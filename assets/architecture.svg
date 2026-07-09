@@ -70,6 +70,11 @@
       <circle cx="86" cy="444" r="5" fill="#e3b341"/>
       <text x="102" y="449" fill="#d5deef">Antigravity</text>
     </g>
+    <g>
+      <rect x="60" y="486" width="200" height="52" rx="10" fill="#121b2f" stroke="#2b3b5e"/>
+      <circle cx="86" cy="512" r="5" fill="#e6edf9"/>
+      <text x="102" y="517" fill="#d5deef">Cursor</text>
+    </g>
   </g>
 
   <!-- Client -> Gateway edges -->
@@ -79,6 +84,7 @@
     <path id="e3" d="M262 308 C 320 308 335 300 408 298" marker-end="url(#arrow)"/>
     <path id="e4" d="M262 376 C 320 376 335 330 408 314" marker-end="url(#arrow)"/>
     <path id="e5" d="M262 444 C 330 444 340 350 408 330" marker-end="url(#arrow)"/>
+    <path id="e6" d="M262 512 C 335 512 345 380 408 348" marker-end="url(#arrow)"/>
   </g>
   <!-- request pulses traveling client -> gateway -->
   <g>
@@ -96,6 +102,9 @@
     </circle>
     <circle r="3.5" fill="#8ab4ff" opacity="0.9">
       <animateMotion dur="2.6s" repeatCount="indefinite" begin="2.0s"><mpath href="#e5"/></animateMotion>
+    </circle>
+    <circle r="3.5" fill="#8ab4ff" opacity="0.9">
+      <animateMotion dur="2.6s" repeatCount="indefinite" begin="2.5s"><mpath href="#e6"/></animateMotion>
     </circle>
   </g>
   <g font-family="'SF Mono', 'Fira Code', Consolas, monospace" font-size="11" fill="#6d7f9f">

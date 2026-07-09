@@ -25,12 +25,12 @@
 UniGrok is a local-first **Grok MCP server and gateway** for
 [xAI's Grok models](https://docs.x.ai/?utm_source=github&utm_medium=readme&utm_campaign=unigrok&utm_content=intro-docs).
 It runs once on your machine, keeps the xAI credential on the server side, and
-lets Claude Desktop, Claude Code, VS Code, Codex, Antigravity, and other MCP
-clients share the same Grok agent over Streamable HTTP — with dual-plane
-routing across the xAI API and the Grok CLI subscription, per-call cost
-tracking, and a browser Control Center.
+lets Claude Desktop, Claude Code, VS Code, Cursor, Codex, Antigravity, and
+other MCP clients share the same Grok agent over Streamable HTTP — with
+dual-plane routing across the xAI API and the Grok CLI subscription, per-call
+cost tracking, and a browser Control Center.
 
-![UniGrok architecture — five MCP clients share one local gateway that routes across the metered xAI API plane and the ~$0-marginal Grok CLI plane, with SQLite-backed sessions, cost, and jobs](assets/architecture.svg)
+![UniGrok architecture — six MCP clients share one local gateway that routes across the metered xAI API plane and the ~$0-marginal Grok CLI plane, with SQLite-backed sessions, cost, and jobs](assets/architecture.svg)
 
 Current release: **v0.4.1**.
 
@@ -146,6 +146,24 @@ claude mcp add --transport http unigrok http://localhost:8080/mcp \
 [mcp_servers.grok]
 url = "http://localhost:8080/mcp"
 http_headers = { "X-Client-ID" = "codex" }
+```
+
+### Cursor
+
+Add UniGrok to Cursor in 10 seconds — create or edit `.cursor/mcp.json` in
+your project root (or `~/.cursor/mcp.json` globally) and paste:
+
+```json
+{
+  "mcpServers": {
+    "unigrok": {
+      "url": "http://localhost:8080/mcp",
+      "name": "UniGrok MCP Gateway",
+      "description": "Shared Grok agent with live Control Center, cost tracking, reasoning guard, OKF + WebMCP self-discovery",
+      "headers": { "X-Client-ID": "cursor" }
+    }
+  }
+}
 ```
 
 If `UNIGROK_API_KEYS` is set in `.env`, also add

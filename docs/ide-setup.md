@@ -98,6 +98,24 @@ check `codex mcp --help`. Keep the server name as `grok`; this repo's
 `.codex/mcp/grok-routing.json` and Codex intelligence config route to the
 `mcp__grok` tool namespace.)
 
+## Cursor (`.cursor/mcp.json` in project root, or `~/.cursor/mcp.json`)
+
+```json
+{
+  "mcpServers": {
+    "unigrok": {
+      "url": "http://localhost:8080/mcp",
+      "name": "UniGrok MCP Gateway",
+      "description": "Shared Grok agent with live Control Center, cost tracking, reasoning guard, OKF + WebMCP self-discovery",
+      "headers": { "X-Client-ID": "cursor" }
+    }
+  }
+}
+```
+
+Cursor auto-detects HTTP servers from the `url` field. After saving, enable
+the server under Settings → MCP; the `agent` tool appears in Composer/chat.
+
 ## Antigravity / Gemini (`settings.json` → MCP servers)
 
 ```json
