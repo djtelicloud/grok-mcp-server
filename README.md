@@ -25,7 +25,7 @@
 UniGrok is a local-first **Grok MCP server and gateway** for
 [xAI's Grok models](https://docs.x.ai/?utm_source=github&utm_medium=readme&utm_campaign=unigrok&utm_content=intro-docs).
 It runs once on your machine, keeps the xAI credential on the server side, and
-lets Claude Desktop, Claude Code, VS Code, Cursor, Codex, Antigravity, and
+lets Cursor, Claude Desktop, Claude Code, VS Code, Codex, Antigravity, and
 other MCP clients share the same Grok agent over Streamable HTTP — with
 dual-plane routing across the xAI API and the Grok CLI subscription, per-call
 cost tracking, and a browser Control Center.
@@ -100,6 +100,26 @@ http://localhost:8080/mcp
 Each IDE should send a stable `X-Client-ID` header so telemetry, sessions, and
 budgets stay separated by caller.
 
+### Cursor
+
+With Cursor joining the xAI family (SpaceX's June 2026 agreement to acquire
+Anysphere), it's the natural first-class Grok IDE — add UniGrok in 10 seconds.
+Create or edit `.cursor/mcp.json` in your project root (or `~/.cursor/mcp.json`
+globally) and paste:
+
+```json
+{
+  "mcpServers": {
+    "unigrok": {
+      "url": "http://localhost:8080/mcp",
+      "name": "UniGrok MCP Gateway",
+      "description": "Shared Grok agent with live Control Center, cost tracking, reasoning guard, OKF + WebMCP self-discovery",
+      "headers": { "X-Client-ID": "cursor" }
+    }
+  }
+}
+```
+
 ### VS Code
 
 ```json
@@ -146,24 +166,6 @@ claude mcp add --transport http unigrok http://localhost:8080/mcp \
 [mcp_servers.grok]
 url = "http://localhost:8080/mcp"
 http_headers = { "X-Client-ID" = "codex" }
-```
-
-### Cursor
-
-Add UniGrok to Cursor in 10 seconds — create or edit `.cursor/mcp.json` in
-your project root (or `~/.cursor/mcp.json` globally) and paste:
-
-```json
-{
-  "mcpServers": {
-    "unigrok": {
-      "url": "http://localhost:8080/mcp",
-      "name": "UniGrok MCP Gateway",
-      "description": "Shared Grok agent with live Control Center, cost tracking, reasoning guard, OKF + WebMCP self-discovery",
-      "headers": { "X-Client-ID": "cursor" }
-    }
-  }
-}
 ```
 
 If `UNIGROK_API_KEYS` is set in `.env`, also add
@@ -241,6 +243,7 @@ UniGrok has three boundaries:
 
 ```mermaid
 flowchart LR
+    CU[Cursor] --> GW
     CC[Claude Code] --> GW
     VS[VS Code] --> GW
     CX[Codex] --> GW

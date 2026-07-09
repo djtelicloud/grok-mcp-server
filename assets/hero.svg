@@ -49,10 +49,10 @@
   <g>
     <!-- client dots -->
     <g font-family="Helvetica, Arial, sans-serif" font-size="11" fill="#7d8ca8" text-anchor="end">
-      <circle cx="742" cy="70"  r="5" fill="#f0883e"/><text x="730" y="74">Claude Code</text>
-      <circle cx="742" cy="118" r="5" fill="#58a6ff"/><text x="730" y="122">VS Code</text>
-      <circle cx="742" cy="166" r="5" fill="#3fb950"/><text x="730" y="170">Codex</text>
-      <circle cx="742" cy="214" r="5" fill="#e3b341"/><text x="730" y="218">Antigravity</text>
+      <circle cx="742" cy="70"  r="5" fill="#e6edf9"/><text x="730" y="74">Cursor</text>
+      <circle cx="742" cy="118" r="5" fill="#f0883e"/><text x="730" y="122">Claude Code</text>
+      <circle cx="742" cy="166" r="5" fill="#58a6ff"/><text x="730" y="170">VS Code</text>
+      <circle cx="742" cy="214" r="5" fill="#3fb950"/><text x="730" y="218">Codex</text>
     </g>
     <!-- edges to gateway -->
     <g stroke="#3a4a6e" stroke-width="1.5" fill="none" opacity="0.9">

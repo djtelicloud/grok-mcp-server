@@ -44,6 +44,26 @@ the plain namespace.
 If `UNIGROK_API_KEYS` is set, also add
 `"Authorization": "Bearer <one-of-those-keys>"` to each config's headers.
 
+## Cursor (`.cursor/mcp.json` in project root, or `~/.cursor/mcp.json`)
+
+With Cursor joining the xAI family, it's the natural first-class Grok IDE.
+
+```json
+{
+  "mcpServers": {
+    "unigrok": {
+      "url": "http://localhost:8080/mcp",
+      "name": "UniGrok MCP Gateway",
+      "description": "Shared Grok agent with live Control Center, cost tracking, reasoning guard, OKF + WebMCP self-discovery",
+      "headers": { "X-Client-ID": "cursor" }
+    }
+  }
+}
+```
+
+Cursor auto-detects HTTP servers from the `url` field. After saving, enable
+the server under Settings → MCP; the `agent` tool appears in Composer/chat.
+
 ## Claude Code (CLI)
 
 ```bash
@@ -97,24 +117,6 @@ your version may want the experimental streamable-HTTP client enabled —
 check `codex mcp --help`. Keep the server name as `grok`; this repo's
 `.codex/mcp/grok-routing.json` and Codex intelligence config route to the
 `mcp__grok` tool namespace.)
-
-## Cursor (`.cursor/mcp.json` in project root, or `~/.cursor/mcp.json`)
-
-```json
-{
-  "mcpServers": {
-    "unigrok": {
-      "url": "http://localhost:8080/mcp",
-      "name": "UniGrok MCP Gateway",
-      "description": "Shared Grok agent with live Control Center, cost tracking, reasoning guard, OKF + WebMCP self-discovery",
-      "headers": { "X-Client-ID": "cursor" }
-    }
-  }
-}
-```
-
-Cursor auto-detects HTTP servers from the `url` field. After saving, enable
-the server under Settings → MCP; the `agent` tool appears in Composer/chat.
 
 ## Antigravity / Gemini (`settings.json` → MCP servers)
 

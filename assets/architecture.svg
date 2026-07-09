@@ -47,13 +47,13 @@
   <g font-family="Helvetica, Arial, sans-serif" font-size="14" font-weight="600">
     <g>
       <rect x="60" y="146" width="200" height="52" rx="10" fill="#121b2f" stroke="#2b3b5e"/>
-      <circle cx="86" cy="172" r="5" fill="#f0883e"/>
-      <text x="102" y="177" fill="#d5deef">Claude Code</text>
+      <circle cx="86" cy="172" r="5" fill="#e6edf9"/>
+      <text x="102" y="177" fill="#d5deef">Cursor</text>
     </g>
     <g>
       <rect x="60" y="214" width="200" height="52" rx="10" fill="#121b2f" stroke="#2b3b5e"/>
-      <circle cx="86" cy="240" r="5" fill="#db8ff5"/>
-      <text x="102" y="245" fill="#d5deef">Claude Desktop</text>
+      <circle cx="86" cy="240" r="5" fill="#f0883e"/>
+      <text x="102" y="245" fill="#d5deef">Claude Code</text>
     </g>
     <g>
       <rect x="60" y="282" width="200" height="52" rx="10" fill="#121b2f" stroke="#2b3b5e"/>
@@ -72,8 +72,8 @@
     </g>
     <g>
       <rect x="60" y="486" width="200" height="52" rx="10" fill="#121b2f" stroke="#2b3b5e"/>
-      <circle cx="86" cy="512" r="5" fill="#e6edf9"/>
-      <text x="102" y="517" fill="#d5deef">Cursor</text>
+      <circle cx="86" cy="512" r="5" fill="#db8ff5"/>
+      <text x="102" y="517" fill="#d5deef">Claude Desktop</text>
     </g>
   </g>
 
