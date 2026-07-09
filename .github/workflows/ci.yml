@@ -1,0 +1,136 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python ${{ matrix.python-version }}
+        run: uv python install ${{ matrix.python-version }}
+
+      - name: Install dependencies (including dev)
+        run: uv sync --locked --dev
+
+      - name: Byte-compile sources
+        run: uv run python -m compileall -q src evals main.py
+
+      - name: Import smoke test
+        env:
+          XAI_API_KEY: dummy-ci-key
+        run: uv run python -c "import src.server; print('server import OK')"
+
+      - name: Run tests
+        env:
+          XAI_API_KEY: dummy-ci-key
+        run: uv run pytest tests/ -v --tb=short
+
+      - name: Build package artifacts
+        if: matrix.python-version == '3.12'
+        run: uv build
+
+      - name: Verify wheel runtime assets
+        if: matrix.python-version == '3.12'
+        run: >-
+          uv run python -c "import glob, zipfile;
+          wheel=glob.glob('dist/*.whl')[0];
+          names=set(zipfile.ZipFile(wheel).namelist());
+          required={'mcp_ui/index.html','docs/okf/index.md','.grok/prompts/grok_adapter.md','example.env'};
+          missing=required-names;
+          assert not missing, f'missing wheel assets: {sorted(missing)}'"
+
+      - name: Static security scan
+        if: matrix.python-version == '3.12'
+        run: uvx bandit -r src -ll -q
+
+      - name: pip-audit
+        if: matrix.python-version == '3.12'
+        run: |
+          uv export --frozen --no-dev --no-emit-project --no-hashes --format requirements-txt > /tmp/requirements-audit.txt
+          uvx pip-audit -r /tmp/requirements-audit.txt
+
+  evals-offline:
+    # Golden-task regression gate: offline cassette replay through the real
+    # run_agent_turn/orchestrate stack (no network, no API key). Fails on any
+    # regression against the expected-pass list in evals/baseline.json.
+    # NEVER add --live here — the live tier calls the real xAI API.
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies (including dev)
+        run: uv sync --locked --dev
+
+      - name: Run offline evals against baseline
+        env:
+          XAI_API_KEY: dummy-ci-key
+        run: uv run python -m evals run --check-baseline
+
+      - name: Upload eval report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-report
+          path: evals/out/report.json
+          if-no-files-found: ignore
+
+  docker:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t grok-mcp:ci .
+
+      - name: Smoke test /healthz
+        # Deliberately no UNIGROK_RUNTIME override: the bare image must be
+        # reachable through the published port (the Dockerfile bakes
+        # UNIGROK_HOST=0.0.0.0), so setting it here would mask a regression.
+        run: |
+          docker run -d --name grok-mcp-ci \
+            -e XAI_API_KEY=dummy-ci-key \
+            -e UNIGROK_API_KEYS=ci-client-key \
+            -p 8080:8080 \
+            grok-mcp:ci
+          for _ in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8080/healthz > /dev/null; then
+              echo "healthz OK"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "healthz never became ready" >&2
+          docker logs grok-mcp-ci >&2
+          exit 1
+
+      - name: Container cleanup
+        if: always()
+        run: docker rm -f grok-mcp-ci || true

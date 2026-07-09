@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.codex/uni-grok-mcp/handoff.schema.json",
+  "title": "UniGrok MCP Codex Handoff",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "from_thread",
+    "to_archetype",
+    "git",
+    "tests",
+    "blockers",
+    "next_action"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "from_thread": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "thread_id",
+        "title"
+      ],
+      "properties": {
+        "thread_id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "host_id": {
+          "type": "string"
+        }
+      }
+    },
+    "to_archetype": {
+      "type": "string"
+    },
+    "git": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "branch",
+        "worktree",
+        "status_summary"
+      ],
+      "properties": {
+        "branch": {
+          "type": "string"
+        },
+        "worktree": {
+          "type": "string"
+        },
+        "status_summary": {
+          "type": "string"
+        }
+      }
+    },
+    "tests": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "last_run",
+        "result"
+      ],
+      "properties": {
+        "last_run": {
+          "type": "string"
+        },
+        "result": {
+          "type": "string"
+        }
+      }
+    },
+    "blockers": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "links": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
+    "next_action": {
+      "type": "string"
+    }
+  }
+}
+

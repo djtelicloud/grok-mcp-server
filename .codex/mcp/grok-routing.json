@@ -1,0 +1,95 @@
+{
+  "$schema": "../schemas/grok-routing.schema.json",
+  "schema_version": 1,
+  "purpose": "Codex-to-UniGrok MCP routing for this project",
+  "server": "grok",
+  "routes": [
+    {
+      "id": "status",
+      "when": "Codex needs UniGrok MCP availability, adapter status, or server health.",
+      "preferred_tools": [
+        "agent"
+      ],
+      "external_content_risk": "low",
+      "note": "Use mode fast with a short health-check prompt. The public HTTP MCP surface exposes the unified agent tool."
+    },
+    {
+      "id": "project-file-context",
+      "when": "Codex needs Grok MCP to inspect local project file names or a bounded local file.",
+      "preferred_tools": [
+        "agent"
+      ],
+      "external_content_risk": "medium",
+      "note": "Prefer Codex local filesystem reads first. Use Grok only for explicit review or synthesis, and avoid sending secrets."
+    },
+    {
+      "id": "git-read",
+      "when": "Codex needs Grok MCP read-only git context.",
+      "preferred_tools": [
+        "agent"
+      ],
+      "external_content_risk": "medium",
+      "note": "Prefer Codex local git commands first. Use Grok for explicit review or synthesis over bounded git context."
+    },
+    {
+      "id": "plain-grok-answer",
+      "when": "The user explicitly asks @grok or asks Grok to answer a bounded question.",
+      "preferred_tools": [
+        "agent"
+      ],
+      "preferred_modes": [
+        "auto",
+        "fast"
+      ],
+      "external_content_risk": "high",
+      "requires_warning_for_nonpublic_content": true
+    },
+    {
+      "id": "grok-agent-review",
+      "when": "The user explicitly asks for Grok peer review, architecture review, or agentic Grok analysis.",
+      "preferred_tools": [
+        "agent"
+      ],
+      "preferred_modes": [
+        "reasoning",
+        "thinking"
+      ],
+      "external_content_risk": "high",
+      "requires_warning_for_nonpublic_content": true
+    },
+    {
+      "id": "deferred-or-long-running-research",
+      "when": "The user asks for long-running Grok research or deferred Grok analysis.",
+      "preferred_codex_surfaces": [
+        "codex_app.create_thread",
+        "codex_app.automation_update",
+        "tool_search"
+      ],
+      "preferred_tools_when_available": [
+        "agent"
+      ],
+      "do_not_assume_tools": [
+        "submit_research_job",
+        "chat.defer",
+        "grok_agent",
+        "chat",
+        "stateful_chat"
+      ],
+      "external_content_risk": "high",
+      "requires_warning_for_nonpublic_content": true,
+      "note": "Use mode research when the live agent tool exposes it. Some provider namespaces mention deferred Grok tools; Codex must discover current UniGrok MCP tools before naming or invoking them."
+    }
+  ],
+  "do_not_answer_directly_when": [
+    "The user explicitly mentions @grok as the desired reviewer",
+    "The user asks for Grok MCP status or Grok model/profile information",
+    "The user asks to compare Codex output with Grok output"
+  ],
+  "safety": {
+    "prefer_local_read_tools_first": true,
+    "do_not_send_secrets": true,
+    "warn_before_external_model_review_of_nonpublic_content": true,
+    "discover_tools_before_using_provider_specific_deferred_routes": true,
+    "public_http_mcp_entrypoint": "mcp__grok.agent"
+  }
+}

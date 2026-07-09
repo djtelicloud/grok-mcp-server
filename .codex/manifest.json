@@ -1,0 +1,90 @@
+{
+  "$schema": "./schemas/manifest.schema.json",
+  "schema_version": 1,
+  "namespace": ".codex",
+  "project": {
+    "slug": "uni-grok-mcp",
+    "kind": "codex-desktop-project"
+  },
+  "packaged_plugin": false,
+  "does_not_override_global_codex_config": true,
+  "threading": {
+    "branch_prefix": "codex/",
+    "default_environment": "worktree",
+    "registry": "./threads/registry.json",
+    "handoff_schema": "./handoff/schema.json"
+  },
+  "automation": {
+    "mode": "templates-only",
+    "use_codex_app_tool": "automation_update",
+    "templates_dir": "./automations",
+    "prefer_suggested_create": true
+  },
+  "codex_app_functions": [
+    "list_projects",
+    "create_thread",
+    "fork_thread",
+    "list_threads",
+    "read_thread",
+    "send_message_to_thread",
+    "handoff_thread",
+    "get_handoff_status",
+    "set_thread_title",
+    "set_thread_pinned",
+    "set_thread_archived",
+    "automation_update"
+  ],
+  "codex_final_response_directives": [
+    "created-thread",
+    "git-stage",
+    "git-commit",
+    "git-push",
+    "git-create-pr",
+    "code-comment"
+  ],
+  "expected_mcp_servers": [
+    {
+      "name": "grok",
+      "purpose": "UniGrok MCP routing through the public mcp__grok.agent entrypoint"
+    },
+    {
+      "name": "node_repl",
+      "purpose": "Codex Browser and Chrome control, Playwright-style inspection, image emission"
+    },
+    {
+      "name": "MCP_DOCKER",
+      "purpose": "Docker-hosted MCP integrations such as remote GitHub helpers"
+    }
+  ],
+  "recommended_codex_plugins": [
+    "browser",
+    "chrome",
+    "computer-use",
+    "github",
+    "openai-developers",
+    "documents",
+    "pdf",
+    "presentations",
+    "spreadsheets",
+    "template-creator"
+  ],
+  "routing_files": {
+    "codex_intelligence": "./intelligence/codex-intelligence.json",
+    "grok_mcp": "./mcp/grok-routing.json",
+    "plugin_capabilities": "./plugins/capabilities.json",
+    "chronicle_triggers": "./chronicle/triggers.json",
+    "memory_context": "./memory/context.md",
+    "security_scan": "./security/secret-scan.md"
+  },
+  "validation": {
+    "script": "./scripts/validate-codex-namespace.sh",
+    "secret_scan_patterns": [
+      "XAI_API_KEY\\s*=",
+      "OPENAI_API_KEY\\s*=",
+      "Authorization:\\s*Bearer\\s+[A-Za-z0-9._-]{10,}",
+      "sk-(proj|live|test|svcacct)-[A-Za-z0-9_-]{8,}",
+      "ghp_[A-Za-z0-9_]{20,}",
+      "xai-[A-Za-z0-9_-]{8,}"
+    ]
+  }
+}

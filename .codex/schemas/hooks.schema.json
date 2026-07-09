@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.codex/uni-grok-mcp/hooks.schema.json",
+  "title": "Codex Documentation Hooks",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "project_local_execution_confirmed",
+    "documentation_only",
+    "hooks"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "project_local_execution_confirmed": {
+      "const": false
+    },
+    "documentation_only": {
+      "const": true
+    }
+  }
+}
+

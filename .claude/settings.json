@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__unigrok__agent",
+      "Bash(git status:*)",
+      "Bash(git fetch:*)",
+      "Bash(git log:*)",
+      "Bash(git diff:*)",
+      "Bash(git branch:*)",
+      "Bash(git show:*)",
+      "Bash(uv run pytest:*)",
+      "Bash(curl -s http://localhost:8080/healthz:*)",
+      "Bash(ls:*)",
+      "Bash(cat:*)"
+    ]
+  }
+}

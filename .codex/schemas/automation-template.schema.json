@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.codex/uni-grok-mcp/automation-template.schema.json",
+  "title": "Codex Automation Template",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "id",
+    "codex_app_function",
+    "automation_update_template",
+    "review_mode",
+    "mutation_policy"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "codex_app_function": {
+      "const": "automation_update"
+    }
+  }
+}
+

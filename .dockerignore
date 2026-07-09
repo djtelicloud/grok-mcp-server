@@ -1,0 +1,65 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+.venv
+env/
+.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+
+# Documentation
+*.md
+docs/
+!docs/
+!docs/okf/
+!docs/okf/**
+
+# Runtime adapter configuration is required by the bare image.
+!.grok/
+!.grok/**
+
+# Test files
+test_*.py
+*_test.py
+demo_*.py
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*.temp

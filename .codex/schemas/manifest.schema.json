@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.codex/uni-grok-mcp/manifest.schema.json",
+  "title": "Codex Namespace Manifest",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "namespace",
+    "project",
+    "packaged_plugin",
+    "codex_app_functions",
+    "expected_mcp_servers",
+    "recommended_codex_plugins",
+    "routing_files"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "namespace": {
+      "const": ".codex"
+    },
+    "packaged_plugin": {
+      "const": false
+    }
+  }
+}
+

@@ -1,0 +1,83 @@
+<svg width="1200" height="280" viewBox="0 0 1200 280" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="UniGrok — Grok MCP Server and Gateway">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0a0e1a"/>
+      <stop offset="0.55" stop-color="#0d1424"/>
+      <stop offset="1" stop-color="#131b30"/>
+    </linearGradient>
+    <linearGradient id="brand" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#58e6d9"/>
+      <stop offset="1" stop-color="#bc8cff"/>
+    </linearGradient>
+    <linearGradient id="apiEdge" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#58e6d9" stop-opacity="0.15"/>
+      <stop offset="1" stop-color="#58e6d9"/>
+    </linearGradient>
+    <linearGradient id="cliEdge" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#bc8cff" stop-opacity="0.15"/>
+      <stop offset="1" stop-color="#bc8cff"/>
+    </linearGradient>
+    <pattern id="grid" width="36" height="36" patternUnits="userSpaceOnUse">
+      <path d="M36 0H0V36" fill="none" stroke="#1c2740" stroke-width="1"/>
+    </pattern>
+    <filter id="glow" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="6" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <rect width="1200" height="280" rx="18" fill="url(#bg)"/>
+  <rect width="1200" height="280" rx="18" fill="url(#grid)" opacity="0.5"/>
+  <rect x="0.75" y="0.75" width="1198.5" height="278.5" rx="17.5" fill="none" stroke="#243354" stroke-width="1.5"/>
+
+  <!-- Wordmark -->
+  <text x="64" y="122" font-family="Helvetica, Arial, sans-serif" font-size="64" font-weight="700" fill="url(#brand)" letter-spacing="-1.5">UniGrok</text>
+  <text x="66" y="162" font-family="Helvetica, Arial, sans-serif" font-size="24" font-weight="500" fill="#c9d5ee" letter-spacing="0.5">Grok MCP Server &amp; Gateway</text>
+  <text x="66" y="204" font-family="'SF Mono', 'Fira Code', Consolas, monospace" font-size="15" fill="#7d8ca8">One Grok server &#183; Every IDE &#183; Zero pasted API keys</text>
+
+  <!-- chips -->
+  <g font-family="'SF Mono', 'Fira Code', Consolas, monospace" font-size="12">
+    <rect x="64" y="226" width="152" height="26" rx="13" fill="#11203a" stroke="#2a4166"/>
+    <text x="140" y="243" text-anchor="middle" fill="#58e6d9">localhost:8080/mcp</text>
+    <rect x="228" y="226" width="120" height="26" rx="13" fill="#11203a" stroke="#2a4166"/>
+    <text x="288" y="243" text-anchor="middle" fill="#8ab4ff">Streamable HTTP</text>
+    <rect x="360" y="226" width="112" height="26" rx="13" fill="#11203a" stroke="#2a4166"/>
+    <text x="416" y="243" text-anchor="middle" fill="#bc8cff">dual-plane</text>
+  </g>
+
+  <!-- Flow glyph: clients -> gateway -> planes -->
+  <g>
+    <!-- client dots -->
+    <g font-family="Helvetica, Arial, sans-serif" font-size="11" fill="#7d8ca8" text-anchor="end">
+      <circle cx="742" cy="70"  r="5" fill="#f0883e"/><text x="730" y="74">Claude Code</text>
+      <circle cx="742" cy="118" r="5" fill="#58a6ff"/><text x="730" y="122">VS Code</text>
+      <circle cx="742" cy="166" r="5" fill="#3fb950"/><text x="730" y="170">Codex</text>
+      <circle cx="742" cy="214" r="5" fill="#e3b341"/><text x="730" y="218">Antigravity</text>
+    </g>
+    <!-- edges to gateway -->
+    <g stroke="#3a4a6e" stroke-width="1.5" fill="none" opacity="0.9">
+      <path d="M748 70 C 800 70 810 128 862 136"/>
+      <path d="M748 118 C 790 118 800 134 862 140"/>
+      <path d="M748 166 C 790 166 800 148 862 144"/>
+      <path d="M748 214 C 800 214 810 156 862 148"/>
+    </g>
+    <!-- gateway hexagon -->
+    <g filter="url(#glow)">
+      <path d="M918 96 L960 120 L960 168 L918 192 L876 168 L876 120 Z" fill="#0f1a30" stroke="url(#brand)" stroke-width="2"/>
+    </g>
+    <text x="918" y="138" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="#e6edf9">MCP</text>
+    <text x="918" y="156" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="10" fill="#7d8ca8">gateway</text>
+    <!-- edges to planes -->
+    <path d="M962 128 C 1010 116 1020 102 1064 96" stroke="url(#apiEdge)" stroke-width="2" fill="none"/>
+    <path d="M962 160 C 1010 172 1020 186 1064 192" stroke="url(#cliEdge)" stroke-width="2" fill="none"/>
+    <!-- plane cards -->
+    <g font-family="Helvetica, Arial, sans-serif">
+      <rect x="1068" y="66" width="102" height="58" rx="10" fill="#0f2226" stroke="#2f6f68"/>
+      <text x="1119" y="90" text-anchor="middle" font-size="12" font-weight="700" fill="#58e6d9">API plane</text>
+      <text x="1119" y="108" text-anchor="middle" font-size="10" fill="#6fa8a1">xAI &#183; metered</text>
+      <rect x="1068" y="162" width="102" height="58" rx="10" fill="#191330" stroke="#5d4a8f"/>
+      <text x="1119" y="186" text-anchor="middle" font-size="12" font-weight="700" fill="#bc8cff">CLI plane</text>
+      <text x="1119" y="204" text-anchor="middle" font-size="10" fill="#8f7cc0">OAuth &#183; ~$0</text>
+    </g>
+  </g>
+</svg>

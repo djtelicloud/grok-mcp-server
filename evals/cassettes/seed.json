@@ -1,0 +1,140 @@
+{
+  "fastpath_simple_math": {
+    "responses": [
+      {"content": "4", "usage": {"prompt_tokens": 12, "completion_tokens": 1}, "cost_usd": 0.0002}
+    ]
+  },
+  "coding_fix_typo": {
+    "responses": [
+      {
+        "content": "The function name has a typo: rename `calulate_total` to `calculate_total`.\n\ndef calculate_total(items):\n    return sum(items)",
+        "usage": {"prompt_tokens": 40, "completion_tokens": 35},
+        "cost_usd": 0.0008
+      }
+    ]
+  },
+  "reasoning_wal_tradeoffs": {
+    "responses": [
+      {
+        "content": "WAL mode lets readers proceed concurrently with a single writer because commits append to the write-ahead log instead of overwriting database pages in place, so readers keep a consistent snapshot. Trade-offs versus a rollback journal: faster writes and non-blocking readers, at the cost of an extra -wal file, periodic checkpointing, and slightly slower reads on very large unchecked WALs.",
+        "usage": {"prompt_tokens": 60, "completion_tokens": 90},
+        "cost_usd": 0.0042
+      }
+    ]
+  },
+  "borderline_product_summary": {
+    "responses": [
+      {
+        "content": "- Launch moved to May\n- Pricing unchanged",
+        "usage": {"prompt_tokens": 30, "completion_tokens": 12},
+        "cost_usd": 0.0004
+      }
+    ]
+  },
+  "escalation_flaky_test": {
+    "responses": [
+      {
+        "content": "This looks like shared-state flakiness across tests; escalating for deeper concurrency analysis.",
+        "tool_calls": [
+          {"id": "call-esc-1", "name": "escalate_reasoning", "arguments": {"reason": "cross-test race condition needs deeper analysis"}}
+        ],
+        "usage": {"prompt_tokens": 45, "completion_tokens": 20},
+        "cost_usd": 0.001
+      },
+      {
+        "content": "The race: both tests mutate the same module-level cache, so ordering changes the outcome. Isolate the fixture with tmp_path and reset the cache in teardown; the test then passes in any order.",
+        "usage": {"prompt_tokens": 80, "completion_tokens": 55},
+        "cost_usd": 0.004
+      }
+    ]
+  },
+  "thinking_trap_average_speed": {
+    "responses": [
+      {
+        "content": "The average speed is 45 km/h.",
+        "usage": {"prompt_tokens": 50, "completion_tokens": 10},
+        "cost_usd": 0.002
+      },
+      {
+        "content": "Total distance is 120 km; time is 2 h out + 1 h back = 3 h, so the average speed is 40 km/h. The common 45 km/h answer is the arithmetic-mean trap — average speed must be total distance over total time.",
+        "usage": {"prompt_tokens": 90, "completion_tokens": 60},
+        "cost_usd": 0.003
+      }
+    ],
+    "verdicts": [
+      {
+        "status": "fail",
+        "issues": ["45 km/h is the arithmetic mean of the two speeds; average speed must use total distance over total time"],
+        "next_action": "Recompute using total distance divided by total time",
+        "cost_usd": 0.0005
+      },
+      {"status": "pass", "cost_usd": 0.0005}
+    ]
+  },
+  "memory_recall_deploy_target": {
+    "responses": [
+      {
+        "content": "Earlier you told me the deployment target is Cloud Run, region europe-west2.",
+        "usage": {"prompt_tokens": 55, "completion_tokens": 18},
+        "cost_usd": 0.0009
+      }
+    ]
+  },
+  "memory_recall_build_id": {
+    "responses": [
+      {
+        "content": "The build id you gave me is 7741.",
+        "usage": {"prompt_tokens": 40, "completion_tokens": 10},
+        "cost_usd": 0.0006
+      }
+    ]
+  },
+  "research_webgpu_adoption": {
+    "responses": [
+      {
+        "content": "WebGPU now ships enabled by default in Chrome and Edge; Firefox ships it on Windows with other platforms in flight, and Safari previews it behind a feature flag — so cross-browser support is close but not yet universal.",
+        "usage": {"prompt_tokens": 70, "completion_tokens": 55},
+        "cost_usd": 0.006,
+        "citations": [
+          "https://caniuse.com/webgpu",
+          "https://developer.chrome.com/blog/webgpu-io2023/"
+        ]
+      }
+    ]
+  },
+  "coding_regex_semver": {
+    "responses": [
+      {
+        "content": "Use `\\b\\d+\\.\\d+\\.\\d+\\b` — it matches 1.2.3 and 10.20.30 while rejecting bare 1.2.",
+        "usage": {"prompt_tokens": 35, "completion_tokens": 30},
+        "cost_usd": 0.0007
+      }
+    ]
+  },
+  "coding_tool_error_resilience": {
+    "responses": [
+      {
+        "content": "Let me check the changelog for that package.",
+        "tool_calls": [
+          {"id": "call-lookup-1", "name": "lookup_docs", "arguments": {"package": "quantumdb"}}
+        ],
+        "usage": {"prompt_tokens": 40, "completion_tokens": 15},
+        "cost_usd": 0.0008
+      },
+      {
+        "content": "I could not find a changelog tool for 'quantumdb' in this workspace, and the repository contains no package by that name — point me at the changelog file if one exists elsewhere.",
+        "usage": {"prompt_tokens": 75, "completion_tokens": 40},
+        "cost_usd": 0.0015
+      }
+    ]
+  },
+  "reasoning_wal_checkpoint_risk": {
+    "responses": [
+      {
+        "content": "At 1000 pages (~4 MB WAL) the autocheckpoint threshold is reasonable, but a write-heavy workload risks checkpoint starvation while long-lived readers pin the WAL: the file keeps growing and read latency creeps up. Monitor -wal file size and run PRAGMA wal_checkpoint(TRUNCATE) during idle windows.",
+        "usage": {"prompt_tokens": 65, "completion_tokens": 70},
+        "cost_usd": 0.004
+      }
+    ]
+  }
+}

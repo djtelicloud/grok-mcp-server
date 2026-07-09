@@ -1,0 +1,48 @@
+# Codex Project Control
+
+This namespace is for Codex desktop only. Keep general agent rules in
+`.agents/AGENTS.md`; keep Grok adapter prompts and model profiles in `.grok/`.
+
+## Purpose
+
+`.codex/` describes how Codex should use Codex app APIs and installed Codex
+plugins while working on UniGrok MCP. It is not a global Codex configuration
+file and does not override `~/.codex/config.toml`.
+
+Use these files when a task needs one of the Codex-only surfaces:
+
+- Codex project threads, forks, handoff, thread titles, pinning, archiving, or
+  follow-up prompts.
+- Codex automations or thread heartbeats.
+- Codex final-response directives.
+- Codex Browser or Chrome control through `node_repl`.
+- Codex Computer Use for macOS app UI.
+- Chronicle or Codex memory hints.
+- Codex OpenAI Platform API key setup.
+- Codex plugin routing through `tool_search`.
+- Codex extraction of useful knowledge from another provider namespace such as
+  `.gemini/`, translated into Codex app/tool routes without copying provider
+  settings.
+
+## Source Files
+
+- `manifest.json` is the project-local Codex capability manifest.
+- `intelligence/codex-intelligence.json` maps task types to Codex tool routes.
+- `threads/registry.json` defines Codex thread archetypes and lifecycle actions.
+- `automations/*.json` are templates for `automation_update`.
+- `mcp/grok-routing.json` describes Codex-to-UniGrok MCP routing.
+- `plugins/capabilities.json` lists installed Codex plugins and safe use cases.
+- `directives.md` documents Codex app response directives.
+
+## Boundaries
+
+- Do not add generic coding standards, universal git etiquette, or general
+  repo architecture to `.codex/`; those belong in `.agents/` or project docs.
+- Do not store secrets, copied user config, auth state, tokens, or API keys.
+- Do not add `.codex-plugin/` unless this repository is packaging a real Codex
+  plugin.
+- Treat all machine-readable files here as advisory project metadata unless
+  the Codex app explicitly documents a loader for them.
+- Do not copy another provider's namespace config directly. Extract only the
+  project risk knowledge and re-express it through Codex APIs, plugins, MCP
+  routes, and validation files.

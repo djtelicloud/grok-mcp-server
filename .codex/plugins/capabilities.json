@@ -1,0 +1,143 @@
+{
+  "$schema": "../schemas/plugin-capabilities.schema.json",
+  "schema_version": 1,
+  "purpose": "Codex plugin capability routing for UniGrok MCP",
+  "plugins": [
+    {
+      "id": "browser",
+      "codex_plugin": "browser@openai-bundled",
+      "use_for": [
+        "Codex in-app browser control",
+        "localhost and file URL inspection",
+        "screenshots for local UI verification"
+      ],
+      "boundaries": [
+        "Use for local targets before generic web browsing",
+        "Do not use shell open commands as a substitute"
+      ]
+    },
+    {
+      "id": "chrome",
+      "codex_plugin": "chrome@openai-bundled",
+      "use_for": [
+        "Existing Chrome sessions",
+        "logged-in browser state",
+        "Chrome extension dependent workflows"
+      ],
+      "boundaries": [
+        "Prefer Browser for generic localhost inspection",
+        "Do not use Chrome when a connector gives structured access"
+      ]
+    },
+    {
+      "id": "computer-use",
+      "codex_plugin": "computer-use@openai-bundled",
+      "use_for": [
+        "macOS app UI",
+        "Accessibility tree inspection",
+        "click, type, key, scroll actions"
+      ],
+      "boundaries": [
+        "Call get_app_state first",
+        "Require human confirmation for destructive UI actions"
+      ]
+    },
+    {
+      "id": "github",
+      "codex_plugin": "github@openai-curated-remote",
+      "use_for": [
+        "PRs and issues",
+        "review comments",
+        "GitHub Actions logs",
+        "draft PR publishing workflows"
+      ],
+      "boundaries": [
+        "Use connector before gh CLI fallback",
+        "Emit Codex git directives only after successful local actions",
+        "Require human confirmation before publishing, merging, deleting, or rerunning workflows"
+      ]
+    },
+    {
+      "id": "openai-developers",
+      "codex_plugin": "openai-developers@openai-curated-remote",
+      "use_for": [
+        "OpenAI API key setup",
+        "OpenAI Agents SDK tasks",
+        "ChatGPT Apps SDK tasks"
+      ],
+      "boundaries": [
+        "Use secure Codex key flow",
+        "Never expose plaintext keys",
+        "Do not write hand-authored key setup instructions when the Codex secure flow is available"
+      ]
+    },
+    {
+      "id": "provider-namespace-extraction",
+      "codex_plugin": "codex-desktop-local",
+      "use_for": [
+        "reading .gemini, .grok, or other provider namespaces as source material",
+        "translating durable risk knowledge into Codex-only routing and validation"
+      ],
+      "boundaries": [
+        "Do not copy provider-specific settings or absolute worktree grants",
+        "Do not copy generic repo rules that belong in .agents",
+        "Use Codex validation and secret scans after translation"
+      ]
+    },
+    {
+      "id": "documents",
+      "codex_plugin": "documents@openai-primary-runtime",
+      "use_for": [
+        "Word document artifacts",
+        "render and verify document layout"
+      ],
+      "boundaries": [
+        "Use only for document artifact tasks"
+      ]
+    },
+    {
+      "id": "pdf",
+      "codex_plugin": "pdf@openai-primary-runtime",
+      "use_for": [
+        "PDF extraction",
+        "PDF rendering",
+        "PDF visual QA"
+      ],
+      "boundaries": [
+        "Use only for PDF artifact tasks"
+      ]
+    },
+    {
+      "id": "presentations",
+      "codex_plugin": "presentations@openai-primary-runtime",
+      "use_for": [
+        "PowerPoint artifacts",
+        "deck rendering and verification"
+      ],
+      "boundaries": [
+        "Use only for presentation artifact tasks"
+      ]
+    },
+    {
+      "id": "spreadsheets",
+      "codex_plugin": "spreadsheets@openai-primary-runtime",
+      "use_for": [
+        "spreadsheet artifacts",
+        "tables, formulas, charts, recalculation"
+      ],
+      "boundaries": [
+        "Use only for spreadsheet artifact tasks"
+      ]
+    },
+    {
+      "id": "template-creator",
+      "codex_plugin": "template-creator@openai-primary-runtime",
+      "use_for": [
+        "personal reusable artifact templates"
+      ],
+      "boundaries": [
+        "Use only when the user asks to create or update a template skill"
+      ]
+    }
+  ]
+}

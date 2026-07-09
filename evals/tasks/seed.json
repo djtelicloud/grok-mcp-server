@@ -1,0 +1,151 @@
+[
+  {
+    "id": "fastpath_simple_math",
+    "category": "coding",
+    "mode": "fast",
+    "prompt": "What is 2 + 2? Reply with only the number.",
+    "graders": [
+      {"type": "contains", "value": "4"},
+      {"type": "not_contains", "value": "cannot"},
+      {"type": "structural", "field": "route", "equals": "fast"},
+      {"type": "structural", "field": "finish_reason", "equals": "final_answer"},
+      {"type": "structural", "field": "model", "equals": "$coding"}
+    ],
+    "max_cost_usd": 0.01,
+    "tags": ["fast-path", "smoke"]
+  },
+  {
+    "id": "coding_fix_typo",
+    "category": "coding",
+    "prompt": "Fix the typo in this Python function name: def calulate_total(items): return sum(items)",
+    "graders": [
+      {"type": "contains", "value": "calculate_total"},
+      {"type": "structural", "field": "model", "equals": "$coding"},
+      {"type": "structural", "field": "route", "equals": "agentic"},
+      {"type": "structural", "field": "finish_reason", "equals": "final_answer"}
+    ],
+    "tags": ["fast-path", "routing"]
+  },
+  {
+    "id": "reasoning_wal_tradeoffs",
+    "category": "reasoning",
+    "prompt": "Explain deeply how does SQLite WAL mode improve concurrency, and compare the trade-offs versus a rollback journal in a multi-reader system design.",
+    "graders": [
+      {"type": "contains", "value": "WAL"},
+      {"type": "contains", "value": "readers"},
+      {"type": "structural", "field": "model", "equals": "$planning"},
+      {"type": "structural", "field": "finish_reason", "equals": "final_answer"}
+    ],
+    "tags": ["routing"]
+  },
+  {
+    "id": "borderline_product_summary",
+    "category": "coding",
+    "prompt": "Summarize the product notes below in two bullet points: launch moved to May, pricing unchanged.",
+    "graders": [
+      {"type": "contains", "value": "May"},
+      {"type": "structural", "field": "model", "equals": "$coding"},
+      {"type": "structural", "field": "route", "equals": "agentic"}
+    ],
+    "tags": ["borderline-routing"]
+  },
+  {
+    "id": "escalation_flaky_test",
+    "category": "coding",
+    "prompt": "Fix the flaky test in tests/test_race.py — it passes alone when run by itself but fails in the full suite.",
+    "graders": [
+      {"type": "structural", "field": "escalated", "equals": true},
+      {"type": "contains", "value": "fixture"},
+      {"type": "structural", "field": "model", "equals": "$coding"},
+      {"type": "structural", "field": "finish_reason", "equals": "final_answer"}
+    ],
+    "tags": ["should-escalate"]
+  },
+  {
+    "id": "thinking_trap_average_speed",
+    "category": "reasoning",
+    "mode": "thinking",
+    "prompt": "Compute the average speed for a 60 km trip out at 30 km/h and back at 60 km/h. Many people answer 45 km/h — verify carefully before answering.",
+    "graders": [
+      {"type": "contains", "value": "40 km/h"},
+      {"type": "structural", "field": "route", "equals": "thinking"},
+      {"type": "structural", "field": "finish_reason", "equals": "final_answer"}
+    ],
+    "tags": ["reflection-trap"]
+  },
+  {
+    "id": "memory_recall_deploy_target",
+    "category": "memory",
+    "prompt": "What deployment target did I tell you earlier in this session?",
+    "session_setup": [
+      {"role": "user", "content": "Remember this: our deployment target is Cloud Run, region europe-west2."},
+      {"role": "assistant", "content": "Noted — deployment target Cloud Run in europe-west2."}
+    ],
+    "graders": [
+      {"type": "contains", "value": "Cloud Run"},
+      {"type": "structural", "field": "appends_before_first_sample", "gte": 4},
+      {"type": "structural", "field": "route", "equals": "agentic"}
+    ],
+    "tags": ["memory", "two-turn"]
+  },
+  {
+    "id": "memory_recall_build_id",
+    "category": "memory",
+    "prompt": "What was the build id I gave you?",
+    "session_setup": [
+      {"role": "user", "content": "The current build id is 7741."},
+      {"role": "assistant", "content": "Got it — build 7741."}
+    ],
+    "graders": [
+      {"type": "contains", "value": "7741"},
+      {"type": "structural", "field": "appends_before_first_sample", "gte": 4}
+    ],
+    "tags": ["memory", "two-turn"]
+  },
+  {
+    "id": "research_webgpu_adoption",
+    "category": "research",
+    "mode": "research",
+    "prompt": "Research the current state of WebGPU adoption across major browsers and summarize where support stands.",
+    "graders": [
+      {"type": "contains", "value": "WebGPU"},
+      {"type": "structural", "field": "citations_count", "gte": 1},
+      {"type": "structural", "field": "model", "equals": "$planning"},
+      {"type": "structural", "field": "route", "equals": "agentic"}
+    ],
+    "tags": ["research", "citations"]
+  },
+  {
+    "id": "coding_regex_semver",
+    "category": "coding",
+    "prompt": "Write a regex that matches semantic version strings like 1.2.3 and 10.20.30.",
+    "graders": [
+      {"type": "regex", "pattern": "\\b\\d+\\.\\d+\\.\\d+\\b"},
+      {"type": "structural", "field": "model", "equals": "$coding"}
+    ],
+    "tags": ["regex-grader"]
+  },
+  {
+    "id": "coding_tool_error_resilience",
+    "category": "coding",
+    "prompt": "Look up the changelog for our internal 'quantumdb' package and tell me what changed in the latest release.",
+    "graders": [
+      {"type": "structural", "field": "tool_calls_count", "gte": 1},
+      {"type": "structural", "field": "finish_reason", "equals": "final_answer"},
+      {"type": "contains", "value": "quantumdb"}
+    ],
+    "tags": ["tool-error", "resilience"]
+  },
+  {
+    "id": "reasoning_wal_checkpoint_risk",
+    "category": "reasoning",
+    "prompt": "Evaluate the risk of enabling SQLite WAL autocheckpoint at 1000 pages for our write-heavy workload.",
+    "graders": [
+      {"type": "contains", "value": "checkpoint"},
+      {"type": "not_contains", "value": "as an AI language model"},
+      {"type": "structural", "field": "model", "equals": "$planning"}
+    ],
+    "max_cost_usd": 0.05,
+    "tags": ["routing", "budget"]
+  }
+]

@@ -1,0 +1,24 @@
+{
+  "webmcp_version": "0.1",
+  "name": "uni-grok-mcp-docs",
+  "title": "UniGrok MCP Documentation & Tools",
+  "description": "Agent-callable documentation and verification helper tools for the UniGrok MCP gateway.",
+  "tools": [
+    {
+      "name": "get_schema",
+      "description": "Returns the Pydantic/JSON schema of a given UniGrok tool."
+    },
+    {
+      "name": "example_call",
+      "description": "Returns a JSON template payload/example call for a given UniGrok mode."
+    },
+    {
+      "name": "simulate_reasoning_guard",
+      "description": "Simulates checking if a model meets the required reasoning level."
+    },
+    {
+      "name": "fetch_okf_bundle",
+      "description": "Returns the metadata, manifest, and topic URLs in the OKF bundle."
+    }
+  ]
+}

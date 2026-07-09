@@ -1,0 +1,179 @@
+# src/storage.py
+"""Storage backend seam for UniGrok.
+
+SessionStoreProtocol is the structural contract every persistence backend
+must satisfy: it enumerates the public async surface of GrokSessionStore
+(src/utils.py), which is the reference — and currently only — implementation
+(WAL SQLite, versioned migrations, write lock + read-connection pool).
+get_store() is the factory the `store` singleton in src/utils.py is created
+through; UNIGROK_STORAGE_BACKEND selects the backend ('sqlite' is the
+default and the only implemented value).
+
+Adding a backend (e.g. Postgres) means:
+  1. Implementing every method of SessionStoreProtocol with the same
+     semantics — notably: all methods must be safe to call before any
+     explicit initialization (GrokSessionStore lazily initializes on first
+     use), close() must be idempotent and reopenable (the next call
+     re-initializes), save_telemetry/create_job read the ambient
+     caller/request-id contextvars when their optional params are None, and
+     persisted free-text (prompts, results, facts) must go through the same
+     redaction/bounding helpers the SQLite backend uses.
+  2. Registering it in get_store() under a new UNIGROK_STORAGE_BACKEND value.
+  3. Extending tests/test_observability.py's conformance test to instantiate
+     the new backend against SessionStoreProtocol.
+
+The protocol is deliberately storage-agnostic: no db_path, connections,
+locks, or SQLite pragmas — those are implementation details of the SQLite
+backend. There is intentionally NO untested Postgres driver here; unknown
+backend names fail fast with NotImplementedError.
+"""
+
+import os
+from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
+
+SUPPORTED_STORAGE_BACKENDS = ("sqlite",)
+
+
+@runtime_checkable
+class SessionStoreProtocol(Protocol):
+    """Public async surface of a UniGrok session/telemetry store.
+
+    Structural (duck-typed) protocol: GrokSessionStore satisfies it without
+    inheriting from it, and tests assert conformance via isinstance (the
+    @runtime_checkable check verifies member presence, not signatures — the
+    signatures below are the documented contract).
+    """
+
+    # ── Lifecycle ────────────────────────────────────────────────────────────
+    async def close(self) -> None: ...
+    async def vacuum_db(self) -> None: ...
+
+    # ── Telemetry ────────────────────────────────────────────────────────────
+    async def save_telemetry(
+        self,
+        intent: str,
+        chosen_plane: str,
+        success: int,
+        latency: float,
+        cost: float,
+        context_id: Optional[str] = None,
+        caller: Optional[str] = None,
+        request_id: Optional[str] = None,
+    ) -> None: ...
+    async def get_telemetry_stats(self) -> List[Dict[str, Any]]: ...
+    async def get_caller_cost_today(self, caller_substring: str) -> float: ...
+    async def get_caller_stats_today(self, limit: int = 10) -> List[Dict[str, Any]]: ...
+    async def get_recent_model_stats(self, limit: int = 200) -> List[Dict[str, Any]]: ...
+
+    # ── Routing calibration (evals → router closed loop) ────────────────────
+    async def upsert_routing_calibration(
+        self,
+        category: str,
+        route: str,
+        model: str,
+        success_rate: float,
+        avg_cost_usd: float,
+        n: int,
+    ) -> None: ...
+    async def get_routing_calibration(
+        self, max_age_hours: Optional[float] = None
+    ) -> List[Dict[str, Any]]: ...
+
+    # ── Task memory ──────────────────────────────────────────────────────────
+    async def save_task_memory(
+        self,
+        prompt: str,
+        outcome_summary: str,
+        plane: str,
+        model: str,
+        profile: str,
+        success: int,
+        latency: float,
+        cost: float,
+        context_id: Optional[str] = None,
+        metadata: Optional[dict] = None,
+    ) -> None: ...
+    async def get_similar_task_memories(
+        self, prompt: str, context_id: Optional[str] = None, limit: int = 3
+    ) -> List[Dict[str, Any]]: ...
+    async def get_task_memory_count(self) -> int: ...
+
+    # ── Knowledge facts ──────────────────────────────────────────────────────
+    async def save_fact(
+        self, fact: str, scope: str = "global", source: str = ""
+    ) -> Optional[int]: ...
+    async def search_facts(
+        self, query: str, scope: Optional[str] = None, limit: int = 5
+    ) -> List[Dict[str, Any]]: ...
+    async def touch_facts(self, fact_ids: List[int]) -> None: ...
+    async def delete_fact(self, fact_id: int) -> bool: ...
+    async def count_facts(self) -> int: ...
+    async def list_facts(
+        self, limit: int = 20, scope: Optional[str] = None
+    ) -> List[Dict[str, Any]]: ...
+
+    # ── Sessions & messages ──────────────────────────────────────────────────
+    async def get_session(self, session_name: str) -> Optional[Dict[str, Any]]: ...
+    async def save_session(
+        self,
+        session_name: str,
+        cli_session_id: Optional[str] = None,
+        api_thread_id: Optional[str] = None,
+        model: Optional[str] = None,
+    ) -> None: ...
+    async def delete_session(self, session_name: str) -> None: ...
+    async def list_sessions(self) -> List[Dict[str, Any]]: ...
+    async def save_message(
+        self,
+        session_name: str,
+        role: str,
+        content: str,
+        metadata: Optional[dict] = None,
+    ) -> None: ...
+    async def replace_messages(
+        self, session_name: str, messages: List[Dict[str, Any]]
+    ) -> None: ...
+    async def load_messages(self, session_name: str) -> List[Dict[str, Any]]: ...
+
+    # ── Deferred jobs ────────────────────────────────────────────────────────
+    async def create_job(
+        self,
+        job_id: str,
+        prompt: str,
+        model: str,
+        caller: Optional[str] = None,
+        request_id: Optional[str] = None,
+    ) -> None: ...
+    async def update_job(
+        self,
+        job_id: str,
+        status: Optional[str] = None,
+        result: Optional[str] = None,
+        cost: Optional[float] = None,
+    ) -> None: ...
+    async def get_job(self, job_id: str) -> Optional[Dict[str, Any]]: ...
+    async def list_jobs(self, limit: int = 20) -> List[Dict[str, Any]]: ...
+
+
+def get_store(db_path: Any = None) -> SessionStoreProtocol:
+    """Build a session store for the configured backend.
+
+    UNIGROK_STORAGE_BACKEND selects it ('sqlite' default; blank/unset reads
+    as sqlite). Unknown values fail fast with NotImplementedError naming the
+    supported set — a typo must not silently fall back to SQLite. db_path is
+    backend-specific (the SQLite file path; tests use per-test temp paths).
+    """
+    backend = os.environ.get("UNIGROK_STORAGE_BACKEND", "sqlite").strip().lower() or "sqlite"
+    if backend == "sqlite":
+        # Late import: src/utils.py imports this factory at module load and
+        # calls it for the `store` singleton while still initializing;
+        # GrokSessionStore is defined above that call site, so this lookup
+        # resolves against the partially-initialized module.
+        from .utils import GrokSessionStore
+
+        return GrokSessionStore(db_path)
+    raise NotImplementedError(
+        f"UNIGROK_STORAGE_BACKEND='{backend}' is not implemented; "
+        f"supported backends: {', '.join(SUPPORTED_STORAGE_BACKENDS)}. "
+        "See src/storage.py for what a new backend must implement."
+    )

@@ -1,0 +1,337 @@
+# tests/test_migrations.py
+# Migration-ordering integration guard. Rounds 1-3 each added store
+# migrations (v6 routing_calibration, v7 knowledge, v8 caller metadata,
+# v9 job request ids); this file pins that the user_version chain stays
+# strictly sequential in the source, that a FRESH db lands exactly on the
+# head version with the full table set, and that a db frozen at the v5
+# schema (the round-2 baseline) upgrades cleanly to head with its data
+# intact and every post-v5 surface usable.
+
+import inspect
+import re
+import sqlite3
+
+import pytest
+
+from src.utils import GrokSessionStore
+
+# The current schema head. Bump this alongside any new migration — the
+# sequential-chain test below will fail loudly if the source and this pin
+# ever disagree.
+SCHEMA_HEAD = 9
+
+# Every table a fully migrated store must carry (sqlite internals and the
+# optional knowledge_fts shadow tables excluded — FTS5 availability is a
+# build-time property covered by tests/test_knowledge.py).
+EXPECTED_TABLES = {
+    "sessions",
+    "telemetry",
+    "messages",
+    "task_memory",
+    "jobs",
+    "routing_calibration",
+    "knowledge",
+}
+
+
+async def _fetch_version(store):
+    async with store._conn.execute("PRAGMA user_version;") as cursor:
+        row = await cursor.fetchone()
+        return row[0]
+
+
+async def _fetch_tables(store):
+    async with store._conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table';"
+    ) as cursor:
+        return {r[0] for r in await cursor.fetchall()}
+
+
+async def _fetch_columns(store, table):
+    async with store._conn.execute(f"PRAGMA table_info({table});") as cursor:
+        return {r[1] for r in await cursor.fetchall()}
+
+
+def _build_v5_db(path):
+    """Hand-build a db exactly as GrokSessionStore left it at user_version 5
+    (post round-2, pre routing_calibration/knowledge/caller/request-id), with
+    one seeded row per table so the upgrade's data preservation is provable."""
+    conn = sqlite3.connect(path)
+    try:
+        conn.executescript(
+            """
+            CREATE TABLE sessions (
+                session_name TEXT PRIMARY KEY,
+                cli_session_id TEXT,
+                api_thread_id TEXT,
+                last_active TEXT,
+                model TEXT
+            );
+            CREATE TABLE telemetry (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                intent TEXT,
+                chosen_plane TEXT,
+                success INTEGER,
+                latency REAL,
+                cost REAL,
+                context_id TEXT
+            );
+            CREATE TABLE messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_name TEXT,
+                role TEXT,
+                content TEXT,
+                timestamp TEXT,
+                metadata TEXT DEFAULT NULL,
+                FOREIGN KEY(session_name) REFERENCES sessions(session_name) ON DELETE CASCADE
+            );
+            CREATE INDEX idx_messages_session_id ON messages(session_name, id ASC);
+            CREATE INDEX idx_telemetry_intent ON telemetry(intent);
+            CREATE INDEX idx_messages_timestamp ON messages(timestamp);
+            CREATE INDEX idx_telemetry_context_id ON telemetry(context_id);
+            CREATE TABLE task_memory (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                task_hash TEXT,
+                prompt_terms TEXT,
+                prompt_excerpt TEXT,
+                outcome_summary TEXT,
+                plane TEXT,
+                model TEXT,
+                profile TEXT,
+                success INTEGER,
+                latency REAL,
+                cost REAL,
+                context_id TEXT,
+                created_at TEXT,
+                metadata TEXT DEFAULT NULL
+            );
+            CREATE INDEX idx_task_memory_hash ON task_memory(task_hash);
+            CREATE INDEX idx_task_memory_context_id ON task_memory(context_id);
+            CREATE INDEX idx_task_memory_created_at ON task_memory(created_at);
+            CREATE TABLE jobs (
+                id TEXT PRIMARY KEY,
+                status TEXT NOT NULL DEFAULT 'queued',
+                prompt TEXT,
+                model TEXT,
+                created_at TEXT,
+                updated_at TEXT,
+                result TEXT,
+                cost REAL DEFAULT 0.0
+            );
+            CREATE INDEX idx_jobs_created_at ON jobs(created_at);
+            PRAGMA user_version = 5;
+            """
+        )
+        conn.execute(
+            "INSERT INTO sessions VALUES ('legacy-sess', 'cli-1', 'thread-1', '2026-01-01T00:00:00', 'grok-4');"
+        )
+        conn.execute(
+            "INSERT INTO telemetry (intent, chosen_plane, success, latency, cost, context_id) "
+            "VALUES ('coding', 'API', 1, 0.5, 0.01, 'ctx-legacy');"
+        )
+        conn.execute(
+            "INSERT INTO messages (session_name, role, content, timestamp) "
+            "VALUES ('legacy-sess', 'user', 'hello from v5', '2026-01-01T00:00:01');"
+        )
+        conn.execute(
+            "INSERT INTO task_memory (task_hash, prompt_terms, prompt_excerpt, outcome_summary, "
+            "plane, model, profile, success, latency, cost, context_id, created_at) "
+            "VALUES ('h1', 'fix bug', 'fix the bug', 'done', 'API', 'grok-4', 'default', 1, "
+            "0.5, 0.01, 'ctx-legacy', '2026-01-01T00:00:02');"
+        )
+        conn.execute(
+            "INSERT INTO jobs (id, status, prompt, model, created_at, updated_at, result) "
+            "VALUES ('job-legacy', 'done', 'old research', 'grok-4', "
+            "'2026-01-01T00:00:03', '2026-01-01T00:00:04', 'old result');"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+class TestMigrationChain:
+    def test_user_version_increments_are_sequential(self):
+        """Drift guard: the migration assignments in _ensure_initialized must
+        be exactly 1..SCHEMA_HEAD in order, and every `if version < N` gate
+        must set PRAGMA user_version = N. Three separate stages added
+        migrations this round — this is what keeps the next one honest."""
+        source = inspect.getsource(GrokSessionStore._ensure_initialized)
+
+        assignments = [
+            int(m) for m in re.findall(r"PRAGMA user_version = (\d+);", source)
+        ]
+        assert assignments == list(range(1, SCHEMA_HEAD + 1)), (
+            f"migration assignments must be sequential 1..{SCHEMA_HEAD}, got {assignments}"
+        )
+
+        gates = [int(m) for m in re.findall(r"if version < (\d+):", source)]
+        assert gates == assignments, (
+            f"every gate needs a matching version bump: gates={gates}, assignments={assignments}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_fresh_db_migrates_to_head(self, tmp_path):
+        """A brand-new db runs the whole chain and lands exactly on head with
+        the full table set and the post-v5 columns present."""
+        store = GrokSessionStore(db_path=tmp_path / "fresh.db")
+        try:
+            await store._ensure_initialized()
+
+            assert await _fetch_version(store) == SCHEMA_HEAD
+            assert EXPECTED_TABLES <= await _fetch_tables(store)
+
+            telemetry_cols = await _fetch_columns(store, "telemetry")
+            assert {"metadata", "created_at", "context_id"} <= telemetry_cols
+            jobs_cols = await _fetch_columns(store, "jobs")
+            assert {"caller", "request_id"} <= jobs_cols
+        finally:
+            await store.close()
+
+    @pytest.mark.asyncio
+    async def test_v5_db_upgrades_to_head_with_data_intact(self, tmp_path):
+        """The round-2 baseline schema (user_version 5) reopened by current
+        code: migrations 6-9 apply cleanly, seeded rows survive, and every
+        post-v5 store surface works on the upgraded db."""
+        db_path = tmp_path / "legacy_v5.db"
+        _build_v5_db(db_path)
+
+        store = GrokSessionStore(db_path=db_path)
+        try:
+            await store._ensure_initialized()
+
+            # Chain completed.
+            assert await _fetch_version(store) == SCHEMA_HEAD
+            assert EXPECTED_TABLES <= await _fetch_tables(store)
+            assert {"metadata", "created_at"} <= await _fetch_columns(store, "telemetry")
+            assert {"caller", "request_id"} <= await _fetch_columns(store, "jobs")
+            async with store._conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='index';"
+            ) as cursor:
+                indexes = {r[0] for r in await cursor.fetchall()}
+            assert {
+                "idx_routing_calibration_updated_at",
+                "idx_knowledge_scope",
+                "idx_telemetry_created_at",
+            } <= indexes
+
+            # Pre-upgrade data survived.
+            messages = await store.load_messages("legacy-sess")
+            assert [m["content"] for m in messages] == ["hello from v5"]
+            job = await store.get_job("job-legacy")
+            assert job["result"] == "old result"
+            assert job["caller"] is None and job["request_id"] is None
+            rows = await store.get_telemetry_stats()
+            legacy = [r for r in rows if r["context_id"] == "ctx-legacy"]
+            assert legacy and legacy[0]["metadata"] is None
+
+            # Post-v5 surfaces are live on the upgraded db.
+            await store.upsert_routing_calibration(
+                "coding", "fast", "grok-4", success_rate=1.0, avg_cost_usd=0.01, n=6
+            )
+            calib = await store.get_routing_calibration(max_age_hours=1)
+            assert len(calib) == 1 and calib[0]["n"] == 6
+
+            fact_id = await store.save_fact("the deploy target is cloud run")
+            found = await store.search_facts("deploy target")
+            assert any(f["id"] == fact_id for f in found)
+
+            await store.save_telemetry(
+                "coding", "API", 1, 0.2, 0.01,
+                caller="claude-code", request_id="rid-upgrade",
+            )
+            await store.create_job(
+                "job-new", "new research", "grok-4",
+                caller="codex", request_id="rid-upgrade",
+            )
+            new_job = await store.get_job("job-new")
+            assert new_job["caller"] == "codex"
+            assert new_job["request_id"] == "rid-upgrade"
+        finally:
+            await store.close()
+
+
+class TestMigrationFailureAtomicity:
+    """The v8/v9 gates must match the try/rollback discipline of the earlier
+    migrations: a mid-migration failure rolls the transaction back, never
+    stamps the new user_version, and leaves the store recoverable (round-3
+    review finding — the original v8 block swallowed non-duplicate-column
+    ALTER failures and could stamp v8 with columns missing)."""
+
+    @staticmethod
+    def _build_v7_db(path, drop_jobs=False, pre_add_metadata=False):
+        """A db stamped user_version=7. drop_jobs simulates a corrupt/foreign
+        db that makes v8's jobs ALTER fail with a NON-duplicate-column
+        OperationalError; pre_add_metadata simulates a column that already
+        exists (the benign duplicate-column rerun)."""
+        _build_v5_db(path)
+        conn = sqlite3.connect(path)
+        try:
+            if drop_jobs:
+                conn.execute("DROP TABLE jobs;")
+            if pre_add_metadata:
+                conn.execute("ALTER TABLE telemetry ADD COLUMN metadata TEXT DEFAULT NULL;")
+            conn.execute("PRAGMA user_version = 7;")
+            conn.commit()
+        finally:
+            conn.close()
+
+    @staticmethod
+    def _raw_version(path):
+        conn = sqlite3.connect(path)
+        try:
+            return conn.execute("PRAGMA user_version;").fetchone()[0]
+        finally:
+            conn.close()
+
+    @pytest.mark.asyncio
+    async def test_v8_failure_rolls_back_and_store_stays_recoverable(self, tmp_path):
+        db_path = tmp_path / "v7_broken.db"
+        self._build_v7_db(db_path, drop_jobs=True)
+
+        store = GrokSessionStore(db_path=db_path)
+        try:
+            with pytest.raises(Exception, match="(?i)no such table"):
+                await store._ensure_initialized()
+
+            # Nothing half-committed: version stays 7, telemetry untouched.
+            assert self._raw_version(db_path) == 7
+            conn = sqlite3.connect(db_path)
+            try:
+                cols = {r[1] for r in conn.execute("PRAGMA table_info(telemetry);")}
+            finally:
+                conn.close()
+            assert "metadata" not in cols and "created_at" not in cols
+
+            # No dangling transaction: repairing the db lets the SAME store
+            # instance initialize cleanly (not 'cannot start a transaction
+            # within a transaction').
+            conn = sqlite3.connect(db_path)
+            try:
+                conn.execute(
+                    "CREATE TABLE jobs (id TEXT PRIMARY KEY, status TEXT NOT NULL "
+                    "DEFAULT 'queued', prompt TEXT, model TEXT, created_at TEXT, "
+                    "updated_at TEXT, result TEXT, cost REAL DEFAULT 0.0);"
+                )
+                conn.commit()
+            finally:
+                conn.close()
+            await store._ensure_initialized()
+            assert await _fetch_version(store) == SCHEMA_HEAD
+        finally:
+            await store.close()
+
+    @pytest.mark.asyncio
+    async def test_v8_duplicate_column_rerun_is_benign(self, tmp_path):
+        """A pre-existing telemetry.metadata column (duplicate-column ALTER)
+        must not abort the migration — only real DDL failures do."""
+        db_path = tmp_path / "v7_dup.db"
+        self._build_v7_db(db_path, pre_add_metadata=True)
+
+        store = GrokSessionStore(db_path=db_path)
+        try:
+            await store._ensure_initialized()
+            assert await _fetch_version(store) == SCHEMA_HEAD
+            assert {"metadata", "created_at"} <= await _fetch_columns(store, "telemetry")
+            assert {"caller", "request_id"} <= await _fetch_columns(store, "jobs")
+        finally:
+            await store.close()

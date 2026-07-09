@@ -1,0 +1,353 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>UniGrok MCP v0.4.1 Control Center</title>
+    <!-- Premium Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Orbitron:wght@500;700;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="./styles.css?v=grok-v0.4.1" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <div id="dockerOfflineAlert" class="alert-banner hidden">
+        <span>⚠️ Local UniGrok Gateway Offline! No connection detected.</span>
+        <div class="alert-actions" style="display: inline-flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+          <button id="dockerRestartBtn" type="button" class="small-btn-glow">Restart Container</button>
+          <div id="restartManualFallback" class="hidden" style="display: inline-flex; gap: 8px; align-items: center;">
+            <span>Or run:</span>
+            <code style="background: rgba(0,0,0,0.3); padding: 4px 8px; border-radius: 4px; font-family: monospace; font-size: 11px; color: var(--ink-soft);">docker compose up --build -d</code>
+            <button id="copyManualRestartBtn" type="button" class="small-btn-glow" style="padding: 2px 6px; font-size: 11px;">Copy</button>
+          </div>
+        </div>
+      </div>
+      <!-- Premium Top Bar -->
+      <header class="topbar">
+        <div class="brand-block">
+          <p class="eyebrow">UNIGROK GATEWAY</p>
+          <h1>Control Center <span class="version-badge">v0.4.1</span></h1>
+        </div>
+        <div class="signal-strip" aria-live="polite">
+          <span id="connectionState" class="status-pill status-idle">Idle</span>
+          <span id="runtimeChip" class="metric-chip">runtime: checking</span>
+          <span id="transportChip" class="metric-chip">transport: checking</span>
+          <span id="toolCountChip" class="metric-chip">tools: checking</span>
+          <span id="lastLatency" class="metric-chip">0 ms</span>
+        </div>
+      </header>
+
+      <!-- Grid Layout: Sidebar Navigation + Workbench + Inspector -->
+      <section class="console-grid">
+        
+        <!-- Sidebar Navigation -->
+        <nav class="sidebar-nav" aria-label="Showcases">
+          <div id="browserWarningCard" class="warning-card hidden" aria-live="assertive">
+            <strong>⚠️ Browser compatibility:</strong> Experimental WebMCP features require a browser or extension that exposes document.modelContext.
+          </div>
+          <div class="nav-title">Agent Showcase</div>
+          <button type="button" class="nav-btn active" data-tab="tab-console">
+            <span class="btn-icon">⚡</span> Quick Test Console
+          </button>
+          <button type="button" class="nav-btn" data-tab="tab-schemas">
+            <span class="btn-icon">📋</span> Schema Explorer
+          </button>
+          <button type="button" class="nav-btn" data-tab="tab-guard">
+            <span class="btn-icon">🛡️</span> Reasoning Guard
+          </button>
+          <button type="button" class="nav-btn" data-tab="tab-okf">
+            <span class="btn-icon">📚</span> OKF Browser
+          </button>
+          <button type="button" class="nav-btn" data-tab="tab-webmcp">
+            <span class="btn-icon">🌐</span> WebMCP Tester
+          </button>
+          <button type="button" class="nav-btn" data-tab="tab-metrics">
+            <span class="btn-icon">📊</span> Telemetry & Metrics
+          </button>
+          <button type="button" class="nav-btn" data-tab="tab-onboarding">
+            <span class="btn-icon">🚀</span> Onboarding (Self)
+          </button>
+        </nav>
+
+        <!-- Main Workbench Content Area -->
+        <section class="workbench">
+          
+          <!-- TAB 1: Quick Test Console -->
+          <div id="tab-console" class="tab-panel active">
+            <div class="panel-header">
+              <h2>Quick Test Console</h2>
+              <button id="copyConsoleCallBtn" type="button" class="small-btn-glow">Copy tool call</button>
+            </div>
+            <p class="panel-desc">Interface with the unified Grok Agent. Automatically routes tasks through Web Search, X Search, and Sandboxed Code Execution.</p>
+            
+            <div class="form-layout">
+              <div id="apiKeyWizard" class="wizard-card hidden">
+                <h4>🔑 API Credentials Wizard</h4>
+                <p class="wizard-desc">Rate limit or credential drift detected. Supply local Client Token to bypass:</p>
+                <div class="wizard-inputs">
+                  <input id="wizardTokenInput" type="text" placeholder="Client token..." class="wizard-input" aria-label="Client token" />
+                  <button id="saveWizardTokenBtn" type="button" class="small-btn-glow">Save Token</button>
+                </div>
+              </div>
+              <div class="form-group row-group">
+                <label for="modeInput">
+                  Execution Mode
+                  <select id="modeInput" aria-label="Execution mode selection">
+                    <option value="auto">auto - Smart query evaluation</option>
+                    <option value="fast">fast - Single-turn toolless path</option>
+                    <option value="reasoning">reasoning - Multi-step planner path</option>
+                    <option value="thinking">thinking - Reflected agent loop</option>
+                    <option value="research">research - Citation-grounded fanout</option>
+                  </select>
+                </label>
+                <label for="modelInput">
+                  Pin Model Override
+                  <select id="modelInput" aria-label="Pin model override selection">
+                    <option value="">auto (Recommended)</option>
+                    <!-- Populated dynamically -->
+                  </select>
+                </label>
+                <label class="toggle-label-legacy">
+                  <input id="legacyModeToggle" type="checkbox" aria-label="Toggle legacy mode output format" /> Legacy Mode
+                </label>
+              </div>
+
+              <div class="form-group">
+                <label for="promptInput">Prompt / Task
+                  <textarea id="promptInput" rows="5" placeholder="e.g. Compare the latency of WebMCP vs stdio JSON-RPC transport..." aria-label="Prompt task message input"></textarea>
+                </label>
+                <div class="estimator-row">
+                  <span id="costEstimator" class="estimator-text">Estimated Cost: $0.00000</span>
+                  <label class="budget-guard-label">
+                    <input id="budgetGuardToggle" type="checkbox" checked aria-label="Toggle budget safety guard" /> Budget Guard
+                  </label>
+                </div>
+              </div>
+
+              <details class="advanced-settings">
+                <summary>Advanced RPC settings</summary>
+                <div class="advanced-grid">
+                  <label>Session ID
+                    <input id="sessionInput" type="text" value="console-session-1" />
+                  </label>
+                  <label>Client ID
+                    <input id="clientIdInput" type="text" value="uni-grok-console" />
+                  </label>
+                  <label>Billing Caller (X-Caller)
+                    <input id="callerInput" type="text" placeholder="e.g. swarm-agent-0" />
+                  </label>
+                  <label>Injected System Rules
+                    <textarea id="systemPromptInput" rows="3" placeholder="Additional system prompt instructions..."></textarea>
+                  </label>
+                </div>
+              </details>
+
+              <div class="form-actions">
+                <button id="sendBtn" type="button" class="primary-btn-glow" aria-label="Send query to agent">Send to Agent</button>
+                <button id="clearBtn" type="button" class="secondary-btn" aria-label="Clear history log">Clear History</button>
+              </div>
+            </div>
+
+            <!-- Scrollable Conversation Log -->
+            <div class="conversation-wrapper">
+              <div class="section-title">Conversation History</div>
+              <div id="conversation" class="transcript"></div>
+            </div>
+          </div>
+
+          <!-- TAB 2: Schema Explorer -->
+          <div id="tab-schemas" class="tab-panel">
+            <div class="panel-header">
+              <h2>Schema Explorer</h2>
+              <button id="copySchemaBtn" type="button" class="small-btn-glow">Copy Schema JSON</button>
+            </div>
+            <p class="panel-desc">Discover the strict Grok-native schemas enforced on the wire. Powered by Pydantic v2.</p>
+            
+            <div class="schemas-layout">
+              <div class="schema-list-container">
+                <div class="section-title">Enforced Models</div>
+                <div id="schemaNav" class="schema-nav-buttons">
+                  <button type="button" class="schema-btn active" data-schema="AgentResult">AgentResult</button>
+                  <button type="button" class="schema-btn" data-schema="ChatResult">ChatResult</button>
+                  <button type="button" class="schema-btn" data-schema="ReflectionResult">ReflectionResult</button>
+                  <button type="button" class="schema-btn" data-schema="MediaResult">MediaResult</button>
+                  <button type="button" class="schema-btn" data-schema="SystemResult">SystemResult</button>
+                </div>
+              </div>
+              <div class="schema-viewer">
+                <div id="schemaNameTitle" class="section-title">AgentResult.json</div>
+                <pre><code id="schemaCodeBlock" class="json-code">Loading schema...</code></pre>
+              </div>
+            </div>
+          </div>
+
+          <!-- TAB 3: Reasoning Guard Simulator -->
+          <div id="tab-guard" class="tab-panel">
+            <div class="panel-header">
+              <h2>Reasoning Guard Simulator</h2>
+            </div>
+            <p class="panel-desc">Simulate how the router enforces reasoning level policies to prevent cognitive fallbacks during remote outages.</p>
+
+            <div class="guard-simulator-box">
+              <div class="form-layout card-base">
+                <div class="form-group row-group">
+                  <label for="guardModel">
+                    Target Model Profile
+                    <select id="guardModel">
+                      <option value="grok-build-0.1">grok-build-0.1 (Lightweight / None)</option>
+                      <option value="grok-4.3">grok-4.3 (Standard / Medium)</option>
+                      <option value="grok-4.5">grok-4.5 (Premier / High)</option>
+                    </select>
+                  </label>
+                  <label for="guardLevel">
+                    Required Level Threshold
+                    <select id="guardLevel">
+                      <option value="none">none (Weight 0)</option>
+                      <option value="low">low (Weight 1)</option>
+                      <option value="medium">medium (Weight 2)</option>
+                      <option value="high">high (Weight 3)</option>
+                    </select>
+                  </label>
+                </div>
+                <div class="form-actions">
+                  <button id="runGuardSimBtn" type="button" class="primary-btn-glow">Run Simulation</button>
+                </div>
+              </div>
+
+              <!-- Simulation Result Card -->
+              <div id="guardResultCard" class="simulation-card neutral">
+                <div class="sim-header">
+                  <span class="sim-label">Simulation Status</span>
+                  <strong id="simStatus">READY</strong>
+                </div>
+                <p id="simExplanation" class="sim-explanation">Select a model and threshold level to verify routing guard enforcement.</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- TAB 4: OKF Browser -->
+          <div id="tab-okf" class="tab-panel">
+            <div class="panel-header">
+              <h2>OKF Browser</h2>
+              <button id="copyOkfPathBtn" type="button" class="small-btn-glow">Copy Path</button>
+            </div>
+            <p class="panel-desc">Browse files from the zero-shot Open Knowledge Format (OKF) bundle. Headless agents ingest this context on startup.</p>
+
+            <div class="okf-layout">
+              <div class="okf-sidebar">
+                <div class="section-title">Bundle Files</div>
+                <div id="okfFileList" class="okf-file-list">
+                  <!-- Loaded dynamically -->
+                  <div class="okf-item loading">Loading files...</div>
+                </div>
+              </div>
+              <div class="okf-content-viewer">
+                <div id="okfFileName" class="section-title">index.md</div>
+                <div id="okfContentArea" class="markdown-preview">Select an OKF topic to inspect.</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- TAB 5: WebMCP Manifest Inspector -->
+          <div id="tab-webmcp" class="tab-panel">
+            <div class="panel-header">
+              <h2>WebMCP Manifest Inspector</h2>
+              <button id="runWebMcpBridgeBtn" type="button" class="primary-btn-glow">Prober Bridge</button>
+            </div>
+            <p class="panel-desc">WebMCP lets browser extensions/agents call documentation tools natively. Probe the client context and view the manifest below.</p>
+
+            <div class="webmcp-box">
+              <div class="section-title">Manifest: /.well-known/webmcp</div>
+              <pre><code id="webmcpManifestCode" class="json-code">Loading manifest...</code></pre>
+
+              <div class="section-title">WebMCP Bridge Status</div>
+              <div id="webmcpBridgeStatus" class="bridge-status-card unconnected">
+                <div class="bridge-title">Checking window.document.modelContext...</div>
+                <p class="bridge-desc">Please open Chrome with the WebMCP Bridge Extension active to test client interactions.</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- TAB 6: Telemetry & Metrics Dashboard -->
+          <div id="tab-metrics" class="tab-panel">
+            <div class="panel-header">
+              <h2>Telemetry & Metrics</h2>
+              <button id="refreshMetricsBtn" type="button" class="small-btn-glow">Refresh Metrics</button>
+            </div>
+            <p class="panel-desc">Inspect daily cost summaries, model distribution, latency averages, and active circuit breakers.</p>
+
+            <div class="metrics-grid">
+              <div class="metric-card">
+                <h3>Daily Cost</h3>
+                <div id="metricCost" class="metric-value">$0.00000</div>
+                <span class="metric-sub">Calculated USD for today</span>
+              </div>
+              <div class="metric-card">
+                <h3>Avg Latency</h3>
+                <div id="metricLatency" class="metric-value">0.00s</div>
+                <span class="metric-sub">Mean elapsed execution time</span>
+              </div>
+              <div class="metric-card">
+                <h3>Plane Distribution</h3>
+                <div id="metricPlane" class="metric-value">0 / 0</div>
+                <span class="metric-sub">API vs Local CLI executions</span>
+              </div>
+              <div class="metric-card">
+                <h3>Circuit Breaker</h3>
+                <div id="metricBreaker" class="metric-value">Closed</div>
+                <span class="metric-sub">Current outage filter state</span>
+              </div>
+            </div>
+            <div class="section-title">Raw Telemetry Report</div>
+            <pre><code id="rawMetricsReport" class="json-code">Loading metrics...</code></pre>
+          </div>
+
+          <!-- TAB 7: Onboarding (Self) -->
+          <div id="tab-onboarding" class="tab-panel">
+            <div class="panel-header">
+              <h2>Zero-Configuration Onboarding</h2>
+              <button id="copyDiscoverBtn" type="button" class="primary-btn-glow">Run discover_self</button>
+            </div>
+            <p class="panel-desc">Exposes raw metadata to headless agent swarms. Invoking this tool lists manifest targets and OKF paths dynamically.</p>
+
+            <div class="onboarding-box">
+              <div class="section-title">Onboarding Tool Payload (`discover_self`)</div>
+              <pre><code id="discoverSelfCode" class="json-code">Click 'Run discover_self' to query the tool...</code></pre>
+            </div>
+          </div>
+
+        </section>
+
+        <!-- Right Inspector Panel -->
+        <aside class="inspector">
+          <div class="panel-header">
+            <h3>RPC Wire Logs</h3>
+            <button id="clearLogsBtn" type="button" class="small-btn">Clear</button>
+          </div>
+          <div id="rpcLogs" class="rpc-logs-container">
+            <div class="log-placeholder">No RPC calls tracked in this session yet.</div>
+          </div>
+
+          <div class="panel-header border-top-panel">
+            <h3>Latest Result Payload</h3>
+            <button id="copyFactsBtn" type="button" class="small-btn">Copy</button>
+          </div>
+          <div class="facts-wrapper">
+            <dl id="factsGrid" class="facts-grid">
+              <dt>Method</dt><dd id="factMethod">-</dd>
+              <dt>Status</dt><dd id="factStatus">-</dd>
+              <dt>Tokens</dt><dd id="factTokens">-</dd>
+              <dt>Cost USD</dt><dd id="factCost">-</dd>
+              <dt>Latency</dt><dd id="factLatency">-</dd>
+              <dt>Route</dt><dd id="factRoute">-</dd>
+              <dt>Plane</dt><dd id="factPlane">-</dd>
+            </dl>
+          </div>
+        </aside>
+
+      </section>
+    </main>
+    <script type="module" src="./app.js?v=grok-v0.4.1"></script>
+  </body>
+</html>

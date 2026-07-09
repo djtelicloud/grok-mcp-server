@@ -1,0 +1,26 @@
+# Security Policy
+
+## Supported Releases
+
+Security fixes are applied to the latest `0.4.x` release line. Users should
+upgrade to the newest patch release before reporting an issue.
+
+## Reporting a Vulnerability
+
+Please use GitHub's private vulnerability reporting or a private Security
+Advisory for this repository. Do not open a public issue containing exploit
+details, API keys, bearer tokens, Grok CLI credentials, private prompts, or
+runtime logs with user data.
+
+Include the affected version or commit, deployment mode, reproduction steps,
+impact, and any suggested mitigation. If private reporting is unavailable,
+contact the repository maintainer privately and wait for a coordinated fix
+before public disclosure.
+
+## Deployment Boundary
+
+UniGrok binds Docker Compose to `127.0.0.1` by default. Before binding to a LAN
+or public interface, configure `UNIGROK_API_KEYS`, terminate TLS at a trusted
+proxy, restrict allowed origins, and rotate any credential that may have been
+exposed. Keep local git mutation and container restart capabilities disabled
+unless the process is running in a trusted local environment.
