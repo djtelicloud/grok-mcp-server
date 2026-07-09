@@ -74,11 +74,29 @@
 
   <!-- Client -> Gateway edges -->
   <g stroke="#4a5f8f" stroke-width="1.6" fill="none">
-    <path d="M262 172 C 330 172 340 250 408 268" marker-end="url(#arrow)"/>
-    <path d="M262 240 C 320 240 335 268 408 282" marker-end="url(#arrow)"/>
-    <path d="M262 308 C 320 308 335 300 408 298" marker-end="url(#arrow)"/>
-    <path d="M262 376 C 320 376 335 330 408 314" marker-end="url(#arrow)"/>
-    <path d="M262 444 C 330 444 340 350 408 330" marker-end="url(#arrow)"/>
+    <path id="e1" d="M262 172 C 330 172 340 250 408 268" marker-end="url(#arrow)"/>
+    <path id="e2" d="M262 240 C 320 240 335 268 408 282" marker-end="url(#arrow)"/>
+    <path id="e3" d="M262 308 C 320 308 335 300 408 298" marker-end="url(#arrow)"/>
+    <path id="e4" d="M262 376 C 320 376 335 330 408 314" marker-end="url(#arrow)"/>
+    <path id="e5" d="M262 444 C 330 444 340 350 408 330" marker-end="url(#arrow)"/>
+  </g>
+  <!-- request pulses traveling client -> gateway -->
+  <g>
+    <circle r="3.5" fill="#8ab4ff" opacity="0.9">
+      <animateMotion dur="2.6s" repeatCount="indefinite" begin="0s"><mpath href="#e1"/></animateMotion>
+    </circle>
+    <circle r="3.5" fill="#8ab4ff" opacity="0.9">
+      <animateMotion dur="2.6s" repeatCount="indefinite" begin="0.5s"><mpath href="#e2"/></animateMotion>
+    </circle>
+    <circle r="3.5" fill="#8ab4ff" opacity="0.9">
+      <animateMotion dur="2.6s" repeatCount="indefinite" begin="1.0s"><mpath href="#e3"/></animateMotion>
+    </circle>
+    <circle r="3.5" fill="#8ab4ff" opacity="0.9">
+      <animateMotion dur="2.6s" repeatCount="indefinite" begin="1.5s"><mpath href="#e4"/></animateMotion>
+    </circle>
+    <circle r="3.5" fill="#8ab4ff" opacity="0.9">
+      <animateMotion dur="2.6s" repeatCount="indefinite" begin="2.0s"><mpath href="#e5"/></animateMotion>
+    </circle>
   </g>
   <g font-family="'SF Mono', 'Fira Code', Consolas, monospace" font-size="11" fill="#6d7f9f">
     <text x="335" y="216" text-anchor="middle">Streamable HTTP</text>
@@ -87,7 +105,9 @@
 
   <!-- ================= Gateway ================= -->
   <g filter="url(#glow)">
-    <rect x="412" y="188" width="330" height="240" rx="14" fill="#0f1a30" stroke="url(#brand)" stroke-width="2"/>
+    <rect x="412" y="188" width="330" height="240" rx="14" fill="#0f1a30" stroke="url(#brand)" stroke-width="2">
+      <animate attributeName="stroke-width" values="2;3.2;2" dur="3.5s" repeatCount="indefinite"/>
+    </rect>
   </g>
   <text x="577" y="226" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="19" font-weight="700" fill="#e6edf9">UniGrok Gateway</text>
   <text x="577" y="248" text-anchor="middle" font-family="'SF Mono', 'Fira Code', Consolas, monospace" font-size="13" fill="#58e6d9">localhost:8080</text>
@@ -139,8 +159,16 @@
   <text x="908" y="464" font-family="Helvetica, Arial, sans-serif" font-size="11" fill="#8f7cc0">subscription &#183; fallback on API failure</text>
 
   <!-- Gateway -> plane edges -->
-  <path d="M744 262 C 800 250 820 232 876 220" stroke="url(#apiEdge)" stroke-width="2.5" fill="none" marker-end="url(#arrowCyan)"/>
-  <path d="M744 354 C 800 366 820 384 876 400" stroke="url(#cliEdge)" stroke-width="2.5" fill="none" marker-end="url(#arrowPurple)"/>
+  <path id="eapi" d="M744 262 C 800 250 820 232 876 220" stroke="url(#apiEdge)" stroke-width="2.5" fill="none" marker-end="url(#arrowCyan)"/>
+  <path id="ecli" d="M744 354 C 800 366 820 384 876 400" stroke="url(#cliEdge)" stroke-width="2.5" fill="none" marker-end="url(#arrowPurple)"/>
+  <circle r="4" fill="#58e6d9">
+    <animateMotion dur="2.2s" repeatCount="indefinite" begin="0.3s"><mpath href="#eapi"/></animateMotion>
+    <animate attributeName="opacity" values="0;1;1;0" keyTimes="0;0.15;0.85;1" dur="2.2s" repeatCount="indefinite" begin="0.3s"/>
+  </circle>
+  <circle r="4" fill="#bc8cff">
+    <animateMotion dur="2.8s" repeatCount="indefinite" begin="1.4s"><mpath href="#ecli"/></animateMotion>
+    <animate attributeName="opacity" values="0;1;1;0" keyTimes="0;0.15;0.85;1" dur="2.8s" repeatCount="indefinite" begin="1.4s"/>
+  </circle>
   <g font-family="Helvetica, Arial, sans-serif" font-size="11">
     <text x="812" y="222" text-anchor="middle" fill="#58e6d9">primary</text>
     <text x="812" y="402" text-anchor="middle" fill="#bc8cff">cost-saver / fallback</text>
@@ -153,7 +181,9 @@
   </g>
   <text x="577" y="576" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="#d5deef">SQLite state</text>
   <text x="577" y="596" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="11" fill="#7d8ca8">sessions &#183; cost &#183; jobs &#183; knowledge</text>
-  <path d="M577 430 L577 520" stroke="#4a5f8f" stroke-width="1.6" stroke-dasharray="5 5" marker-end="url(#arrow)"/>
+  <path d="M577 430 L577 520" stroke="#4a5f8f" stroke-width="1.6" stroke-dasharray="5 5" marker-end="url(#arrow)">
+    <animate attributeName="stroke-dashoffset" values="20;0" dur="1.6s" repeatCount="indefinite"/>
+  </path>
 
   <!-- footer -->
   <text x="1152" y="636" text-anchor="end" font-family="'SF Mono', 'Fira Code', Consolas, monospace" font-size="11" fill="#4a5f8f">unigrok &#183; v0.4.1</text>

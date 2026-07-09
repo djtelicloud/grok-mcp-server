@@ -56,10 +56,16 @@
     </g>
     <!-- edges to gateway -->
     <g stroke="#3a4a6e" stroke-width="1.5" fill="none" opacity="0.9">
-      <path d="M748 70 C 800 70 810 128 862 136"/>
-      <path d="M748 118 C 790 118 800 134 862 140"/>
-      <path d="M748 166 C 790 166 800 148 862 144"/>
-      <path d="M748 214 C 800 214 810 156 862 148"/>
+      <path id="h1" d="M748 70 C 800 70 810 128 862 136"/>
+      <path id="h2" d="M748 118 C 790 118 800 134 862 140"/>
+      <path id="h3" d="M748 166 C 790 166 800 148 862 144"/>
+      <path id="h4" d="M748 214 C 800 214 810 156 862 148"/>
+    </g>
+    <g>
+      <circle r="2.5" fill="#8ab4ff"><animateMotion dur="2.2s" repeatCount="indefinite" begin="0s"><mpath href="#h1"/></animateMotion></circle>
+      <circle r="2.5" fill="#8ab4ff"><animateMotion dur="2.2s" repeatCount="indefinite" begin="0.55s"><mpath href="#h2"/></animateMotion></circle>
+      <circle r="2.5" fill="#8ab4ff"><animateMotion dur="2.2s" repeatCount="indefinite" begin="1.1s"><mpath href="#h3"/></animateMotion></circle>
+      <circle r="2.5" fill="#8ab4ff"><animateMotion dur="2.2s" repeatCount="indefinite" begin="1.65s"><mpath href="#h4"/></animateMotion></circle>
     </g>
     <!-- gateway hexagon -->
     <g filter="url(#glow)">
@@ -68,8 +74,10 @@
     <text x="918" y="138" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="#e6edf9">MCP</text>
     <text x="918" y="156" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="10" fill="#7d8ca8">gateway</text>
     <!-- edges to planes -->
-    <path d="M962 128 C 1010 116 1020 102 1064 96" stroke="url(#apiEdge)" stroke-width="2" fill="none"/>
-    <path d="M962 160 C 1010 172 1020 186 1064 192" stroke="url(#cliEdge)" stroke-width="2" fill="none"/>
+    <path id="hapi" d="M962 128 C 1010 116 1020 102 1064 96" stroke="url(#apiEdge)" stroke-width="2" fill="none"/>
+    <path id="hcli" d="M962 160 C 1010 172 1020 186 1064 192" stroke="url(#cliEdge)" stroke-width="2" fill="none"/>
+    <circle r="3" fill="#58e6d9"><animateMotion dur="1.9s" repeatCount="indefinite" begin="0.4s"><mpath href="#hapi"/></animateMotion></circle>
+    <circle r="3" fill="#bc8cff"><animateMotion dur="2.4s" repeatCount="indefinite" begin="1.2s"><mpath href="#hcli"/></animateMotion></circle>
     <!-- plane cards -->
     <g font-family="Helvetica, Arial, sans-serif">
       <rect x="1068" y="66" width="102" height="58" rx="10" fill="#0f2226" stroke="#2f6f68"/>

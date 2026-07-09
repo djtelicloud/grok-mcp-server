@@ -15,6 +15,13 @@
 
 # UniGrok · Grok MCP Server & Gateway
 
+> **What is UniGrok?** One local Grok server that every coding agent on your
+> machine shares — self-routing across xAI's API and the Grok CLI
+> subscription, with per-call cost tracking, while your API key never leaves
+> the server.
+
+![UniGrok Control Center in action — a fast-mode agent call streams back with live tokens, cost, latency, route, and plane metadata](assets/control-center-demo.gif)
+
 UniGrok is a local-first **Grok MCP server and gateway** for
 [xAI's Grok models](https://docs.x.ai/?utm_source=github&utm_medium=readme&utm_campaign=unigrok&utm_content=intro-docs).
 It runs once on your machine, keeps the xAI credential on the server side, and
@@ -70,12 +77,6 @@ Open the local Control Center:
 ```text
 http://localhost:8080/ui/
 ```
-
-![UniGrok Control Center: live agent run with cost, route, and plane metadata](assets/control-center-v0.4.1.png)
-
-*The Control Center's Quick Test Console — every `agent` call reports tokens,
-cost (USD), latency, route, and plane in real time, alongside raw JSON-RPC
-wire logs.*
 
 ## Install Script
 

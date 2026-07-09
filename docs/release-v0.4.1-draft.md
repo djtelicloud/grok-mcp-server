@@ -48,6 +48,7 @@ portability while keeping the public MCP endpoint and `agent` contract stable.
 - [x] Medium/high static security scan passes.
 - [x] Locked runtime dependency audit reports no known vulnerabilities.
 - [x] Current tree and reachable history reviewed for committed credentials.
-- [ ] Repository visibility changed to public.
+- [x] Public repository published as `djtelicloud/grok-mcp-server` (clean
+  single-commit snapshot; this private repo remains the dev archive).
 - [x] `v0.4.1` tag created from the verified `main` commit and pushed.
 - [x] GitHub release published from these notes.
