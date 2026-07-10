@@ -62,6 +62,36 @@ def test_mcp_ui_static_files_are_served(monkeypatch):
     assert ".routing-receipt" in styles.text
     assert ".model-plane-grid" in styles.text
     assert ".provider-model-card" in styles.text
+    assert 'id="navSplitter"' in index.text
+    assert 'id="inspectorSplitter"' in index.text
+    assert 'data-region="workbench"' in index.text
+    assert 'role="tablist"' in index.text
+    assert 'role="separator"' in index.text
+    assert "ResizeObserver" in script.text
+    assert "fitLayout" in script.text
+    assert "unigrok_ui_layout_get" in script.text
+    assert "mcp.console.layout.v1" in script.text
+    assert "grid-template-columns: 1fr !important" not in styles.text
+    assert "fonts.googleapis.com" not in index.text
+
+
+def test_mcp_ui_layout_engine_is_local_and_ide_first():
+    with TestClient(create_app(), base_url="http://localhost:8080") as client:
+        index = client.get("/ui/")
+        script = client.get("/ui/app.js")
+        styles = client.get("/ui/styles.css")
+
+    assert 'data-nav="open"' in index.text
+    assert 'data-inspector="open"' in index.text
+    assert 'aria-label="Workspace layout controls"' in index.text
+    assert "--workbench-min: 320px" in styles.text
+    assert '.console-grid[data-nav="rail"]' in styles.text
+    assert '.console-grid[data-inspector="hidden"]' in styles.text
+    assert "pointerdown" in script.text
+    assert 'event.key.toLowerCase() === "b"' in script.text
+    resize_observer_body = script.text.split("new ResizeObserver", 1)[1].split("observer.observe", 1)[0]
+    assert "fetch(" not in resize_observer_body
+    assert "fetchMcpCall" not in resize_observer_body
 
 
 def test_mcp_ui_loads_without_exposing_mcp_when_auth_is_active(monkeypatch):

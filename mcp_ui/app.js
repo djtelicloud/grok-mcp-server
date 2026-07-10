@@ -1,4 +1,185 @@
 const STORAGE_KEY = "unigrok.mcp.console.settings.v4";
+const LAYOUT_KEY = "unigrok.mcp.console.layout.v1";
+const PANEL_MODES = ["open", "rail", "hidden"];
+const LAYOUT_LIMITS = {
+  nav: [148, 340],
+  inspector: [210, 460],
+  workbench: 320,
+  rail: 48,
+  splitter: 5,
+};
+
+const defaultLayout = {
+  nav: "open",
+  inspector: "open",
+  navWidth: 216,
+  inspectorWidth: 292,
+  density: "comfortable",
+};
+
+function readLayout() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(LAYOUT_KEY) || "{}");
+    return {
+      ...defaultLayout,
+      ...saved,
+      nav: PANEL_MODES.includes(saved.nav) ? saved.nav : defaultLayout.nav,
+      inspector: PANEL_MODES.includes(saved.inspector) ? saved.inspector : defaultLayout.inspector,
+      navWidth: clamp(Number(saved.navWidth) || defaultLayout.navWidth, ...LAYOUT_LIMITS.nav),
+      inspectorWidth: clamp(Number(saved.inspectorWidth) || defaultLayout.inspectorWidth, ...LAYOUT_LIMITS.inspector),
+      density: saved.density === "compact" ? "compact" : "comfortable",
+    };
+  } catch (_) {
+    return { ...defaultLayout };
+  }
+}
+
+let layoutState = readLayout();
+let layoutAnimationTimer = null;
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function panelPixels(mode, width) {
+  if (mode === "open") return width + LAYOUT_LIMITS.splitter;
+  if (mode === "rail") return LAYOUT_LIMITS.rail + LAYOUT_LIMITS.splitter;
+  return 0;
+}
+
+function fitLayout(width, preferred = layoutState) {
+  const fitted = { ...preferred };
+  const fits = () => panelPixels(fitted.nav, fitted.navWidth)
+    + panelPixels(fitted.inspector, fitted.inspectorWidth)
+    + LAYOUT_LIMITS.workbench <= width;
+
+  // Debug chrome yields before navigation; the workbench always keeps its floor.
+  const demotions = [
+    ["inspector", "open", "rail"],
+    ["nav", "open", "rail"],
+    ["inspector", "rail", "hidden"],
+    ["nav", "rail", "hidden"],
+  ];
+  for (const [side, from, to] of demotions) {
+    if (fits()) break;
+    if (fitted[side] === from) fitted[side] = to;
+  }
+  return fitted;
+}
+
+function saveLayout() {
+  try { localStorage.setItem(LAYOUT_KEY, JSON.stringify(layoutState)); } catch (_) { /* session-only fallback */ }
+}
+
+function applyLayout({ animate = false } = {}) {
+  const grid = $("consoleGrid");
+  if (!grid) return;
+  const rect = grid.getBoundingClientRect();
+  const effective = fitLayout(rect.width || window.innerWidth);
+  const compact = layoutState.density === "compact" || rect.width < 720 || rect.height < 580;
+
+  grid.dataset.nav = effective.nav;
+  grid.dataset.inspector = effective.inspector;
+  grid.dataset.density = compact ? "compact" : "comfortable";
+  grid.style.setProperty("--nav-width", `${layoutState.navWidth}px`);
+  grid.style.setProperty("--inspector-width", `${layoutState.inspectorWidth}px`);
+  grid.dataset.layout = JSON.stringify({
+    nav: effective.nav,
+    inspector: effective.inspector,
+    navWidth: layoutState.navWidth,
+    inspectorWidth: layoutState.inspectorWidth,
+    density: compact ? "compact" : "comfortable",
+  });
+
+  $("toggleNavBtn")?.setAttribute("aria-expanded", String(effective.nav !== "hidden"));
+  $("toggleInspectorBtn")?.setAttribute("aria-expanded", String(effective.inspector !== "hidden"));
+  $("densityBtn")?.setAttribute("aria-pressed", String(layoutState.density === "compact"));
+  $("navSplitter")?.setAttribute("aria-valuenow", String(layoutState.navWidth));
+  $("inspectorSplitter")?.setAttribute("aria-valuenow", String(layoutState.inspectorWidth));
+
+  if (animate) {
+    grid.classList.add("layout-animate");
+    clearTimeout(layoutAnimationTimer);
+    layoutAnimationTimer = setTimeout(() => grid.classList.remove("layout-animate"), 160);
+  }
+}
+
+function cyclePanel(side) {
+  const currentIndex = PANEL_MODES.indexOf(layoutState[side]);
+  layoutState[side] = PANEL_MODES[(currentIndex + 1) % PANEL_MODES.length];
+  saveLayout();
+  applyLayout({ animate: true });
+}
+
+function bindSplitter(id, side) {
+  const splitter = $(id);
+  if (!splitter) return;
+  const widthKey = side === "nav" ? "navWidth" : "inspectorWidth";
+  const limits = LAYOUT_LIMITS[side];
+
+  const resizeTo = (delta, startWidth) => {
+    const direction = side === "nav" ? 1 : -1;
+    layoutState[widthKey] = clamp(Math.round(startWidth + delta * direction), ...limits);
+    layoutState[side] = "open";
+    saveLayout();
+    applyLayout();
+  };
+
+  splitter.addEventListener("pointerdown", (event) => {
+    const startX = event.clientX;
+    const startWidth = layoutState[widthKey];
+    splitter.setPointerCapture(event.pointerId);
+    splitter.classList.add("dragging");
+    const move = (nextEvent) => resizeTo(nextEvent.clientX - startX, startWidth);
+    const end = () => {
+      splitter.classList.remove("dragging");
+      splitter.removeEventListener("pointermove", move);
+    };
+    splitter.addEventListener("pointermove", move);
+    splitter.addEventListener("pointerup", end, { once: true });
+    splitter.addEventListener("pointercancel", end, { once: true });
+  });
+
+  splitter.addEventListener("keydown", (event) => {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    const step = event.shiftKey ? 24 : 8;
+    const physicalDelta = event.key === "ArrowRight" ? step : -step;
+    resizeTo(physicalDelta, layoutState[widthKey]);
+  });
+}
+
+function setupLayoutController() {
+  applyLayout();
+  $("toggleNavBtn")?.addEventListener("click", () => cyclePanel("nav"));
+  $("toggleInspectorBtn")?.addEventListener("click", () => cyclePanel("inspector"));
+  $("inspectorRailBtn")?.addEventListener("click", () => {
+    layoutState.inspector = "open";
+    saveLayout();
+    applyLayout({ animate: true });
+  });
+  $("densityBtn")?.addEventListener("click", () => {
+    layoutState.density = layoutState.density === "compact" ? "comfortable" : "compact";
+    saveLayout();
+    applyLayout({ animate: true });
+  });
+  bindSplitter("navSplitter", "nav");
+  bindSplitter("inspectorSplitter", "inspector");
+
+  document.addEventListener("keydown", (event) => {
+    const command = event.ctrlKey || event.metaKey;
+    if (command && !event.shiftKey && event.key.toLowerCase() === "b") {
+      event.preventDefault();
+      cyclePanel("nav");
+    } else if (command && event.shiftKey && event.key.toLowerCase() === "i") {
+      event.preventDefault();
+      cyclePanel("inspector");
+    }
+  });
+
+  const observer = new ResizeObserver(() => applyLayout());
+  observer.observe($("consoleGrid"));
+}
 
 const state = {
   activeTab: "tab-console",
@@ -36,24 +217,49 @@ function copyTextToClipboard(text, btnElement) {
 
 // --- Dynamic Tab Router ---
 function setupTabRouter() {
-  document.querySelectorAll(".nav-btn").forEach((btn) => {
+  const tablist = $("sidebarNav");
+  const tabs = [...document.querySelectorAll(".nav-btn")];
+  tabs.forEach((btn) => {
     btn.addEventListener("click", () => {
       const tabId = btn.getAttribute("data-tab");
       switchTab(tabId);
     });
   });
+  tablist?.addEventListener("keydown", (event) => {
+    const index = tabs.indexOf(document.activeElement);
+    if (index < 0) return;
+    let next = index;
+    if (event.key === "ArrowDown" || event.key === "ArrowRight") next = (index + 1) % tabs.length;
+    else if (event.key === "ArrowUp" || event.key === "ArrowLeft") next = (index - 1 + tabs.length) % tabs.length;
+    else if (event.key === "Home") next = 0;
+    else if (event.key === "End") next = tabs.length - 1;
+    else return;
+    event.preventDefault();
+    tabs[next].focus();
+    tabs[next].click();
+  });
 }
 
 function switchTab(tabId) {
-  document.querySelectorAll(".nav-btn").forEach((b) => b.classList.remove("active"));
-  document.querySelectorAll(".tab-panel").forEach((p) => p.classList.remove("active"));
+  document.querySelectorAll(".nav-btn").forEach((b) => {
+    b.classList.remove("active");
+    b.setAttribute("aria-selected", "false");
+    b.tabIndex = -1;
+  });
+  document.querySelectorAll(".tab-panel").forEach((p) => {
+    p.classList.remove("active");
+    p.hidden = true;
+  });
 
   const targetBtn = document.querySelector(`.nav-btn[data-tab="${tabId}"]`);
   const targetPanel = $(tabId);
 
   if (targetBtn && targetPanel) {
     targetBtn.classList.add("active");
+    targetBtn.setAttribute("aria-selected", "true");
+    targetBtn.tabIndex = 0;
     targetPanel.classList.add("active");
+    targetPanel.hidden = false;
     state.activeTab = tabId;
 
     // Trigger tab-specific initializations
@@ -1228,6 +1434,22 @@ async function registerWebMcpTools() {
 
   try {
     await ctx.registerTool({
+      name: "unigrok_ui_layout_get",
+      description: "Returns the deterministic IDE layout state and crawlable Control Center regions.",
+      inputSchema: { type: "object", properties: {} },
+      execute: async () => ({
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            layout: JSON.parse($("consoleGrid")?.dataset.layout || "{}"),
+            regions: [...document.querySelectorAll("[data-region]")].map((node) => node.dataset.region),
+            activeTab: state.activeTab,
+          }, null, 2),
+        }],
+      }),
+    });
+
+    await ctx.registerTool({
       name: "get_schema",
       description: "Returns the Pydantic/JSON schema of a given UniGrok tool.",
       inputSchema: {
@@ -1516,6 +1738,14 @@ function setupCostEstimator() {
 
 // --- Initializer ---
 function init() {
+  document.querySelectorAll(".tab-panel").forEach((panel) => {
+    panel.setAttribute("role", "tabpanel");
+    panel.setAttribute("data-region", panel.dataset.region || panel.id);
+    const button = document.querySelector(`.nav-btn[data-tab="${panel.id}"]`);
+    if (button) panel.setAttribute("aria-labelledby", button.id);
+    panel.hidden = !panel.classList.contains("active");
+  });
+  setupLayoutController();
   setupTabRouter();
   setupSchemaExplorer();
   setupReasoningGuard();
