@@ -72,6 +72,17 @@ docker compose up --build -d
 curl -s http://localhost:4765/healthz
 ```
 
+Authenticate the independent CLI subscription plane once per machine:
+
+```bash
+docker compose run --rm grok-cli-auth
+```
+
+The helper uses xAI's device-code login and stores the refreshable OAuth state
+in the dedicated `unigrok-cli-auth` Docker volume. It is service identity, not
+project identity: never repeat this when switching repositories. Ordinary
+startup is noninteractive and remains API-capable when CLI auth is absent.
+
 This is a standalone, workspace-neutral service. The image runs its baked
 application from `/app`, keeps mutable data in a Docker volume at `/state`, and
 does **not** mount this repository or whichever project an IDE currently has
@@ -281,6 +292,10 @@ flowchart LR
 ```
 
 Full design detail lives in [architecture.md](architecture.md).
+
+UniGrok strips `XAI_API_KEY` from every CLI subprocess. This prevents a CLI
+invocation from silently charging the API credential and makes the reported
+CLI/API routing split a real credential and allowance boundary.
 
 Useful endpoints in HTTP mode:
 

@@ -26,6 +26,7 @@ from starlette.staticfiles import StaticFiles
 
 from .utils import (
     FALLBACK_XAI_LANGUAGE_MODELS,
+    CLI_AUTH_SETUP_COMMAND,
     MetaLayer,
     PathResolver,
     close_xai_client,
@@ -37,12 +38,14 @@ from .utils import (
     get_request_id,
     get_xai_client,
     grok_cli_available,
+    grok_cli_plane_status,
     is_cloudrun_runtime,
     new_request_id,
     normalize_caller,
     reset_active_caller,
     reset_request_id,
     redact_secrets,
+    run_blocking,
     run_agent_turn,
     set_active_caller,
     set_request_id,
@@ -611,10 +614,18 @@ async def healthz(_: Request) -> JSONResponse:
 async def readyz(_: Request) -> JSONResponse:
     # The probe is auth-exempt, so the body stays boolean-only: exception text
     # (absolute paths, sqlite errors) is logged server-side, never disclosed.
-    cli_auth_state = Path.home() / ".grok" / "auth.json"
+    try:
+        cli_plane = await run_blocking(
+            grok_cli_plane_status,
+            timeout_sec=5.0,
+            timeout=6.0,
+        )
+    except Exception as exc:
+        logger.warning(f"readyz CLI-plane probe failed: {exc}")
+        cli_plane = {"ready": False}
     checks: Dict[str, bool] = {
         "model_auth": bool(os.environ.get("XAI_API_KEY", "").strip())
-        or (not is_cloudrun_runtime() and grok_cli_available() and cli_auth_state.exists()),
+        or bool(cli_plane.get("ready")),
         "state_dir_writable": False,
         "database": False,
     }
@@ -639,7 +650,20 @@ async def readyz(_: Request) -> JSONResponse:
 
 
 async def runtimez(request: Request) -> JSONResponse:
-    auth_state = Path.home() / ".grok" / "auth.json"
+    try:
+        cli_plane = await run_blocking(
+            grok_cli_plane_status,
+            timeout_sec=5.0,
+            timeout=6.0,
+        )
+    except Exception:
+        cli_plane = {
+            "state": "unreachable",
+            "ready": False,
+            "binary": grok_cli_available(),
+            "auth": "probe_failed",
+            "setup_command": CLI_AUTH_SETUP_COMMAND,
+        }
     request_dial = _mode_dial_for_scope(request.scope)
     return JSONResponse(
         {
@@ -668,8 +692,11 @@ async def runtimez(request: Request) -> JSONResponse:
                 "client_tokens_configured": bool(_api_keys()),
             },
             "cli_plane": {
-                "binary": grok_cli_available(),
-                "auth_state": auth_state.exists(),
+                "binary": bool(cli_plane["binary"]),
+                "state": cli_plane["state"],
+                "ready": bool(cli_plane["ready"]),
+                "auth": cli_plane["auth"],
+                "setup_command": cli_plane["setup_command"],
             },
         }
     )
@@ -1599,24 +1626,21 @@ def _resolve_bind_port(port: Optional[int] = None) -> int:
 def _log_cli_plane_availability():
     """Say up front whether the local CLI plane exists here.
 
-    A missing `grok` binary silently failing at request time would masquerade
-    as an API error; a startup log makes the degradation explicit instead.
-    When the binary is present, also say whether auth state (~/.grok/auth.json,
-    the grok.com OAuth session) is visible — in a container that means the
-    host's ~/.grok was bind-mounted."""
-    from pathlib import Path
-
-    from src.utils import grok_cli_available
-
+    A missing or unauthenticated `grok` binary silently failing at request time
+    would masquerade as an API error; a startup log makes the verified service
+    credential state explicit instead."""
     cli_path = PathResolver.get_grok_cli_path()
-    if grok_cli_available():
-        auth_state = Path.home() / ".grok" / "auth.json"
-        auth_note = (
-            "auth state present"
-            if auth_state.exists()
-            else f"NO auth state at {auth_state} — mount the host ~/.grok or run `grok login`"
+    status = grok_cli_plane_status(timeout_sec=5.0)
+    if status["ready"]:
+        logger.info(f"local CLI plane: ready ({cli_path}; verified grok.com OAuth).")
+    elif status["binary"]:
+        logger.warning(
+            "local CLI plane: %s (%s). Authenticate the global service with `%s`; "
+            "API-plane service remains available.",
+            status["state"],
+            status["auth"],
+            status["setup_command"],
         )
-        logger.info(f"local CLI plane: available ({cli_path}; {auth_note}).")
     else:
         logger.warning(
             "local CLI plane: UNAVAILABLE (no grok binary at "

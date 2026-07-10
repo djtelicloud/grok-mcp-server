@@ -114,10 +114,15 @@ full API-backed capability set. The CLI plane uses an authenticated local Grok
 CLI subscription when its binary and OAuth session are available; it provides
 eligible CLI models and can be selected for cost-saving or API-failure fallback.
 
-Use `grok --check` to verify the local CLI is ready. The final response and the
-Control Center show the selected `model`, `route`, `plane`, `cost_usd`, and
-latency. A request choosing the API plane is not an error: model compatibility,
-requested capabilities, and CLI readiness all influence routing.
+Authenticate the running global Docker service once, from any directory, with
+`docker exec -it grok-mcp-server env -u XAI_API_KEY -u GROK_API_KEY grok login
+--device-auth`; do not authenticate separately inside caller projects. Check
+`/runtimez` or `grok_mcp_status` for the verified CLI state. UniGrok removes
+`XAI_API_KEY` from CLI child processes so an API-backed CLI cannot masquerade
+as the independent subscription plane. The final response and Control Center
+show the selected `model`, `route`, `plane`, `cost_usd`, and latency. A request
+choosing the API plane is not an error: model compatibility, requested
+capabilities, and CLI readiness all influence routing.
 
 ## How do I see the model, route, plane, and cost for a request? {#request-metadata}
 
@@ -158,11 +163,16 @@ curl -s http://localhost:4765/healthz
 ```
 
 Use `/readyz` when you also need readiness checks for model authentication,
-state storage, and SQLite. Check CLI-plane readiness with:
+state storage, and SQLite. Inspect the non-secret CLI state with:
 
 ```bash
-grok --check
+curl -s http://localhost:4765/runtimez
 ```
+
+If it reports `needs_auth`, run the `setup_command` returned in the CLI-plane
+status. It targets the running global container, so it works from any project
+directory. `grok --check` is not a health probe; in the xAI CLI it enables a
+prompt self-verification loop.
 
 The gateway uses Streamable HTTP at `/mcp`; it does not expose the legacy `/sse`
 endpoint.

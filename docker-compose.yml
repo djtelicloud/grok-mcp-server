@@ -13,8 +13,8 @@ services:
     volumes:
       # Service state is independent from the source checkout and caller projects.
       - grok-mcp-state:/state
-      # Optional Grok CLI OAuth state shared from the host.
-      - ${HOME}/.grok:/home/appuser/.grok
+      # Machine-level CLI OAuth identity, isolated from projects and host CLI state.
+      - grok-mcp-cli-auth:/home/appuser/.grok
     env_file:
       - path: ${UNIGROK_ENV_FILE:-.env}
         required: false
@@ -35,5 +35,25 @@ services:
       start_period: 15s
     restart: unless-stopped
 
+  # Explicit one-time bootstrap; never starts during ordinary `compose up`.
+  # Run: docker compose run --rm grok-cli-auth
+  grok-cli-auth:
+    profiles: ["auth"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: grok-mcp:latest
+    entrypoint: ["/usr/local/bin/grok"]
+    command: ["login", "--device-auth"]
+    environment:
+      # Auth must establish the independent grok.com plane, never use API billing.
+      - XAI_API_KEY=
+    volumes:
+      - grok-mcp-cli-auth:/home/appuser/.grok
+    stdin_open: true
+    tty: true
+
 volumes:
   grok-mcp-state:
+  grok-mcp-cli-auth:
+    name: unigrok-cli-auth

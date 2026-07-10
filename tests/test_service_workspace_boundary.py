@@ -132,6 +132,11 @@ def test_stable_and_contributor_compose_files_are_separate():
     assert "UNIGROK_SERVICE_MODE=stable" in stable
     assert ".:/workspace" not in stable
     assert "grok-mcp-state:/state" in stable
+    assert "grok-mcp-cli-auth:/home/appuser/.grok" in stable
+    assert "${HOME}/.grok" not in stable
+    assert "grok-cli-auth:" in stable
+    assert 'command: ["login", "--device-auth"]' in stable
+    assert "name: unigrok-cli-auth" in stable
     assert "UNIGROK_SERVICE_MODE=contributor" in contributor
     assert "name: grok-mcp-dev" in contributor
     assert ".:/workspace" in contributor

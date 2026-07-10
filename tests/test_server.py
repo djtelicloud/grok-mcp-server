@@ -33,24 +33,26 @@ from src.utils import MetaLayer
 @pytest.mark.asyncio
 async def test_grok_mcp_status():
     """grok_mcp_status must return version, git HEAD, project paths, and SQLite session metrics."""
-    with patch("asyncio.create_subprocess_exec") as mock_exec:
-        # Mock sub-process runs for grok whoami and git rev-parse
-        mock_proc_whoami = AsyncMock()
-        mock_proc_whoami.returncode = 0
-        mock_proc_whoami.communicate.return_value = (b"david-user\n", b"")
-        
+    cli_status = {
+        "state": "ready",
+        "auth": "oauth_verified",
+        "setup_command": "docker exec -it grok-mcp-server env -u XAI_API_KEY -u GROK_API_KEY grok login --device-auth",
+    }
+    with patch("asyncio.create_subprocess_exec") as mock_exec, patch(
+        "src.tools.system.grok_cli_plane_status", return_value=cli_status
+    ):
         mock_proc_git = AsyncMock()
         mock_proc_git.returncode = 0
         mock_proc_git.communicate.return_value = (b"abcdefg\n", b"")
-        
-        mock_exec.side_effect = [mock_proc_whoami, mock_proc_git]
+        mock_exec.return_value = mock_proc_git
         
         res = await grok_mcp_status()
         
         assert "# UniGrok MCP Server Status" in res
         assert "Server Version" in res
         assert "abcdefg" in res
-        assert "david-user" in res
+        assert "ready (oauth_verified)" in res
+        assert "docker exec -it grok-mcp-server" in res
         assert "Active Database Sessions" in res
         # Runtime concurrency wiring: timed-thread counters + breaker state
         assert "Timed Threads In Flight" in res

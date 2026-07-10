@@ -17,7 +17,7 @@ services:
     volumes:
       - .:/workspace
       - grok-mcp-dev-state:/state
-      - ${HOME}/.grok:/home/appuser/.grok
+      - grok-mcp-cli-auth:/home/appuser/.grok
     env_file:
       - path: ${UNIGROK_ENV_FILE:-.env}
         required: false
@@ -41,3 +41,5 @@ services:
 
 volumes:
   grok-mcp-dev-state:
+  grok-mcp-cli-auth:
+    name: unigrok-cli-auth

@@ -81,6 +81,11 @@ No dial owns separate state or broadens authorization.
 
 ### Guiding Principles:
 * **Local dual-plane execution**: The server utilizes a Cloud API Plane (via `xai-sdk`) and a Local CLI Plane (via the native `grok` command-line tool) to ensure resilience against network failures or credential issues.
+  The planes are credential-isolated: the API SDK receives `XAI_API_KEY`, while
+  every CLI child has API-key variables removed and must use a verified
+  grok.com OAuth session from the machine-level `unigrok-cli-auth` Docker
+  volume. Device-code bootstrap is an explicit one-time helper, never an
+  interactive container-start side effect and never project-specific.
 * **Context-awareness**: The workspace state (active file, Git diffs, etc.) is sensed dynamically to ground generation.
 * **Durable local storage**: A concurrent SQLite-backed database maintains telemetry, sessions, and messages.
 
@@ -258,7 +263,8 @@ If the API plane encounters issues, the execution falls back to the CLI plane:
 ```
 
 CLI routing now uses the CLI's headless protocol directly. Readiness is probed
-with `grok --check`; calls use `--output-format json` or `streaming-json`, and
+with a bounded, cached, API-key-stripped `grok models` call that must report a
+grok.com login; calls use `--output-format json` or `streaming-json`, and
 forward structured-output and reasoning controls through `--json-schema`,
 `--effort`, and `--max-turns` when those are present on the internal request.
 For native CLI continuity, the server stores a deterministic CLI session id and

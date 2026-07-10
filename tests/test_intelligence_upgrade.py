@@ -375,6 +375,35 @@ async def test_grok_cli_discovery_failure_returns_fallback(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_grok_cli_discovery_rejects_api_key_backed_cli(monkeypatch):
+    monkeypatch.setenv("UNIGROK_RUNTIME", "local")
+    monkeypatch.setenv("XAI_API_KEY", "must-not-reach-cli")
+    captured = {}
+
+    class FakeProc:
+        returncode = 0
+
+        async def communicate(self):
+            return (
+                b"You are using XAI_API_KEY.\nDefault model: grok-4.5\n"
+                b"Available models:\n  * grok-4.5 (default)\n",
+                b"",
+            )
+
+    async def fake_exec(*args, **kwargs):
+        captured["env"] = kwargs["env"]
+        return FakeProc()
+
+    monkeypatch.setattr(utils.asyncio, "create_subprocess_exec", fake_exec)
+
+    discovered = await utils.discover_grok_cli_models()
+
+    assert discovered["available"] is False
+    assert "XAI_API_KEY" not in captured["env"]
+    assert any("not independent" in warning for warning in discovered["warnings"])
+
+
+@pytest.mark.asyncio
 async def test_grok_cli_discovery_skips_cloudrun(monkeypatch):
     monkeypatch.setenv("UNIGROK_RUNTIME", "cloudrun")
     mock_exec = AsyncMock(side_effect=AssertionError("CLI should not run in Cloud Run"))

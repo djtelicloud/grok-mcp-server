@@ -35,9 +35,9 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # Install the grok CLI (Linux build) so the local CLI plane works inside
 # the container. Version-pinned for reproducible builds. The installer drops
 # the binary under /root/.grok/bin; move it to a world-readable path because
-# the runtime user's ~/.grok is reserved for the (optional) bind-mounted host
-# auth state (auth.json OAuth session + refresh token).
-RUN curl -fsSL https://x.ai/cli/install.sh | bash -s 0.2.82 \
+# the runtime user's ~/.grok is reserved for the persistent service-level OAuth
+# volume (auth.json OAuth session + refresh token).
+RUN curl -fsSL https://x.ai/cli/install.sh | bash -s 0.2.93 \
     && install -m 0755 /root/.grok/bin/grok /usr/local/bin/grok \
     && rm -rf /root/.grok
 
@@ -51,8 +51,8 @@ COPY .grok/ ./.grok/
 # Run as an unprivileged user. Stable mutable data lives under /state, never
 # in the application bundle or an IDE project.
 RUN useradd --create-home --uid 1000 --shell /usr/sbin/nologin appuser \
-    && mkdir -p /state \
-    && chown -R appuser:appuser /app /state
+    && mkdir -p /state /home/appuser/.grok \
+    && chown -R appuser:appuser /app /state /home/appuser/.grok
 USER appuser
 
 # Expose port (optional for stdio, required for HTTP transport later if I will add it)

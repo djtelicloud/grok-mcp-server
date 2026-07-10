@@ -16,6 +16,7 @@ from ..models.results import SystemResult
 from ..version import __version__
 
 from ..utils import (
+    CLI_AUTH_SETUP_COMMAND,
     store,
     get_xai_client,
     GrokInvocationContext,
@@ -33,6 +34,7 @@ from ..utils import (
     get_runtime_stats,
     get_circuit_breaker_state,
     get_routing_advisor,
+    grok_cli_plane_status,
     scoped_session,
     input_limit,
     validate_local_input,
@@ -57,19 +59,20 @@ async def grok_mcp_status() -> str:
         grok_cli = PathResolver.get_grok_cli_path()
         uv_bin = PathResolver.get_uv_path()
 
-        # Check local Grok CLI credentials
-        cli_auth = "Unauthenticated"
+        # Verify the service-level OAuth plane without inheriting XAI_API_KEY.
         try:
-            proc = await asyncio.create_subprocess_exec(
-                grok_cli, "whoami",
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE
+            cli_plane = await run_blocking(
+                grok_cli_plane_status,
+                timeout_sec=5.0,
+                timeout=6.0,
             )
-            stdout, _ = await communicate_with_timeout(proc, 3.0)
-            if proc.returncode == 0:
-                user_val = stdout.decode().strip()
-                cli_auth = f"Authenticated as {user_val}"
         except Exception:
-            pass
+            cli_plane = {
+                "state": "unreachable",
+                "auth": "probe_failed",
+                "setup_command": CLI_AUTH_SETUP_COMMAND,
+            }
+        cli_auth = f"{cli_plane['state']} ({cli_plane['auth']})"
 
         git_sha = "Unknown"
         try:
@@ -207,6 +210,7 @@ async def grok_mcp_status() -> str:
             f"**Grok CLI Binary:** `{grok_cli}`\n"
             f"**UV Binary:** `{uv_bin}`\n"
             f"**CLI Authentication:** `{cli_auth}`\n"
+            f"**CLI Auth Setup:** `{cli_plane['setup_command']}`\n"
             f"**Developer API Key:** `{'Configured' if XAI_API_KEY else 'Missing'}`\n\n"
             "### .grok Adapter\n"
             f"- **Profile Files:** `{adapter_status['profile_count']}`\n"

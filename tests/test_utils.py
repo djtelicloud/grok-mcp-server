@@ -3351,6 +3351,7 @@ class TestUtilsQuickWins:
             return b"cli output", b""
 
         async def fake_exec(*cmd, **kwargs):
+            captured["env"] = kwargs["env"]
             return FakeProc()
 
         monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
@@ -3361,6 +3362,7 @@ class TestUtilsQuickWins:
         assert is_cli is True
         assert content == "cli output"
         assert captured["timeout"] == 33.0
+        assert "XAI_API_KEY" not in captured["env"]
 
 
 class TestCliPlaneV2:
@@ -3506,9 +3508,14 @@ class TestCliPlaneV2:
         ]
         store.save_session.assert_not_awaited()
 
-    def test_cli_check_uses_check_flag_for_plane_health(self, monkeypatch):
+    def test_cli_check_uses_oauth_only_models_probe_for_plane_health(self, monkeypatch, tmp_path):
         from src import utils
 
+        monkeypatch.delenv("UNI_GROK_TESTING", raising=False)
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("XAI_API_KEY", "must-not-reach-cli")
+        (tmp_path / ".grok").mkdir()
+        (tmp_path / ".grok" / "auth.json").write_text("{}", encoding="utf-8")
         monkeypatch.setattr(utils, "grok_cli_available", lambda: True)
         monkeypatch.setattr(
             PathResolver, "get_grok_cli_path", staticmethod(lambda: "/tmp/grok")
@@ -3518,13 +3525,31 @@ class TestCliPlaneV2:
         def fake_run(cmd, **kwargs):
             captured["cmd"] = list(cmd)
             captured["kwargs"] = kwargs
-            return SimpleNamespace(returncode=0)
+            return SimpleNamespace(
+                returncode=0,
+                stdout=b"You are logged in with grok.com.\nAvailable models:\n- grok-4.5\n",
+                stderr=b"",
+            )
 
         monkeypatch.setattr(utils.subprocess, "run", fake_run)
 
-        assert utils.grok_cli_check_ready(timeout_sec=3.0) is True
-        assert captured["cmd"] == ["/tmp/grok", "--check"]
+        assert utils.grok_cli_plane_status(timeout_sec=3.0, force=True)["ready"] is True
+        assert captured["cmd"] == ["/tmp/grok", "models"]
         assert captured["kwargs"]["timeout"] == 3.0
+        assert "XAI_API_KEY" not in captured["kwargs"]["env"]
+
+    def test_cli_oauth_env_strips_api_credentials(self, monkeypatch):
+        from src import utils
+
+        monkeypatch.setenv("XAI_API_KEY", "api-secret")
+        monkeypatch.setenv("GROK_API_KEY", "alternate-secret")
+        monkeypatch.setenv("KEEP_ME", "yes")
+
+        child_env = utils.grok_cli_oauth_env()
+
+        assert "XAI_API_KEY" not in child_env
+        assert "GROK_API_KEY" not in child_env
+        assert child_env["KEEP_ME"] == "yes"
 
     def test_cli_plane_ready_uses_check_probe_outside_tests(self, monkeypatch):
         from src import utils

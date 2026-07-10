@@ -171,11 +171,23 @@ text using `workspace_context` and an optional `workspace_label`. `/metrics` (JS
 provides them. `degraded=true` means the run fell back from the initially
 selected route or plane.
 
-The local CLI plane works **inside the container**: the image bakes the
-Linux `grok` binary (version-pinned in the Dockerfile) and compose mounts the
-host's `~/.grok` (your `grok login` OAuth session, refresh token included) at
-the runtime user's home. The startup log reports both binary and auth-state
-availability. Requests that pin a CLI model (`grok-build`,
-`grok-composer-2.5-fast`) run on the grok.com subscription at $0 marginal
-cost; API-plane failures degrade to the CLI plane instead of failing.
-Remove the `~/.grok` volume in `docker-compose.yml` for an API-only container.
+The local CLI plane works **inside the container**: the image bakes the Linux
+`grok` binary (version-pinned in the Dockerfile), while compose persists its
+machine-level OAuth session in the dedicated `unigrok-cli-auth` Docker volume.
+Authenticate that service identity once with:
+
+```bash
+docker compose run --rm grok-cli-auth
+```
+
+The device-code flow is deliberately separate from ordinary startup and from
+every IDE project. UniGrok strips `XAI_API_KEY` from CLI subprocesses, so a CLI
+route must use verified grok.com OAuth instead of silently consuming API quota.
+The startup log and `/runtimez` report `ready`, `needs_auth`, `unreachable`, or
+other bounded state. When CLI auth is absent, the container still starts and
+the API plane remains available.
+
+After the service is running, the equivalent project-independent repair command
+is `docker exec -it grok-mcp-server env -u XAI_API_KEY -u GROK_API_KEY grok
+login --device-auth`. `/runtimez` and `grok_mcp_status` return that exact command
+when authentication needs attention.

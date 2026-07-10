@@ -183,21 +183,142 @@ def grok_cli_available() -> bool:
     return bool(shutil.which(path) or Path(path).exists())
 
 
-def grok_cli_check_ready(timeout_sec: float = 2.0) -> bool:
-    """Run the CLI's own bounded health probe for routing decisions."""
+CLI_AUTH_SETUP_COMMAND = (
+    "docker exec -it grok-mcp-server env -u XAI_API_KEY -u GROK_API_KEY "
+    "grok login --device-auth"
+)
+_CLI_PLANE_STATUS_TTL_SEC = 30.0
+_CLI_PLANE_STATUS_CACHE: Dict[str, Any] = {"key": None, "at": 0.0, "value": None}
+_CLI_PLANE_STATUS_LOCK = threading.Lock()
+
+
+def grok_cli_oauth_env(base: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+    """Return an environment that cannot silently bill the API plane.
+
+    The UniGrok process needs ``XAI_API_KEY`` for its SDK route, but the Grok
+    CLI inherits process variables by default.  Removing API credentials from
+    every CLI child is what makes the two planes genuinely independent: the
+    CLI must use its persisted grok.com OAuth session or fail closed.
+    """
+    env = dict(os.environ if base is None else base)
+    env.pop("XAI_API_KEY", None)
+    env.pop("GROK_API_KEY", None)
+    return env
+
+
+def grok_cli_plane_status(
+    timeout_sec: float = 5.0,
+    *,
+    force: bool = False,
+) -> Dict[str, Any]:
+    """Return a bounded, cached, non-secret view of the OAuth CLI plane.
+
+    ``auth.json`` is necessary but not sufficient: it may be stale.  A
+    successful ``grok models`` response that explicitly identifies grok.com
+    login verifies the service credential without consuming an inference
+    turn.  The probe always strips API-key variables so an API-backed CLI can
+    never masquerade as the independent subscription plane.
+    """
+    setup = CLI_AUTH_SETUP_COMMAND
+    if is_cloudrun_runtime():
+        return {
+            "state": "disabled",
+            "ready": False,
+            "binary": False,
+            "auth": "unavailable",
+            "setup_command": setup,
+        }
     if not grok_cli_available():
-        return False
+        return {
+            "state": "unavailable",
+            "ready": False,
+            "binary": False,
+            "auth": "missing_binary",
+            "setup_command": setup,
+        }
+
+    auth_state = Path.home() / ".grok" / "auth.json"
+    if not auth_state.is_file():
+        return {
+            "state": "needs_auth",
+            "ready": False,
+            "binary": True,
+            "auth": "missing",
+            "setup_command": setup,
+        }
+
+    # Tests model the credential boundary without reaching grok.com.
+    if os.environ.get("UNI_GROK_TESTING") == "1":
+        return {
+            "state": "ready",
+            "ready": True,
+            "binary": True,
+            "auth": "oauth_test_state",
+            "setup_command": setup,
+        }
+
+    try:
+        auth_mtime = auth_state.stat().st_mtime_ns
+    except OSError:
+        auth_mtime = 0
+    cache_key = (PathResolver.get_grok_cli_path(), auth_mtime)
+    now = time.monotonic()
+    with _CLI_PLANE_STATUS_LOCK:
+        cached = _CLI_PLANE_STATUS_CACHE.get("value")
+        if (
+            not force
+            and cached is not None
+            and _CLI_PLANE_STATUS_CACHE.get("key") == cache_key
+            and now - float(_CLI_PLANE_STATUS_CACHE.get("at") or 0.0)
+            < _CLI_PLANE_STATUS_TTL_SEC
+        ):
+            return dict(cached)
+
     try:
         completed = subprocess.run(
-            [PathResolver.get_grok_cli_path(), "--check"],
+            [PathResolver.get_grok_cli_path(), "models"],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             timeout=max(1.0, float(timeout_sec)),
             check=False,
+            env=grok_cli_oauth_env(),
         )
+        output = (
+            completed.stdout.decode("utf-8", errors="replace")
+            + "\n"
+            + completed.stderr.decode("utf-8", errors="replace")
+        ).lower()
+        using_api_key = "using xai_api_key" in output or "using xai api key" in output
+        oauth_verified = "logged in with grok.com" in output
+        ready = completed.returncode == 0 and oauth_verified and not using_api_key
+        if ready:
+            state, auth = "ready", "oauth_verified"
+        elif using_api_key:
+            state, auth = "api_key_conflict", "api_key"
+        elif "login" in output or "auth" in output:
+            state, auth = "needs_auth", "invalid_or_expired"
+        else:
+            state, auth = "unreachable", "unverified"
+    except subprocess.TimeoutExpired:
+        state, auth, ready = "unreachable", "probe_timeout", False
     except Exception:
-        return False
-    return completed.returncode == 0
+        state, auth, ready = "unreachable", "probe_failed", False
+
+    result = {
+        "state": state,
+        "ready": ready,
+        "binary": True,
+        "auth": auth,
+        "setup_command": setup,
+    }
+    with _CLI_PLANE_STATUS_LOCK:
+        _CLI_PLANE_STATUS_CACHE.update({"key": cache_key, "at": now, "value": dict(result)})
+    return result
+
+
+def grok_cli_check_ready(timeout_sec: float = 2.0) -> bool:
+    """Compatibility wrapper for the verified OAuth CLI-plane probe."""
+    return bool(grok_cli_plane_status(timeout_sec=timeout_sec).get("ready"))
 
 
 def get_unigrok_runtime() -> str:
@@ -617,9 +738,9 @@ def xai_api_key_configured() -> bool:
 def cli_plane_ready_for_local_runtime() -> bool:
     if is_cloudrun_runtime() or not grok_cli_available():
         return False
-    # Unit tests patch grok_cli_available() to model routing without launching
-    # a real local CLI. Production routing uses `grok --check` so a present but
-    # unauthenticated CLI does not look like a usable plane.
+    # Unit tests patch grok_cli_available() to model routing without reaching
+    # grok.com. Production uses a cached, API-key-stripped model-list probe so
+    # stale auth state cannot look like a usable subscription plane.
     if os.environ.get("UNI_GROK_TESTING") == "1":
         return True
     return grok_cli_check_ready()
@@ -1163,6 +1284,7 @@ async def discover_grok_cli_models(timeout_sec: float = 5.0) -> Dict[str, Any]:
             "models",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            env=grok_cli_oauth_env(),
         )
         try:
             stdout, stderr = await communicate_with_timeout(proc, timeout_sec)
@@ -1180,13 +1302,23 @@ async def discover_grok_cli_models(timeout_sec: float = 5.0) -> Dict[str, Any]:
                 "source": "cli-fallback",
             }
 
-        parsed = _parse_grok_cli_models_output(
+        combined_output = (
             stdout.decode("utf-8", errors="replace")
             + "\n"
             + stderr.decode("utf-8", errors="replace")
         )
+        parsed = _parse_grok_cli_models_output(combined_output)
         model_ids = parsed["models"] or FALLBACK_GROK_CLI_MODELS
         warnings = list(parsed["warnings"])
+        normalized_output = combined_output.lower()
+        api_key_conflict = (
+            "using xai_api_key" in normalized_output
+            or "using xai api key" in normalized_output
+        )
+        if api_key_conflict:
+            warnings.append(
+                "Grok CLI reported API-key authentication; subscription plane is not independent."
+            )
         if proc.returncode != 0:
             warnings.append(f"`grok models` exited with code {proc.returncode}.")
         if not parsed["models"]:
@@ -1196,7 +1328,7 @@ async def discover_grok_cli_models(timeout_sec: float = 5.0) -> Dict[str, Any]:
         return {
             "models": [{"id": model_id, "default": model_id == default_model} for model_id in model_ids],
             "default_model": default_model,
-            "available": proc.returncode == 0 and bool(parsed["models"]),
+            "available": proc.returncode == 0 and bool(parsed["models"]) and not api_key_conflict,
             "warnings": _dedupe_preserve_order(warnings),
             "source": "grok_cli",
         }
@@ -6494,6 +6626,7 @@ async def _call_plane(
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=str(PathResolver.get_workspace_root() or PathResolver.get_service_root()),
+                env=grok_cli_oauth_env(),
             )
             cli_timeout = _env_timeout("UNIGROK_CLI_TIMEOUT", 120.0)
             try:
