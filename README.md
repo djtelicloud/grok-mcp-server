@@ -369,7 +369,7 @@ If using the Grok CLI plane, ensure `grok auth status` shows authenticated.
 <details>
 <summary><strong><code>mcp-remote</code> bridge not connecting</strong></summary>
 
-If your IDE uses `mcp-remote` to connect to UniGrok's Streamable HTTP
+1. Confirm the server is running: `curl http://localhost:8080/healthz`
 endpoint:
 
 1. Confirm the server is running: `curl http://localhost:8080/health`
