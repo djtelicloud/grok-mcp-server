@@ -92,6 +92,9 @@ def _aggregate(rows: List[Dict[str, Any]], plane: Optional[str] = None) -> Dict[
     exact_token_rows = 0
     estimated_token_rows = 0
     models: Dict[str, int] = {}
+    route_classes: Dict[str, int] = {}
+    selection_reasons: Dict[str, int] = {}
+    routing_receipt_rows = 0
     for row in selected:
         meta = telemetry_metadata(row)
         tokens = max(0, _safe_int(meta.get("tokens")))
@@ -104,6 +107,15 @@ def _aggregate(rows: List[Dict[str, Any]], plane: Optional[str] = None) -> Dict[
         model = str(meta.get("model") or "").strip()
         if model:
             models[model] = models.get(model, 0) + 1
+        routing = meta.get("routing")
+        if isinstance(routing, dict):
+            routing_receipt_rows += 1
+            route_class = str(routing.get("route_class") or "").strip()
+            reason = str(routing.get("why_detail") or routing.get("why") or "").strip()
+            if route_class:
+                route_classes[route_class] = route_classes.get(route_class, 0) + 1
+            if reason:
+                selection_reasons[reason] = selection_reasons.get(reason, 0) + 1
 
     request_count = len(selected)
     p95_index = min(int(request_count * 0.95), request_count - 1) if request_count else 0
@@ -118,7 +130,38 @@ def _aggregate(rows: List[Dict[str, Any]], plane: Optional[str] = None) -> Dict[
         "exact_token_requests": exact_token_rows,
         "estimated_token_requests": estimated_token_rows,
         "models": dict(sorted(models.items(), key=lambda item: (-item[1], item[0]))),
+        "route_classes": dict(sorted(route_classes.items(), key=lambda item: (-item[1], item[0]))),
+        "selection_reasons": dict(sorted(selection_reasons.items(), key=lambda item: (-item[1], item[0]))),
+        "routing_receipt_requests": routing_receipt_rows,
     }
+
+
+def _recent_routes(rows: List[Dict[str, Any]], limit: int = 12) -> List[Dict[str, Any]]:
+    """Newest prompt-free routing receipts for the UI.
+
+    Telemetry intent/prompt excerpts are intentionally excluded.  Only the
+    already-bounded receipt plus operational result fields leave storage.
+    """
+    result: List[Dict[str, Any]] = []
+    # Store rows are newest-first (get_telemetry_stats ORDER BY id DESC).
+    for row in rows:
+        meta = telemetry_metadata(row)
+        routing = meta.get("routing")
+        if not isinstance(routing, dict):
+            continue
+        result.append({
+            "created_at": row.get("created_at"),
+            "caller": meta.get("caller"),
+            "plane": _plane_name(row.get("chosen_plane")),
+            "success": _safe_int(row.get("success")) == 1,
+            "latency_sec": _safe_float(row.get("latency")),
+            "cost_usd": _safe_float(row.get("cost")) if _plane_name(row.get("chosen_plane")) == "API" else None,
+            "tokens": max(0, _safe_int(meta.get("tokens"))),
+            "routing": routing,
+        })
+        if len(result) >= max(1, int(limit or 12)):
+            break
+    return result
 
 
 def aggregate_telemetry_planes(rows: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
@@ -260,10 +303,12 @@ def build_metrics_snapshot(
             "today": {
                 "summary": _aggregate(today),
                 "planes": {plane: _aggregate(today, plane) for plane in today_planes},
+                "recent_routes": _recent_routes(today),
             },
             "lifetime": {
                 "summary": _aggregate(rows),
                 "planes": {plane: _aggregate(rows, plane) for plane in lifetime_planes},
+                "recent_routes": _recent_routes(rows),
             },
             "api_billing": {
                 "local_source": "exact_xai_response_cost",
@@ -286,6 +331,9 @@ def build_metrics_snapshot(
                 "model_attributed_rows": sum(1 for row in rows if telemetry_metadata(row).get("model")),
                 "token_attributed_rows": sum(
                     1 for row in rows if _safe_int(telemetry_metadata(row).get("tokens")) > 0
+                ),
+                "routing_receipt_rows": sum(
+                    1 for row in rows if isinstance(telemetry_metadata(row).get("routing"), dict)
                 ),
             },
         },

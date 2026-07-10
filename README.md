@@ -32,7 +32,7 @@ cost tracking, and a browser Control Center.
 
 ![UniGrok architecture — six MCP clients share one local gateway that routes across the metered xAI API plane and the ~$0-marginal Grok CLI plane, with SQLite-backed sessions, cost, and jobs](assets/architecture.svg)
 
-Current development release: **v0.4.2**.
+Current development release: **v0.5.0**.
 
 Use it as:
 
@@ -251,6 +251,26 @@ Core tools:
 - `read_local_file`, `list_project_files`: workspace inspection.
 - `git_status`, `git_diff`, `git_log`, `git_show`: read-only Git context.
 - `generate_image`, `generate_video`, `extend_video`: Grok Imagine media.
+
+### Explainable model selection
+
+`agent(model=None, mode="auto")` uses one deterministic, local-first selector:
+
+- capability classes are `planning`, `coding`, `vision`, and `research`;
+- planning cold-starts on `grok-4.5`, coding on `grok-build-0.1`, and research
+  on the live Grok 4.20 multi-agent slug;
+- explicit model pins and `UNIGROK_*_MODEL` overrides always win;
+- the live catalog is cached for 15 minutes and a discovery failure uses the
+  bundled model directory instead of blocking a request;
+- fresh eval calibration is considered before local telemetry, but a peer
+  needs mature evidence and a 15-point success-rate advantage to replace the
+  stable default.
+
+Every `AgentResult` includes a `routing` receipt, and new telemetry rows retain
+that same prompt-free receipt. It explains the task feature bucket, route
+class, candidate models, evidence source, selected model, pin source, and any
+failover. The Control Center renders these receipts directly rather than
+guessing a reason from aggregate metrics.
 
 The public Streamable HTTP MCP endpoint intentionally exposes the unified
 `agent` surface for IDE use. The full stdio server exposes the broader tool

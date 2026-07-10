@@ -28,6 +28,7 @@ from ..utils import (
     scoped_session,
     input_limit,
     validate_local_input,
+    DEFAULT_PLANNING_MODEL,
 )
 from xai_sdk.chat import system, user, assistant, image, file as xai_file
 
@@ -46,8 +47,8 @@ def _validate_agent_count(model: str, agent_count: Optional[int]) -> Optional[st
         return None
     if agent_count not in (4, 16):
         return "Input Validation Error: agent_count must be either 4 or 16."
-    if model != "grok-4.20-multi-agent":
-        return "Input Validation Error: agent_count is only supported with grok-4.20-multi-agent."
+    if not model.startswith("grok-4.20-multi-agent"):
+        return "Input Validation Error: agent_count is only supported with a grok-4.20-multi-agent model."
     return None
 
 
@@ -149,7 +150,7 @@ async def agent(
             completion for trivial prompts; `"reasoning"` pins the planning
             model; `"thinking"` runs the agent loop plus a schema-enforced
             reflection review for the hardest tasks (slowest, most expensive);
-            `"research"` runs multi-agent research on the planning model
+            `"research"` uses the catalog's multi-agent-capable research model
             (agent_count from UNIGROK_RESEARCH_AGENT_COUNT, 4 or 16) with
             inline citations requested — sources come back under `citations`.
         model: Optional Grok model id. Leave unset to let routing choose.
@@ -164,7 +165,7 @@ async def agent(
         prompt=task,
         session=session,
         model=model,
-        mode="reasoning" if mode in ("reasoning", "research") else "auto",
+        mode=mode if mode in ("reasoning", "research") else "auto",
         thinking_mode=(mode == "thinking"),
         enable_agentic=(mode != "fast"),
         agent_count=_research_agent_count() if is_research else None,
@@ -189,6 +190,7 @@ async def agent(
         route=layer.route or "unknown",
         plane=layer.plane if layer.plane in ["API", "CLI", "CLI-Fallback", "local", "utility"] else "API",
         why=layer.routing_why or "auto",
+        routing=layer.routing_receipt or None,
         degraded=layer.degraded,
         citations=citations_mapped,
     )
@@ -310,7 +312,7 @@ async def chat(
 async def grok_agent(
     prompt: str,
     session: Optional[str] = None,
-    model: str = "grok-4.3",
+    model: str = DEFAULT_PLANNING_MODEL,
     system_prompt: Optional[str] = None,
     max_iterations: int = 5,
     cost_limit: float = 0.50,
@@ -322,7 +324,7 @@ async def grok_agent(
     Args:
         prompt: Task or question for the agent.
         session: Optional session name for persistent history in chats.
-        model: Grok model id (default `grok-4.3`).
+        model: Grok model id (default `grok-4.5`).
         system_prompt: Optional system instruction prepended to the conversation.
         max_iterations: Strict cap on reviewer-driven correction retries (default 5).
         cost_limit: Total budget in USD before hard abort (default 0.50).
@@ -402,6 +404,7 @@ async def grok_agent(
             route=layer.route or "unknown",
             plane=layer.plane if layer.plane in ["API", "CLI", "CLI-Fallback", "local", "utility"] else "API",
             why=layer.routing_why or "auto",
+            routing=layer.routing_receipt or None,
             degraded=layer.degraded,
             citations=citations_mapped,
         )
@@ -411,7 +414,7 @@ async def grok_reflect(
     subject: str,
     criteria: Optional[str] = None,
     context: Optional[str] = None,
-    model: str = "grok-4.3",
+    model: str = DEFAULT_PLANNING_MODEL,
 ) -> ReflectionResult:
     """Run a structured, tool-free Grok review of an artifact or plan.
 
@@ -482,7 +485,7 @@ async def grok_reflect(
 
 async def stateful_chat(
     prompt: str,
-    model: str = "grok-4.3",
+    model: str = DEFAULT_PLANNING_MODEL,
     response_id: Optional[str] = None,
     system_prompt: Optional[str] = None
 ) -> ChatResult:
@@ -490,7 +493,7 @@ async def stateful_chat(
 
     Args:
         prompt: User message to append.
-        model: Grok model id (default `grok-4.3`).
+        model: Grok model id (default `grok-4.5`).
         response_id: ID of the previous response to continue from.
         system_prompt: Optional system instruction.
 
@@ -572,7 +575,7 @@ async def delete_stateful_response(response_id: str) -> str:
 async def chat_with_vision(
     prompt: str,
     session: Optional[str] = None,
-    model: str = "grok-4.3",
+    model: str = DEFAULT_PLANNING_MODEL,
     image_paths: Optional[List[str]] = None,
     image_urls: Optional[List[str]] = None,
     detail: str = "auto"
@@ -582,7 +585,7 @@ async def chat_with_vision(
     Args:
         prompt: Question or instruction about the image(s).
         session: Optional session name for persistent history in chats.
-        model: Vision-capable Grok model (default `grok-4.3`).
+        model: Vision-capable Grok model (default `grok-4.5`).
         image_paths: Local image file paths to analyze.
         image_urls: Public image URLs to analyze.
         detail: Image detail level. One of `"auto"`, `"low"`, or `"high"`.
@@ -665,7 +668,7 @@ async def chat_with_files(
     prompt: str,
     file_ids: List[str],
     session: Optional[str] = None,
-    model: str = "grok-4.3",
+    model: str = DEFAULT_PLANNING_MODEL,
     system_prompt: Optional[str] = None,
 ) -> ChatResult:
     """Chat with Grok using one or more previously uploaded files as context.
@@ -674,7 +677,7 @@ async def chat_with_files(
         prompt: Question or instruction about the attached files.
         file_ids: IDs returned by `xai_upload_file`.
         session: Optional session name for persistent local history.
-        model: Grok model id (default `grok-4.3`).
+        model: Grok model id (default `grok-4.5`).
         system_prompt: Optional system instruction prepended to the conversation.
     """
     if not file_ids:

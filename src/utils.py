@@ -26,6 +26,13 @@ from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any, Literal, Callable
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field as PydanticField
+from .routing import (
+    ROUTE_CANDIDATES,
+    choose_model_candidate,
+    classify_route,
+    extract_routing_features,
+    make_routing_receipt,
+)
 
 # Path Resolver for zero-config portability
 class PathResolver:
@@ -716,6 +723,8 @@ FALLBACK_XAI_LANGUAGE_MODELS = [
     "grok-4.5",
     "grok-4.3",
     "grok-4.20-0309-reasoning",
+    "grok-4.20-0309-non-reasoning",
+    "grok-4.20-multi-agent-0309",
     "grok-4.20-multi-agent",
     "grok-build-0.1",
     "grok-2-1212",
@@ -2516,6 +2525,7 @@ class GrokSessionStore:
         tokens: Optional[int] = None,
         token_kind: Optional[str] = None,
         billing_source: Optional[str] = None,
+        routing: Optional[Dict[str, Any]] = None,
     ):
         await self._ensure_initialized()
         # caller and request_id ride the metadata JSON column (v8) so future
@@ -2542,6 +2552,16 @@ class GrokSessionStore:
         clean_billing_source = str(billing_source or "").strip().lower()
         if clean_billing_source in ("xai_response_exact", "subscription_unmetered", "unknown"):
             meta["billing_source"] = clean_billing_source
+        if isinstance(routing, dict):
+            try:
+                # A receipt contains only bounded features, model slugs, and
+                # evidence counts; never a prompt.  Round-trip through JSON to
+                # prevent custom mapping objects from escaping that contract.
+                clean_routing = json.loads(json.dumps(routing, separators=(",", ":")))
+                if isinstance(clean_routing, dict) and len(json.dumps(clean_routing)) <= 6000:
+                    meta["routing"] = clean_routing
+            except (TypeError, ValueError):
+                pass
         meta_str = json.dumps(meta, separators=(",", ":")) if meta else None
         now_str = datetime.now().isoformat()
         async with self._lock:
@@ -2646,9 +2666,10 @@ class GrokSessionStore:
                 SELECT plane, model,
                        COUNT(*) AS samples,
                        AVG(success) AS success_rate,
-                       AVG(cost) AS avg_cost
+                       AVG(cost) AS avg_cost,
+                       AVG(latency) AS avg_latency
                 FROM (
-                    SELECT plane, model, success, cost
+                    SELECT plane, model, success, cost, latency
                     FROM task_memory ORDER BY id DESC LIMIT ?
                 )
                 GROUP BY plane, model
@@ -4065,6 +4086,7 @@ class MetaLayer:
     fallback_occurred: bool = False
     degraded: bool = False
     routing_why: str = "auto"
+    routing_receipt: Dict[str, Any] = field(default_factory=dict)
     context_id: Optional[str] = None
     # Honest terminal outcome: final_answer | depth_exhausted | budget_exhausted
     # | fallback | error. Set at every terminal point; "unknown" means the
@@ -4176,8 +4198,11 @@ class ToolObservation:
 
 # Known-limit fallback directory used when the models API is unreachable.
 _MODEL_TOKEN_LIMIT_FALLBACKS = {
+    "grok-4.5": 131072,
     "grok-4.3": 131072,
+    "grok-4.20-0309-non-reasoning": 131072,
     "grok-4.20-0309-reasoning": 131072,
+    "grok-4.20-multi-agent-0309": 131072,
     "grok-4.20-multi-agent": 131072,
     "grok-composer-2.5-fast": 131072,
     "grok-build": 131072,
@@ -5283,7 +5308,7 @@ class AgentLoop:
 
 # ─── Execution Dispatch Constants ────────────────────────────────────────────
 DEFAULT_CODING_MODEL = "grok-build-0.1"
-DEFAULT_PLANNING_MODEL = "grok-4.3"
+DEFAULT_PLANNING_MODEL = "grok-4.5"
 
 
 # ─── Dynamic Model Resolution ────────────────────────────────────────────────
@@ -5293,6 +5318,7 @@ _MODEL_ALIAS_ENV_OVERRIDES = {
     "planning": "UNIGROK_PLANNING_MODEL",
     "coding": "UNIGROK_CODING_MODEL",
     "vision": "UNIGROK_VISION_MODEL",
+    "research": "UNIGROK_RESEARCH_MODEL",
 }
 
 
@@ -5301,15 +5327,17 @@ def _model_alias_default(alias: str) -> str:
     default — grok-4.3 is the vision-capable flagship)."""
     if alias == "coding":
         return DEFAULT_CODING_MODEL
+    if alias == "research":
+        return ROUTE_CANDIDATES["research"][0]
     return DEFAULT_PLANNING_MODEL
 
 
 class ModelResolver:
-    """Resolve the routing aliases `planning` / `coding` / `vision` to slugs.
+    """Resolve the routing aliases planning/coding/vision/research to slugs.
 
     Resolution order per alias:
-      1. Env override (UNIGROK_PLANNING_MODEL / UNIGROK_CODING_MODEL /
-         UNIGROK_VISION_MODEL) — wins over everything, including testing mode.
+      1. Matching UNIGROK_*_MODEL override — wins over everything, including
+         testing mode.
       2. The static default when discovery is disabled
          (UNIGROK_MODEL_DISCOVERY=0) or under UNI_GROK_TESTING (hermetic
          tests never discover).
@@ -5328,10 +5356,36 @@ class ModelResolver:
     def __init__(self, ttl: float = _TTL_SEC):
         self._ttl = ttl
         self._resolved: Dict[str, tuple] = {}  # alias → (slug, timestamp)
+        self._catalog: Optional[tuple] = None  # (ids, source, available, timestamp)
         self._lock = asyncio.Lock()
+        self._catalog_lock = asyncio.Lock()
 
     def invalidate(self):
         self._resolved.clear()
+        self._catalog = None
+
+    async def catalog_snapshot(self) -> tuple[List[str], str, bool]:
+        """Return a TTL-cached catalog without making routing depend on it.
+
+        Discovery failure returns the known fallback IDs and is cached just
+        like a success, preventing every request from paying a dead-network
+        timeout.  The source/availability values ride the routing receipt.
+        """
+        if not self._discovery_enabled():
+            return list(FALLBACK_XAI_LANGUAGE_MODELS), "static_fallback", False
+        cached = self._catalog
+        if cached is not None and time.time() - cached[3] < self._ttl:
+            return list(cached[0]), str(cached[1]), bool(cached[2])
+        async with self._catalog_lock:
+            cached = self._catalog
+            if cached is not None and time.time() - cached[3] < self._ttl:
+                return list(cached[0]), str(cached[1]), bool(cached[2])
+            discovery = await discover_xai_api_models()
+            ids = [entry.get("id") for entry in discovery.get("models", []) if entry.get("id")]
+            source = str(discovery.get("source") or "unknown")
+            available = bool(discovery.get("available"))
+            self._catalog = (ids, source, available, time.time())
+            return list(ids), source, available
 
     @staticmethod
     def _discovery_enabled() -> bool:
@@ -5390,15 +5444,14 @@ class ModelResolver:
 
     async def _resolve_from_catalog(self, alias: str, default: str) -> str:
         try:
-            discovery = await discover_xai_api_models()
+            catalog_ids, _, available = await self.catalog_snapshot()
         except Exception as exc:  # discover catches internally; belt and braces
             logging.getLogger("GrokMCP").warning(
                 f"Model alias '{alias}': catalog discovery raised, using default '{default}': {exc}"
             )
             return default
-        if not discovery.get("available"):
+        if not available:
             return default
-        catalog_ids = [entry.get("id") for entry in discovery.get("models", []) if entry.get("id")]
         if default in catalog_ids:
             return default
         picked = self._pick_closest(alias, catalog_ids)
@@ -5415,7 +5468,7 @@ _MODEL_RESOLVER = ModelResolver()
 
 
 async def resolve_model(alias_or_model: str) -> str:
-    """Resolve a routing alias (`planning`/`coding`/`vision`) to a live model
+    """Resolve a routing alias (planning/coding/vision/research) to a live model
     slug via the shared ModelResolver; explicit slugs pass through unchanged."""
     return await _MODEL_RESOLVER.resolve(alias_or_model)
 
@@ -5917,7 +5970,9 @@ class RoutingAdvisor:
                 "planning": {"samples": cal_p_samples, "success_rate": cal_p_rate, "avg_cost": cal_p_cost},
                 "coding": {"samples": cal_c_samples, "success_rate": cal_c_rate, "avg_cost": cal_c_cost},
             },
-            "borderline_source": "calibration" if cal_verdict is not None else "telemetry",
+            "borderline_source": (
+                "calibration" if cal_verdict is not None else "telemetry" if stats else "static"
+            ),
             "borderline_choice": "planning" if prefers else "coding (static prior)",
             # Per-request record (calibration|semantic|telemetry|static);
             # shadow=True means a semantic verdict was computed but the
@@ -5925,6 +5980,10 @@ class RoutingAdvisor:
             "last_decision": asdict(self._last_decision) if self._last_decision else None,
             "task_rag": task_rag_view,
         }
+
+    async def selection_evidence(self, store: Any) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        """Cached local evidence for bounded peer selection."""
+        return await self._snapshot(store), await self._calibration_snapshot(store)
 
 
 _ROUTING_ADVISOR = RoutingAdvisor()
@@ -6245,6 +6304,7 @@ async def run_thinking_loop(
     input_messages: Optional[List[Dict[str, Any]]] = None,
     on_event: Optional[Callable] = None,
     caller: Optional[str] = None,
+    routing_receipt: Optional[Dict[str, Any]] = None,
 ) -> MetaLayer:
     """Thinking route: AgentLoop execution wrapped in a schema-enforced
     reflection loop. Replaces the retired 6-stage ThinkingKernel.
@@ -6395,8 +6455,10 @@ async def run_thinking_loop(
                 tokens=layer.tokens,
                 prompt=prompt,
                 output=layer.generation,
+                routing=routing_receipt,
             ),
         )
+    layer.routing_receipt = dict(routing_receipt or {})
     return layer
 
 
@@ -6830,7 +6892,12 @@ async def _save_task_memory_safe(
     try:
         # Escalation outcomes ride task-memory metadata so future retrieval
         # sees which tasks needed the planning model.
-        task_metadata = {"escalated": True} if layer.escalated else None
+        task_metadata: Dict[str, Any] = {}
+        if layer.escalated:
+            task_metadata["escalated"] = True
+        routing_receipt = getattr(layer, "routing_receipt", None)
+        if routing_receipt:
+            task_metadata["routing"] = routing_receipt
         await active_store.save_task_memory(
             prompt=prompt,
             outcome_summary=layer.generation or layer.reflection or layer.reasoning or "",
@@ -6841,7 +6908,7 @@ async def _save_task_memory_safe(
             latency=layer.latency,
             cost=layer.cost_usd,
             context_id=layer.context_id,
-            metadata=task_metadata,
+            metadata=task_metadata or None,
         )
         # Best-effort cloud mirror (UNIGROK_TASK_RAG mirror|shadow|active):
         # a single-flight fire-and-forget outbox drain — never blocks or
@@ -6861,6 +6928,7 @@ def _telemetry_usage_kwargs(
     tokens: int,
     prompt: str,
     output: str,
+    routing: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Classify provider-exact API usage vs locally estimated CLI usage."""
     is_cli = str(plane or "").lower().startswith("cli")
@@ -6870,13 +6938,147 @@ def _telemetry_usage_kwargs(
             "tokens": _estimate_text_tokens(prompt, output),
             "token_kind": "local_estimate",
             "billing_source": "subscription_unmetered",
+            "routing": routing,
         }
     return {
         "model": model,
         "tokens": max(0, int(tokens or 0)),
         "token_kind": "provider_exact" if tokens else "unavailable",
         "billing_source": "xai_response_exact",
+        "routing": routing,
     }
+
+
+async def _select_routing_model(
+    *,
+    prompt: str,
+    mode: str,
+    thinking_mode: bool,
+    requested_model: Optional[str],
+    active_store: Any,
+    input_messages: Optional[List[Dict[str, Any]]],
+    enable_agentic: bool,
+) -> tuple[str, str, Dict[str, Any], bool]:
+    """Select a model and emit the single routing receipt used everywhere."""
+    reason_score = routing_reason_score(prompt) if mode == "auto" else 0
+    features = extract_routing_features(
+        prompt,
+        reason_score=reason_score,
+        input_messages=input_messages,
+        enable_agentic=enable_agentic,
+    )
+
+    if requested_model:
+        model = await resolve_model(requested_model)
+        if mode == "research" and not model.startswith("grok-4.20-multi-agent"):
+            raise ValueError(
+                "research mode requires a grok-4.20-multi-agent model; "
+                f"explicit model '{model}' is incompatible"
+            )
+        receipt = make_routing_receipt(
+            mode=mode,
+            route_class="pinned",
+            model=model,
+            why="pin",
+            why_detail="explicit_model",
+            features=features,
+            candidates=[{"model": model, "rank": 0, "selected": True}],
+            evidence_source="explicit",
+            catalog_source="not_consulted",
+            pin_source="model",
+        )
+        return model, "pin", receipt, True
+
+    borderline_prefers: Optional[bool] = None
+    if mode == "auto" and reason_score == 1:
+        try:
+            borderline_prefers = await get_routing_advisor().prefers_planning(
+                active_store,
+                await resolve_model("planning"),
+                await resolve_model("coding"),
+                prompt=prompt,
+            )
+        except Exception as exc:
+            logging.getLogger("GrokMCP").warning(
+                f"Routing advisor unavailable; keeping static prior: {exc}"
+            )
+            borderline_prefers = False
+
+    route_class, class_reason = classify_route(
+        mode=mode,
+        thinking_mode=thinking_mode,
+        features=features,
+        borderline_prefers_planning=borderline_prefers,
+    )
+    route_uses_reasoning = route_class in ("planning", "vision", "research")
+
+    if prefer_cli_when_api_key_missing():
+        model = keyless_cli_model(None, route_uses_reasoning)
+        why = "cost" if route_class == "coding" else "auto"
+        receipt = make_routing_receipt(
+            mode=mode,
+            route_class=route_class,
+            model=model,
+            why=why,
+            why_detail="keyless_cli",
+            features=features,
+            candidates=[{"model": model, "rank": 0, "selected": True}],
+            evidence_source="credential_plane",
+            catalog_source="grok_cli",
+        )
+        return model, why, receipt, route_uses_reasoning
+
+    alias = route_class if route_class in _MODEL_ALIAS_ENV_OVERRIDES else "planning"
+    env_name = _MODEL_ALIAS_ENV_OVERRIDES[alias]
+    env_model = os.environ.get(env_name, "").strip()
+    if env_model:
+        if route_class == "research" and not env_model.startswith("grok-4.20-multi-agent"):
+            raise ValueError(
+                f"{env_name} must name a grok-4.20-multi-agent model for research mode"
+            )
+        receipt = make_routing_receipt(
+            mode=mode,
+            route_class=route_class,
+            model=env_model,
+            why="pin",
+            why_detail="env_override",
+            features=features,
+            candidates=[{"model": env_model, "rank": 0, "selected": True}],
+            evidence_source="explicit",
+            catalog_source="not_consulted",
+            pin_source=env_name,
+        )
+        return env_model, "pin", receipt, route_uses_reasoning
+
+    catalog_ids, catalog_source, catalog_available = await _MODEL_RESOLVER.catalog_snapshot()
+    telemetry, calibration = await get_routing_advisor().selection_evidence(active_store)
+    choice = choose_model_candidate(
+        route_class,
+        available_models=catalog_ids,
+        telemetry=telemetry,
+        calibration=calibration,
+    )
+    if route_class == "research" and catalog_available and choice["catalog_fallback"]:
+        raise RuntimeError("No multi-agent research model is available in the live xAI catalog")
+    model = str(choice["model"])
+    mode_pin = mode != "auto" or thinking_mode
+    why = "pin" if mode_pin else ("cost" if route_class == "coding" else "auto")
+    candidate_reason = str(choice["selection_reason"])
+    why_detail = candidate_reason if candidate_reason != "catalog_default" else class_reason
+    receipt = make_routing_receipt(
+        mode=mode,
+        route_class=route_class,
+        model=model,
+        why=why,
+        why_detail=why_detail,
+        features=features,
+        candidates=choice["candidates"],
+        evidence_source=str(choice["evidence_source"]),
+        catalog_source=catalog_source,
+        pin_source="mode" if mode_pin else None,
+        catalog_fallback=bool(choice["catalog_fallback"] or not catalog_available),
+    )
+    return model, why, receipt, route_uses_reasoning
 
 
 # ─── Unified Orchestrate — Thin Router (v2) ──────────────────────────────────
@@ -6884,7 +7086,7 @@ def _telemetry_usage_kwargs(
 async def orchestrate(
     prompt: str,
     session: Optional[str] = None,
-    mode: Literal["auto", "reasoning", "composer"] = "auto",
+    mode: Literal["auto", "reasoning", "research", "composer"] = "auto",
     thinking_mode: bool = False,
     store: Any = None,
     dynamic_sys_prompt: str = "",
@@ -6933,61 +7135,21 @@ async def orchestrate(
         if subagents_manifest:
             dynamic_sys_prompt += f"\n\n{subagents_manifest}"
 
-    reason_score = routing_reason_score(prompt) if mode == "auto" else 0
-    route_uses_reasoning = (
-        thinking_mode
-        or mode == "reasoning"
-        or (mode == "auto" and reason_score >= 2)
-    )
-    if (
-        not route_uses_reasoning
-        and mode == "auto"
-        and reason_score == 1
-        and requested_model is None
-    ):
-        # Borderline score (exactly 1) statically falls to the coding model.
-        # The telemetry-informed prior flips it to planning only when recent
-        # success rates justify it (see RoutingAdvisor); any advisor failure
-        # keeps the static prior.
-        try:
-            route_uses_reasoning = await get_routing_advisor().prefers_planning(
-                store,
-                await resolve_model("planning"),
-                await resolve_model("coding"),
-                prompt=prompt,
-                context_id=context_id,
-            )
-        except Exception as advisor_err:
-            logging.getLogger("GrokMCP").warning(
-                f"Routing advisor unavailable; keeping static prior: {advisor_err}"
-            )
-    # Alias resolution: in a local/Docker prototype with no xAI API key but a
-    # mounted Grok CLI, use the subscription CLI plane directly. Do not try the
-    # API first and then explain auth errors to the browser UI.
     keyless_cli_direct = prefer_cli_when_api_key_missing()
-    if keyless_cli_direct:
-        profile_model = keyless_cli_model(requested_model, route_uses_reasoning)
-        if thinking_mode:
-            logging.getLogger("GrokMCP").info(
-                "thinking_mode requires the xAI API plane; using direct Grok CLI route because XAI_API_KEY is not configured."
-            )
-        thinking_mode = False
-    else:
-        # Reasoning-scored prompts ride the planning alias, everything else
-        # the coding alias. resolve_model consults the live catalog
-        # (TTL-cached) and degrades to the static defaults when discovery is
-        # unavailable, disabled, or under UNI_GROK_TESTING. Explicit
-        # requested_model slugs are never rewritten.
-        profile_model = requested_model or await resolve_model(
-            "planning" if route_uses_reasoning else "coding"
-        )
-    routing_why = (
-        "pin"
-        if requested_model or mode != "auto" or thinking_mode
-        else "cost"
-        if keyless_cli_direct or not route_uses_reasoning
-        else "auto"
+    profile_model, routing_why, routing_receipt, route_uses_reasoning = await _select_routing_model(
+        prompt=prompt,
+        mode=mode,
+        thinking_mode=thinking_mode,
+        requested_model=requested_model,
+        active_store=store,
+        input_messages=input_messages,
+        enable_agentic=enable_agentic,
     )
+    if keyless_cli_direct and thinking_mode:
+        logging.getLogger("GrokMCP").info(
+            "thinking_mode requires the xAI API plane; using direct Grok CLI route because XAI_API_KEY is not configured."
+        )
+        thinking_mode = False
     active_profile = load_grok_profile(profile_model)
     if require_reasoning_level:
         level_map = {"none": 0, "low": 1, "medium": 2, "high": 3}
@@ -7038,6 +7200,7 @@ async def orchestrate(
                 input_messages=input_messages,
                 on_event=on_event,
                 caller=caller,
+                routing_receipt=routing_receipt,
             )
             layer.latency = time.time() - start_time
             layer.context_id = context_id
@@ -7046,6 +7209,7 @@ async def orchestrate(
             layer.profile = str(active_profile.get("profile") or "")
             layer.policy_mode = current_policy_mode()
             layer.routing_why = routing_why
+            layer.routing_receipt = routing_receipt
             layer.degraded = False
             success = 1 if layer.finish_reason == "final_answer" else 0
             await _save_task_memory_safe(store, prompt, layer, actual_model, success)
@@ -7079,6 +7243,7 @@ async def orchestrate(
             layer.profile = str(active_profile.get("profile") or layer.profile or "")
             layer.policy_mode = current_policy_mode()
             layer.routing_why = routing_why
+            layer.routing_receipt = routing_receipt
             layer.degraded = False
             success = 1 if layer.finish_reason == "final_answer" else 0
             if store:
@@ -7088,6 +7253,7 @@ async def orchestrate(
                     **_telemetry_usage_kwargs(
                         plane=layer.plane, model=actual_model,
                         tokens=layer.tokens, prompt=prompt, output=layer.generation,
+                        routing=layer.routing_receipt,
                     ),
                 )
             await _save_task_memory_safe(store, prompt, layer, actual_model, success)
@@ -7108,7 +7274,7 @@ async def orchestrate(
     actual_mode: Literal["reasoning", "composer"] = "reasoning"
     cli_max_turns = AgentLoopPolicy().max_depth if enable_agentic and not force_fast else None
 
-    layer = MetaLayer()
+    layer = MetaLayer(routing_receipt=routing_receipt)
     try:
         gen_res, g_tok, g_cost, is_cli = await _call_plane(
             actual_mode, prompt, session, store, dynamic_sys_prompt,
@@ -7132,6 +7298,13 @@ async def orchestrate(
         layer.context_id = context_id
         layer.routing_why = "failover" if degraded_route else routing_why
         layer.degraded = degraded_route
+        if degraded_route:
+            layer.routing_receipt = {
+                **routing_receipt,
+                "why": "failover",
+                "why_detail": "agentic_to_fast",
+                "fallback": {"from_route": "agentic", "to_route": "fast"},
+            }
         if store:
             await store.save_telemetry(
                 prompt[:100], layer.plane, 1, time.time() - start_time,
@@ -7139,6 +7312,7 @@ async def orchestrate(
                 **_telemetry_usage_kwargs(
                     plane=layer.plane, model=actual_model,
                     tokens=layer.tokens, prompt=prompt, output=layer.generation,
+                    routing=layer.routing_receipt,
                 ),
             )
 
@@ -7169,6 +7343,7 @@ async def orchestrate(
                     **_telemetry_usage_kwargs(
                         plane=layer.plane, model=actual_model,
                         tokens=0, prompt=prompt, output="",
+                        routing=layer.routing_receipt,
                     ),
                 )
             layer.latency = time.time() - start_time
@@ -7184,6 +7359,7 @@ async def orchestrate(
                     **_telemetry_usage_kwargs(
                         plane="API", model=actual_model,
                         tokens=0, prompt=prompt, output="",
+                        routing=layer.routing_receipt,
                     ),
                 )
             raise RuntimeError(f"xAI API execution failed in Cloud Run runtime: {e}") from e
@@ -7214,6 +7390,13 @@ async def orchestrate(
             layer.finish_reason = "fallback"
             layer.degraded = True
             layer.routing_why = "failover"
+            layer.routing_receipt = {
+                **routing_receipt,
+                "resolved_model": layer.model,
+                "why": "failover",
+                "why_detail": "api_to_cli_fallback",
+                "fallback": {"from_model": actual_model, "to_model": layer.model},
+            }
             if store:
                 await store.save_telemetry(
                     prompt[:100], layer.plane, 1, time.time() - start_time,
@@ -7221,6 +7404,7 @@ async def orchestrate(
                     **_telemetry_usage_kwargs(
                         plane=layer.plane, model=layer.model,
                         tokens=layer.tokens, prompt=prompt, output=layer.generation,
+                        routing=layer.routing_receipt,
                     ),
                 )
         except Exception as cli_err:
@@ -7236,6 +7420,13 @@ async def orchestrate(
             layer.finish_reason = "error"
             layer.degraded = True
             layer.routing_why = "failover"
+            layer.routing_receipt = {
+                **routing_receipt,
+                "resolved_model": layer.model,
+                "why": "failover",
+                "why_detail": "api_and_cli_failed",
+                "fallback": {"from_model": actual_model, "to_model": layer.model},
+            }
             if store:
                 await store.save_telemetry(
                     prompt[:100], layer.plane, 0, time.time() - start_time,
@@ -7243,11 +7434,15 @@ async def orchestrate(
                     **_telemetry_usage_kwargs(
                         plane=layer.plane, model=layer.model,
                         tokens=0, prompt=prompt, output="",
+                        routing=layer.routing_receipt,
                     ),
                 )
 
     layer.latency = time.time() - start_time
-    await _save_task_memory_safe(store, prompt, layer, actual_model, 1 if layer.finish_reason == "final_answer" else 0)
+    await _save_task_memory_safe(
+        store, prompt, layer, layer.model or actual_model,
+        1 if layer.finish_reason == "final_answer" else 0,
+    )
     if layer.finish_reason == "fallback":
         logging.getLogger("GrokMCP").warning(
             f"Grok MCP Router: fallback finish reason triggered (degraded run/typo rerouted). Actual model: {actual_model}, route: {layer.route}"
@@ -7345,8 +7540,10 @@ async def run_agent_turn(
 
     if session and layer.generation:
         history = await load_history(session, store)
-        metadata = {"model": model, "plane": layer.plane, "context_id": context_id, "tokens": layer.tokens, "cost": layer.cost_usd}
+        metadata = {"model": layer.model or model, "plane": layer.plane, "context_id": context_id, "tokens": layer.tokens, "cost": layer.cost_usd}
         metadata["routing_why"] = layer.routing_why
+        if layer.routing_receipt:
+            metadata["routing"] = layer.routing_receipt
         metadata["degraded"] = layer.degraded
         if caller:
             # Which agent drove this turn — session transcripts in a shared
@@ -7372,7 +7569,7 @@ async def run_agent_turn(
         # api_thread_id carries the server-side thread head: the stored
         # completion id when server state was active, else the legacy session
         # placeholder (which the loop knows never to send upstream).
-        await store.save_session(session, api_thread_id=layer.response_id or session, model=model)
+        await store.save_session(session, api_thread_id=layer.response_id or session, model=layer.model or model)
         try:
             await maybe_compact_history(session, history, store)
         except Exception as compact_err:

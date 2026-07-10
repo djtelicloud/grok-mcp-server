@@ -1,7 +1,7 @@
 ---
 okf_version: "0.1"
 faq_schema_version: "1"
-source_version: "0.4.2"
+source_version: "0.5.0"
 title: "UniGrok FAQ"
 type: "topic"
 description: "Verified local-first setup, routing, security, and troubleshooting answers for UniGrok MCP users."
@@ -182,6 +182,23 @@ prompt self-verification loop.
 
 The gateway uses Streamable HTTP at `/mcp`; it does not expose the legacy `/sse`
 endpoint.
+
+## Why did auto mode choose this Grok model? {#model-selection-receipt}
+
+**Keywords:** model selection, grok 4.5, auto mode, routing receipt, why, research model
+
+Inspect the `routing` object returned by `agent`, or expand the matching row in
+Control Center's **Recent Routing Receipts** panel. It records the capability
+class, bounded prompt features, candidate models, evidence and catalog source,
+explicit pin source, selected model, and failover reason without storing the
+prompt itself.
+
+Cold-start defaults are `grok-4.5` for planning/vision and
+`grok-build-0.1` for coding. Research chooses the available Grok 4.20
+multi-agent slug. Explicit `model` arguments and `UNIGROK_*_MODEL` overrides
+always win. Fresh evaluation calibration or mature local telemetry can promote
+a peer only when its success rate clears the 0.15 quality margin, preventing
+small samples from making model selection flap.
 
 ## Docker started but UniGrok is not working. Where are the logs? {#docker-logs}
 

@@ -383,15 +383,15 @@ class TestResearchTools:
 class TestResearchMode:
     @pytest.mark.asyncio
     async def test_research_mode_maps_to_planning_multi_agent(self, monkeypatch):
-        """mode='research' rides the reasoning route with agent_count=4
-        (default) and requests inline citations."""
+        """mode='research' reaches the research capability class with
+        agent_count=4 (default) and requests inline citations."""
         mock_run = AsyncMock(return_value=MetaLayer(generation="ok"))
         monkeypatch.setattr("src.tools.chats.run_agent_turn", mock_run)
 
         await agent(task="survey the field", mode="research")
 
         _, kwargs = mock_run.call_args
-        assert kwargs["mode"] == "reasoning"
+        assert kwargs["mode"] == "research"
         assert kwargs["thinking_mode"] is False
         assert kwargs["enable_agentic"] is True
         assert kwargs["agent_count"] == 4

@@ -4,6 +4,30 @@ All notable changes to UniGrok MCP will be documented in this file.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-10
+
+### Added
+- **Explainable adaptive routing**: Replaced the two-fixed-alias illusion with
+  bounded capability classes for planning, coding, vision, and research.
+  Auto mode now filters a cached live catalog, cold-starts planning on
+  `grok-4.5`, routes research to the available Grok 4.20 multi-agent model,
+  and permits mature calibration or local telemetry to displace a stable
+  default only after a 15-point quality margin.
+- **Routing receipts**: Every unified-agent result, telemetry row, task-memory
+  record, and session turn can carry the same versioned, prompt-free receipt:
+  route class, bounded task features, selected model, candidates, catalog
+  source, evidence source, pin source, and failover reason. The Control Center
+  shows recent expandable receipts plus route-class and selection-reason
+  summaries without exposing prompts.
+
+### Changed
+- The planning, vision, reflection, and stateful reasoning default is now
+  `grok-4.5`; explicit model pins and environment overrides retain absolute
+  precedence. Catalog discovery is shared behind a 15-minute cache and safely
+  falls back to the bundled model directory when unavailable.
+- Research mode now reaches the research capability class rather than being
+  flattened into ordinary reasoning before selection.
+
 ## [0.4.2] - 2026-07-10
 
 ### Added

@@ -371,7 +371,7 @@ async def test_grok_reflect_degrades_when_parse_unavailable(monkeypatch):
     assert res.ok is False
     assert res.critique == {}
     assert res.response == "structured_reflection_unavailable"
-    assert res.model == "grok-4.3"
+    assert res.model == "grok-4.5"
     assert res.tokens == 0
     assert res.cost_usd == 0.0
     assert res.finish_reason == "error"
@@ -470,6 +470,7 @@ async def test_agent_tool_returns_structured_metadata(monkeypatch):
         tokens=42,
         cost_usd=0.012,
         latency=1.5,
+        routing_receipt={"v": 1, "resolved_model": "grok-build-0.1", "why_detail": "coding_signal"},
     ))
     monkeypatch.setattr("src.tools.chats.run_agent_turn", mock_run)
 
@@ -486,6 +487,7 @@ async def test_agent_tool_returns_structured_metadata(monkeypatch):
     assert res.tokens == 42
     assert res.cost_usd == 0.012
     assert res.latency_sec == 1.5
+    assert res.routing["why_detail"] == "coding_signal"
     _, kwargs = mock_run.call_args
     assert kwargs["prompt"] == "summarize src/utils.py"
     assert kwargs["session"] == "s-agent"
@@ -598,7 +600,7 @@ async def test_grok_agent_forwards_caps_to_thinking_loop(monkeypatch):
     _, kwargs = mock_loop.call_args
     assert kwargs["max_reflections"] == 3
     assert kwargs["global_budget_usd"] == 0.25
-    assert kwargs["model"] == "grok-4.3"
+    assert kwargs["model"] == "grok-4.5"
     assert "capped answer" in res.response
 
 

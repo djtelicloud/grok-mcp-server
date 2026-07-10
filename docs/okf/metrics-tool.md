@@ -22,6 +22,20 @@ For HTTP gateways, `/metrics` returns JSON by default and Prometheus text with
 JSON payload additionally carries the same structured usage ledger used by the
 MCP UI.
 
+## Routing Receipts
+
+New unified-agent telemetry rows include a versioned `routing` object. It is
+prompt-free and bounded: selected model, capability class, model candidates,
+feature bucket/hash, catalog source, evidence source, explicit pin source, and
+failover facts. JSON metrics expose the newest receipts under
+`usage.<period>.recent_routes`, plus aggregate `route_classes` and
+`selection_reasons`. The UI renders these values directly; it never infers why
+a model ran from a model name or dollar amount.
+
+Rows created before v0.5.0 naturally have no receipt. They remain valid for
+cost, latency, success, model, caller, token, and plane aggregates, while
+`data_quality.routing_receipt_rows` states the exact explainability coverage.
+
 ## Billing Truth
 
 - API calls record xAI's exact per-response billed cost and provider token

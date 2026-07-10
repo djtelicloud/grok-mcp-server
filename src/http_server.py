@@ -1405,7 +1405,7 @@ async def public_agent(
         "session": _scoped_session(session),
         "system_prompt": system_prompt,
         "model": model,
-        "mode": "reasoning" if resolved_mode in ("reasoning", "research") else "auto",
+        "mode": resolved_mode if resolved_mode in ("reasoning", "research") else "auto",
         "thinking_mode": resolved_mode == "thinking",
         "enable_agentic": resolved_mode != "fast",
     }
@@ -1426,6 +1426,7 @@ async def public_agent(
         route=layer.route or "unknown",
         plane=layer.plane if layer.plane in ["API", "CLI", "CLI-Fallback", "local", "utility"] else "API",
         why=layer.routing_why or "auto",
+        routing=layer.routing_receipt or None,
         degraded=layer.degraded,
         citations=citations_mapped,
         requested_mode=resolved_mode,

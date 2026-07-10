@@ -122,30 +122,28 @@ During the collaborative review, `grok-4.3` identified several structural bottle
 ```mermaid
 flowchart TD
     Start([Prompt Received]) --> Context[Query Dynamic Workspace Context + context_id]
-    Context --> ThinkingDecide{Explicit thinking path?}
-    
-    %% Thinking Path
-    ThinkingDecide -- Yes (grok_agent / thinking_mode) --> TK[run_thinking_loop: AgentLoop + Structured Reflection]
+    Context --> Features[Extract bounded prompt-free routing features]
+    Features --> Pin{Explicit model or env override?}
+    Pin -- Yes --> Receipt[Create v1 routing receipt]
+    Pin -- No --> Class[Classify: planning / coding / vision / research]
+    Class --> Catalog[Filter up to 3 candidates through cached live catalog]
+    Catalog --> Evidence[Apply fresh calibration, then mature telemetry, with quality hysteresis]
+    Evidence --> Receipt
+    Receipt --> ThinkingDecide{Explicit thinking path?}
+
+    ThinkingDecide -- Yes --> TK[run_thinking_loop: AgentLoop + Structured Reflection]
     TK --> Verdict{chat.parse ReflectionVerdict}
     Verdict -- pass / reviewer unavailable --> SQLiteSave[Save Run, Context ID & Telemetry to SQLite]
     Verdict -- fail (bounded retries, shared budget) --> TK
     SQLiteSave --> FormatOutput[Format Output with Grok Context Signature]
     FormatOutput --> End([Return Final Text Response])
 
-    %% Agentic Path
-    ThinkingDecide -- No --> RouteDecide{Has Agentic Flag, Reasoning Plane, or Reasoning Keywords?}
-    RouteDecide -- Yes (Reasoning Task) --> AgenticPath[Activate Agentic Loop]
+    ThinkingDecide -- No --> AgenticDecide{Agentic enabled?}
+    AgenticDecide -- Yes --> AgenticPath[Activate ReAct Agent Loop with selected model]
     AgenticPath --> AgentLoop[ReAct Loop: Parallel Tool Dispatch]
     AgentLoop --> SQLiteSave
 
-    %% Fast Path
-    RouteDecide -- No (Fast Path) --> KeywordMatch{Keyword Matches Planning Intent?}
-    KeywordMatch -- Yes --> TargetPlanning[Set Model: grok-4.3 / API]
-    KeywordMatch -- No --> TargetCoding[Set Model: grok-build-0.1 / API]
-    
-    TargetPlanning --> CallPlane[Execute _call_plane]
-    TargetCoding --> CallPlane
-    
+    AgenticDecide -- No --> CallPlane[Execute selected model on fast plane]
     CallPlane --> ExecSuccess{Execution Successful?}
     ExecSuccess -- Yes --> SQLiteSave
     ExecSuccess -- No --> Fallback[Activate Local CLI Fallback]
@@ -154,6 +152,15 @@ flowchart TD
     ExecFallback -- No --> Fatal[Output Hard Recovery Error Message]
     Fatal --> SQLiteSave
 ```
+
+The routing receipt is created once before execution and follows the result
+through agentic, thinking, fast, and failover paths. It is dual-written into
+`AgentResult`, telemetry metadata, task-memory metadata, and session-turn
+metadata; prompts are never copied into the receipt. Planning cold-starts on
+`grok-4.5`, coding on `grok-build-0.1`, and research uses a live
+`grok-4.20-multi-agent*` slug. A peer can displace the stable default only when
+fresh eval calibration or mature local telemetry clears the 0.15 quality
+margin, which also provides deterministic anti-flap hysteresis.
 
 ---
 

@@ -13,10 +13,10 @@ def test_mcp_ui_static_files_are_served(monkeypatch):
         styles = client.get("/ui/styles.css")
 
     assert index.status_code == 200
-    assert "<title>UniGrok MCP v0.4.2 Control Center</title>" in index.text
-    assert '<span class="version-badge">v0.4.2</span>' in index.text
-    assert 'script type="module" src="./app.js?v=grok-v0.4.2"' in index.text
-    assert '<link rel="stylesheet" href="./styles.css?v=grok-v0.4.2" />' in index.text
+    assert "<title>UniGrok MCP v0.5.0 Control Center</title>" in index.text
+    assert '<span class="version-badge">v0.5.0</span>' in index.text
+    assert 'script type="module" src="./app.js?v=grok-v0.5.0"' in index.text
+    assert '<link rel="stylesheet" href="./styles.css?v=grok-v0.5.0" />' in index.text
     assert "Control Center" in index.text
     assert "Bearer token" not in index.text
     assert "Quick Test Console" in index.text
@@ -34,9 +34,16 @@ def test_mcp_ui_static_files_are_served(monkeypatch):
     assert 'id="providerUsageState"' in index.text
     assert 'id="cliUsageState"' in index.text
     assert "SuperGrok CLI subscription" in index.text
+    assert 'id="routingReceipts"' in index.text
+    assert 'id="routeClassBreakdown"' in index.text
+    assert 'id="selectionReasonBreakdown"' in index.text
+    assert 'id="factSelection"' in index.text
+    assert "renderRoutingReceipts" in script.text
+    assert "routing?.why_detail" in script.text
     assert styles.status_code == 200
     assert ".console-grid" in styles.text
     assert ".metric-card" in styles.text
+    assert ".routing-receipt" in styles.text
 
 
 def test_mcp_ui_loads_without_exposing_mcp_when_auth_is_active(monkeypatch):

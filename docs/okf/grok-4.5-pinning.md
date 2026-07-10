@@ -41,5 +41,11 @@ If the server environment lacks an xAI API Key but has a mounted `grok` CLI subs
 If the live xAI endpoint is unreachable or model listing fails, UniGrok falls back to a hardcoded list of supported IDs:
 - **Premier default**: `grok-4.5`
 - **Default coding**: `grok-build-0.1`
-- **Standard reasoning**: `grok-4.3`
-- **Multi-agent**: `grok-4.20-multi-agent`
+- **Planning default**: `grok-4.5`
+- **Planning fallback**: `grok-4.3`
+- **Multi-agent research**: the available `grok-4.20-multi-agent*` catalog slug
+
+Auto-routing does not equate "newest" with "best." It filters a bounded
+capability-class candidate list, keeps a stable cold-start default, and only
+lets fresh calibration or mature local telemetry promote a peer by the
+configured quality margin. Explicit pins and environment overrides always win.

@@ -86,6 +86,7 @@ const enforcedSchemas = {
       plane: { type: "string", enum: ["API", "CLI", "CLI-Fallback", "local", "utility"] },
       citations: { type: "array", items: { type: "object", properties: { url: { type: "string" } } } },
       why: { type: "string", description: "Decision rationale metric." },
+      routing: { type: "object", description: "Versioned prompt-free model-selection receipt." },
       degraded: { type: "boolean", description: "True if model fallback triggered." },
       trace: { type: "array", description: "Structured multi-step execution trace." }
     },
@@ -422,6 +423,73 @@ function renderBreakdownList(containerId, entries, valueLabel) {
   }
 }
 
+function routingLabel(value) {
+  return String(value || "unknown").replaceAll("_", " ");
+}
+
+function renderRoutingReceipts(receipts) {
+  const container = $("routingReceipts");
+  container.replaceChildren();
+  if (!receipts?.length) {
+    const empty = document.createElement("span");
+    empty.className = "empty-cell";
+    empty.textContent = "No v1 routing receipts in this period. Older telemetry remains valid.";
+    container.appendChild(empty);
+    return;
+  }
+  for (const item of receipts) {
+    const receipt = item.routing || {};
+    const details = document.createElement("details");
+    details.className = "routing-receipt";
+    const summary = document.createElement("summary");
+
+    const primary = document.createElement("span");
+    primary.className = "receipt-primary";
+    const model = document.createElement("strong");
+    model.textContent = receipt.resolved_model || "unknown model";
+    const route = document.createElement("span");
+    route.className = "state-chip local";
+    route.textContent = routingLabel(receipt.route_class);
+    primary.append(model, route);
+
+    const reason = document.createElement("span");
+    reason.className = "receipt-reason";
+    reason.textContent = routingLabel(receipt.why_detail || receipt.why);
+
+    const operational = document.createElement("span");
+    operational.className = "receipt-operational";
+    const time = item.created_at ? new Date(item.created_at).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"}) : "—";
+    operational.textContent = `${item.caller || "unattributed"} • ${item.plane || "unknown"} • ${time}`;
+    summary.append(primary, reason, operational);
+
+    const body = document.createElement("div");
+    body.className = "receipt-body";
+    const facts = document.createElement("div");
+    facts.className = "receipt-facts";
+    const factValues = [
+      ["Mode", receipt.mode],
+      ["Evidence", receipt.evidence_source],
+      ["Catalog", receipt.catalog?.source],
+      ["Tokens", formatTokens(item.tokens)],
+      ["Latency", `${Number(item.latency_sec || 0).toFixed(2)}s`],
+      ["Result", item.success ? "success" : "failed"],
+    ];
+    for (const [label, value] of factValues) {
+      const fact = document.createElement("span");
+      const key = document.createElement("b");
+      key.textContent = `${label}: `;
+      fact.append(key, document.createTextNode(routingLabel(value)));
+      facts.appendChild(fact);
+    }
+    const raw = document.createElement("pre");
+    raw.className = "receipt-json";
+    raw.textContent = JSON.stringify({features: receipt.features, candidates: receipt.candidates, fallback: receipt.fallback || null}, null, 2);
+    body.append(facts, raw);
+    details.append(summary, body);
+    container.appendChild(details);
+  }
+}
+
 function renderPlaneTable(planes) {
   const body = $("planeBreakdownBody");
   body.replaceChildren();
@@ -470,7 +538,7 @@ function renderMetricsSnapshot() {
   const quality = payload.usage.data_quality;
   const periodLabel = state.metricsPeriod === "today" ? "today" : "across the local ledger";
   $("metricsCoverage").innerText = summary.requests
-    ? `${summary.requests} request${summary.requests === 1 ? "" : "s"} ${periodLabel}. Token coverage grows as new v2 telemetry is recorded; older rows remain valid for cost, latency, and plane counts.`
+    ? `${summary.requests} request${summary.requests === 1 ? "" : "s"} ${periodLabel}. ${summary.routing_receipt_requests || 0} row${summary.routing_receipt_requests === 1 ? "" : "s"} include explainable routing receipts; older rows remain valid for cost, latency, and plane counts.`
     : `No model executions ${periodLabel}. Health checks, discovery, and status calls intentionally do not create billable telemetry.`;
 
   const breakerCount = Object.values(payload.circuit_breakers || {}).filter((item) => item?.open).length;
@@ -499,6 +567,17 @@ function renderMetricsSnapshot() {
     Object.entries(payload.callers || {}),
     (value) => `${value.requests} req • $${Number(value.total_cost_usd || 0).toFixed(4)}`
   );
+  renderBreakdownList(
+    "routeClassBreakdown",
+    Object.entries(summary.route_classes || {}),
+    (value) => `${value} request${value === 1 ? "" : "s"}`
+  );
+  renderBreakdownList(
+    "selectionReasonBreakdown",
+    Object.entries(summary.selection_reasons || {}),
+    (value) => `${value} request${value === 1 ? "" : "s"}`
+  );
+  renderRoutingReceipts(period.recent_routes || []);
 
   $("rawMetricsReport").innerText = JSON.stringify(payload, null, 2);
 }
@@ -861,6 +940,8 @@ function renderFactsPane(method, response, elapsed) {
   $("factCost").innerText = payload.cost_usd ? `$${payload.cost_usd.toFixed(5)}` : "-";
   $("factRoute").innerText = payload.route || "-";
   $("factPlane").innerText = payload.plane || "-";
+  $("factModel").innerText = payload.model || "-";
+  $("factSelection").innerText = routingLabel(payload.routing?.why_detail || payload.why || "-");
 }
 
 async function callAgent(prompt) {
@@ -945,6 +1026,8 @@ function setupConsoleActions() {
       latency: $("factLatency").innerText,
       route: $("factRoute").innerText,
       plane: $("factPlane").innerText,
+      model: $("factModel").innerText,
+      selection: $("factSelection").innerText,
     };
     copyTextToClipboard(JSON.stringify(facts, null, 2), this);
   });

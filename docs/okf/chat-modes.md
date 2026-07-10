@@ -48,7 +48,7 @@ Sends a direct text prompt to a Grok model.
 Appends to a server-side conversation thread at xAI.
 - **Parameters**:
   - `prompt` (string, required): Follow-up text.
-  - `model` (string, optional): Default `"grok-4.3"`.
+  - `model` (string, optional): Default `"grok-4.5"`.
   - `response_id` (string, optional): Prior stateful ID to resume from.
   - `system_prompt` (string, optional): Initial system prompt.
 
@@ -57,7 +57,7 @@ Analyzes local image files or public image URLs.
 - **Parameters**:
   - `prompt` (string, required): Text instruction.
   - `session` (string, optional): Session name.
-  - `model` (string, optional): Default `"grok-4.3"`.
+  - `model` (string, optional): Default `"grok-4.5"`.
   - `image_paths` (array of strings, optional): Paths to local files (PNG/JPG).
   - `image_urls` (array of strings, optional): Public URLs.
   - `detail` (string, optional): `"auto"`, `"low"`, `"high"`.
@@ -68,7 +68,7 @@ Infers across uploaded document files.
   - `prompt` (string, required): Core request.
   - `file_ids` (array of strings, required): IDs returned by `xai_upload_file`.
   - `session` (string, optional): Session name.
-  - `model` (string, optional): Default `"grok-4.3"`.
+  - `model` (string, optional): Default `"grok-4.5"`.
 
 ### 5. `grok_reflect` (Structured Critique)
 Determines strict critique review parameters through structured output schemas.
@@ -76,7 +76,7 @@ Determines strict critique review parameters through structured output schemas.
   - `subject` (string, required): Text or code content to review.
   - `criteria` (string, optional): Rules for critique.
   - `context` (string, optional): Additional baseline settings.
-  - `model` (string, optional): Default `"grok-4.3"`.
+  - `model` (string, optional): Default `"grok-4.5"`.
 - **Response Shape (`ReflectionResult`)**:
   ```json
   {

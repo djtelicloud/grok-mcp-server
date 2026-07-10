@@ -23,6 +23,9 @@ class ChatResult(BaseResult):
 
 class AgentResult(BaseResult):
     why: str = Field("auto", description="Router decision trace (Grok-native).")
+    routing: Optional[Dict[str, Any]] = Field(
+        None, description="Prompt-free, versioned receipt explaining model selection."
+    )
     degraded: bool = Field(False, description="True if fallback occurred.")
     trace: Optional[List[Dict[str, Any]]] = Field(None, description="Multi-agent step trace (for grok_agent research mode).")
     requested_mode: Optional[Literal["auto", "fast", "reasoning", "thinking", "research"]] = Field(

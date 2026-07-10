@@ -25,7 +25,7 @@ def test_structured_metrics_separate_api_billing_from_cli_subscription():
             plane="API",
             latency=2.0,
             cost=0.012,
-            metadata='{"model":"grok-4.5","tokens":120,"token_kind":"provider_exact","caller":"codex"}',
+            metadata='{"model":"grok-4.5","tokens":120,"token_kind":"provider_exact","caller":"codex","routing":{"v":1,"route_class":"planning","resolved_model":"grok-4.5","why":"auto","why_detail":"reasoning_score","features":{"feature_hash":"abc"},"candidates":[]}}',
         ),
         _row(
             created_at=now,
@@ -48,6 +48,12 @@ def test_structured_metrics_separate_api_billing_from_cli_subscription():
     assert snapshot["usage"]["cli_subscription"]["cost_per_request_usd"] is None
     assert snapshot["usage"]["cli_subscription"]["provider_usage_available"] is False
     assert snapshot["planes"]["CLI"]["total_cost_usd"] == 0.0
+    assert today["summary"]["route_classes"] == {"planning": 1}
+    assert today["summary"]["selection_reasons"] == {"reasoning_score": 1}
+    receipt = today["recent_routes"][0]
+    assert receipt["routing"]["resolved_model"] == "grok-4.5"
+    assert "intent" not in receipt
+    assert snapshot["usage"]["data_quality"]["routing_receipt_rows"] == 1
 
 
 def test_structured_metrics_empty_period_is_null_not_fake_zero():
@@ -95,6 +101,13 @@ async def test_save_telemetry_persists_usage_provenance(tmp_path):
             tokens=321,
             token_kind="local_estimate",
             billing_source="subscription_unmetered",
+            routing={
+                "v": 1,
+                "route_class": "coding",
+                "resolved_model": "grok-composer-2.5-fast",
+                "why": "cost",
+                "why_detail": "keyless_cli",
+            },
         )
         row = (await store.get_telemetry_stats())[0]
         metadata = telemetry_metadata(row)
@@ -102,5 +115,6 @@ async def test_save_telemetry_persists_usage_provenance(tmp_path):
         assert metadata["tokens"] == 321
         assert metadata["token_kind"] == "local_estimate"
         assert metadata["billing_source"] == "subscription_unmetered"
+        assert metadata["routing"]["why_detail"] == "keyless_cli"
     finally:
         await store.close()

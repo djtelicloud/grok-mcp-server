@@ -681,7 +681,7 @@ async def test_phoneword_dial_supplies_default_mode(monkeypatch):
     finally:
         _ACTIVE_MODE_DIAL.reset(token)
 
-    assert mock_run.await_args.kwargs["mode"] == "reasoning"
+    assert mock_run.await_args.kwargs["mode"] == "research"
     assert mock_run.await_args.kwargs["agent_count"] == 4
     assert result.requested_mode == "research"
     assert result.mode_source == "dial"
@@ -734,7 +734,7 @@ async def test_mode_dial_middleware_uses_host_port_only_when_enabled(monkeypatch
         (
             "research",
             {
-                "mode": "reasoning",
+                "mode": "research",
                 "thinking_mode": False,
                 "enable_agentic": True,
                 "agent_count": 4,
