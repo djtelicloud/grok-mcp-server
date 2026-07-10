@@ -1597,10 +1597,11 @@ function renderFilePreviewNotice() {
   const fallback = $("restartManualFallback");
   if (!alertBanner || !message || !restartBtn) return;
   isOffline = false;
-  message.textContent = "Preview copy — runtime checks and MCP actions require the live Control Center.";
+  message.textContent = "Preview only — use the live Control Center for runtime actions.";
   restartBtn.textContent = "Open Live UI";
   restartBtn.dataset.action = "open-live-ui";
   fallback?.classList.add("hidden");
+  fallback?.style.setProperty("display", "none", "important");
   alertBanner.classList.add("preview-banner");
   alertBanner.classList.remove("hidden");
   setStatus("idle", "Preview");

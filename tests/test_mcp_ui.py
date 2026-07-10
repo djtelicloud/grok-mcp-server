@@ -131,8 +131,15 @@ def test_mcp_ui_file_preview_routes_to_live_control_center():
     assert 'window.location.protocol === "file:"' in script.text
     assert 'const LIVE_UI_URL = "http://localhost:4765/ui/"' in script.text
     assert 'restartBtn.dataset.action = "open-live-ui"' in script.text
+    assert 'style.setProperty("display", "none", "important")' in script.text
     assert "window.location.assign(LIVE_UI_URL)" in script.text
     assert "pollReadyz();" in script.text
+
+    with TestClient(create_app(), base_url="http://localhost:8080") as client:
+        styles = client.get("/ui/styles.css")
+    assert ".alert-banner.preview-banner" in styles.text
+    assert "position: fixed" in styles.text
+    assert ".preview-banner #restartManualFallback" in styles.text
 
 
 def test_mcp_ui_browser_warning():

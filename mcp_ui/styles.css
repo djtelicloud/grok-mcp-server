@@ -1445,9 +1445,29 @@ pre {
 }
 
 .alert-banner.preview-banner {
+  position: fixed;
+  right: 12px;
+  bottom: 12px;
+  left: auto;
+  z-index: 100;
+  width: min(380px, calc(100vw - 24px));
+  padding: 9px 10px;
+  gap: 10px;
   color: var(--cyan);
   background: rgba(79, 231, 255, 0.08);
-  border-bottom-color: var(--cyan);
+  border: 1px solid var(--cyan);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(14px);
+  font-size: 11px;
+}
+
+.alert-banner.preview-banner .alert-actions {
+  flex: 0 0 auto;
+}
+
+.alert-banner.preview-banner #restartManualFallback {
+  display: none !important;
 }
 
 .credential-alert {
