@@ -18,7 +18,7 @@ from src.utils import GrokSessionStore
 # The current schema head. Bump this alongside any new migration — the
 # sequential-chain test below will fail loudly if the source and this pin
 # ever disagree.
-SCHEMA_HEAD = 9
+SCHEMA_HEAD = 10
 
 # Every table a fully migrated store must carry (sqlite internals and the
 # optional knowledge_fts shadow tables excluded — FTS5 availability is a
@@ -184,6 +184,10 @@ class TestMigrationChain:
             assert {"metadata", "created_at", "context_id"} <= telemetry_cols
             jobs_cols = await _fetch_columns(store, "jobs")
             assert {"caller", "request_id"} <= jobs_cols
+            task_memory_cols = await _fetch_columns(store, "task_memory")
+            assert {
+                "remote_file_id", "synced_at", "sync_attempts", "sync_error",
+            } <= task_memory_cols
         finally:
             await store.close()
 
@@ -246,6 +250,127 @@ class TestMigrationChain:
             new_job = await store.get_job("job-new")
             assert new_job["caller"] == "codex"
             assert new_job["request_id"] == "rid-upgrade"
+        finally:
+            await store.close()
+
+
+def _build_v9_db(path):
+    """A db exactly as GrokSessionStore left it at user_version 9 (pre
+    task-memory sync bookkeeping): the v5 baseline plus the v6-v9 shapes
+    applied by hand, so the v10 upgrade's data preservation is provable."""
+    _build_v5_db(path)
+    conn = sqlite3.connect(path)
+    try:
+        conn.executescript(
+            """
+            CREATE TABLE routing_calibration (
+                category TEXT NOT NULL,
+                route TEXT NOT NULL,
+                model TEXT NOT NULL,
+                success_rate REAL NOT NULL DEFAULT 0.0,
+                avg_cost_usd REAL NOT NULL DEFAULT 0.0,
+                n INTEGER NOT NULL DEFAULT 0,
+                updated_at TEXT,
+                PRIMARY KEY (category, route, model)
+            );
+            CREATE INDEX idx_routing_calibration_updated_at
+                ON routing_calibration(updated_at);
+            CREATE TABLE knowledge (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                scope TEXT NOT NULL DEFAULT 'global',
+                fact TEXT NOT NULL,
+                source TEXT,
+                terms TEXT,
+                created_at TEXT,
+                last_used_at TEXT,
+                uses INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE INDEX idx_knowledge_scope ON knowledge(scope);
+            CREATE INDEX idx_knowledge_created_at ON knowledge(created_at);
+            ALTER TABLE telemetry ADD COLUMN metadata TEXT DEFAULT NULL;
+            ALTER TABLE telemetry ADD COLUMN created_at TEXT DEFAULT NULL;
+            ALTER TABLE jobs ADD COLUMN caller TEXT DEFAULT NULL;
+            CREATE INDEX idx_telemetry_created_at ON telemetry(created_at);
+            ALTER TABLE jobs ADD COLUMN request_id TEXT DEFAULT NULL;
+            PRAGMA user_version = 9;
+            """
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+class TestV10TaskMemorySync:
+    @pytest.mark.asyncio
+    async def test_v9_db_upgrades_to_v10_with_data_intact(self, tmp_path):
+        """A db frozen at v9 gains the task-memory sync columns + partial
+        index; the seeded row survives as an unsynced outbox entry and the
+        new outbox surface works on the upgraded db."""
+        db_path = tmp_path / "legacy_v9.db"
+        _build_v9_db(db_path)
+
+        store = GrokSessionStore(db_path=db_path)
+        try:
+            await store._ensure_initialized()
+
+            assert await _fetch_version(store) == SCHEMA_HEAD
+            assert {
+                "remote_file_id", "synced_at", "sync_attempts", "sync_error",
+            } <= await _fetch_columns(store, "task_memory")
+            async with store._conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='index';"
+            ) as cursor:
+                indexes = {r[0] for r in await cursor.fetchall()}
+            assert "idx_task_memory_unsynced" in indexes
+
+            # The pre-upgrade row IS the outbox: unsynced with zero attempts.
+            rows = await store.list_unsynced_task_memories()
+            assert len(rows) == 1
+            row = rows[0]
+            assert row["task_hash"] == "h1"
+            assert row["synced_at"] is None
+            assert row["sync_attempts"] == 0
+            assert await store.count_unsynced_task_memories() == 1
+
+            # Failure marking bumps attempts and stores a bounded error.
+            await store.mark_task_memory_sync_failed(row["id"], "boom " * 400)
+            failed = (await store.list_unsynced_task_memories())[0]
+            assert failed["sync_attempts"] == 1
+            assert len(failed["sync_error"]) < 600  # bounded to 500 + marker
+
+            # max_attempts filter excludes exhausted rows.
+            assert await store.list_unsynced_task_memories(max_attempts=1) == []
+
+            # Success marking drains the outbox and maps the remote id back.
+            await store.mark_task_memory_synced(row["id"], "file-abc")
+            assert await store.count_unsynced_task_memories() == 0
+            assert await store.list_unsynced_task_memories() == []
+            mapped = await store.get_task_memories_by_remote_ids(["file-abc"])
+            assert [m["id"] for m in mapped] == [row["id"]]
+            assert mapped[0]["sync_error"] is None
+        finally:
+            await store.close()
+
+    @pytest.mark.asyncio
+    async def test_v10_duplicate_column_rerun_is_benign(self, tmp_path):
+        """A pre-existing task_memory.synced_at column (partial prior run)
+        must not abort the v10 migration."""
+        db_path = tmp_path / "v9_dup.db"
+        _build_v9_db(db_path)
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute("ALTER TABLE task_memory ADD COLUMN synced_at TEXT DEFAULT NULL;")
+            conn.commit()
+        finally:
+            conn.close()
+
+        store = GrokSessionStore(db_path=db_path)
+        try:
+            await store._ensure_initialized()
+            assert await _fetch_version(store) == SCHEMA_HEAD
+            assert {
+                "remote_file_id", "synced_at", "sync_attempts", "sync_error",
+            } <= await _fetch_columns(store, "task_memory")
         finally:
             await store.close()
 

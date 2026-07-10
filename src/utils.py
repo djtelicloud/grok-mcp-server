@@ -2085,6 +2085,37 @@ class GrokSessionStore:
                     await self._conn.rollback()
                     raise
 
+            if version < 10:
+                # Task-memory cloud mirror (UNIGROK_TASK_RAG): rows gain sync
+                # bookkeeping so `synced_at IS NULL` IS the durable outbox —
+                # no separate sync table, no claim/lease (single-process
+                # server; backfill is resumable by construction).
+                # remote_file_id maps xAI collection search hits back to
+                # local rows; sync_error holds bounded-redacted diagnostics.
+                await self._conn.execute("BEGIN IMMEDIATE;")
+                try:
+                    for ddl in (
+                        "ALTER TABLE task_memory ADD COLUMN remote_file_id TEXT DEFAULT NULL;",
+                        "ALTER TABLE task_memory ADD COLUMN synced_at TEXT DEFAULT NULL;",
+                        "ALTER TABLE task_memory ADD COLUMN sync_attempts INTEGER NOT NULL DEFAULT 0;",
+                        "ALTER TABLE task_memory ADD COLUMN sync_error TEXT DEFAULT NULL;",
+                    ):
+                        try:
+                            await self._conn.execute(ddl)
+                        except aiosqlite.OperationalError as ddl_err:
+                            # See v8: only duplicate-column reruns are benign.
+                            if "duplicate column" not in str(ddl_err).lower():
+                                raise
+                    await self._conn.execute(
+                        "CREATE INDEX IF NOT EXISTS idx_task_memory_unsynced "
+                        "ON task_memory(id) WHERE synced_at IS NULL;"
+                    )
+                    await self._conn.execute("PRAGMA user_version = 10;")
+                    await self._conn.commit()
+                except Exception:
+                    await self._conn.rollback()
+                    raise
+
             # knowledge_fts is (re)checked on EVERY init, not just inside the
             # v7 gate: FTS5 is a compile-time SQLite option, so a db created
             # on a build WITH it can be reopened by one WITHOUT it (and vice
@@ -2494,6 +2525,102 @@ class GrokSessionStore:
         await self._ensure_initialized()
         async with self._read_conn() as conn:
             async with conn.execute("SELECT COUNT(*) FROM task_memory") as cursor:
+                row = await cursor.fetchone()
+                return int(row[0] if row else 0)
+
+    @staticmethod
+    def _decode_task_memory_row(row: Any) -> Dict[str, Any]:
+        item = dict(row)
+        # metadata is stored as JSON text — hand callers a dict.
+        meta_raw = item.get("metadata")
+        if isinstance(meta_raw, str) and meta_raw:
+            try:
+                item["metadata"] = json.loads(meta_raw)
+            except (TypeError, ValueError):
+                pass
+        return item
+
+    # ── Task-memory cloud-mirror outbox (UNIGROK_TASK_RAG, v10) ─────────────
+    # `synced_at IS NULL` IS the outbox; there is no separate sync table.
+
+    @_with_read_retry_async
+    async def list_unsynced_task_memories(
+        self,
+        limit: int = 50,
+        max_attempts: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        await self._ensure_initialized()
+        bounded = max(1, min(int(limit or 50), 200))
+        query = "SELECT * FROM task_memory WHERE synced_at IS NULL"
+        params: List[Any] = []
+        if max_attempts is not None:
+            query += " AND sync_attempts < ?"
+            params.append(int(max_attempts))
+        query += " ORDER BY id ASC LIMIT ?"
+        params.append(bounded)
+        async with self._read_conn() as conn:
+            async with conn.execute(query, params) as cursor:
+                rows = await cursor.fetchall()
+        return [self._decode_task_memory_row(row) for row in rows]
+
+    @_with_write_retry_async
+    async def mark_task_memory_synced(self, memory_id: int, remote_file_id: str) -> None:
+        await self._ensure_initialized()
+        async with self._lock:
+            await self._conn.execute("BEGIN IMMEDIATE;")
+            try:
+                await self._conn.execute(
+                    "UPDATE task_memory SET synced_at = ?, remote_file_id = ?, sync_error = NULL "
+                    "WHERE id = ?",
+                    (datetime.now().isoformat(), str(remote_file_id or ""), int(memory_id)),
+                )
+                await self._conn.commit()
+            except Exception:
+                await self._conn.rollback()
+                raise
+            await self._on_write_completed()
+
+    @_with_write_retry_async
+    async def mark_task_memory_sync_failed(self, memory_id: int, error: str) -> None:
+        await self._ensure_initialized()
+        async with self._lock:
+            await self._conn.execute("BEGIN IMMEDIATE;")
+            try:
+                await self._conn.execute(
+                    "UPDATE task_memory SET sync_attempts = sync_attempts + 1, sync_error = ? "
+                    "WHERE id = ?",
+                    (_bounded_redacted(str(error or ""), 500), int(memory_id)),
+                )
+                await self._conn.commit()
+            except Exception:
+                await self._conn.rollback()
+                raise
+            await self._on_write_completed()
+
+    @_with_read_retry_async
+    async def get_task_memories_by_remote_ids(
+        self, file_ids: List[str]
+    ) -> List[Dict[str, Any]]:
+        await self._ensure_initialized()
+        wanted = [str(fid) for fid in (file_ids or []) if str(fid or "").strip()][:25]
+        if not wanted:
+            return []
+        placeholders = ", ".join("?" for _ in wanted)
+        async with self._read_conn() as conn:
+            async with conn.execute(
+                f"SELECT * FROM task_memory WHERE remote_file_id IN ({placeholders})",
+                wanted,
+            ) as cursor:
+                rows = await cursor.fetchall()
+        return [self._decode_task_memory_row(row) for row in rows]
+
+    @_with_read_retry_async
+    async def count_unsynced_task_memories(self) -> int:
+        await self._ensure_initialized()
+        async with self._read_conn() as conn:
+            async with conn.execute(
+                "SELECT COUNT(*) FROM task_memory WHERE synced_at IS NULL"
+            ) as cursor:
                 row = await cursor.fetchone()
                 return int(row[0] if row else 0)
 
