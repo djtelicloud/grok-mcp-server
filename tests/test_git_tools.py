@@ -20,7 +20,7 @@ def git_repo(tmp_path, monkeypatch):
     _git(repo, "add", "README.md")
     _git(repo, "commit", "-m", "initial")
 
-    monkeypatch.setattr(git_tools.PathResolver, "get_project_root", staticmethod(lambda: repo))
+    monkeypatch.setattr(git_tools.PathResolver, "get_workspace_root", staticmethod(lambda: repo))
     return repo
 
 

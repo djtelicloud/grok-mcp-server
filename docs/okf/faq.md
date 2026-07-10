@@ -50,6 +50,33 @@ loopback-only deployment, use one of those gateway client tokens in each client
 configuration. An xAI API key is deliberately not accepted as a gateway client
 token.
 
+## Do my other projects need UniGrok namespace folders? {#no-project-namespace}
+
+**Keywords:** unrelated project, namespace, agents, codex, grok folder, global mcp, switch project
+
+No. Register `http://localhost:8080/mcp` once in the IDE's global or user
+configuration, then switch Git projects normally. The stable UniGrok service
+runs its own baked code and documentation; it does not require `.agents`,
+`.codex`, `.gemini`, `.grok`, `.github`, or any other UniGrok file in a caller's
+project. Namespace files in the UniGrok source repository exist for contributors
+developing UniGrok itself.
+
+## Can UniGrok automatically see the project open in my IDE? {#workspace-context-boundary}
+
+**Keywords:** workspace, project files, filesystem, context, agent workspace_context, privacy
+
+Not through MCP registration alone. The stable service is workspace-neutral and
+cannot browse whichever folder an IDE currently has open. When Grok needs local
+evidence, the IDE agent should send deliberately selected excerpts, diffs,
+errors, or other text in the `agent` tool's optional `workspace_context` field,
+with `workspace_label` when useful. This keeps project access explicit and
+prevents one persistent service from silently inheriting every IDE's filesystem.
+
+UniGrok contributors may instead run `docker compose -f
+docker-compose.dev.yml up --build -d` on port 8081. That separate development
+service mounts the UniGrok repository and enables its local file/git/test and
+commit-memory workflows; it is not the globally registered stable service.
+
 ## Why are my sessions and telemetry separate in each IDE? {#client-id-sessions}
 
 **Keywords:** x-client-id, session, telemetry, cursor, vscode, claude code
@@ -89,12 +116,11 @@ zero-cost local FAQ lookup is documentation retrieval, not a model invocation.
 
 **Keywords:** port, 8080, address in use, bind, docker compose
 
-Either stop the other local service or change UniGrok's host-side Compose port
-mapping in `docker-compose.yml`. For example, change the published mapping to:
+Either stop the other local service or set a different stable host port when
+starting Compose. For example:
 
-```yaml
-ports:
-  - "127.0.0.1:9090:8080"
+```bash
+UNIGROK_PORT=9090 docker compose up --build -d
 ```
 
 Then use `http://localhost:9090/mcp` and `http://localhost:9090/ui/`. When

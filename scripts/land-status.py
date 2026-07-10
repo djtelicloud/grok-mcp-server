@@ -24,7 +24,7 @@ def main() -> int:
     except OSError:
         runtime_head = "unknown"
     relation = "matches main" if runtime_head == main_head else "differs or not yet recorded"
-    print(f"Runtime source marker: {runtime_head} ({relation})")
+    print(f"Contributor runtime source marker: {runtime_head} ({relation})")
     print("Worktrees:")
     for item in worktrees(repo):
         branch = item.get("branch", "detached").removeprefix("refs/heads/")
@@ -43,17 +43,21 @@ def main() -> int:
             print(f"  {branch}: {count} commit(s)")
     if not ahead:
         print("  none")
-    try:
-        with urlopen("http://127.0.0.1:8080/runtimez", timeout=2) as response:  # noqa: S310
-            runtime = json.load(response)
-        print(
-            "Runtime: ready "
-            f"(transport={runtime.get('transport')}, "
-            f"api={runtime.get('api_plane', {}).get('xai_api_key')}, "
-            f"cli={runtime.get('cli_plane', {}).get('auth_state')})"
-        )
-    except (OSError, URLError, ValueError) as exc:
-        print(f"Runtime: unavailable ({exc})")
+    for label, url in (
+        ("Stable service", "http://127.0.0.1:8080/runtimez"),
+        ("Contributor dev service", "http://127.0.0.1:8081/runtimez"),
+    ):
+        try:
+            with urlopen(url, timeout=2) as response:  # noqa: S310
+                runtime = json.load(response)
+            print(
+                f"{label}: ready "
+                f"(transport={runtime.get('transport')}, "
+                f"api={runtime.get('api_plane', {}).get('xai_api_key')}, "
+                f"cli={runtime.get('cli_plane', {}).get('auth_state')})"
+            )
+        except (OSError, URLError, ValueError) as exc:
+            print(f"{label}: unavailable ({exc})")
     return 0
 
 

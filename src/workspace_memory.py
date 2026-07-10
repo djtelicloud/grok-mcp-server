@@ -44,6 +44,8 @@ class WorkspaceMemoryError(RuntimeError):
 
 
 def workspace_memory_mode() -> str:
+    if not PathResolver.contributor_mode():
+        return "off"
     raw = os.environ.get("UNIGROK_WORKSPACE_MEMORY", "mirror").strip().lower() or "mirror"
     return raw if raw in VALID_MODES else "off"
 
@@ -63,7 +65,14 @@ def _git(repo: Path, *args: str, check: bool = True) -> str:
 
 
 def _repo() -> Path:
-    return PathResolver.get_project_root().resolve()
+    if not PathResolver.contributor_mode():
+        raise WorkspaceMemoryError(
+            "commit-anchored workspace memory is available only in UniGrok contributor mode"
+        )
+    workspace = PathResolver.get_workspace_root()
+    if workspace is None:
+        raise WorkspaceMemoryError("contributor mode has no attached workspace")
+    return workspace.resolve()
 
 
 def _common_git_dir(repo: Path) -> Path:

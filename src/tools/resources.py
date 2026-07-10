@@ -53,7 +53,10 @@ def _clamp(text: str, limit: int) -> str:
 def _read_agent_doc(rel_path: str) -> Optional[str]:
     """One agent-instructions file (bounded), or None when absent/unreadable."""
     try:
-        path = PathResolver.get_project_root() / rel_path
+        workspace = PathResolver.get_workspace_root()
+        if workspace is None:
+            return None
+        path = workspace / rel_path
         if not path.is_file():
             return None
         return _clamp(path.read_text(encoding="utf-8", errors="replace"), _WORKSPACE_DOC_LIMIT)
@@ -162,6 +165,14 @@ def register_resource_primitives(mcp: FastMCP):
         read to orient itself in this workspace. Every section degrades
         independently — a missing doc, broken git, or unhappy store never
         fails the whole resource."""
+        workspace = PathResolver.get_workspace_root()
+        if workspace is None:
+            return (
+                "# UniGrok Workspace\n\n"
+                "No local workspace is attached. This is the normal stable-service "
+                "mode: the caller's project remains private unless the caller sends "
+                "selected context with an `agent` request."
+            )
         sections = ["# UniGrok Workspace"]
 
         agents_doc = _read_agent_doc(".agents/AGENTS.md")

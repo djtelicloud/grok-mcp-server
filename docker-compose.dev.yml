@@ -1,0 +1,40 @@
+# Contributor-only live-source service. It is intentionally separate from the
+# stable service registered in IDEs. Start with:
+#   docker compose -f docker-compose.dev.yml up --build -d
+services:
+  grok-mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: grok-mcp:dev
+    container_name: grok-mcp-dev
+    working_dir: /workspace
+    command: ["/app/.venv/bin/python", "/workspace/main.py", "--http"]
+    ports:
+      - "127.0.0.1:${UNIGROK_DEV_PORT:-8081}:8080"
+    volumes:
+      - .:/workspace
+      - grok-mcp-dev-state:/state
+      - ${HOME}/.grok:/home/appuser/.grok
+    env_file:
+      - path: ${UNIGROK_ENV_FILE:-.env}
+        required: false
+    environment:
+      - UNIGROK_RUNTIME=http
+      - UNIGROK_SERVICE_MODE=contributor
+      - UNIGROK_CONTRIBUTOR_MODE=1
+      - UNIGROK_SERVICE_ROOT=/workspace
+      - WORKSPACE_ROOT=/workspace
+      - UNIGROK_STATE_DIR=/state
+      - UNIGROK_TRUSTED_LOOPBACK_PROXY=1
+      - PYTHONPATH=/workspace
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=5)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    restart: unless-stopped
+
+volumes:
+  grok-mcp-dev-state:

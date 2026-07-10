@@ -50,7 +50,7 @@ def test_grok_profile_clamps_values_and_rejects_prompt_traversal(tmp_path, monke
         encoding="utf-8",
     )
 
-    monkeypatch.setattr(utils.PathResolver, "get_project_root", staticmethod(lambda: root))
+    monkeypatch.setattr(utils.PathResolver, "get_service_root", staticmethod(lambda: root))
 
     profile = load_grok_profile("unsafe")
 
@@ -65,7 +65,7 @@ def test_grok_prompt_loader_blocks_traversal(tmp_path, monkeypatch):
     prompts.mkdir(parents=True)
     (prompts / "ok.md").write_text("adapter prompt", encoding="utf-8")
 
-    monkeypatch.setattr(utils.PathResolver, "get_project_root", staticmethod(lambda: root))
+    monkeypatch.setattr(utils.PathResolver, "get_service_root", staticmethod(lambda: root))
 
     assert load_grok_prompt("ok.md") == "adapter prompt"
     assert load_grok_prompt("../secret.md") == ""

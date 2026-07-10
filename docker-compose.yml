@@ -5,44 +5,27 @@ services:
       dockerfile: Dockerfile
     image: grok-mcp:latest
     container_name: grok-mcp-server
-    working_dir: /workspace
-    command: ["/app/.venv/bin/python", "main.py", "--http"]
+    working_dir: /app
+    command: ["/app/.venv/bin/python", "/app/main.py", "--http"]
     ports:
-      # Loopback-only by default: every IDE on THIS machine reaches
-      # http://localhost:8080/mcp, and the grok CLI auth state mounted below
-      # never faces the LAN. To serve other devices, set UNIGROK_API_KEYS in
-      # .env first, then change this to "0.0.0.0:8080:8080".
-      - "127.0.0.1:8080:8080"
+      # One stable, globally registered service for every local IDE/project.
+      - "127.0.0.1:${UNIGROK_PORT:-8080}:8080"
     volumes:
-      # Live project mount: file reads, git state, and dynamic context come
-      # from the real repo, not the baked image copy. Session/log state
-      # persists on the host under ./chats and ./logs via the same mount
-      # (both are gitignored).
-      - .:/workspace
-      # Grok CLI auth state (grok.com OAuth session + refresh token): shares
-      # the host's `grok login` with the in-container CLI plane. Writable on
-      # purpose — the CLI refreshes tokens in place (guarded by its own file
-      # locks). Remove this mount for an API-only container; the binary in
-      # /usr/local/bin stays, requests just fail fast without auth.
+      # Service state is independent from the source checkout and caller projects.
+      - grok-mcp-state:/state
+      # Optional Grok CLI OAuth state shared from the host.
       - ${HOME}/.grok:/home/appuser/.grok
     env_file:
-      # Load .env from this checkout by default. Worktree users can point at
-      # another secret file without embedding a machine-specific path here.
       - path: ${UNIGROK_ENV_FILE:-.env}
         required: false
     environment:
-      # A container deployment is always the HTTP runtime. Interpolating this
-      # from .env would let example.env's `local` value bind the loopback
-      # inside the container, making the published port unreachable.
       - UNIGROK_RUNTIME=http
-      # The application binds 0.0.0.0 inside the container, but the port above
-      # is published on host loopback only. This declaration preserves the
-      # local no-token workflow; remove it before changing the port mapping.
+      - UNIGROK_SERVICE_MODE=stable
+      - UNIGROK_CONTRIBUTOR_MODE=0
+      - UNIGROK_SERVICE_ROOT=/app
+      - UNIGROK_STATE_DIR=/state
+      - WORKSPACE_ROOT=
       - UNIGROK_TRUSTED_LOOPBACK_PROXY=1
-      # Run mounted source while reusing the baked /app virtualenv.
-      - PYTHONPATH=/workspace
-      # Resolve workspace files/git against the bind mount, not /app.
-      - WORKSPACE_ROOT=/workspace
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=5)"]
       interval: 30s
@@ -50,3 +33,6 @@ services:
       retries: 3
       start_period: 15s
     restart: unless-stopped
+
+volumes:
+  grok-mcp-state:

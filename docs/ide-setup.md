@@ -18,20 +18,29 @@ often do not have that gitignored file; set
 `UNIGROK_ENV_FILE=/path/to/.env` before `docker compose up` to use a secret
 file from another checkout.
 
-The compose file bind-mounts the repo at `/workspace`, runs that mounted
-source with the baked dependency environment, resolves file/git context through
-`WORKSPACE_ROOT`, and publishes `127.0.0.1:8080`. Compose declares that this is
-a trusted loopback-only host publication so the local prototype can run without
-a client token. The application still requires `UNIGROK_API_KEYS` for any
+The stable compose file runs the image's baked application at `/app`, stores
+mutable data in a Docker volume mounted at `/state`, and publishes
+`127.0.0.1:8080`. It does not mount the UniGrok checkout or an IDE project.
+Compose declares that this is a trusted loopback-only host publication so the
+local service can run without a client token. The application still requires `UNIGROK_API_KEYS` for any
 direct non-loopback bind or Cloud Run deployment. Remove the
 `UNIGROK_TRUSTED_LOOPBACK_PROXY` declaration and set `UNIGROK_API_KEYS` before
 changing the port mapping to `0.0.0.0:8080:8080` or `8080:8080`.
 
-Mount a different project by changing the volume line (`- .:/workspace`)
-or pointing compose at that directory. Note: a **git worktree** mounted as
-`/workspace` will not resolve git state inside the container (its `.git`
-is a pointer into the parent repo outside the mount) — mount the primary
-checkout.
+Do not edit Compose to mount each project you open. MCP registration is global
+service access, not filesystem authority. A calling IDE supplies only the
+material Grok needs through the optional `agent.workspace_context` field.
+Projects therefore need no UniGrok-specific namespace folders.
+
+UniGrok contributors have a separate live-source service at port 8081:
+
+```bash
+docker compose -f docker-compose.dev.yml up --build -d
+```
+
+That contributor service mounts this repository at `/workspace` and enables
+local file/git/test and commit-memory facilities. It is not the service normal
+users register for arbitrary projects.
 
 ## Per-IDE identity: `X-Client-ID`
 
@@ -133,10 +142,11 @@ check `codex mcp --help`. Keep the server name as `grok`; this repo's
 
 ## What the IDEs get
 
-The public MCP surface is the single `agent` tool (modes:
+The public MCP surface centers on the `agent` tool (modes:
 auto/fast/reasoning/thinking/research) — UniGrok routes across Grok models,
-runs xAI server-side tools plus workspace file/git tools against
-`/workspace`, and remembers per-client sessions. `/metrics` (JSON or
+runs xAI server-side tools, and remembers per-client sessions. The stable
+service cannot browse the IDE's open folder. IDE agents may attach selected
+text using `workspace_context` and an optional `workspace_label`. `/metrics` (JSON or
 `?format=prometheus`) shows per-caller usage.
 
 `agent` returns `response` plus execution metadata: `route`, `plane`, `model`,

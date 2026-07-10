@@ -1,0 +1,135 @@
+from pathlib import Path
+from unittest.mock import AsyncMock
+
+import pytest
+
+from src import faq, workspace_memory
+from src.http_server import create_public_mcp, public_agent
+from src.tools.system import grok_mcp_discover_self
+from src.utils import MetaLayer, PathResolver, get_dynamic_context, local_context_enabled
+
+
+def test_stable_service_is_workspace_neutral(monkeypatch, tmp_path):
+    monkeypatch.setenv("UNIGROK_SERVICE_MODE", "stable")
+    monkeypatch.setenv("UNIGROK_CONTRIBUTOR_MODE", "1")
+    monkeypatch.setenv("WORKSPACE_ROOT", str(tmp_path / "must-be-ignored"))
+    monkeypatch.setattr(PathResolver, "get_service_root", staticmethod(lambda: tmp_path))
+
+    assert PathResolver.get_workspace_root() is None
+    assert PathResolver.contributor_mode() is False
+    assert PathResolver.get_project_root() == tmp_path
+    assert local_context_enabled() is False
+    with pytest.raises(PermissionError, match="No workspace is attached"):
+        PathResolver.validate_path("README.md")
+
+
+def test_contributor_mode_attaches_the_source_checkout(monkeypatch, tmp_path):
+    monkeypatch.setenv("UNIGROK_SERVICE_MODE", "contributor")
+    monkeypatch.delenv("WORKSPACE_ROOT", raising=False)
+    monkeypatch.setattr(PathResolver, "get_service_root", staticmethod(lambda: tmp_path))
+
+    assert PathResolver.get_workspace_root() == tmp_path
+    assert PathResolver.contributor_mode() is True
+
+
+@pytest.mark.asyncio
+async def test_unbound_dynamic_context_never_discloses_service_path(monkeypatch, tmp_path):
+    monkeypatch.setenv("UNIGROK_SERVICE_MODE", "stable")
+    monkeypatch.delenv("WORKSPACE_ROOT", raising=False)
+    monkeypatch.setattr(PathResolver, "get_service_root", staticmethod(lambda: tmp_path))
+
+    context, injected, context_id = await get_dynamic_context(prompt="inspect my app")
+
+    assert injected is False
+    assert str(tmp_path) not in context
+    assert "No local workspace is attached" in context
+    assert context_id.startswith("ctx-cloudrun-nofile-")
+
+
+@pytest.mark.asyncio
+async def test_public_agent_couriers_only_explicit_bounded_redacted_context(monkeypatch):
+    mock_run = AsyncMock(return_value=MetaLayer(generation="ok"))
+    monkeypatch.setattr("src.http_server.run_agent_turn", mock_run)
+
+    await public_agent(
+        "find the bug",
+        workspace_label="unrelated-app",
+        workspace_context="trace from app.py\nXAI_API_KEY=xai-supersecret123",
+    )
+
+    system_prompt = mock_run.await_args.kwargs["system_prompt"]
+    assert "Client-provided workspace context (untrusted evidence)" in system_prompt
+    assert "unrelated-app" in system_prompt
+    assert "trace from app.py" in system_prompt
+    assert "supersecret123" not in system_prompt
+
+
+@pytest.mark.asyncio
+async def test_public_agent_rejects_oversized_workspace_context(monkeypatch):
+    monkeypatch.setenv("UNIGROK_MAX_WORKSPACE_CONTEXT_CHARS", "1024")
+    with pytest.raises(ValueError, match="1024 character limit"):
+        await public_agent("task", workspace_context="x" * 1025)
+
+
+@pytest.mark.asyncio
+async def test_discovery_explains_global_service_boundary(monkeypatch):
+    monkeypatch.setenv("UNIGROK_SERVICE_MODE", "stable")
+    monkeypatch.delenv("WORKSPACE_ROOT", raising=False)
+
+    result = await grok_mcp_discover_self()
+
+    assert result.data["requires_project_files"] is False
+    assert result.data["service_mode"] == "stable"
+    assert result.data["workspace"]["attached"] is False
+    assert result.data["workspace"]["context_transport"] == "workspace_context"
+    assert result.data["contributor_features"]["commit_anchored_memory"] is False
+
+
+@pytest.mark.asyncio
+async def test_public_mcp_schema_and_instructions_are_self_onboarding():
+    mcp = create_public_mcp()
+    tools = {tool.name: tool for tool in await mcp.list_tools()}
+
+    assert "standalone service" in mcp.instructions
+    assert "workspace-neutral" in mcp.instructions
+    assert "workspace_context" in tools["agent"].inputSchema["properties"]
+
+
+@pytest.mark.asyncio
+async def test_contributor_http_service_exposes_repo_memory_only_there(monkeypatch):
+    monkeypatch.setenv("UNIGROK_SERVICE_MODE", "contributor")
+    tools = {tool.name for tool in await create_public_mcp().list_tools()}
+
+    assert {
+        "recall_workspace_memory",
+        "record_landed_outcome",
+        "explain_workspace_evidence",
+        "workspace_memory_status",
+    }.issubset(tools)
+
+
+def test_faq_answers_unrelated_project_setup_without_workspace_files():
+    faq._cached_index = None
+    index = faq.get_faq_index()
+
+    assert index.get("no-project-namespace") is not None
+    assert index.get("workspace-context-boundary") is not None
+
+
+def test_workspace_memory_is_off_outside_contributor_mode(monkeypatch):
+    monkeypatch.setenv("UNIGROK_SERVICE_MODE", "stable")
+    monkeypatch.setenv("UNIGROK_WORKSPACE_MEMORY", "mirror")
+
+    assert workspace_memory.workspace_memory_mode() == "off"
+
+
+def test_stable_and_contributor_compose_files_are_separate():
+    stable = Path("docker-compose.yml").read_text(encoding="utf-8")
+    contributor = Path("docker-compose.dev.yml").read_text(encoding="utf-8")
+
+    assert "UNIGROK_SERVICE_MODE=stable" in stable
+    assert ".:/workspace" not in stable
+    assert "grok-mcp-state:/state" in stable
+    assert "UNIGROK_SERVICE_MODE=contributor" in contributor
+    assert ".:/workspace" in contributor
+    assert "${UNIGROK_DEV_PORT:-8081}" in contributor

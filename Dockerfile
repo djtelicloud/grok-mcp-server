@@ -2,17 +2,16 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# Install system dependencies (git: workspace git tools run against the
-# bind-mounted /workspace repo)
+# Install system dependencies. Git is used only when contributor mode attaches
+# a workspace; the stable service itself is workspace-neutral.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     ca-certificates \
     git \
     && rm -rf /var/lib/apt/lists/*
 
-# The mounted /workspace is owned by the host user (different uid than
-# appuser), which git refuses as "dubious ownership" — mark it safe
-# system-wide at build time (root), before dropping privileges.
+# The contributor compose file bind-mounts /workspace from a host with a
+# different uid, so mark only that conventional development mount as safe.
 RUN git config --system --add safe.directory /workspace
 
 # Install uv using the installer script (version-pinned, world-readable location)
@@ -49,9 +48,11 @@ COPY mcp_ui/ ./mcp_ui/
 COPY docs/okf/ ./docs/okf/
 COPY .grok/ ./.grok/
 
-# Run as an unprivileged user; the app writes state under /app (logs/, chats/)
+# Run as an unprivileged user. Stable mutable data lives under /state, never
+# in the application bundle or an IDE project.
 RUN useradd --create-home --uid 1000 --shell /usr/sbin/nologin appuser \
-    && chown -R appuser:appuser /app
+    && mkdir -p /state \
+    && chown -R appuser:appuser /app /state
 USER appuser
 
 # Expose port (optional for stdio, required for HTTP transport later if I will add it)

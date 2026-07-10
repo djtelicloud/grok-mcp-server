@@ -64,7 +64,12 @@ def _validate_ref(ref: str) -> str:
 def _repo_root(repo_path: Optional[str] = None) -> Path:
     if repo_path:
         return PathResolver.validate_path(repo_path)
-    return PathResolver.get_project_root().resolve()
+    workspace = PathResolver.get_workspace_root()
+    if workspace is None:
+        raise PermissionError(
+            "Git tools are unavailable because no workspace is attached to this UniGrok service."
+        )
+    return workspace.resolve()
 
 
 def _validate_repo_path(path_value: str, repo: Path) -> str:

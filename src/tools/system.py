@@ -53,7 +53,7 @@ async def grok_mcp_status() -> str:
     """Inspect the current health, versions, CLI auth, and sqlite metrics of the Grok-MCP server."""
     async with GrokInvocationContext("utility", logger, append_signature=False) as ctx:
         server_version = __version__
-        proj_root = PathResolver.get_project_root()
+        proj_root = PathResolver.get_service_root()
         grok_cli = PathResolver.get_grok_cli_path()
         uv_bin = PathResolver.get_uv_path()
 
@@ -201,7 +201,9 @@ async def grok_mcp_status() -> str:
             "# UniGrok MCP Server Status\n\n"
             f"**Server Version:** `{server_version}`\n"
             f"**Git HEAD SHA:** `{git_sha}`\n"
-            f"**Project Root:** `{proj_root}`\n"
+            f"**Service Mode:** `{'contributor' if PathResolver.contributor_mode() else 'stable'}`\n"
+            f"**Service Root:** `{proj_root}`\n"
+            f"**Workspace Attached:** `{'yes' if PathResolver.get_workspace_root() is not None else 'no'}`\n"
             f"**Grok CLI Binary:** `{grok_cli}`\n"
             f"**UV Binary:** `{uv_bin}`\n"
             f"**CLI Authentication:** `{cli_auth}`\n"
@@ -461,7 +463,9 @@ async def read_local_file(file_path: str, max_chars: int = 500000) -> str:
         except (PermissionError, ValueError) as e:
             return ctx.format_output(f"[BLOCKED] Access denied: {str(e)}")
 
-        proj_root = PathResolver.get_project_root()
+        proj_root = PathResolver.get_workspace_root()
+        if proj_root is None:
+            return ctx.format_output("[UNAVAILABLE] No workspace is attached to this UniGrok service.")
         patterns = load_gitignore_patterns(proj_root)
         if is_path_ignored(resolved, proj_root, patterns):
             return ctx.format_output(f"[BLOCKED] Access denied: path '{file_path}' is ignored or private.")
@@ -488,7 +492,9 @@ async def read_local_file(file_path: str, max_chars: int = 500000) -> str:
 async def list_project_files(extensions: Optional[str] = None, max_results: int = 200) -> str:
     """List source code and config files present in the current workspace."""
     async with GrokInvocationContext("utility", logger, append_signature=False) as ctx:
-        proj_root = PathResolver.get_project_root()
+        proj_root = PathResolver.get_workspace_root()
+        if proj_root is None:
+            return ctx.format_output("[UNAVAILABLE] No workspace is attached to this UniGrok service.")
         patterns = load_gitignore_patterns(proj_root)
 
         ext_list = []
@@ -588,7 +594,10 @@ def _validate_test_target(target: str) -> str:
 
     path_part = target.split("::", 1)[0]
     resolved = PathResolver.validate_path(path_part)
-    project_root = PathResolver.get_project_root().resolve()
+    workspace = PathResolver.get_workspace_root()
+    if workspace is None:
+        raise PermissionError("No workspace is attached to this UniGrok service.")
+    project_root = workspace.resolve()
     try:
         rel = resolved.relative_to(project_root)
     except ValueError as exc:
@@ -615,7 +624,10 @@ async def run_local_tests(
         safe_target = _validate_test_target(target)
         timeout = min(max(int(max_seconds or 60), 5), 300)
         output_limit = min(max(int(max_output_chars or 12000), 1000), 50000)
-        project_root = PathResolver.get_project_root().resolve()
+        workspace = PathResolver.get_workspace_root()
+        if workspace is None:
+            return ctx.format_output("Local test execution is unavailable because no workspace is attached.")
+        project_root = workspace.resolve()
 
         uv_bin = shutil.which("uv")
         if uv_bin:
@@ -804,9 +816,23 @@ async def db_vacuum() -> str:
 async def grok_mcp_discover_self() -> SystemResult:
     """Exposes OKF bundle information, WebMCP manifests, and tool schemas for zero-configuration agent onboarding."""
     async with GrokInvocationContext("utility", logger, append_signature=False) as ctx:
+        workspace = PathResolver.get_workspace_root()
+        contributor = PathResolver.contributor_mode()
         manifest = {
             "okf_version": "0.1",
             "name": "uni-grok-mcp",
+            "service_mode": "contributor" if contributor else "stable",
+            "requires_project_files": False,
+            "workspace": {
+                "attached": workspace is not None,
+                "context_transport": "workspace_context",
+                "automatic_project_discovery": False,
+            },
+            "contributor_features": {
+                "enabled": contributor,
+                "commit_anchored_memory": contributor,
+                "serialized_landing": contributor,
+            },
             "okf_bundle_root": "/docs/okf/index.md",
             "webmcp_manifest": "/.well-known/webmcp",
             "files": [
@@ -825,6 +851,13 @@ async def grok_mcp_discover_self() -> SystemResult:
             "# UniGrok MCP Discovery & Self-Description\n\n"
             "This tool provides zero-configuration onboarding metadata for AI agents to discover, "
             "verify, and call the UniGrok MCP gateway tools.\n\n"
+            "## Service and Project Boundary\n"
+            "- UniGrok is a standalone MCP service; the caller's project needs no UniGrok namespace files.\n"
+            f"- Service mode: `{'contributor' if contributor else 'stable'}`. "
+            f"Workspace attached: `{'yes' if workspace is not None else 'no'}`.\n"
+            "- Stable mode never assumes it can browse the IDE's open project. Send only relevant, "
+            "deliberately selected material through the `agent.workspace_context` field.\n"
+            "- Repository memory, Git landing, and source mounts are contributor-only facilities.\n\n"
             "## OKF (Open Knowledge Format) Bundle\n"
             "- **Manifest / Manifest Root:** `/docs/okf/okf-manifest.json`\n"
             "- **Index Document:** `/docs/okf/index.md`\n"
@@ -870,7 +903,7 @@ async def grok_mcp_restart_container() -> SystemResult:
                 plane="local",
             )
 
-        proj_root = PathResolver.get_project_root().expanduser().resolve()
+        proj_root = PathResolver.get_service_root().expanduser().resolve()
         configured_root = os.environ.get("UNIGROK_CONTAINER_RESTART_ROOT", "").strip()
         authorized_root = (
             Path(configured_root).expanduser().resolve()

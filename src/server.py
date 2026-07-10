@@ -26,8 +26,8 @@ async def server_lifespan(server):
 # Initialize FastMCP Server instance
 SERVER_INSTRUCTIONS = (
     "UniGrok is a unified Grok agent: one gateway to xAI's Grok models with "
-    "server-side web/X search and sandboxed code execution, plus local file, "
-    "git, and test tools, and persistent session memory.\n\n"
+    "server-side web/X search and sandboxed code execution, plus optional "
+    "attached-workspace file, git, and test tools, and persistent session memory.\n\n"
     "Start with the `agent` tool — it is the headline entry point. Give it any "
     "nontrivial task and it auto-routes across Grok models, runs tools as "
     "needed, and returns structured execution metadata. Use `chat` for plain "
@@ -48,7 +48,7 @@ SERVER_INSTRUCTIONS = (
     "`remember_fact`/`search_knowledge`/`forget_fact` manage durable distilled "
     "facts that auto-inject into matching prompts, and `distill_session` "
     "condenses a chat session into facts in the background."
-    " Commit-anchored workspace memory: `recall_workspace_memory` returns "
+    " Contributor-only commit-anchored workspace memory: `recall_workspace_memory` returns "
     "branch-relevant engineering evidence for a caller-supplied HEAD, while "
     "`record_landed_outcome` accepts evidence only for commits certified by "
     "the local `scripts/land` gate."

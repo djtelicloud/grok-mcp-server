@@ -17,6 +17,8 @@ from urllib.request import Request, urlopen
 
 MAIN_REF = "refs/heads/main"
 DEFAULT_TEST_ARGS = ["uv", "run", "pytest", "-q"]
+DEV_COMPOSE_FILE = "docker-compose.dev.yml"
+DEV_BASE_URL = "http://127.0.0.1:8081"
 
 
 class LandError(RuntimeError):
@@ -153,7 +155,7 @@ def changed_paths(repo: Path, old: str, new: str) -> list[str]:
 
 
 def runtime_action(paths: list[str]) -> str:
-    rebuild_names = {"Dockerfile", "docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml", "pyproject.toml", "uv.lock"}
+    rebuild_names = {"Dockerfile", "docker-compose.yml", "docker-compose.dev.yml", "docker-compose.yaml", "compose.yml", "compose.yaml", "pyproject.toml", "uv.lock"}
     if any(path in rebuild_names or path.startswith("docker/") for path in paths):
         return "rebuild"
     if any(path == "main.py" or path.startswith("src/") for path in paths):
@@ -174,8 +176,8 @@ def probe_json(url: str, expected_status: str) -> None:
         raise LandError(f"unexpected response from {url}: {payload}")
 
 
-def probe_ui() -> None:
-    with urlopen("http://127.0.0.1:8080/ui/", timeout=10) as response:  # noqa: S310
+def probe_ui(base_url: str) -> None:
+    with urlopen(f"{base_url}/ui/", timeout=10) as response:  # noqa: S310
         body = response.read(4096)
     if b"UniGrok" not in body:
         raise LandError("Control Center smoke check did not find the UniGrok marker")
@@ -195,7 +197,7 @@ def configured_client_token(repo: Path) -> Optional[str]:
     return None
 
 
-def probe_mcp(token: Optional[str] = None) -> None:
+def probe_mcp(base_url: str, token: Optional[str] = None) -> None:
     payload = json.dumps(
         {
             "jsonrpc": "2.0",
@@ -216,7 +218,7 @@ def probe_mcp(token: Optional[str] = None) -> None:
     if token:
         headers["Authorization"] = f"Bearer {token}"
     request = Request(
-        "http://127.0.0.1:8080/mcp",
+        f"{base_url}/mcp",
         data=payload,
         headers=headers,
         method="POST",
@@ -227,7 +229,7 @@ def probe_mcp(token: Optional[str] = None) -> None:
         raise LandError("MCP initialize smoke check returned an unexpected payload")
 
 
-def wait_for_runtime(repo: Path, *, timeout: float = 60.0) -> None:
+def wait_for_runtime(repo: Path, *, base_url: str, timeout: float = 60.0) -> None:
     """Wait through the normal Docker restart window before failing smoke.
 
     Uvicorn can close the first connection while the old process exits even
@@ -238,16 +240,16 @@ def wait_for_runtime(repo: Path, *, timeout: float = 60.0) -> None:
     last_error: Optional[Exception] = None
     while time.monotonic() < deadline:
         try:
-            probe_json("http://127.0.0.1:8080/healthz", "healthy")
-            probe_json("http://127.0.0.1:8080/readyz", "ready")
-            probe_ui()
-            runtime = get_json("http://127.0.0.1:8080/runtimez")
+            probe_json(f"{base_url}/healthz", "healthy")
+            probe_json(f"{base_url}/readyz", "ready")
+            probe_ui(base_url)
+            runtime = get_json(f"{base_url}/runtimez")
             token = configured_client_token(repo) if runtime.get("gateway_auth", {}).get("enabled") else None
             if runtime.get("gateway_auth", {}).get("enabled") and not token:
                 raise LandError(
                     "MCP auth is enabled but no client token is available for the landing smoke check"
                 )
-            probe_mcp(token)
+            probe_mcp(base_url, token)
             return
         except Exception as exc:  # expected briefly while Docker hands off
             last_error = exc
@@ -260,19 +262,28 @@ def reconcile_runtime(repo: Path, paths: list[str]) -> str:
     if action == "none":
         return "unchanged"
     compose = run(
-        ["docker", "compose", "ps", "--status", "running", "--services"],
+        ["docker", "compose", "-f", DEV_COMPOSE_FILE, "ps", "--status", "running", "--services"],
         cwd=repo,
         check=False,
     )
     if compose.returncode:
         raise LandError((compose.stderr or "cannot inspect Docker Compose").strip())
     if "grok-mcp" not in compose.stdout.split():
-        return "service not running; start will use current main"
+        return "contributor dev service not running; stable service untouched"
     if action == "rebuild":
-        run(["docker", "compose", "up", "--build", "-d", "grok-mcp"], cwd=repo, capture=False)
+        run(
+            ["docker", "compose", "-f", DEV_COMPOSE_FILE, "up", "--build", "-d", "grok-mcp"],
+            cwd=repo,
+            capture=False,
+        )
     elif action == "restart":
-        run(["docker", "compose", "restart", "grok-mcp"], cwd=repo, capture=False)
-    wait_for_runtime(repo)
+        run(
+            ["docker", "compose", "-f", DEV_COMPOSE_FILE, "restart", "grok-mcp"],
+            cwd=repo,
+            capture=False,
+        )
+    base_url = os.environ.get("UNIGROK_LAND_DEV_URL", DEV_BASE_URL).rstrip("/")
+    wait_for_runtime(repo, base_url=base_url)
     if action == "rebuild":
         return "rebuilt and smoke-tested"
     if action == "restart":

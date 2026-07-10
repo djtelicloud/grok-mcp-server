@@ -883,7 +883,7 @@ async def test_grok_mcp_restart_container_gating(monkeypatch, tmp_path):
     monkeypatch.setenv("UNIGROK_ENABLE_CONTAINER_RESTART", "1")
     invalid_root = tmp_path / "outside"
     invalid_root.mkdir()
-    with patch("src.tools.system.PathResolver.get_project_root", return_value=invalid_root):
+    with patch("src.tools.system.PathResolver.get_service_root", return_value=invalid_root):
         res_scope = await grok_mcp_restart_container()
         assert res_scope.data["status"] == "unauthorized_scope"
         assert "execution blocked" in res_scope.response
@@ -892,7 +892,7 @@ async def test_grok_mcp_restart_container_gating(monkeypatch, tmp_path):
     valid_root = tmp_path / "project"
     valid_root.mkdir()
     (valid_root / "docker-compose.yml").write_text("services: {}\n", encoding="utf-8")
-    with patch("src.tools.system.PathResolver.get_project_root", return_value=valid_root):
+    with patch("src.tools.system.PathResolver.get_service_root", return_value=valid_root):
         mock_proc = MagicMock()
         mock_proc.returncode = 0
 
@@ -912,7 +912,7 @@ async def test_grok_mcp_restart_container_gating(monkeypatch, tmp_path):
 
     # 4. An explicit allow-root must match exactly.
     monkeypatch.setenv("UNIGROK_CONTAINER_RESTART_ROOT", str(tmp_path / "different"))
-    with patch("src.tools.system.PathResolver.get_project_root", return_value=valid_root):
+    with patch("src.tools.system.PathResolver.get_service_root", return_value=valid_root):
         res_shadow = await grok_mcp_restart_container()
         assert res_shadow.data["status"] == "unauthorized_scope"
         assert "execution blocked" in res_shadow.response

@@ -72,6 +72,16 @@ docker compose up --build -d
 curl -s http://localhost:8080/healthz
 ```
 
+This is a standalone, workspace-neutral service. The image runs its baked
+application from `/app`, keeps mutable data in a Docker volume at `/state`, and
+does **not** mount this repository or whichever project an IDE currently has
+open. Register the endpoint globally once, then switch projects freely; those
+projects need no `.agents`, `.codex`, `.grok`, or other UniGrok files.
+
+When Grok needs project material, the calling IDE should send deliberately
+selected excerpts, diffs, errors, or other context in `agent.workspace_context`.
+UniGrok never guesses that MCP registration grants filesystem access.
+
 Open the local Control Center:
 
 ```text
@@ -223,8 +233,9 @@ Core tools:
   knowledge memory.
 - `recall_workspace_memory`, `record_landed_outcome`,
   `explain_workspace_evidence`, `workspace_memory_status`: explicit,
-  commit-anchored engineering evidence shared across local IDE agents. Records
-  require a verified `scripts/land` receipt; automatic prompt injection is off.
+  contributor-only, commit-anchored engineering evidence for agents developing
+  UniGrok itself. Records require a verified `scripts/land` receipt; automatic
+  prompt injection is off. These tools are not on the public HTTP service.
 - `web_search`, `x_search`, `remote_code_execution`: xAI server-side tools.
 - `read_local_file`, `list_project_files`: workspace inspection.
 - `git_status`, `git_diff`, `git_log`, `git_show`: read-only Git context.
@@ -238,6 +249,11 @@ Workspace-memory operations are also available locally as
 `unigrok-mcp memory status`, `unigrok-mcp memory sync`, and
 `unigrok-mcp memory import`. The Git Notes ref is local provenance and is not
 part of ordinary branch pushes.
+
+The public HTTP surface stays intentionally small: `agent`, status, discovery,
+and the disabled-by-default maintenance helper. In unrelated projects, call
+`agent` normally and add `workspace_context` only when local project evidence
+is needed.
 
 ## Architecture
 
@@ -332,7 +348,22 @@ uv sync
 uv run pytest
 uv run python -m compileall -q src evals main.py
 docker compose config
+docker compose -f docker-compose.dev.yml config
 ```
+
+Contributors who want live mounted source use the separate service on port
+8081:
+
+```bash
+docker compose -f docker-compose.dev.yml up --build -d
+```
+
+That contributor endpoint conditionally adds the commit-anchored memory tools,
+so repository-local IDE skills can recall and record verified landing evidence.
+Those tools never appear on the stable service used by unrelated projects.
+
+`scripts/land` may reconcile that contributor service after tests pass. It
+never rebuilds or restarts the stable port-8080 service automatically.
 
 Run the full local test suite before publishing changes. Offline evals can be
 run with:

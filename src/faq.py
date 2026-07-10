@@ -131,7 +131,7 @@ _cached_index: Optional[FAQIndex] = None
 
 
 def _faq_path() -> Path:
-    return PathResolver.get_project_root() / "docs" / "okf" / "faq.md"
+    return PathResolver.get_service_root() / "docs" / "okf" / "faq.md"
 
 
 def _normalize_phrase(value: str) -> str:

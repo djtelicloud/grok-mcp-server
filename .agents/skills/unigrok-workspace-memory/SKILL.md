@@ -1,9 +1,13 @@
 ---
 name: unigrok-workspace-memory
-description: Recall and record verified commit-anchored engineering evidence when planning, implementing, debugging, reviewing, or landing work in the UniGrok multi-IDE repository.
+description: Contributor-only recall and recording of verified commit-anchored engineering evidence while developing the UniGrok repository itself; never use for unrelated projects served by the stable MCP.
 ---
 
 # UniGrok Workspace Memory
+
+This is a source-contributor skill, not a capability that downstream projects
+must install. Never copy it into a user's unrelated repository and never imply
+that globally registering the stable MCP grants access to that repository.
 
 Use this skill for implementation, debugging, architecture, review, and prior-
 decision questions in this repository. It is a thin client workflow: UniGrok

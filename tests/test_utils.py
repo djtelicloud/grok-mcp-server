@@ -76,13 +76,13 @@ class TestPathResolver:
         assert (root / "pyproject.toml").exists(), "Project root should contain pyproject.toml"
 
     def test_get_logs_dir_creates_dir(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(PathResolver, "get_project_root", staticmethod(lambda: tmp_path))
+        monkeypatch.setattr(PathResolver, "get_service_root", staticmethod(lambda: tmp_path))
         logs = PathResolver.get_logs_dir()
         assert logs.exists()
         assert logs.is_dir()
 
     def test_get_chats_dir_creates_dir(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(PathResolver, "get_project_root", staticmethod(lambda: tmp_path))
+        monkeypatch.setattr(PathResolver, "get_service_root", staticmethod(lambda: tmp_path))
         chats = PathResolver.get_chats_dir()
         assert chats.exists()
         assert chats.is_dir()
@@ -948,7 +948,7 @@ class TestTier2ToolsRegistered:
         """raw_read_local_file must not read ignored/private files under the root."""
         (tmp_path / ".gitignore").write_text(".env\n", encoding="utf-8")
         (tmp_path / ".env").write_text("SECRET=leak", encoding="utf-8")
-        monkeypatch.setattr(PathResolver, "get_project_root", staticmethod(lambda: tmp_path))
+        monkeypatch.setattr(PathResolver, "get_workspace_root", staticmethod(lambda: tmp_path))
 
         obs = await dispatch_internal_tool("read_local_file", {"file_path": ".env"})
 
@@ -972,7 +972,7 @@ class TestTier2ToolsRegistered:
         tests_dir = tmp_path / "tests"
         tests_dir.mkdir()
         (tests_dir / "test_sample.py").write_text("def test_ok():\n    assert True\n", encoding="utf-8")
-        monkeypatch.setattr(PathResolver, "get_project_root", staticmethod(lambda: tmp_path))
+        monkeypatch.setattr(PathResolver, "get_workspace_root", staticmethod(lambda: tmp_path))
         monkeypatch.setattr(system_tools.shutil, "which", lambda name: None)
 
         captured = {}
@@ -2860,7 +2860,7 @@ class TestStableContextId:
         post-arrow path instead of the bogus 'old -> new' string."""
         from src.utils import get_dynamic_context, git_cache
 
-        monkeypatch.setattr(PathResolver, "get_project_root", staticmethod(lambda: tmp_path))
+        monkeypatch.setattr(PathResolver, "get_workspace_root", staticmethod(lambda: tmp_path))
         (tmp_path / "new_name.py").write_text("print('hi')\n", encoding="utf-8")
 
         class FakeProc:
@@ -3243,7 +3243,7 @@ class TestXai2026Surface:
     def test_profile_reasoning_effort_normalized(self, tmp_path, monkeypatch):
         from src.utils import load_grok_profile
 
-        monkeypatch.setattr(PathResolver, "get_project_root", staticmethod(lambda: tmp_path))
+        monkeypatch.setattr(PathResolver, "get_service_root", staticmethod(lambda: tmp_path))
         hyper = tmp_path / ".grok" / "hyperparams"
         hyper.mkdir(parents=True)
         (hyper / "custom-effort.json").write_text(

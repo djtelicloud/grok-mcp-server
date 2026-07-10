@@ -66,6 +66,7 @@ def test_runtime_action_is_minimal():
     assert land.runtime_action(["mcp_ui/index.html"]) == "smoke"
     assert land.runtime_action(["src/server.py"]) == "restart"
     assert land.runtime_action(["uv.lock"]) == "rebuild"
+    assert land.runtime_action(["docker-compose.dev.yml"]) == "rebuild"
 
 
 def test_land_fast_forwards_visible_main(repo_with_agent, monkeypatch):
@@ -216,15 +217,33 @@ def test_runtime_wait_retries_expected_restart_handoff(monkeypatch, tmp_path):
             raise ConnectionResetError("container restarting")
 
     monkeypatch.setattr(land, "probe_json", flaky_probe)
-    monkeypatch.setattr(land, "probe_ui", lambda: None)
+    monkeypatch.setattr(land, "probe_ui", lambda base_url: None)
     monkeypatch.setattr(
         land,
         "get_json",
         lambda url: {"gateway_auth": {"enabled": False}},
     )
-    monkeypatch.setattr(land, "probe_mcp", lambda token=None: None)
+    monkeypatch.setattr(land, "probe_mcp", lambda base_url, token=None: None)
     monkeypatch.setattr(land.time, "sleep", lambda seconds: None)
 
-    land.wait_for_runtime(tmp_path, timeout=1.0)
+    land.wait_for_runtime(tmp_path, base_url="http://127.0.0.1:8081", timeout=1.0)
 
     assert attempts >= 3
+
+
+def test_runtime_reconciliation_only_inspects_contributor_compose(monkeypatch, tmp_path):
+    calls = []
+
+    def fake_run(args, **kwargs):
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(land, "run", fake_run)
+
+    result = land.reconcile_runtime(tmp_path, ["src/server.py"])
+
+    assert result == "contributor dev service not running; stable service untouched"
+    assert calls == [[
+        "docker", "compose", "-f", "docker-compose.dev.yml",
+        "ps", "--status", "running", "--services",
+    ]]

@@ -84,7 +84,7 @@ def test_missing_mcp_ui_does_not_block_healthz(monkeypatch, tmp_path):
     monkeypatch.delenv("UNIGROK_RUNTIME", raising=False)
     monkeypatch.delenv("UNIGROK_API_KEYS", raising=False)
     monkeypatch.setattr(
-        "src.http_server.PathResolver.get_project_root",
+        "src.http_server.PathResolver.get_service_root",
         staticmethod(lambda: tmp_path),
     )
 
@@ -161,6 +161,7 @@ def test_runtimez_reports_no_secret_runtime_status(monkeypatch):
     assert payload["api_plane"]["xai_api_key"] is True
     assert payload["cli_plane"]["binary"] is True
     assert payload["transport"] == "http"
+    assert payload["service"]["requires_project_files"] is False
     assert "secret-value" not in res.text
 
 

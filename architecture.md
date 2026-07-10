@@ -8,6 +8,16 @@ This document is the production-grade architectural specification of **UniGrok**
 
 UniGrok is a Python implementation built on the `FastMCP` framework. It runs once on a developer's machine as a shared local gateway: every MCP client (Claude Code, Claude Desktop, VS Code, Codex, Antigravity) connects to the same endpoint, the xAI credential stays server-side, and requests self-route across two Grok planes — the metered xAI API and the Grok CLI subscription. It bridges cloud APIs with local execution fallbacks and workspace context sensing.
 
+The stable MCP is a product service, not an ambient view of the source checkout
+or the folder open in an IDE. Bundled code and support assets resolve from the
+immutable service root (`/app` in Docker), mutable sessions/logs/SQLite resolve
+from the state root (`/state`), and the workspace root is absent unless a
+deployment explicitly attaches one. Public IDE calls carry selected project
+evidence through `agent.workspace_context`; MCP registration alone never grants
+filesystem access. A separate contributor Compose service mounts the UniGrok
+repository, enables local file/git/test tools and commit-anchored evidence, and
+is the only runtime that `scripts/land` may reconcile automatically.
+
 ```
                                   +----------------------------------+
                                   |      MCP IDE / Agent Hosts       |

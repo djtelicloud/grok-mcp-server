@@ -515,7 +515,7 @@ class TestRankedContextFile:
         path+head overlaps the prompt terms wins — not simply the first."""
         from src.utils import get_dynamic_context
 
-        monkeypatch.setattr(PathResolver, "get_project_root", staticmethod(lambda: tmp_path))
+        monkeypatch.setattr(PathResolver, "get_workspace_root", staticmethod(lambda: tmp_path))
         (tmp_path / "alpha.py").write_text("unrelated telemetry counters\n", encoding="utf-8")
         (tmp_path / "beta.py").write_text("worker queue processing logic\n", encoding="utf-8")
         _fake_git(monkeypatch, b"M  alpha.py\nM  beta.py\n")
@@ -537,7 +537,7 @@ class TestRankedContextFile:
     async def test_promptless_call_keeps_first_modified_file(self, tmp_path, monkeypatch):
         from src.utils import get_dynamic_context
 
-        monkeypatch.setattr(PathResolver, "get_project_root", staticmethod(lambda: tmp_path))
+        monkeypatch.setattr(PathResolver, "get_workspace_root", staticmethod(lambda: tmp_path))
         (tmp_path / "alpha.py").write_text("first file\n", encoding="utf-8")
         (tmp_path / "beta.py").write_text("second file\n", encoding="utf-8")
         _fake_git(monkeypatch, b"M  alpha.py\nM  beta.py\n")
@@ -555,7 +555,7 @@ class TestRankedContextFile:
     async def test_zero_overlap_falls_back_to_first_candidate(self, tmp_path, monkeypatch):
         from src.utils import get_dynamic_context
 
-        monkeypatch.setattr(PathResolver, "get_project_root", staticmethod(lambda: tmp_path))
+        monkeypatch.setattr(PathResolver, "get_workspace_root", staticmethod(lambda: tmp_path))
         (tmp_path / "alpha.py").write_text("first file\n", encoding="utf-8")
         (tmp_path / "beta.py").write_text("second file\n", encoding="utf-8")
         _fake_git(monkeypatch, b"M  alpha.py\nM  beta.py\n")
@@ -576,7 +576,7 @@ class TestKnowledgeContextInjection:
         reads facts from, with a fake single-file workspace around it."""
         s = GrokSessionStore(db_path=tmp_path / "ctx.db")
         monkeypatch.setattr(utils_module, "store", s)
-        monkeypatch.setattr(PathResolver, "get_project_root", staticmethod(lambda: tmp_path))
+        monkeypatch.setattr(PathResolver, "get_workspace_root", staticmethod(lambda: tmp_path))
         (tmp_path / "app.py").write_text("gateway startup code\n", encoding="utf-8")
         _fake_git(monkeypatch, b"M  app.py\n")
         yield s
