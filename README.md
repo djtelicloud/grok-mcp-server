@@ -321,7 +321,12 @@ guidance.
 <summary><strong>Port 8080 is already in use</strong></summary>
 
 Another service is bound to port 8080. Either stop it or change the UniGrok
-port by setting `UNIGROK_PORT` in your `.env` file:
+Another service is bound to port 8080. Either stop it, or change the host
+port mapping in `docker-compose.yml` (e.g. `"127.0.0.1:9090:8080"`):
+
+```yaml
+    ports:
+      - "127.0.0.1:9090:8080"
 
 ```bash
 UNIGROK_PORT=9090
