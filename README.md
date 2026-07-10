@@ -315,6 +315,75 @@ or extension that exposes `document.modelContext`, and keep the target tab at
 See [SECURITY.md](SECURITY.md) for vulnerability reporting and deployment
 guidance.
 
+## Troubleshooting / FAQ
+
+<details>
+<summary><strong>Port 8080 is already in use</strong></summary>
+
+Another service is bound to port 8080. Either stop it or change the UniGrok
+port by setting `UNIGROK_PORT` in your `.env` file:
+
+```bash
+UNIGROK_PORT=9090
+```
+
+Then access the Control Center at `http://localhost:9090/ui/`.
+
+</details>
+
+<details>
+<summary><strong>Docker containers won't start</strong></summary>
+
+Make sure Docker Desktop (or the Docker daemon on Linux) is running. Then:
+
+```bash
+docker compose down -v   # clean up any stale state
+docker compose up --build -d
+```
+
+On Windows with WSL2, ensure WSL integration is enabled in Docker Desktop
+settings.
+
+</details>
+
+<details>
+<summary><strong>API key rejected / 401 Unauthorized</strong></summary>
+
+Verify your `XAI_API_KEY` in `.env` is valid and has not expired. You can
+test it directly:
+
+```bash
+curl -H "Authorization: Bearer $XAI_API_KEY" https://api.x.ai/v1/models
+```
+
+If using the Grok CLI plane, ensure `grok auth status` shows authenticated.
+
+</details>
+
+<details>
+<summary><strong><code>mcp-remote</code> bridge not connecting</strong></summary>
+
+If your IDE uses `mcp-remote` to connect to UniGrok's Streamable HTTP
+endpoint:
+
+1. Confirm the server is running: `curl http://localhost:8080/health`
+2. Check that your IDE config points to `http://localhost:8080/mcp` (not
+   `/sse` — UniGrok uses Streamable HTTP, not SSE)
+3. Restart the IDE's MCP client after configuration changes
+
+</details>
+
+<details>
+<summary><strong>Requests hang or timeout</strong></summary>
+
+Large prompts or long tool-use chains may exceed default timeouts. Check:
+
+- Network connectivity to `api.x.ai`
+- Docker resource limits (increase memory if containers are OOM-killed)
+- Server logs: `docker compose logs -f unigrok`
+
+</details>
+
 ## Development
 
 ```bash
