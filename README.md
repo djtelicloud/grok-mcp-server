@@ -383,7 +383,7 @@ endpoint:
 <summary><strong>Requests hang or timeout</strong></summary>
 
 Large prompts or long tool-use chains may exceed default timeouts. Check:
-
+- Server logs: `docker compose logs -f grok-mcp`
 - Network connectivity to `api.x.ai`
 - Docker resource limits (increase memory if containers are OOM-killed)
 - Server logs: `docker compose logs -f unigrok`
