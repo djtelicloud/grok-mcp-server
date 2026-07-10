@@ -11,7 +11,7 @@ import re
 import uuid
 import subprocess
 import tempfile
-from dataclasses import dataclass, field, replace
+from dataclasses import asdict, dataclass, field, replace
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 import shutil
@@ -5079,11 +5079,31 @@ def _calibration_ttl_hours() -> float:
         return 168.0
 
 
+@dataclass
+class RoutingDecision:
+    """Diagnostic record of the advisor's last borderline decision.
+
+    source precedence: calibration > semantic > telemetry > static.
+    shadow=True marks a decision where a semantic verdict WAS computed but
+    the baseline was returned (UNIGROK_TASK_RAG=shadow — zero production
+    impact by construction)."""
+
+    source: str
+    prefers_planning: bool
+    applied: bool
+    shadow: bool = False
+    evidence_count: int = 0
+    planning_signal: float = 0.0
+    coding_signal: float = 0.0
+    confidence: float = 0.0
+    at: float = field(default_factory=time.time)
+
+
 class RoutingAdvisor:
     """Telemetry-informed prior for BORDERLINE routing scores (score == 1).
 
     Borderline prompts statically fall to the coding model. This advisor can
-    flip one to the planning model, consulting two data sources in strict
+    flip one to the planning model, consulting three data sources in strict
     precedence order:
 
       1. EVAL CALIBRATION (routing_calibration table, written by
@@ -5092,7 +5112,13 @@ class RoutingAdvisor:
          are aggregated per model; when BOTH models have eligible rows the
          calibration verdict is final — curated golden-task outcomes beat raw
          telemetry.
-      2. RAW TELEMETRY fallback: the most recent task-memory rows
+      2. SEMANTIC TASK-MEMORY EVIDENCE (src/rag.py, only when
+         UNIGROK_TASK_RAG is shadow|active and calibration was undecidable):
+         fused local-FTS + collection matches for THIS prompt, weighted by
+         per-model success. In shadow mode the verdict is recorded but the
+         baseline is returned; in active mode a decidable verdict is final
+         (a decidable False blocks a telemetry flip, mirroring calibration).
+      3. RAW TELEMETRY fallback: the most recent task-memory rows
          (store.get_recent_model_stats, last 200) aggregated into per-model
          success rates; flips only when planning's recent success rate
          exceeds the coding model's by UNIGROK_ADVISOR_MARGIN (default 0.15)
@@ -5101,7 +5127,8 @@ class RoutingAdvisor:
     Both aggregates are cached in-process for _TTL_SEC, so the routing hot
     path performs zero extra DB reads between refreshes. Under
     UNI_GROK_TESTING the advisor is bypassed entirely (returns the static
-    prior) unless a test injects data via inject_stats()/inject_calibration().
+    prior) unless a test injects data via inject_stats()/inject_calibration()/
+    inject_semantic() — offline evals and cassettes stay byte-identical.
     """
 
     _TTL_SEC = 120.0
@@ -5117,6 +5144,9 @@ class RoutingAdvisor:
         self._calibration: Optional[List[Dict[str, Any]]] = None
         self._calibration_fetched_at = 0.0
         self._calibration_injected = False
+        self._semantic: Optional[Any] = None
+        self._semantic_injected = False
+        self._last_decision: Optional[RoutingDecision] = None
         self._lock = asyncio.Lock()
 
     def inject_stats(self, stats: List[Dict[str, Any]]):
@@ -5132,6 +5162,13 @@ class RoutingAdvisor:
         self._calibration_fetched_at = time.time()
         self._calibration_injected = True
 
+    def inject_semantic(self, verdict: Optional[Any]):
+        """Test hook: pin the semantic verdict (a rag.SemanticVerdict);
+        overrides the UNI_GROK_TESTING bypass so tests exercise the
+        precedence path explicitly."""
+        self._semantic = verdict
+        self._semantic_injected = True
+
     def invalidate(self):
         self._stats = None
         self._fetched_at = 0.0
@@ -5139,6 +5176,9 @@ class RoutingAdvisor:
         self._calibration = None
         self._calibration_fetched_at = 0.0
         self._calibration_injected = False
+        self._semantic = None
+        self._semantic_injected = False
+        self._last_decision = None
 
     async def _snapshot(self, store: Any) -> List[Dict[str, Any]]:
         if self._injected:
@@ -5254,17 +5294,115 @@ class RoutingAdvisor:
             return False
         return (p_rate - c_rate) >= _advisor_margin()
 
-    async def prefers_planning(self, store: Any, planning_model: str, coding_model: str) -> bool:
-        """True only when fresh eval calibration (first) or recent telemetry
-        (fallback) justifies flipping a borderline prompt to the planning
-        model; anything else keeps the static prior."""
+    async def _semantic_verdict(
+        self,
+        store: Any,
+        prompt: str,
+        context_id: Optional[str],
+        planning_model: str,
+        coding_model: str,
+    ) -> Optional[Any]:
+        if self._semantic_injected:
+            return self._semantic
+        if os.environ.get("UNI_GROK_TESTING") == "1":
+            # Hermetic: like _snapshot/_calibration_snapshot, semantic
+            # evidence is inert under tests unless injected — offline evals,
+            # cassettes and the seed suite stay byte-identical.
+            return None
         try:
+            from .rag import gather_semantic_evidence
+
+            return await gather_semantic_evidence(
+                store, prompt, context_id, planning_model, coding_model
+            )
+        except Exception as exc:
+            logging.getLogger("GrokMCP").warning(
+                f"Semantic routing evidence failed (fail-open): {exc}"
+            )
+            return None
+
+    async def prefers_planning(
+        self,
+        store: Any,
+        planning_model: str,
+        coding_model: str,
+        prompt: Optional[str] = None,
+        context_id: Optional[str] = None,
+    ) -> bool:
+        """True only when fresh eval calibration (first), a decidable
+        semantic task-memory verdict (UNIGROK_TASK_RAG=active only), or
+        recent telemetry (fallback) justifies flipping a borderline prompt
+        to the planning model; anything else keeps the static prior. The
+        3-arg legacy call (no prompt) behaves exactly as before semantic
+        evidence existed."""
+        try:
+            # 1. EVAL CALIBRATION — a decidable verdict is always final.
             calibration = await self._calibration_snapshot(store)
             verdict = self._decide_calibration(calibration, planning_model, coding_model)
             if verdict is not None:
+                self._last_decision = RoutingDecision(
+                    source="calibration", prefers_planning=verdict, applied=True
+                )
                 return verdict
+
+            # Baseline = the pre-semantic fallback chain (telemetry → static).
             stats = await self._snapshot(store)
-            return self._decide(stats, planning_model, coding_model)
+            baseline = self._decide(stats, planning_model, coding_model)
+            baseline_source = "telemetry" if stats else "static"
+
+            # 2. SEMANTIC TASK-MEMORY EVIDENCE — only when calibration was
+            #    undecidable, a prompt is available, and the task-RAG mode
+            #    is shadow|active (off/mirror never reach src/rag retrieval,
+            #    keeping those modes byte-identical to the legacy chain).
+            mode = "off"
+            semantic = None
+            if prompt:
+                from .rag import task_rag_mode
+
+                mode = task_rag_mode()
+                if mode in ("shadow", "active"):
+                    semantic = await self._semantic_verdict(
+                        store, prompt, context_id, planning_model, coding_model
+                    )
+            if semantic is not None and semantic.prefers_planning is not None:
+                from .rag import record_stat
+
+                if mode == "active":
+                    # A decidable semantic verdict is final either way — a
+                    # decidable False BLOCKS a telemetry flip, mirroring the
+                    # calibration semantics.
+                    if semantic.prefers_planning != baseline:
+                        record_stat("applied_flips")
+                    self._last_decision = RoutingDecision(
+                        source="semantic",
+                        prefers_planning=semantic.prefers_planning,
+                        applied=True,
+                        evidence_count=semantic.evidence_count,
+                        planning_signal=semantic.planning_signal,
+                        coding_signal=semantic.coding_signal,
+                        confidence=semantic.confidence,
+                    )
+                    return semantic.prefers_planning
+                # SHADOW: compute + record, NEVER apply — return the baseline.
+                if semantic.prefers_planning != baseline:
+                    record_stat("shadow_flips")
+                self._last_decision = RoutingDecision(
+                    source=baseline_source,
+                    prefers_planning=baseline,
+                    applied=True,
+                    shadow=True,
+                    evidence_count=semantic.evidence_count,
+                    planning_signal=semantic.planning_signal,
+                    coding_signal=semantic.coding_signal,
+                    confidence=semantic.confidence,
+                )
+                return baseline
+
+            # 3./4. TELEMETRY → STATIC (unchanged semantics).
+            self._last_decision = RoutingDecision(
+                source=baseline_source, prefers_planning=baseline, applied=True
+            )
+            return baseline
         except Exception as exc:
             logging.getLogger("GrokMCP").warning(f"Routing advisor decision failed: {exc}")
             return False
@@ -5297,6 +5435,10 @@ class RoutingAdvisor:
             },
             "borderline_source": "calibration" if cal_verdict is not None else "telemetry",
             "borderline_choice": "planning" if prefers else "coding (static prior)",
+            # Per-request record (calibration|semantic|telemetry|static);
+            # shadow=True means a semantic verdict was computed but the
+            # baseline was returned (UNIGROK_TASK_RAG=shadow).
+            "last_decision": asdict(self._last_decision) if self._last_decision else None,
         }
 
 
@@ -6294,6 +6436,8 @@ async def orchestrate(
                 store,
                 await resolve_model("planning"),
                 await resolve_model("coding"),
+                prompt=prompt,
+                context_id=context_id,
             )
         except Exception as advisor_err:
             logging.getLogger("GrokMCP").warning(

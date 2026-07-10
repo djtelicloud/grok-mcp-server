@@ -671,3 +671,168 @@ class TestLiveBatchGating:
 
         use, note = batch_mode_decision(self._fast_tasks(8), usable=False, reason="no batch")
         assert use is False and "unavailable" in note
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# RoutingAdvisor: semantic task-memory evidence (UNIGROK_TASK_RAG)
+# Precedence: calibration > semantic (shadow|active only) > telemetry > static
+# ─────────────────────────────────────────────────────────────────────────────
+
+import src.rag as rag_module
+from src.rag import SemanticVerdict
+
+
+def _semantic_verdict(prefers, evidence=4):
+    high, low = 0.9, 0.1
+    return SemanticVerdict(
+        prefers_planning=prefers,
+        planning_signal=high if prefers else low,
+        coding_signal=low if prefers else high,
+        evidence_count=evidence,
+        confidence=0.5,
+    )
+
+
+_FLIPPING_TELEMETRY = [
+    {"plane": "API", "model": DEFAULT_PLANNING_MODEL, "samples": 40,
+     "success_rate": 0.9, "avg_cost": 0.01},
+    {"plane": "API", "model": DEFAULT_CODING_MODEL, "samples": 40,
+     "success_rate": 0.5, "avg_cost": 0.002},
+]
+
+
+class TestRoutingAdvisorSemantic:
+    @pytest.fixture(autouse=True)
+    def _fresh_rag_state(self):
+        rag_module.reset_task_rag_state()
+        yield
+        rag_module.reset_task_rag_state()
+
+    @pytest.mark.asyncio
+    async def test_calibration_true_beats_semantic_false(self, monkeypatch):
+        monkeypatch.setenv("UNIGROK_TASK_RAG", "active")
+        advisor = RoutingAdvisor()
+        advisor.inject_calibration(
+            _calibration_rows(DEFAULT_PLANNING_MODEL, DEFAULT_CODING_MODEL)
+        )
+        advisor.inject_semantic(_semantic_verdict(False))
+        assert await advisor.prefers_planning(
+            None, DEFAULT_PLANNING_MODEL, DEFAULT_CODING_MODEL,
+            prompt="borderline business summary",
+        ) is True
+        assert advisor._last_decision.source == "calibration"
+
+    @pytest.mark.asyncio
+    async def test_calibration_false_beats_semantic_true(self, monkeypatch):
+        monkeypatch.setenv("UNIGROK_TASK_RAG", "active")
+        advisor = RoutingAdvisor()
+        advisor.inject_calibration(
+            _calibration_rows(DEFAULT_PLANNING_MODEL, DEFAULT_CODING_MODEL,
+                              p_rate=0.6, c_rate=0.6)
+        )
+        advisor.inject_semantic(_semantic_verdict(True))
+        assert await advisor.prefers_planning(
+            None, DEFAULT_PLANNING_MODEL, DEFAULT_CODING_MODEL,
+            prompt="borderline business summary",
+        ) is False
+        assert advisor._last_decision.source == "calibration"
+
+    @pytest.mark.asyncio
+    async def test_active_semantic_false_blocks_telemetry_flip(self, monkeypatch):
+        """Mirrors the calibration semantics one precedence rung down: a
+        decidable semantic False is final even when telemetry would flip."""
+        monkeypatch.setenv("UNIGROK_TASK_RAG", "active")
+        advisor = RoutingAdvisor()
+        advisor.inject_stats(_FLIPPING_TELEMETRY)
+        advisor.inject_semantic(_semantic_verdict(False))
+        assert await advisor.prefers_planning(
+            None, DEFAULT_PLANNING_MODEL, DEFAULT_CODING_MODEL,
+            prompt="borderline business summary",
+        ) is False
+        assert advisor._last_decision.source == "semantic"
+        assert rag_module.get_task_rag_stats()["applied_flips"] == 1
+
+    @pytest.mark.asyncio
+    async def test_active_semantic_true_flips_static_baseline(self, monkeypatch):
+        monkeypatch.setenv("UNIGROK_TASK_RAG", "active")
+        advisor = RoutingAdvisor()
+        advisor.inject_stats([])  # empty telemetry → static baseline False
+        advisor.inject_semantic(_semantic_verdict(True))
+        assert await advisor.prefers_planning(
+            None, DEFAULT_PLANNING_MODEL, DEFAULT_CODING_MODEL,
+            prompt="borderline business summary",
+        ) is True
+        assert advisor._last_decision.source == "semantic"
+        assert advisor._last_decision.applied is True
+        assert rag_module.get_task_rag_stats()["applied_flips"] == 1
+
+    @pytest.mark.asyncio
+    async def test_undecidable_semantic_falls_through_to_telemetry(self, monkeypatch):
+        monkeypatch.setenv("UNIGROK_TASK_RAG", "active")
+        advisor = RoutingAdvisor()
+        advisor.inject_stats(_FLIPPING_TELEMETRY)
+        advisor.inject_semantic(_semantic_verdict(None))
+        assert await advisor.prefers_planning(
+            None, DEFAULT_PLANNING_MODEL, DEFAULT_CODING_MODEL,
+            prompt="borderline business summary",
+        ) is True  # telemetry decides, exactly as before semantic existed
+        assert advisor._last_decision.source == "telemetry"
+        assert advisor._last_decision.shadow is False
+
+    @pytest.mark.asyncio
+    async def test_shadow_returns_baseline_and_records_flip(self, monkeypatch):
+        monkeypatch.setenv("UNIGROK_TASK_RAG", "shadow")
+        advisor = RoutingAdvisor()
+        advisor.inject_stats([])  # static baseline False
+        advisor.inject_semantic(_semantic_verdict(True))
+        assert await advisor.prefers_planning(
+            None, DEFAULT_PLANNING_MODEL, DEFAULT_CODING_MODEL,
+            prompt="borderline business summary",
+        ) is False, "shadow mode must NEVER apply the semantic verdict"
+        decision = advisor._last_decision
+        assert decision.shadow is True
+        assert decision.source == "static"
+        assert decision.evidence_count == 4
+        assert rag_module.get_task_rag_stats()["shadow_flips"] == 1
+        assert rag_module.get_task_rag_stats()["applied_flips"] == 0
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("mode", [None, "off", "mirror"])
+    async def test_off_and_mirror_never_consult_semantic(self, monkeypatch, mode):
+        if mode is None:
+            monkeypatch.delenv("UNIGROK_TASK_RAG", raising=False)
+        else:
+            monkeypatch.setenv("UNIGROK_TASK_RAG", mode)
+        advisor = RoutingAdvisor()
+        advisor.inject_semantic(_semantic_verdict(True))  # must be ignored
+        assert await advisor.prefers_planning(
+            None, DEFAULT_PLANNING_MODEL, DEFAULT_CODING_MODEL,
+            prompt="borderline business summary",
+        ) is False
+        assert advisor._last_decision.source == "static"
+        assert advisor._last_decision.shadow is False
+
+    @pytest.mark.asyncio
+    async def test_testing_env_without_injection_never_reaches_rag(self, monkeypatch):
+        """UNI_GROK_TESTING=1 (conftest) keeps semantic evidence inert unless
+        injected — offline evals and the seed suite stay byte-identical."""
+        monkeypatch.setenv("UNIGROK_TASK_RAG", "active")
+        advisor = RoutingAdvisor()
+        gatherer = AsyncMock()
+        monkeypatch.setattr(rag_module, "gather_semantic_evidence", gatherer)
+        assert await advisor.prefers_planning(
+            None, DEFAULT_PLANNING_MODEL, DEFAULT_CODING_MODEL,
+            prompt="borderline business summary",
+        ) is False
+        gatherer.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_three_arg_legacy_call_skips_semantic(self, monkeypatch):
+        """No prompt → today's behavior exactly, even with a pinned verdict."""
+        monkeypatch.setenv("UNIGROK_TASK_RAG", "active")
+        advisor = RoutingAdvisor()
+        advisor.inject_semantic(_semantic_verdict(True))
+        assert await advisor.prefers_planning(
+            None, DEFAULT_PLANNING_MODEL, DEFAULT_CODING_MODEL
+        ) is False
+        assert advisor._last_decision.source == "static"
