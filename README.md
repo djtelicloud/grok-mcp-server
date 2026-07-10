@@ -358,7 +358,8 @@ Verify your `XAI_API_KEY` in `.env` is valid and has not expired. You can
 test it directly:
 
 ```bash
-curl -H "Authorization: Bearer $XAI_API_KEY" https://api.x.ai/v1/models
+If using the Grok CLI plane, ensure `grok --check` succeeds (this is the
+same probe UniGrok's router uses for plane readiness).
 ```
 
 If using the Grok CLI plane, ensure `grok auth status` shows authenticated.
