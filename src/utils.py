@@ -5419,6 +5419,37 @@ class RoutingAdvisor:
         cal_c_samples, cal_c_rate, cal_c_cost = self._aggregate_calibration(calibration, coding_model)
         cal_verdict = self._decide_calibration(calibration, planning_model, coding_model)
         prefers = cal_verdict if cal_verdict is not None else self._decide(stats, planning_model, coding_model)
+        # Task-memory RAG view (src/rag.py). `ready` is the CACHED readiness
+        # from the most recent probe/upload/search — never a network call on
+        # the status path; `unsynced` is a cheap partial-index COUNT guarded
+        # so a failing store can never break /metrics.
+        task_rag_view: Optional[Dict[str, Any]] = None
+        try:
+            from .rag import (
+                FUSED_SCORE_BUCKETS,
+                get_task_memory_mirror,
+                get_task_rag_stats,
+                task_rag_collection_name,
+                task_rag_mode,
+            )
+
+            rag_mode = task_rag_mode()
+            unsynced: Optional[int] = None
+            if rag_mode != "off" and store is not None:
+                try:
+                    unsynced = await store.count_unsynced_task_memories()
+                except Exception:
+                    unsynced = None
+            task_rag_view = {
+                "mode": rag_mode,
+                "collection": task_rag_collection_name(),
+                "ready": get_task_memory_mirror().last_known_ready,
+                "unsynced": unsynced,
+                "fused_score_bucket_bounds": list(FUSED_SCORE_BUCKETS),
+                **get_task_rag_stats(),
+            }
+        except Exception as exc:
+            logging.getLogger("GrokMCP").warning(f"task_rag status view failed: {exc}")
         return {
             "planning_model": planning_model,
             "coding_model": coding_model,
@@ -5439,6 +5470,7 @@ class RoutingAdvisor:
             # shadow=True means a semantic verdict was computed but the
             # baseline was returned (UNIGROK_TASK_RAG=shadow).
             "last_decision": asdict(self._last_decision) if self._last_decision else None,
+            "task_rag": task_rag_view,
         }
 
 

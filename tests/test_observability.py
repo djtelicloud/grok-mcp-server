@@ -510,6 +510,76 @@ class TestPrometheusRendering:
         assert default.json()["format"] == "unigrok-json-v1"
 
 
+
+def _task_rag_view():
+    return {
+        "mode": "shadow",
+        "collection": "unigrok-task-memories-v1",
+        "ready": True,
+        "unsynced": 4,
+        "fused_score_bucket_bounds": [0.2, 0.4, 0.6, 0.8, 1.0],
+        "queries": 11, "cache_hits": 5, "remote_calls": 6, "remote_failures": 1,
+        "rate_limited": 0, "timeouts": 1, "uploads": 9, "upload_failures": 2,
+        "shadow_flips": 3, "applied_flips": 0,
+        "fused_score_buckets": [1, 2, 0, 1, 0, 1],
+        "fused_score_sum": 2.5,
+        "fused_score_count": 5,
+    }
+
+
+class TestTaskRagPrometheusRendering:
+    def test_families_and_histogram_render(self):
+        snapshot = _metrics_snapshot()
+        snapshot["routing_advisor"]["task_rag"] = _task_rag_view()
+        text = _render_prometheus_metrics(snapshot)
+        assert "unigrok_task_rag_ready 1" in text
+        assert "unigrok_task_rag_unsynced_rows 4" in text
+        assert "unigrok_task_rag_remote_calls_total 6" in text
+        assert "unigrok_task_rag_remote_failures_total 1" in text
+        assert "unigrok_task_rag_shadow_flips_total 3" in text
+        assert "unigrok_task_rag_applied_flips_total 0" in text
+        # Histogram: cumulative le buckets + sum + count, fixed cardinality.
+        assert "# TYPE unigrok_task_rag_fused_score histogram" in text
+        assert 'unigrok_task_rag_fused_score_bucket{le="0.2"} 1' in text
+        assert 'unigrok_task_rag_fused_score_bucket{le="0.4"} 3' in text
+        assert 'unigrok_task_rag_fused_score_bucket{le="1.0"} 4' in text
+        assert 'unigrok_task_rag_fused_score_bucket{le="+Inf"} 5' in text
+        assert "unigrok_task_rag_fused_score_sum 2.5" in text
+        assert "unigrok_task_rag_fused_score_count 5" in text
+
+    def test_unknown_ready_and_unsynced_emit_no_series(self):
+        """None means "not probed yet"/"store unavailable" — the family() empty-
+        series skip keeps those out of the exposition instead of lying with 0."""
+        view = _task_rag_view()
+        view["ready"] = None
+        view["unsynced"] = None
+        snapshot = _metrics_snapshot()
+        snapshot["routing_advisor"]["task_rag"] = view
+        text = _render_prometheus_metrics(snapshot)
+        assert "unigrok_task_rag_ready" not in text
+        assert "unigrok_task_rag_unsynced_rows" not in text
+        assert "unigrok_task_rag_remote_calls_total 6" in text
+
+    def test_absent_task_rag_renders_no_families(self):
+        text = _render_prometheus_metrics(_metrics_snapshot())
+        assert "unigrok_task_rag_" not in text
+
+    def test_metrics_json_exposes_task_rag_mode(self, monkeypatch):
+        monkeypatch.delenv("UNIGROK_RUNTIME", raising=False)
+        monkeypatch.delenv("UNIGROK_API_KEYS", raising=False)
+        monkeypatch.delenv("UNIGROK_TASK_RAG", raising=False)
+        import src.http_server as http_module
+
+        monkeypatch.setattr(
+            http_module.store, "get_telemetry_stats", AsyncMock(return_value=[])
+        )
+        with TestClient(create_app()) as client:
+            payload = client.get("/metrics").json()
+        task_rag = payload["routing_advisor"]["task_rag"]
+        assert task_rag["mode"] == "off"
+        assert task_rag["collection"] == "unigrok-task-memories-v1"
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Item 4 — storage interface
 # ─────────────────────────────────────────────────────────────────────────────

@@ -795,6 +795,69 @@ def _render_prometheus_metrics(snapshot: Dict[str, Any]) -> str:
             [({}, 1 if advisor.get("borderline_choice") == "planning" else 0)],
         )
 
+        # Task-memory RAG (UNIGROK_TASK_RAG): all families UNLABELED — the
+        # mode string and nested detail stay JSON-only like the advisor's
+        # nested view. `le` below is a histogram mechanic, not an identity
+        # label (fixed cardinality of 6 series).
+        task_rag: Optional[Dict[str, Any]] = advisor.get("task_rag")
+        if isinstance(task_rag, dict):
+            ready = task_rag.get("ready")
+            family(
+                "unigrok_task_rag_ready", "gauge",
+                "1 when the task-memory collection mirror last probed ready (cached, no network).",
+                [] if ready is None else [({}, 1 if ready else 0)],
+            )
+            unsynced = task_rag.get("unsynced")
+            family(
+                "unigrok_task_rag_unsynced_rows", "gauge",
+                "Task-memory rows awaiting collection sync (outbox depth).",
+                [] if unsynced is None else [({}, unsynced)],
+            )
+            family(
+                "unigrok_task_rag_remote_calls_total", "counter",
+                "Collection semantic searches attempted.",
+                [({}, task_rag.get("remote_calls", 0))],
+            )
+            family(
+                "unigrok_task_rag_remote_failures_total", "counter",
+                "Collection semantic searches that failed (decision fell open to the baseline).",
+                [({}, task_rag.get("remote_failures", 0))],
+            )
+            family(
+                "unigrok_task_rag_shadow_flips_total", "counter",
+                "Shadow-mode semantic verdicts that disagreed with the baseline (never applied).",
+                [({}, task_rag.get("shadow_flips", 0))],
+            )
+            family(
+                "unigrok_task_rag_applied_flips_total", "counter",
+                "Active-mode semantic verdicts that changed the borderline route.",
+                [({}, task_rag.get("applied_flips", 0))],
+            )
+            buckets = task_rag.get("fused_score_buckets") or []
+            bounds = task_rag.get("fused_score_bucket_bounds") or []
+            if buckets and len(buckets) == len(bounds) + 1:
+                lines.append(
+                    "# HELP unigrok_task_rag_fused_score "
+                    "Top fused evidence score per semantic borderline decision."
+                )
+                lines.append("# TYPE unigrok_task_rag_fused_score histogram")
+                cumulative = 0
+                for bound, count in zip(bounds, buckets):
+                    cumulative += int(count)
+                    lines.append(
+                        f"unigrok_task_rag_fused_score_bucket{_prom_labels({'le': str(bound)})} {cumulative}"
+                    )
+                cumulative += int(buckets[-1])
+                lines.append(
+                    f"unigrok_task_rag_fused_score_bucket{_prom_labels({'le': '+Inf'})} {cumulative}"
+                )
+                lines.append(
+                    f"unigrok_task_rag_fused_score_sum {task_rag.get('fused_score_sum', 0.0)}"
+                )
+                lines.append(
+                    f"unigrok_task_rag_fused_score_count {task_rag.get('fused_score_count', 0)}"
+                )
+
     return "\n".join(lines) + "\n"
 
 

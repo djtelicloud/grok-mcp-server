@@ -875,3 +875,74 @@ class TestRagCli:
         assert code == 0
         assert "force-reupload: re-queued 1 rows" in out.getvalue()
         assert service.upload_document.call_count == 2  # original + refresh
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Integration smoke: mirror → search → fuse → decision (fake client, no I/O)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestEndToEndIntegration:
+    @pytest.mark.asyncio
+    async def test_mirror_search_fuse_decide_cycle(self, monkeypatch, tstore):
+        """Full cycle on one store: save memories → drain the mirror →
+        semantic search maps hits back by remote_file_id → fusion → the
+        advisor applies the flip in active mode and suppresses it in shadow."""
+        from src.utils import RoutingAdvisor
+
+        monkeypatch.setenv("UNI_GROK_TESTING", "0")  # exercise the real gather path
+        monkeypatch.setenv("UNIGROK_TASK_RAG", "active")
+        monkeypatch.setenv("UNIGROK_TASK_RAG_MIN_EVIDENCE", "3")
+
+        # History for this kind of prompt: planning succeeded, coding failed.
+        await _save_memory(
+            tstore, "plan the quarterly business summary", model=PLANNING, success=1
+        )
+        await _save_memory(
+            tstore, "plan the product roadmap discussion", model=PLANNING, success=1
+        )
+        await _save_memory(
+            tstore, "plan the team timeline overview", model=CODING, success=0
+        )
+
+        client, service = _fake_collections_client()
+        with patch("src.rag.get_xai_client", return_value=client):
+            summary = await get_task_memory_mirror().sync_pending(tstore, limit=10)
+            assert summary == {"synced": 3, "failed": 0}
+
+            async with tstore._conn.execute(
+                "SELECT remote_file_id FROM task_memory ORDER BY id"
+            ) as cursor:
+                file_ids = [r[0] for r in await cursor.fetchall()]
+            service.search.return_value = SimpleNamespace(matches=[
+                SimpleNamespace(chunk_content=f"chunk {i}", score=0.9 - i * 0.1, file_id=fid)
+                for i, fid in enumerate(file_ids)
+            ])
+
+            advisor = RoutingAdvisor()
+            advisor.inject_calibration([])  # undecidable → semantic consulted
+            advisor.inject_stats([])        # silent telemetry → static baseline
+            decided = await advisor.prefers_planning(
+                tstore, PLANNING, CODING,
+                prompt="plan the business summary timeline",
+            )
+            assert decided is True
+            assert advisor._last_decision.source == "semantic"
+            assert advisor._last_decision.evidence_count >= 3
+            assert service.search.call_count == 1
+
+            # Same evidence in SHADOW mode: verdict recorded, baseline kept.
+            monkeypatch.setenv("UNIGROK_TASK_RAG", "shadow")
+            shadow_advisor = RoutingAdvisor()
+            shadow_advisor.inject_calibration([])
+            shadow_advisor.inject_stats([])
+            shadow_decided = await shadow_advisor.prefers_planning(
+                tstore, PLANNING, CODING,
+                prompt="plan the business summary timeline",
+            )
+            assert shadow_decided is False
+            assert shadow_advisor._last_decision.shadow is True
+
+        stats = get_task_rag_stats()
+        assert stats["applied_flips"] == 1
+        assert stats["shadow_flips"] == 1
+        assert stats["fused_score_count"] >= 1
