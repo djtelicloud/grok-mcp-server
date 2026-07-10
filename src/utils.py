@@ -2739,6 +2739,26 @@ class GrokSessionStore:
                 row = await cursor.fetchone()
                 return int(row[0] if row else 0)
 
+    @_with_write_retry_async
+    async def reset_task_memory_sync(self) -> int:
+        """Re-queue EVERY task memory for mirroring (rag backfill
+        --force-reupload): deterministic document names keep the re-upload
+        idempotent on the collection side. Returns the row count."""
+        await self._ensure_initialized()
+        async with self._lock:
+            await self._conn.execute("BEGIN IMMEDIATE;")
+            try:
+                cursor = await self._conn.execute(
+                    "UPDATE task_memory SET synced_at = NULL, sync_attempts = 0, sync_error = NULL"
+                )
+                count = int(cursor.rowcount or 0)
+                await self._conn.commit()
+            except Exception:
+                await self._conn.rollback()
+                raise
+            await self._on_write_completed()
+        return count
+
     # pattern_cache (get_cached_pattern/save_cached_pattern) removed — the
     # table was write-only with zero callers. Task memory (task_memory table)
     # is the surviving learning store.
@@ -6188,6 +6208,13 @@ async def _save_task_memory_safe(
             context_id=layer.context_id,
             metadata=task_metadata,
         )
+        # Best-effort cloud mirror (UNIGROK_TASK_RAG mirror|shadow|active):
+        # a single-flight fire-and-forget outbox drain — never blocks or
+        # fails the response path. Late import: utils must not import rag
+        # at module top (rag imports utils).
+        from .rag import spawn_sync_task
+
+        spawn_sync_task(active_store)
     except Exception as exc:
         logging.getLogger("GrokMCP").warning(f"Task memory save failed: {exc}")
 

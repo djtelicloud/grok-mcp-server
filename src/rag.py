@@ -24,16 +24,18 @@ subclass it; no second subclass ships today.
 
 import asyncio
 import bisect
+import contextlib
 import dataclasses
 import json
 import logging
 import os
+import sys
 import threading
 import time
 from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, TextIO
 
 from .utils import (
     _advisor_margin,
@@ -691,6 +693,177 @@ async def gather_semantic_evidence(
     return verdict
 
 
+# ─── Fire-and-forget sync trigger (wired into _save_task_memory_safe) ────────
+
+# Strong refs so fire-and-forget drains aren't garbage-collected mid-flight;
+# the done callback discards them.
+_BG_TASKS: set = set()
+# Single-flight guard: bursty saves must not pile up run_blocking timed
+# threads (shared UNIGROK_MAX_TIMED_THREADS cap) — one drain at a time, and
+# a drain covers every pending row anyway.
+_SYNC_INFLIGHT = threading.Event()
+
+
+def spawn_sync_task(store: Any) -> Optional["asyncio.Task"]:
+    """Best-effort background outbox drain; returns the task or None when
+    skipped (mode off, drain already in flight, or no running loop). Never
+    raises and never blocks the caller."""
+    if task_rag_mode() == "off":
+        return None
+    if _SYNC_INFLIGHT.is_set():
+        return None
+    _SYNC_INFLIGHT.set()
+    try:
+        task = asyncio.create_task(
+            get_task_memory_mirror().sync_pending(store, limit=4, max_attempts=5)
+        )
+    except RuntimeError:
+        _SYNC_INFLIGHT.clear()
+        return None
+    _BG_TASKS.add(task)
+
+    def _done(finished: "asyncio.Task") -> None:
+        _BG_TASKS.discard(finished)
+        _SYNC_INFLIGHT.clear()
+        if not finished.cancelled():
+            with contextlib.suppress(Exception):
+                finished.result()  # surface nothing; sync_pending never raises
+
+    task.add_done_callback(_done)
+    return task
+
+
+# ─── `rag` CLI (dispatched from src/cli.py, no argparse by convention) ───────
+
+_RAG_USAGE = """usage: unigrok-mcp rag <subcommand>
+
+subcommands:
+  status                     mode, collection, readiness, outbox depth, stats
+  backfill [--dry-run] [--limit N] [--retry-failed] [--force-reupload]
+                             drain the sync outbox oldest-first (resumable)
+"""
+
+
+async def _rag_status(store: Any, out: TextIO) -> int:
+    mode = task_rag_mode()
+    mirror = get_task_memory_mirror()
+    print(f"mode: {mode}", file=out)
+    print(f"collection: {task_rag_collection_name()}", file=out)
+    if mode == "off":
+        print("ready: no (UNIGROK_TASK_RAG=off)", file=out)
+    elif await mirror.ready():
+        print("ready: yes", file=out)
+    else:
+        reason = mirror._last_error or "unavailable"
+        print(f"ready: no ({reason})", file=out)
+    try:
+        unsynced = await store.count_unsynced_task_memories()
+        print(f"unsynced: {unsynced}", file=out)
+    except Exception as exc:
+        print(f"unsynced: unavailable ({exc})", file=out)
+    stats = get_task_rag_stats()
+    for key in (
+        "queries", "cache_hits", "remote_calls", "remote_failures",
+        "rate_limited", "timeouts", "uploads", "upload_failures",
+        "shadow_flips", "applied_flips",
+    ):
+        print(f"{key}: {stats[key]}", file=out)
+    return 0
+
+
+async def _rag_backfill(
+    store: Any,
+    out: TextIO,
+    dry_run: bool,
+    limit: Optional[int],
+    retry_failed: bool,
+    force_reupload: bool,
+) -> int:
+    mode = task_rag_mode()
+    if mode == "off":
+        print("UNIGROK_TASK_RAG=off — nothing to backfill.", file=out)
+        return 1
+    mirror = get_task_memory_mirror()
+
+    if force_reupload and not dry_run:
+        requeued = await store.reset_task_memory_sync()
+        print(f"force-reupload: re-queued {requeued} rows", file=out)
+
+    max_attempts = None if retry_failed else 5
+    total = len(
+        await store.list_unsynced_task_memories(limit=200, max_attempts=max_attempts)
+    )
+    if dry_run:
+        preview = await store.list_unsynced_task_memories(
+            limit=5, max_attempts=max_attempts
+        )
+        print(f"dry-run: {total} row(s) pending (window of 200)", file=out)
+        for row in preview:
+            print(f"  would upload {mirror.document_name(row)}", file=out)
+        return 0
+
+    if not await mirror.ready():
+        print(f"mirror unavailable: {mirror._last_error or 'not ready'}", file=out)
+        return 1
+
+    synced = failed = processed = 0
+    while True:
+        batch_limit = 25 if limit is None else min(25, limit - processed)
+        if batch_limit <= 0:
+            break
+        summary = await mirror.sync_pending(
+            store, limit=batch_limit, max_attempts=max_attempts
+        )
+        batch_total = summary["synced"] + summary["failed"]
+        if batch_total == 0:
+            break
+        synced += summary["synced"]
+        failed += summary["failed"]
+        processed += batch_total
+        print(f"synced {synced}/{max(total, processed)} (failed {failed})", file=out)
+        if summary["synced"] == 0:
+            # A whole batch failed: stop instead of hammering the same rows
+            # (with --retry-failed they would never leave the window).
+            break
+    remaining = await store.count_unsynced_task_memories()
+    print(f"done: {synced} synced, {failed} failed, {remaining} remaining", file=out)
+    return 0
+
+
+def rag_cli(args: List[str], stream: Optional[TextIO] = None, store: Any = None) -> int:
+    """Hand-rolled `rag` subcommand dispatcher (matching src/cli.py's init
+    pattern — no argparse). Runs against the shared store singleton unless
+    a store is injected (tests)."""
+    out = stream or sys.stdout
+    args = list(args or [])
+    command = args[0] if args else ""
+    if command not in ("status", "backfill"):
+        print(_RAG_USAGE, file=out)
+        return 2
+
+    if store is None:
+        from .utils import store as shared_store
+
+        store = shared_store
+
+    if command == "status":
+        return asyncio.run(_rag_status(store, out))
+
+    dry_run = "--dry-run" in args
+    retry_failed = "--retry-failed" in args
+    force_reupload = "--force-reupload" in args
+    limit: Optional[int] = None
+    if "--limit" in args:
+        try:
+            limit = max(1, int(args[args.index("--limit") + 1]))
+        except (IndexError, ValueError):
+            print("--limit needs a positive integer", file=out)
+            return 2
+    return asyncio.run(
+        _rag_backfill(store, out, dry_run, limit, retry_failed, force_reupload)
+    )
+
+
 # ─── Test hook ───────────────────────────────────────────────────────────────
 
 def reset_task_rag_state() -> None:
@@ -700,6 +873,7 @@ def reset_task_rag_state() -> None:
     global _MIRROR, _MODE_WARNED, _STATS
     _MIRROR = TaskMemoryMirror()
     _MODE_WARNED = False
+    _SYNC_INFLIGHT.clear()
     with _STATS_LOCK:
         _STATS = _fresh_stats()
     with _CACHE_LOCK:

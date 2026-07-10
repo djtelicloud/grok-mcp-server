@@ -138,6 +138,11 @@ def main(argv: list[str] | None = None) -> int | None:
     if argv and argv[0] == "init":
         return init_project(root)
 
+    if argv and argv[0] == "rag":
+        from src.rag import rag_cli
+
+        return rag_cli(argv[1:])
+
     from src import server
 
     api_key = os.getenv("XAI_API_KEY", "").strip()

@@ -5,6 +5,8 @@
 # sync triggers, and the `rag` CLI. The advisor precedence tests live in
 # tests/test_evals.py next to the existing calibration precedence pins.
 
+import asyncio
+import io
 import time
 from datetime import datetime, timedelta
 from types import SimpleNamespace
@@ -639,3 +641,237 @@ class TestGatherSemanticEvidence:
             _BrokenStore(), "prompt", None, PLANNING, CODING
         )
         assert verdict is None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Sync trigger: single-flight spawn + _save_task_memory_safe wiring
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestSpawnSyncTask:
+    @pytest.mark.asyncio
+    async def test_off_mode_spawns_nothing(self, monkeypatch):
+        monkeypatch.delenv("UNIGROK_TASK_RAG", raising=False)
+        assert rag.spawn_sync_task(None) is None
+        assert rag._BG_TASKS == set()
+
+    @pytest.mark.asyncio
+    async def test_single_flight_blocks_concurrent_drains(self, monkeypatch):
+        monkeypatch.setenv("UNIGROK_TASK_RAG", "mirror")
+        release = asyncio.Event()
+
+        async def slow_sync(store, limit=4, max_attempts=5):
+            await release.wait()
+            return {"synced": 0, "failed": 0}
+
+        monkeypatch.setattr(get_task_memory_mirror(), "sync_pending", slow_sync)
+
+        first = rag.spawn_sync_task(None)
+        assert first is not None
+        assert rag.spawn_sync_task(None) is None, "in-flight drain must block"
+        release.set()
+        await first
+        # The done callback clears the guard: the next save can drain again.
+        second = rag.spawn_sync_task(None)
+        assert second is not None
+        await second
+
+    @pytest.mark.asyncio
+    async def test_save_task_memory_safe_spawns_once(self, monkeypatch, tstore):
+        import src.utils as utils_module
+
+        monkeypatch.setenv("UNIGROK_TASK_RAG", "mirror")
+        layer = SimpleNamespace(
+            escalated=False, generation="did it", reflection=None, reasoning=None,
+            plane="API", profile="default", latency=0.1, cost_usd=0.0, context_id=None,
+        )
+        with patch("src.rag.spawn_sync_task") as spawn:
+            await utils_module._save_task_memory_safe(
+                tstore, "prompt text", layer, CODING, 1
+            )
+        spawn.assert_called_once_with(tstore)
+        assert await tstore.get_task_memory_count() == 1
+
+    @pytest.mark.asyncio
+    async def test_save_survives_spawn_failure(self, monkeypatch, tstore):
+        import src.utils as utils_module
+
+        monkeypatch.setenv("UNIGROK_TASK_RAG", "mirror")
+        layer = SimpleNamespace(
+            escalated=False, generation="done", reflection=None, reasoning=None,
+            plane="API", profile="default", latency=0.1, cost_usd=0.0, context_id=None,
+        )
+        with patch("src.rag.spawn_sync_task", side_effect=RuntimeError("boom")):
+            await utils_module._save_task_memory_safe(
+                tstore, "prompt text", layer, CODING, 1
+            )  # must not raise
+        assert await tstore.get_task_memory_count() == 1
+
+    @pytest.mark.asyncio
+    async def test_end_to_end_save_drains_outbox(self, monkeypatch, tstore):
+        import src.utils as utils_module
+
+        monkeypatch.setenv("UNIGROK_TASK_RAG", "mirror")
+        client, _service = _fake_collections_client()
+        layer = SimpleNamespace(
+            escalated=False, generation="fixed", reflection=None, reasoning=None,
+            plane="API", profile="default", latency=0.1, cost_usd=0.0, context_id=None,
+        )
+        with patch("src.rag.get_xai_client", return_value=client):
+            await utils_module._save_task_memory_safe(
+                tstore, "end to end drain check", layer, CODING, 1
+            )
+            spawned = list(rag._BG_TASKS)
+            assert len(spawned) == 1
+            await asyncio.gather(*spawned)
+        assert await tstore.count_unsynced_task_memories() == 0
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# `rag` CLI: status + backfill
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _seed_db(db_path, prompts):
+    async def _seed():
+        s = GrokSessionStore(db_path=db_path)
+        for prompt in prompts:
+            await _save_memory(s, prompt)
+        await s.close()
+
+    asyncio.run(_seed())
+
+
+class TestRagCli:
+    def test_unknown_subcommand_prints_usage(self):
+
+
+        out = io.StringIO()
+        assert rag.rag_cli(["provision"], stream=out) == 2
+        assert "usage:" in out.getvalue()
+
+    def test_status_off_mode(self, monkeypatch, tmp_path):
+
+
+        monkeypatch.delenv("UNIGROK_TASK_RAG", raising=False)
+        db = tmp_path / "cli-status.db"
+        _seed_db(db, ["one task"])
+        out = io.StringIO()
+        code = rag.rag_cli(
+            ["status"], stream=out, store=GrokSessionStore(db_path=db)
+        )
+        assert code == 0
+        text = out.getvalue()
+        assert "mode: off" in text
+        assert "ready: no (UNIGROK_TASK_RAG=off)" in text
+        assert "unsynced: 1" in text
+
+    def test_status_ready_with_capable_client(self, monkeypatch, tmp_path):
+
+
+        monkeypatch.setenv("UNIGROK_TASK_RAG", "mirror")
+        db = tmp_path / "cli-ready.db"
+        _seed_db(db, [])
+        client, _service = _fake_collections_client()
+        out = io.StringIO()
+        with patch("src.rag.get_xai_client", return_value=client):
+            code = rag.rag_cli(
+                ["status"], stream=out, store=GrokSessionStore(db_path=db)
+            )
+        assert code == 0
+        assert "ready: yes" in out.getvalue()
+
+    def test_backfill_off_mode_exits_1(self, monkeypatch, tmp_path):
+
+
+        monkeypatch.delenv("UNIGROK_TASK_RAG", raising=False)
+        out = io.StringIO()
+        code = rag.rag_cli(
+            ["backfill"], stream=out,
+            store=GrokSessionStore(db_path=tmp_path / "off.db"),
+        )
+        assert code == 1
+
+    def test_backfill_dry_run_is_networkless(self, monkeypatch, tmp_path):
+
+
+        monkeypatch.setenv("UNIGROK_TASK_RAG", "mirror")
+        db = tmp_path / "cli-dry.db"
+        _seed_db(db, ["alpha task", "beta task"])
+        out = io.StringIO()
+        with patch("src.rag.get_xai_client") as mock_client:
+            code = rag.rag_cli(
+                ["backfill", "--dry-run"], stream=out,
+                store=GrokSessionStore(db_path=db),
+            )
+        mock_client.assert_not_called()
+        assert code == 0
+        text = out.getvalue()
+        assert "2 row(s) pending" in text
+        assert "would upload taskmem-1-" in text
+
+    def test_backfill_drains_and_reports(self, monkeypatch, tmp_path):
+
+
+        monkeypatch.setenv("UNIGROK_TASK_RAG", "mirror")
+        db = tmp_path / "cli-drain.db"
+        _seed_db(db, ["alpha task", "beta task", "gamma task"])
+        client, service = _fake_collections_client()
+        out = io.StringIO()
+        with patch("src.rag.get_xai_client", return_value=client):
+            code = rag.rag_cli(
+                ["backfill"], stream=out, store=GrokSessionStore(db_path=db)
+            )
+        assert code == 0
+        assert service.upload_document.call_count == 3
+        assert "done: 3 synced, 0 failed, 0 remaining" in out.getvalue()
+
+    def test_backfill_limit_bounds_processing(self, monkeypatch, tmp_path):
+
+
+        monkeypatch.setenv("UNIGROK_TASK_RAG", "mirror")
+        db = tmp_path / "cli-limit.db"
+        _seed_db(db, ["alpha task", "beta task", "gamma task"])
+        client, service = _fake_collections_client()
+        out = io.StringIO()
+        with patch("src.rag.get_xai_client", return_value=client):
+            code = rag.rag_cli(
+                ["backfill", "--limit", "1"], stream=out,
+                store=GrokSessionStore(db_path=db),
+            )
+        assert code == 0
+        assert service.upload_document.call_count == 1
+        assert "2 remaining" in out.getvalue()
+
+    def test_backfill_bad_limit_exits_2(self, monkeypatch, tmp_path):
+
+
+        monkeypatch.setenv("UNIGROK_TASK_RAG", "mirror")
+        out = io.StringIO()
+        code = rag.rag_cli(
+            ["backfill", "--limit", "many"], stream=out,
+            store=GrokSessionStore(db_path=tmp_path / "bad.db"),
+        )
+        assert code == 2
+
+    def test_backfill_force_reupload_requeues_synced_rows(
+        self, monkeypatch, tmp_path
+    ):
+
+
+        monkeypatch.setenv("UNIGROK_TASK_RAG", "mirror")
+        db = tmp_path / "cli-force.db"
+        _seed_db(db, ["alpha task"])
+        client, service = _fake_collections_client()
+        with patch("src.rag.get_xai_client", return_value=client):
+            assert rag.rag_cli(
+                ["backfill"], stream=io.StringIO(),
+                store=GrokSessionStore(db_path=db),
+            ) == 0
+            rag.reset_task_rag_state()
+            out = io.StringIO()
+            code = rag.rag_cli(
+                ["backfill", "--force-reupload"], stream=out,
+                store=GrokSessionStore(db_path=db),
+            )
+        assert code == 0
+        assert "force-reupload: re-queued 1 rows" in out.getvalue()
+        assert service.upload_document.call_count == 2  # original + refresh

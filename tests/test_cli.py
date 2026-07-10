@@ -62,3 +62,17 @@ def test_init_project_uses_packaged_template_for_installed_cli(monkeypatch, tmp_
     assert code == 0
     assert (target / ".env").read_text(encoding="utf-8") == "XAI_API_KEY=packaged-template\n"
     assert "packaged environment template" in stream.getvalue()
+
+
+def test_main_dispatches_rag_subcommand_without_starting_server(monkeypatch):
+    import src.rag as rag_module
+
+    called = {}
+
+    def fake_rag_cli(args, stream=None, store=None):
+        called["args"] = list(args)
+        return 0
+
+    monkeypatch.setattr(rag_module, "rag_cli", fake_rag_cli)
+    assert cli.main(["rag", "status"]) == 0
+    assert called["args"] == ["status"]

@@ -524,7 +524,7 @@ _PROTOCOL_MEMBERS = (
     "save_task_memory", "get_similar_task_memories", "get_task_memory_count",
     "list_unsynced_task_memories", "mark_task_memory_synced",
     "mark_task_memory_sync_failed", "get_task_memories_by_remote_ids",
-    "count_unsynced_task_memories",
+    "count_unsynced_task_memories", "reset_task_memory_sync",
     "save_fact", "search_facts", "touch_facts", "delete_fact", "count_facts",
     "list_facts",
     "get_session", "save_session", "delete_session", "list_sessions",
