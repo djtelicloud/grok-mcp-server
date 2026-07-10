@@ -221,6 +221,10 @@ Core tools:
   xAI research jobs.
 - `remember_fact`, `search_knowledge`, `forget_fact`, `distill_session`: local
   knowledge memory.
+- `recall_workspace_memory`, `record_landed_outcome`,
+  `explain_workspace_evidence`, `workspace_memory_status`: explicit,
+  commit-anchored engineering evidence shared across local IDE agents. Records
+  require a verified `scripts/land` receipt; automatic prompt injection is off.
 - `web_search`, `x_search`, `remote_code_execution`: xAI server-side tools.
 - `read_local_file`, `list_project_files`: workspace inspection.
 - `git_status`, `git_diff`, `git_log`, `git_show`: read-only Git context.
@@ -229,6 +233,11 @@ Core tools:
 The public Streamable HTTP MCP endpoint intentionally exposes the unified
 `agent` surface for IDE use. The full stdio server exposes the broader tool
 set for local trusted workflows.
+
+Workspace-memory operations are also available locally as
+`unigrok-mcp memory status`, `unigrok-mcp memory sync`, and
+`unigrok-mcp memory import`. The Git Notes ref is local provenance and is not
+part of ordinary branch pushes.
 
 ## Architecture
 
@@ -239,7 +248,8 @@ UniGrok has three boundaries:
 - Model plane: API-backed Grok models are primary; authenticated local Grok CLI
   can serve CLI-plane models when available.
 - Local state: SQLite stores sessions, telemetry, research jobs, task memory,
-  and distilled knowledge under the configured state directory.
+  distilled knowledge, and commit-anchored workspace evidence under the
+  configured state directory.
 
 ```mermaid
 flowchart LR

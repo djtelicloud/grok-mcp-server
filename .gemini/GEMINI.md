@@ -28,3 +28,4 @@ Select modular tools based on the nature of the request:
 
 ## 5. Verification Requirements
 * `scripts/land` runs the full pytest suite against the exact commit that it fast-forwards to visible local `main`. Remote publishing is separate and only user-requested.
+* Use `.agents/skills/unigrok-workspace-memory/SKILL.md` for commit-anchored recall. Pass the Gemini worktree's own full HEAD and record one concise outcome only after `scripts/land` succeeds.

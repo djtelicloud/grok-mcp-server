@@ -58,3 +58,7 @@ Use these files when a task needs one of the Codex-only surfaces:
   report `NOT LANDED: <specific blocker>` and continue when agent-resolvable.
 - Do not remove the worktree after landing; another open Codex window or IDE
   may still reference it. Remote publication is a separate user-requested task.
+- For implementation, debugging, architecture, or review, use the tracked
+  `unigrok-workspace-memory` skill. Supply the Codex worktree's own full HEAD
+  to recall; after landing, record one concise verified outcome against the
+  SHA printed by `scripts/land`.

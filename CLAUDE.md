@@ -94,3 +94,8 @@ Never manually merge, overwrite a dirty tracked `main`, or remove the task
 worktree after landing because another open IDE may still use it. Fetch, push,
 PR, and release publication are separate operations performed only when the
 user explicitly requests them.
+
+For implementation, debugging, architecture, or review, use
+`.agents/skills/unigrok-workspace-memory/SKILL.md`. Recall against the Claude
+worktree's own full HEAD; after landing, record one concise verified outcome
+against the exact SHA printed by `scripts/land`.

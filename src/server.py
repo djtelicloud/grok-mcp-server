@@ -48,6 +48,10 @@ SERVER_INSTRUCTIONS = (
     "`remember_fact`/`search_knowledge`/`forget_fact` manage durable distilled "
     "facts that auto-inject into matching prompts, and `distill_session` "
     "condenses a chat session into facts in the background."
+    " Commit-anchored workspace memory: `recall_workspace_memory` returns "
+    "branch-relevant engineering evidence for a caller-supplied HEAD, while "
+    "`record_landed_outcome` accepts evidence only for commits certified by "
+    "the local `scripts/land` gate."
 )
 
 mcp = FastMCP(
@@ -123,6 +127,15 @@ from .tools.knowledge import (
     distill_session,
     register_knowledge_tools,
 )
+from .tools.workspace_memory import (
+    recall_workspace_memory,
+    record_landed_outcome,
+    explain_workspace_evidence,
+    workspace_memory_status,
+    sync_workspace_memory_notes,
+    import_workspace_memory_notes,
+    register_workspace_memory_tools,
+)
 from .tools.resources import register_resource_primitives
 
 # Register all modules
@@ -132,6 +145,7 @@ register_system_tools(mcp)
 register_git_tools(mcp)
 register_research_tools(mcp)
 register_knowledge_tools(mcp)
+register_workspace_memory_tools(mcp)
 register_resource_primitives(mcp)
 
 def main(argv: Optional[Iterable[str]] = None):

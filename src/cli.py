@@ -143,6 +143,11 @@ def main(argv: list[str] | None = None) -> int | None:
 
         return rag_cli(argv[1:])
 
+    if argv and argv[0] == "memory":
+        from src.workspace_memory import workspace_memory_cli
+
+        return workspace_memory_cli(argv[1:])
+
     from src import server
 
     api_key = os.getenv("XAI_API_KEY", "").strip()

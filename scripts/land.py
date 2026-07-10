@@ -259,16 +259,41 @@ def reconcile_runtime(repo: Path, paths: list[str]) -> str:
     return "smoke-tested"
 
 
-def write_receipt(git_dir: Path, *, head: str, branch: str, main_path: Path) -> None:
+def write_receipt(
+    git_dir: Path,
+    *,
+    head: str,
+    branch: str,
+    main_path: Path,
+    previous_main: str,
+    changed_paths: list[str],
+) -> None:
     receipts = git_dir / "unigrok-land" / "receipts"
     receipts.mkdir(parents=True, exist_ok=True)
-    (receipts / f"{head}.json").write_text(
+    receipt_path = receipts / f"{head}.json"
+    if receipt_path.exists():
+        try:
+            existing = json.loads(receipt_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError) as exc:
+            raise LandError(f"existing landing receipt is corrupt: {receipt_path}") from exc
+        existing_tests = existing.get("tests")
+        if existing.get("head") != head or (
+            existing_tests and existing_tests.get("status") != "passed"
+        ):
+            raise LandError(f"existing landing receipt is not a valid success receipt: {receipt_path}")
+        # Successful receipts are content-addressed provenance. Re-landing an
+        # already-landed commit must never change its receipt hash.
+        return
+    receipt_path.write_text(
         json.dumps(
             {
                 "head": head,
                 "branch": branch,
+                "previous_main": previous_main,
+                "changed_paths": changed_paths,
                 "main_worktree": str(main_path),
                 "test_command": DEFAULT_TEST_ARGS,
+                "tests": {"command": DEFAULT_TEST_ARGS, "status": "passed"},
                 "landed_at": time.time(),
             },
             indent=2,
@@ -338,7 +363,7 @@ def land(repo: Path) -> str:
             run(["git", "merge", "--ff-only", tested_head], cwd=main_path, capture=False)
             if git(main_path, "rev-parse", "HEAD") != tested_head:
                 raise LandError("shared main did not reach the tested commit")
-            write_receipt(common_dir, head=tested_head, branch=branch, main_path=main_path)
+            landing_paths = changed_paths(main_path, baseline, tested_head)
             paths, runtime_marker = runtime_changes(
                 common_dir,
                 main_path,
@@ -347,6 +372,17 @@ def land(repo: Path) -> str:
             )
             runtime = reconcile_runtime(main_path, paths)
             runtime_marker.write_text(tested_head + "\n", encoding="utf-8")
+            # The receipt is the workspace-memory trust boundary. Write it
+            # only after tests, fast-forward, and runtime reconciliation all
+            # succeed — exactly when this command can emit LANDED TO MAIN.
+            write_receipt(
+                common_dir,
+                head=tested_head,
+                branch=branch,
+                main_path=main_path,
+                previous_main=baseline,
+                changed_paths=landing_paths,
+            )
         print(f"Runtime: {runtime}", flush=True)
         return tested_head
 

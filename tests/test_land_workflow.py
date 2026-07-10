@@ -80,8 +80,17 @@ def test_land_fast_forwards_visible_main(repo_with_agent, monkeypatch):
     assert (main / "file.txt").read_text(encoding="utf-8") == "agent change\n"
     receipt = main / ".git" / "unigrok-land" / "receipts" / f"{expected}.json"
     assert receipt.is_file()
+    receipt_data = __import__("json").loads(receipt.read_text(encoding="utf-8"))
+    assert receipt_data["head"] == expected
+    assert receipt_data["previous_main"]
+    assert receipt_data["changed_paths"] == ["file.txt"]
+    assert receipt_data["tests"]["status"] == "passed"
     marker = main / ".git" / "unigrok-land" / "runtime-head"
     assert marker.read_text(encoding="utf-8").strip() == expected
+
+    original_receipt = receipt.read_bytes()
+    assert land.land(agent) == expected
+    assert receipt.read_bytes() == original_receipt
 
 
 def test_land_rebases_behind_agent_before_testing(repo_with_agent, monkeypatch):
@@ -152,6 +161,8 @@ def test_failed_runtime_reconciliation_is_retried_from_previous_main(repo_with_a
         land.land(agent)
 
     assert git(main, "rev-parse", "HEAD") == expected
+    failed_receipt = main / ".git" / "unigrok-land" / "receipts" / f"{expected}.json"
+    assert not failed_receipt.exists()
     seen = []
     monkeypatch.setattr(land, "reconcile_runtime", lambda repo, paths: seen.extend(paths) or "recovered")
 

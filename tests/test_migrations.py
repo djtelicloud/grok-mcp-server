@@ -18,7 +18,7 @@ from src.utils import GrokSessionStore
 # The current schema head. Bump this alongside any new migration — the
 # sequential-chain test below will fail loudly if the source and this pin
 # ever disagree.
-SCHEMA_HEAD = 10
+SCHEMA_HEAD = 11
 
 # Every table a fully migrated store must carry (sqlite internals and the
 # optional knowledge_fts shadow tables excluded — FTS5 availability is a
@@ -31,6 +31,7 @@ EXPECTED_TABLES = {
     "jobs",
     "routing_calibration",
     "knowledge",
+    "workspace_evidence",
 }
 
 

@@ -91,3 +91,4 @@ Multiple IDE agents can collaborate on this project concurrently. Follow these r
 3. **Mandatory Landing Gate**: Commit the intended work, then run `./scripts/land` from the task worktree. Do not manually merge or claim completion until it prints `LANDED TO MAIN: <sha>`.
 4. **Visible Main Is the Product**: Local `main` integration is mandatory. Remote fetch/push/publication is separate and happens only when the user explicitly asks for it.
 5. **Protect Open IDEs**: Never remove task worktrees after landing or overwrite a dirty tracked `main`; another IDE may still be using them.
+6. **Commit-Anchored Memory**: Use the `unigrok-workspace-memory` skill to recall evidence using the agent worktree's own full HEAD. After landing, record a concise outcome against the exact SHA printed by `scripts/land`; do not write Git Notes directly.

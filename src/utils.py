@@ -2124,6 +2124,59 @@ class GrokSessionStore:
                     await self._conn.rollback()
                     raise
 
+            if version < 11:
+                # Commit-anchored workspace evidence. SQLite is authoritative;
+                # note_synced_at IS NULL is the durable best-effort Git Notes
+                # mirror outbox. Evidence is deliberately separate from
+                # task_memory because technical decisions must not influence
+                # the model-routing advisor.
+                await self._conn.execute("BEGIN IMMEDIATE;")
+                try:
+                    await self._conn.execute("""
+                        CREATE TABLE IF NOT EXISTS workspace_evidence (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            evidence_id TEXT NOT NULL UNIQUE,
+                            repo_id TEXT NOT NULL,
+                            landed_sha TEXT NOT NULL,
+                            previous_main TEXT,
+                            kind TEXT NOT NULL DEFAULT 'decision',
+                            summary TEXT NOT NULL,
+                            terms TEXT,
+                            paths TEXT,
+                            symbols TEXT,
+                            tests TEXT,
+                            confidence REAL NOT NULL DEFAULT 0.8,
+                            supersedes TEXT,
+                            task_memory_ids TEXT,
+                            source_caller TEXT,
+                            receipt_hash TEXT NOT NULL,
+                            content_hash TEXT NOT NULL,
+                            note_ref TEXT,
+                            note_synced_at TEXT,
+                            sync_attempts INTEGER NOT NULL DEFAULT 0,
+                            sync_error TEXT,
+                            created_at TEXT,
+                            UNIQUE(repo_id, landed_sha, content_hash)
+                        )
+                    """)
+                    await self._conn.execute(
+                        "CREATE INDEX IF NOT EXISTS idx_workspace_evidence_repo_created "
+                        "ON workspace_evidence(repo_id, created_at DESC);"
+                    )
+                    await self._conn.execute(
+                        "CREATE INDEX IF NOT EXISTS idx_workspace_evidence_sha "
+                        "ON workspace_evidence(repo_id, landed_sha);"
+                    )
+                    await self._conn.execute(
+                        "CREATE INDEX IF NOT EXISTS idx_workspace_evidence_unsynced "
+                        "ON workspace_evidence(id) WHERE note_synced_at IS NULL;"
+                    )
+                    await self._conn.execute("PRAGMA user_version = 11;")
+                    await self._conn.commit()
+                except Exception:
+                    await self._conn.rollback()
+                    raise
+
             # knowledge_fts is (re)checked on EVERY init, not just inside the
             # v7 gate: FTS5 is a compile-time SQLite option, so a db created
             # on a build WITH it can be reopened by one WITHOUT it (and vice
@@ -2764,6 +2817,189 @@ class GrokSessionStore:
                 raise
             await self._on_write_completed()
         return count
+
+    # ── Commit-anchored workspace evidence (v11) ───────────────────────────
+
+    @staticmethod
+    def _decode_workspace_evidence_row(row: Any) -> Dict[str, Any]:
+        item = dict(row)
+        for key in ("paths", "symbols", "tests", "supersedes", "task_memory_ids"):
+            raw = item.get(key)
+            if isinstance(raw, str) and raw:
+                try:
+                    item[key] = json.loads(raw)
+                except (TypeError, ValueError):
+                    item[key] = [] if key != "tests" else {}
+            elif raw is None:
+                item[key] = [] if key != "tests" else {}
+        return item
+
+    @_with_write_retry_async
+    async def save_workspace_evidence(self, payload: Dict[str, Any]) -> int:
+        await self._ensure_initialized()
+        evidence_id = str(payload.get("evidence_id") or "").strip()
+        repo_id = str(payload.get("repo_id") or "").strip()
+        landed_sha = str(payload.get("landed_sha") or "").strip()
+        content_hash = str(payload.get("content_hash") or "").strip()
+        receipt_hash = str(payload.get("receipt_hash") or "").strip()
+        if not all((evidence_id, repo_id, landed_sha, content_hash, receipt_hash)):
+            raise ValueError("workspace evidence identity fields are required")
+        summary = _bounded_redacted(str(payload.get("summary") or ""), 2000)
+        if not summary:
+            raise ValueError("workspace evidence summary is required")
+        terms = " ".join(_task_terms(" ".join([
+            summary,
+            " ".join(str(p) for p in payload.get("paths") or []),
+            " ".join(str(s) for s in payload.get("symbols") or []),
+        ])))
+        now_str = datetime.now().isoformat()
+        async with self._lock:
+            await self._conn.execute("BEGIN IMMEDIATE;")
+            try:
+                async with self._conn.execute(
+                    "SELECT id FROM workspace_evidence "
+                    "WHERE repo_id = ? AND landed_sha = ? AND content_hash = ?",
+                    (repo_id, landed_sha, content_hash),
+                ) as cursor:
+                    existing = await cursor.fetchone()
+                if existing:
+                    await self._conn.commit()
+                    return int(existing[0])
+                cursor = await self._conn.execute(
+                    """
+                    INSERT INTO workspace_evidence (
+                        evidence_id, repo_id, landed_sha, previous_main, kind,
+                        summary, terms, paths, symbols, tests, confidence,
+                        supersedes, task_memory_ids, source_caller, receipt_hash,
+                        content_hash, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        evidence_id,
+                        repo_id,
+                        landed_sha,
+                        str(payload.get("previous_main") or ""),
+                        str(payload.get("kind") or "decision")[:32],
+                        summary,
+                        terms,
+                        json.dumps(payload.get("paths") or [], separators=(",", ":")),
+                        json.dumps(payload.get("symbols") or [], separators=(",", ":")),
+                        json.dumps(payload.get("tests") or {}, separators=(",", ":")),
+                        max(0.0, min(float(payload.get("confidence", 0.8)), 1.0)),
+                        json.dumps(payload.get("supersedes") or [], separators=(",", ":")),
+                        json.dumps(payload.get("task_memory_ids") or [], separators=(",", ":")),
+                        _bounded_redacted(str(payload.get("source_caller") or "unknown"), 80),
+                        receipt_hash,
+                        content_hash,
+                        now_str,
+                    ),
+                )
+                row_id = int(cursor.lastrowid)
+                await self._conn.commit()
+            except Exception:
+                await self._conn.rollback()
+                raise
+            await self._on_write_completed()
+        return row_id
+
+    @_with_read_retry_async
+    async def get_workspace_evidence(self, evidence_id: str) -> Optional[Dict[str, Any]]:
+        await self._ensure_initialized()
+        async with self._read_conn() as conn:
+            async with conn.execute(
+                "SELECT * FROM workspace_evidence WHERE evidence_id = ?",
+                (str(evidence_id or ""),),
+            ) as cursor:
+                row = await cursor.fetchone()
+        return self._decode_workspace_evidence_row(row) if row else None
+
+    @_with_read_retry_async
+    async def list_workspace_evidence(
+        self, repo_id: str, limit: int = 500
+    ) -> List[Dict[str, Any]]:
+        await self._ensure_initialized()
+        bounded = max(1, min(int(limit or 500), 1000))
+        async with self._read_conn() as conn:
+            async with conn.execute(
+                "SELECT * FROM workspace_evidence WHERE repo_id = ? "
+                "ORDER BY id DESC LIMIT ?",
+                (str(repo_id or ""), bounded),
+            ) as cursor:
+                rows = await cursor.fetchall()
+        return [self._decode_workspace_evidence_row(row) for row in rows]
+
+    @_with_read_retry_async
+    async def list_unsynced_workspace_evidence(
+        self, limit: int = 50, max_attempts: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
+        await self._ensure_initialized()
+        query = "SELECT * FROM workspace_evidence WHERE note_synced_at IS NULL"
+        params: List[Any] = []
+        if max_attempts is not None:
+            query += " AND sync_attempts < ?"
+            params.append(int(max_attempts))
+        query += " ORDER BY id ASC LIMIT ?"
+        params.append(max(1, min(int(limit or 50), 200)))
+        async with self._read_conn() as conn:
+            async with conn.execute(query, params) as cursor:
+                rows = await cursor.fetchall()
+        return [self._decode_workspace_evidence_row(row) for row in rows]
+
+    @_with_write_retry_async
+    async def mark_workspace_evidence_synced(
+        self, evidence_id: str, note_ref: str
+    ) -> None:
+        await self._ensure_initialized()
+        async with self._lock:
+            await self._conn.execute("BEGIN IMMEDIATE;")
+            try:
+                await self._conn.execute(
+                    "UPDATE workspace_evidence SET note_synced_at = ?, note_ref = ?, "
+                    "sync_error = NULL WHERE evidence_id = ?",
+                    (datetime.now().isoformat(), str(note_ref or ""), str(evidence_id or "")),
+                )
+                await self._conn.commit()
+            except Exception:
+                await self._conn.rollback()
+                raise
+            await self._on_write_completed()
+
+    @_with_write_retry_async
+    async def mark_workspace_evidence_sync_failed(
+        self, evidence_id: str, error: str
+    ) -> None:
+        await self._ensure_initialized()
+        async with self._lock:
+            await self._conn.execute("BEGIN IMMEDIATE;")
+            try:
+                await self._conn.execute(
+                    "UPDATE workspace_evidence SET sync_attempts = sync_attempts + 1, "
+                    "sync_error = ? WHERE evidence_id = ?",
+                    (_bounded_redacted(str(error or ""), 500), str(evidence_id or "")),
+                )
+                await self._conn.commit()
+            except Exception:
+                await self._conn.rollback()
+                raise
+            await self._on_write_completed()
+
+    @_with_read_retry_async
+    async def count_workspace_evidence(self) -> int:
+        await self._ensure_initialized()
+        async with self._read_conn() as conn:
+            async with conn.execute("SELECT COUNT(*) FROM workspace_evidence") as cursor:
+                row = await cursor.fetchone()
+        return int(row[0] if row else 0)
+
+    @_with_read_retry_async
+    async def count_unsynced_workspace_evidence(self) -> int:
+        await self._ensure_initialized()
+        async with self._read_conn() as conn:
+            async with conn.execute(
+                "SELECT COUNT(*) FROM workspace_evidence WHERE note_synced_at IS NULL"
+            ) as cursor:
+                row = await cursor.fetchone()
+        return int(row[0] if row else 0)
 
     # pattern_cache (get_cached_pattern/save_cached_pattern) removed — the
     # table was write-only with zero callers. Task memory (task_memory table)

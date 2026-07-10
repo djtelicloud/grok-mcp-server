@@ -94,3 +94,8 @@ completion: do not tell the user an implementation is complete until the
 command prints `LANDED TO MAIN: <sha>`. Never remove the task worktree after
 landing, because another open IDE may still use it. Fetch, push, PR, and release
 publication are separate operations performed only when explicitly requested.
+
+For implementation, debugging, architecture, or review, use the tracked
+`.agents/skills/unigrok-workspace-memory/SKILL.md`. Recall against the Codex
+worktree's own full HEAD, and record durable evidence only after `scripts/land`
+certifies the exact commit.
