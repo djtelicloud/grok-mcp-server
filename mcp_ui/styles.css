@@ -1444,6 +1444,12 @@ pre {
   display: none !important;
 }
 
+.alert-banner.preview-banner {
+  color: var(--cyan);
+  background: rgba(79, 231, 255, 0.08);
+  border-bottom-color: var(--cyan);
+}
+
 .credential-alert {
   display: flex;
   justify-content: space-between;

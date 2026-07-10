@@ -10,7 +10,7 @@
   <body>
     <main class="app-shell">
       <div id="dockerOfflineAlert" class="alert-banner hidden">
-        <span>⚠️ Local UniGrok Gateway Offline! No connection detected.</span>
+        <span id="offlineAlertMessage">⚠️ Local UniGrok Gateway Offline! No connection detected.</span>
         <div class="alert-actions" style="display: inline-flex; gap: 8px; align-items: center; flex-wrap: wrap;">
           <button id="dockerRestartBtn" type="button" class="small-btn-glow">Restart Container</button>
           <div id="restartManualFallback" class="hidden" style="display: inline-flex; gap: 8px; align-items: center;">

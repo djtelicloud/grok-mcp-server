@@ -121,6 +121,18 @@ def test_mcp_ui_docker_health_restart_button():
     assert 'id="dockerRestartBtn"' in index.text
     assert 'id="copyManualRestartBtn"' in index.text
     assert 'id="restartManualFallback"' in index.text
+    assert 'id="offlineAlertMessage"' in index.text
+
+
+def test_mcp_ui_file_preview_routes_to_live_control_center():
+    with TestClient(create_app(), base_url="http://localhost:8080") as client:
+        script = client.get("/ui/app.js")
+
+    assert 'window.location.protocol === "file:"' in script.text
+    assert 'const LIVE_UI_URL = "http://localhost:4765/ui/"' in script.text
+    assert 'restartBtn.dataset.action = "open-live-ui"' in script.text
+    assert "window.location.assign(LIVE_UI_URL)" in script.text
+    assert "pollReadyz();" in script.text
 
 
 def test_mcp_ui_browser_warning():

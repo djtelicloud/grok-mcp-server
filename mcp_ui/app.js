@@ -1584,8 +1584,33 @@ function checkBrowserCompatibility() {
 }
 
 let isOffline = false;
+const LIVE_UI_URL = "http://localhost:4765/ui/";
+
+function isFilePreview() {
+  return window.location.protocol === "file:";
+}
+
+function renderFilePreviewNotice() {
+  const alertBanner = $("dockerOfflineAlert");
+  const message = $("offlineAlertMessage");
+  const restartBtn = $("dockerRestartBtn");
+  const fallback = $("restartManualFallback");
+  if (!alertBanner || !message || !restartBtn) return;
+  isOffline = false;
+  message.textContent = "Preview copy — runtime checks and MCP actions require the live Control Center.";
+  restartBtn.textContent = "Open Live UI";
+  restartBtn.dataset.action = "open-live-ui";
+  fallback?.classList.add("hidden");
+  alertBanner.classList.add("preview-banner");
+  alertBanner.classList.remove("hidden");
+  setStatus("idle", "Preview");
+}
 
 async function pollReadyz() {
+  if (isFilePreview()) {
+    renderFilePreviewNotice();
+    return;
+  }
   try {
     const res = await fetch("/readyz");
     if (res.ok) {
@@ -1613,6 +1638,10 @@ function setupDockerRestart() {
   const restartBtn = $("dockerRestartBtn");
   if (restartBtn) {
     restartBtn.addEventListener("click", async () => {
+      if (isFilePreview() || restartBtn.dataset.action === "open-live-ui") {
+        window.location.assign(LIVE_UI_URL);
+        return;
+      }
       const originalText = restartBtn.innerText;
       restartBtn.innerText = "Restarting...";
       restartBtn.disabled = true;
@@ -1651,7 +1680,8 @@ function setupDockerRestart() {
     });
   }
 
-  // Start polling every 5 seconds
+  // Check immediately, then poll the live HTTP origin every 5 seconds.
+  pollReadyz();
   setInterval(pollReadyz, 5000);
 }
 
