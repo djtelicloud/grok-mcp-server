@@ -1225,7 +1225,13 @@ def get_xai_client():
                 if not XAI_API_KEY:
                     raise ValueError("XAI_API_KEY is not configured in the environment.")
                 from xai_sdk import Client
-                _client = Client(api_key=XAI_API_KEY)
+                # Collections (knowledge + task-memory mirrors) require a
+                # SEPARATE management API key on the xAI side — the inference
+                # key alone yields "Please provide a management API key."
+                # Optional: unset keeps inference-only behavior, and the
+                # mirrors fail open with that exact reason in `rag status`.
+                management_key = os.getenv("XAI_MANAGEMENT_API_KEY", "").strip() or None
+                _client = Client(api_key=XAI_API_KEY, management_api_key=management_key)
     if _eval_record_enabled():
         # Opt-in eval recording tap (UNIGROK_EVAL_RECORD=1): a thin per-call
         # proxy that appends completed responses to a cassette event log.

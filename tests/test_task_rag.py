@@ -946,3 +946,41 @@ class TestEndToEndIntegration:
         assert stats["applied_flips"] == 1
         assert stats["shadow_flips"] == 1
         assert stats["fused_score_count"] >= 1
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Management-key wiring (xAI Collections is a management API)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestManagementKeyWiring:
+    def _fresh_client(self, monkeypatch, mgmt_env):
+        import src.utils as utils_module
+
+        created = {}
+
+        class FakeClient:
+            def __init__(self, api_key=None, management_api_key=None):
+                created["api_key"] = api_key
+                created["management_api_key"] = management_api_key
+
+        monkeypatch.setattr("xai_sdk.Client", FakeClient)
+        monkeypatch.setattr(utils_module, "_client", None)
+        if mgmt_env is None:
+            monkeypatch.delenv("XAI_MANAGEMENT_API_KEY", raising=False)
+        else:
+            monkeypatch.setenv("XAI_MANAGEMENT_API_KEY", mgmt_env)
+        utils_module.get_xai_client()
+        return created
+
+    def test_management_key_passed_when_set(self, monkeypatch):
+        created = self._fresh_client(monkeypatch, "xai-mgmt-test-key")
+        assert created["management_api_key"] == "xai-mgmt-test-key"
+        assert created["api_key"]  # inference key still wired
+
+    def test_absent_management_key_passes_none(self, monkeypatch):
+        created = self._fresh_client(monkeypatch, None)
+        assert created["management_api_key"] is None
+
+    def test_blank_management_key_passes_none(self, monkeypatch):
+        created = self._fresh_client(monkeypatch, "   ")
+        assert created["management_api_key"] is None

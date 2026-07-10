@@ -2763,7 +2763,7 @@ class TestRunBlockingResilience:
         constructed = []
 
         class SlowClient:
-            def __init__(self, api_key=None):
+            def __init__(self, api_key=None, management_api_key=None):
                 time.sleep(0.02)
                 constructed.append(self)
 
