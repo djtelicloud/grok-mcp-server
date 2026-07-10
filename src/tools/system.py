@@ -816,7 +816,8 @@ async def grok_mcp_discover_self() -> SystemResult:
                 "/docs/okf/reasoning-guard.md",
                 "/docs/okf/grok-4.5-pinning.md",
                 "/docs/okf/media-imagine.md",
-                "/docs/okf/metrics-tool.md"
+                "/docs/okf/metrics-tool.md",
+                "/docs/okf/faq.md"
             ]
         }
 
@@ -827,7 +828,8 @@ async def grok_mcp_discover_self() -> SystemResult:
             "## OKF (Open Knowledge Format) Bundle\n"
             "- **Manifest / Manifest Root:** `/docs/okf/okf-manifest.json`\n"
             "- **Index Document:** `/docs/okf/index.md`\n"
-            "For full schemas, reasoning level weights, media generation params, and metrics, ingest these files.\n\n"
+            "- **Verified FAQ:** `/docs/okf/faq.md` — consulted by Grok on demand for UniGrok support, never auto-injected.\n"
+            "For full schemas, reasoning level weights, media generation params, metrics, and verified support answers, ingest these files.\n\n"
             "## WebMCP Manifest\n"
             "- **Path:** `/.well-known/webmcp`\n"
             "Exposes browser-native callable tools (like `get_schema`, `example_call`, etc.) directly on the console documentation UI."

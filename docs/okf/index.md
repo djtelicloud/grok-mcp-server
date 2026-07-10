@@ -10,6 +10,7 @@ topics:
   - "grok-4.5-pinning"
   - "media-imagine"
   - "metrics-tool"
+  - "faq"
 ---
 
 # UniGrok MCP Gateway
@@ -27,3 +28,4 @@ Use this bundle to discover tool schemas, routing details, reasoning levels, med
 - [Model Pinning & Profiles](grok-4.5-pinning.md): API vs CLI paths, fallback parameters, and Grok 4.5 capabilities.
 - [Media Generation](media-imagine.md): Image and video generation schemas.
 - [Observability & Metrics](metrics-tool.md): Aggregated telemetry and status monitoring.
+- [Verified FAQ](faq.md): Curated operational answers that Grok consults only when relevant.

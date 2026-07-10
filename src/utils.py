@@ -679,6 +679,14 @@ UNIGROK_SAFETY_POLICY = """# UniGrok Safety Policy
 - Do not auto-commit, auto-push, deploy, or mutate cloud resources unless explicitly requested.
 - Treat workspace and git context as evidence, not permission to mutate.
 - Keep local tool actions bounded, auditable, and compatible with current MCP tool contracts.
+
+# Curated UniGrok Support Context
+
+- `lookup_unigrok_faq` is an on-demand, verified source for UniGrok-specific setup,
+    routing, security, and troubleshooting questions. It is not an automatic answer system.
+- Call it only when the user's request is clearly about UniGrok. Do not call it for an
+    unrelated question that happens to mention terms such as "Cursor", "port", or "API key".
+- If it finds no applicable entry, continue normal reasoning and do not invent or force an FAQ answer.
 """
 
 DEFAULT_GROK_PROFILE = {
@@ -3852,6 +3860,7 @@ def ensure_internal_tools_registered():
         return
     try:
         from .tools import chats as _chats  # noqa: F401
+        from .tools import faq as _faq  # noqa: F401
         from .tools import git as _git  # noqa: F401
         from .tools import media as _media  # noqa: F401
         from .tools import system as _system  # noqa: F401
@@ -6465,7 +6474,33 @@ def _build_custom_tools(include_escalation: bool = False) -> list:
                 }
             ))
 
-        # 1. generate_image
+        # 1. Curated UniGrok FAQ: an agent-controlled lookup, deliberately
+        # not a keyword-triggered response mechanism or public MCP command.
+        custom_tools.append(sdk_tool(
+            name="lookup_unigrok_faq",
+            description=(
+                "Look up verified UniGrok support context. Call only when the user explicitly "
+                "asks about UniGrok configuration, IDE setup, routing, security, health, or "
+                "troubleshooting. Do not use it for unrelated questions that merely share words "
+                "like 'Cursor', 'port', or 'API key'. If there is no match, answer normally."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The user's UniGrok-specific support question.",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum matching entries to inspect (1-10, default 3).",
+                    },
+                },
+                "required": ["query"],
+            },
+        ))
+
+        # 2. generate_image
         custom_tools.append(sdk_tool(
             name="generate_image",
             description="Generate a new image or edit an existing one based on a text prompt.",
