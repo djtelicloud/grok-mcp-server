@@ -133,6 +133,8 @@ def test_mcp_ui_file_preview_routes_to_live_control_center():
     assert 'restartBtn.dataset.action = "open-live-ui"' in script.text
     assert 'style.setProperty("display", "none", "important")' in script.text
     assert "window.location.assign(LIVE_UI_URL)" in script.text
+    assert "window.location.replace(LIVE_UI_URL)" in script.text
+    assert "setTimeout(renderFilePreviewNotice, 700)" in script.text
     assert "pollReadyz();" in script.text
 
     with TestClient(create_app(), base_url="http://localhost:8080") as client:

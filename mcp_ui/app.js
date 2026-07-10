@@ -1769,6 +1769,14 @@ function setupCostEstimator() {
 
 // --- Initializer ---
 function init() {
+  if (isFilePreview()) {
+    // IDE artifact viewers may reopen this source file. Move immediately to
+    // the server-backed UI; show the compact fallback only if navigation is
+    // blocked by the host.
+    setTimeout(renderFilePreviewNotice, 700);
+    window.location.replace(LIVE_UI_URL);
+    return;
+  }
   document.querySelectorAll(".tab-panel").forEach((panel) => {
     panel.setAttribute("role", "tabpanel");
     panel.setAttribute("data-region", panel.dataset.region || panel.id);
