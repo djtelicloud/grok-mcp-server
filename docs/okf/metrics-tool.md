@@ -44,9 +44,19 @@ cost, latency, success, model, caller, token, and plane aggregates, while
   latency, model, and locally estimated tokens. Per-request dollar cost and
   remaining SuperGrok quota are unavailable from xAI and are represented as
   unknown, not zero.
-- Optional `XAI_MANAGEMENT_API_KEY` plus `UNIGROK_XAI_TEAM_ID` enables a cached
-  team-wide API usage comparison. It may include API traffic outside UniGrok
-  and never changes CLI statistics or the local ledger.
+- An advanced, optional organization-wide API usage comparison may be enabled
+  by operators. Ordinary users do not need a team id or management key: local
+  API cost and CLI activity tracking work without them. Organization totals
+  may include API traffic outside UniGrok and never change CLI statistics.
+
+## Credential-plane status
+
+`grok_mcp_discover_self`, `grok_mcp_status(view="json")`, `/runtimez`, and
+public `agent` results share a versioned `credential_planes` object. It reports
+the CLI-first preference, effective plane, non-secret readiness, local-usage
+coverage, and bounded repair actions. Agents must ask the user before running
+installation, device-auth, or secret-configuration actions and suppress repeat
+prompts until the notice id changes.
 
 ## Circuit Breakers & Failover
 

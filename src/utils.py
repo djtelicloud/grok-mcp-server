@@ -33,6 +33,11 @@ from .routing import (
     extract_routing_features,
     make_routing_receipt,
 )
+from .credentials import (
+    CLI_AUTH_SETUP_COMMAND,
+    build_credential_plane_contract,
+    credential_plane_policy,
+)
 
 # Path Resolver for zero-config portability
 class PathResolver:
@@ -190,10 +195,6 @@ def grok_cli_available() -> bool:
     return bool(shutil.which(path) or Path(path).exists())
 
 
-CLI_AUTH_SETUP_COMMAND = (
-    "docker exec -it grok-mcp-server env -u XAI_API_KEY -u GROK_API_KEY "
-    "grok login --device-auth"
-)
 _CLI_PLANE_STATUS_TTL_SEC = 30.0
 _CLI_PLANE_STATUS_CACHE: Dict[str, Any] = {"key": None, "at": 0.0, "value": None}
 _CLI_PLANE_STATUS_LOCK = threading.Lock()
@@ -334,6 +335,19 @@ def get_unigrok_runtime() -> str:
 
 def is_cloudrun_runtime() -> bool:
     return get_unigrok_runtime() == "cloudrun"
+
+
+def credential_plane_contract(
+    cli_status: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Return the shared non-secret plane health and action contract."""
+
+    return build_credential_plane_contract(
+        api_configured=xai_api_key_configured(),
+        cli_status=cli_status if cli_status is not None else grok_cli_plane_status(),
+        cloudrun=is_cloudrun_runtime(),
+        containerized=Path("/.dockerenv").exists(),
+    )
 
 
 def local_context_enabled() -> bool:
@@ -817,6 +831,34 @@ def _build_grok_cli_args(
 
 def prefer_cli_when_api_key_missing() -> bool:
     return not xai_api_key_configured() and cli_plane_ready_for_local_runtime()
+
+
+def prefer_cli_for_route(
+    *,
+    route_class: str,
+    thinking_mode: bool,
+) -> bool:
+    """Prefer subscription CLI for compatible unpinned local work.
+
+    Grok 4.5 thinking, vision, and multi-agent research are API-native. When
+    the API key is absent, CLI remains the graceful service-saving route even
+    for a request that asked for thinking; the receipt records that downgrade.
+    """
+
+    if (
+        os.environ.get("UNI_GROK_TESTING") == "1"
+        and xai_api_key_configured()
+    ):
+        # Offline cassettes patch the API client and must never escape to a
+        # real host CLI merely because it happens to be installed/authenticated.
+        return False
+    if not cli_plane_ready_for_local_runtime():
+        return False
+    if not xai_api_key_configured():
+        return True
+    if credential_plane_policy(cloudrun=is_cloudrun_runtime()) != "cli_first":
+        return False
+    return not thinking_mode and route_class not in {"vision", "research"}
 
 
 def cli_native_session_ids_enabled() -> bool:
@@ -4087,6 +4129,7 @@ class MetaLayer:
     degraded: bool = False
     routing_why: str = "auto"
     routing_receipt: Dict[str, Any] = field(default_factory=dict)
+    credentials: Dict[str, Any] = field(default_factory=dict)
     context_id: Optional[str] = None
     # Honest terminal outcome: final_answer | depth_exhausted | budget_exhausted
     # | fallback | error. Set at every terminal point; "unknown" means the
@@ -7012,22 +7055,6 @@ async def _select_routing_model(
     )
     route_uses_reasoning = route_class in ("planning", "vision", "research")
 
-    if prefer_cli_when_api_key_missing():
-        model = keyless_cli_model(None, route_uses_reasoning)
-        why = "cost" if route_class == "coding" else "auto"
-        receipt = make_routing_receipt(
-            mode=mode,
-            route_class=route_class,
-            model=model,
-            why=why,
-            why_detail="keyless_cli",
-            features=features,
-            candidates=[{"model": model, "rank": 0, "selected": True}],
-            evidence_source="credential_plane",
-            catalog_source="grok_cli",
-        )
-        return model, why, receipt, route_uses_reasoning
-
     alias = route_class if route_class in _MODEL_ALIAS_ENV_OVERRIDES else "planning"
     env_name = _MODEL_ALIAS_ENV_OVERRIDES[alias]
     env_model = os.environ.get(env_name, "").strip()
@@ -7049,6 +7076,27 @@ async def _select_routing_model(
             pin_source=env_name,
         )
         return env_model, "pin", receipt, route_uses_reasoning
+
+    if prefer_cli_for_route(route_class=route_class, thinking_mode=thinking_mode):
+        model = keyless_cli_model(None, route_uses_reasoning)
+        why = "cost"
+        why_detail = (
+            "api_key_missing_cli"
+            if not xai_api_key_configured()
+            else "cli_first_policy"
+        )
+        receipt = make_routing_receipt(
+            mode=mode,
+            route_class=route_class,
+            model=model,
+            why=why,
+            why_detail=why_detail,
+            features=features,
+            candidates=[{"model": model, "rank": 0, "selected": True}],
+            evidence_source="credential_plane",
+            catalog_source="grok_cli",
+        )
+        return model, why, receipt, route_uses_reasoning
 
     catalog_ids, catalog_source, catalog_available = await _MODEL_RESOLVER.catalog_snapshot()
     telemetry, calibration = await get_routing_advisor().selection_evidence(active_store)
@@ -7135,7 +7183,6 @@ async def orchestrate(
         if subagents_manifest:
             dynamic_sys_prompt += f"\n\n{subagents_manifest}"
 
-    keyless_cli_direct = prefer_cli_when_api_key_missing()
     profile_model, routing_why, routing_receipt, route_uses_reasoning = await _select_routing_model(
         prompt=prompt,
         mode=mode,
@@ -7145,7 +7192,8 @@ async def orchestrate(
         input_messages=input_messages,
         enable_agentic=enable_agentic,
     )
-    if keyless_cli_direct and thinking_mode:
+    direct_cli = is_cli_model(profile_model)
+    if direct_cli and thinking_mode:
         logging.getLogger("GrokMCP").info(
             "thinking_mode requires the xAI API plane; using direct Grok CLI route because XAI_API_KEY is not configured."
         )
@@ -7180,7 +7228,7 @@ async def orchestrate(
     #   2. the route when UNIGROK_FORCE_FAST is truthy (env kill-switch),
     #   3. the fallback when AgentLoop raises.
     force_fast = os.environ.get("UNIGROK_FORCE_FAST", "").strip().lower() in ("1", "true", "yes")
-    use_agentic = enable_agentic and not force_fast and not keyless_cli_direct
+    use_agentic = enable_agentic and not force_fast and not direct_cli
     # Track intelligence-route failovers so the fast-path outcome stays honest.
     degraded_route = False
 
@@ -7520,6 +7568,81 @@ async def run_agent_turn(
     if system_parts:
         dynamic_sys_prompt += "\nAdditional Instructions:\n" + "\n\n".join(system_parts)
 
+    try:
+        cli_status = await run_blocking(
+            grok_cli_plane_status,
+            timeout_sec=5.0,
+            timeout=6.0,
+        )
+    except Exception:
+        cli_status = {
+            "state": "unreachable",
+            "ready": False,
+            "binary": grok_cli_available(),
+            "auth": "probe_failed",
+            "setup_command": CLI_AUTH_SETUP_COMMAND,
+        }
+    credentials = credential_plane_contract(cli_status)
+    if not credentials["service_usable"]:
+        return MetaLayer(
+            generation=(
+                "UniGrok cannot run model work because neither credential plane is ready. "
+                "Inspect `credentials.notices`, ask the user for permission, and perform "
+                "only the selected global service repair. Never request XAI_API_KEY in chat "
+                "or store it in the caller project."
+            ),
+            finish_reason="error",
+            route="credential-setup",
+            plane="local",
+            model="unavailable",
+            degraded=True,
+            routing_why="credentials",
+            credentials=credentials,
+            context_id=context_id,
+        )
+
+    request_requires_api = bool(
+        thinking_mode
+        or mode == "research"
+        or (model and not is_cli_model(model))
+        or extract_routing_features(
+            final_prompt,
+            reason_score=0,
+            input_messages=input_messages or None,
+            enable_agentic=enable_agentic,
+        ).get("has_image")
+    )
+    if request_requires_api and not credentials["api"]["available"]:
+        request_credentials = json.loads(json.dumps(credentials))
+        for notice in request_credentials["notices"]:
+            if notice.get("plane") == "API":
+                notice.update({
+                    "severity": "error",
+                    "blocking": True,
+                    "prompt_user": True,
+                    "prompt_when": "now",
+                    "message": (
+                        "This request requires the xAI API plane, but XAI_API_KEY is "
+                        "missing from the global UniGrok service environment. Ask permission "
+                        "to help configure it securely; never request the key in chat."
+                    ),
+                })
+        return MetaLayer(
+            generation=(
+                "This request requires the xAI API plane, but XAI_API_KEY is not configured. "
+                "Inspect `credentials.api.action`, ask permission to help with the global "
+                "service `.env`, and never request or echo the key in chat."
+            ),
+            finish_reason="error",
+            route="credential-setup",
+            plane="local",
+            model=model or "api-required",
+            degraded=True,
+            routing_why="credentials",
+            credentials=request_credentials,
+            context_id=context_id,
+        )
+
     layer = await orchestrate(
         prompt=final_prompt,
         session=session,
@@ -7537,6 +7660,7 @@ async def run_agent_turn(
         caller=caller,
         require_reasoning_level=require_reasoning_level,
     )
+    layer.credentials = credentials
 
     if session and layer.generation:
         history = await load_history(session, store)

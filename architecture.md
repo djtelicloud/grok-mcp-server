@@ -122,11 +122,17 @@ During the collaborative review, `grok-4.3` identified several structural bottle
 ```mermaid
 flowchart TD
     Start([Prompt Received]) --> Context[Query Dynamic Workspace Context + context_id]
-    Context --> Features[Extract bounded prompt-free routing features]
+    Context --> Credentials[Probe non-secret API / CLI plane health]
+    Credentials --> Usable{Either plane usable?}
+    Usable -- No --> Setup[Return permission-gated credential actions]
+    Usable -- Yes --> Features[Extract bounded prompt-free routing features]
     Features --> Pin{Explicit model or env override?}
     Pin -- Yes --> Receipt[Create v1 routing receipt]
     Pin -- No --> Class[Classify: planning / coding / vision / research]
-    Class --> Catalog[Filter up to 3 candidates through cached live catalog]
+    Class --> Plane{CLI-first compatible route?}
+    Plane -- Yes --> CLIChoice[Select Grok CLI subscription model]
+    CLIChoice --> Receipt
+    Plane -- No --> Catalog[Filter up to 3 API candidates through cached live catalog]
     Catalog --> Evidence[Apply fresh calibration, then mature telemetry, with quality hysteresis]
     Evidence --> Receipt
     Receipt --> ThinkingDecide{Explicit thinking path?}
@@ -161,6 +167,14 @@ metadata; prompts are never copied into the receipt. Planning cold-starts on
 `grok-4.20-multi-agent*` slug. A peer can displace the stable default only when
 fresh eval calibration or mature local telemetry clears the 0.15 quality
 margin, which also provides deterministic anti-flap hysteresis.
+
+The local plane policy defaults to `cli_first`: compatible unpinned planning
+and coding work use the authenticated Grok CLI subscription. Explicit model or
+environment pins still win, while thinking, vision, and multi-agent research
+remain API-native. Discovery, status, `/runtimez`, and every public agent result
+carry the same versioned `credential_planes` contract. Agents prompt once per
+notice id and must obtain user approval before installation, device auth, or
+secure server-environment changes.
 
 ---
 
@@ -198,8 +212,9 @@ The structured usage ledger distinguishes billing truth from observation.
 API rows carry xAI's exact per-response billed cost and provider token counts;
 CLI rows carry locally observed request/success/latency/model data plus clearly
 labeled token estimates because the SuperGrok subscription exposes neither
-per-request cost nor quota through the API. Optional Management API usage is a
-team-wide comparison only and never mutates or inflates CLI statistics.
+per-request cost nor quota through the API. Advanced organization-wide
+Management API usage is optional and never mutates or inflates CLI statistics;
+ordinary users need neither a team id nor a management key for the local ledger.
 
 **Knowledge memory (v7)**: facts are deduped on exact `(scope, fact)` text, secret-redacted and bounded at rest. Search rides an FTS5 index (`knowledge_fts`, bm25 ranking) when the SQLite build has it — probed with a TEMP virtual table on EVERY store init, never assumed, since FTS5 is a compile-time option and a db can move between builds; the index is dual-written (no triggers, so knowledge writes never break without FTS5) and self-heals at init via an id-level divergence rebuild (unindexed facts and orphaned index rows are detected even when they cancel out in row counts). Builds without FTS5 fall back to a LIKE-prefiltered term-overlap ranking. Distillation: `distill_session` (MCP tool) or `UNIGROK_AUTO_DISTILL=1` (once per session per process, past a message threshold) submits a `JobManager` job that condenses the stored session history into 3-8 facts via the shared tool-free structured-parse machinery (`_parse_structured` + pydantic `FactList` — the same seam the reflection reviewer uses). An optional capability-gated adapter (`UNIGROK_COLLECTIONS=1`, xai_sdk ≥ 1.17 `client.collections`) mirrors facts into a named xAI collection best-effort and merges collection search results into `search_knowledge`; the local table remains the source of truth and the hot context path never queries the cloud.
 
@@ -245,9 +260,11 @@ Cost accumulates across attempts and reviewer calls against ONE shared budget (`
 
 ---
 
-## 6. Local CLI Fallback Model
+## 6. CLI-First Local Plane and API Failover
 
-If the API plane encounters issues, the execution falls back to the CLI plane:
+Compatible unpinned local work selects the CLI plane first when its grok.com
+OAuth session is healthy. API-native paths use API directly, and an API call
+that fails may still recover through CLI:
 
 ```
 [API Call Fails]

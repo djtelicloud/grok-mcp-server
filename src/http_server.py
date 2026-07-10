@@ -40,6 +40,7 @@ from .utils import (
     get_xai_client,
     grok_cli_available,
     grok_cli_plane_status,
+    credential_plane_contract,
     is_cloudrun_runtime,
     new_request_id,
     normalize_caller,
@@ -666,6 +667,7 @@ async def runtimez(request: Request) -> JSONResponse:
             "setup_command": CLI_AUTH_SETUP_COMMAND,
         }
     request_dial = _mode_dial_for_scope(request.scope)
+    credential_planes = credential_plane_contract(cli_plane)
     return JSONResponse(
         {
             "runtime": get_unigrok_runtime(),
@@ -699,6 +701,7 @@ async def runtimez(request: Request) -> JSONResponse:
                 "auth": cli_plane["auth"],
                 "setup_command": cli_plane["setup_command"],
             },
+            "credential_planes": credential_planes,
         }
     )
 
@@ -1427,6 +1430,7 @@ async def public_agent(
         plane=layer.plane if layer.plane in ["API", "CLI", "CLI-Fallback", "local", "utility"] else "API",
         why=layer.routing_why or "auto",
         routing=layer.routing_receipt or None,
+        credentials=getattr(layer, "credentials", None) or None,
         degraded=layer.degraded,
         citations=citations_mapped,
         requested_mode=resolved_mode,
@@ -1457,7 +1461,10 @@ def create_public_mcp() -> FastMCP:
             "workspace-neutral: include deliberately selected project material in "
             "`workspace_context` when Grok needs it. Call `grok_mcp_discover_self` "
             "for the canonical 4765 GROK endpoint, optional phoneword mode dials, "
-            "and exact onboarding guidance."
+            "and exact onboarding guidance. On first connection, inspect the "
+            "credential_planes contract and follow any prompt_user notice: ask the "
+            "user before installation, device authentication, or secret configuration; "
+            "never request XAI_API_KEY in chat or write it into the caller project."
         ),
         streamable_http_path="/mcp",
         stateless_http=True,

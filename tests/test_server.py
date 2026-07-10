@@ -97,6 +97,8 @@ async def test_grok_mcp_status_json_view_is_structured(monkeypatch):
     assert result["schema_version"] == 2
     assert result["usage"]["today"]["summary"]["requests"] == 1
     assert result["usage"]["today"]["summary"]["api_cost_usd"] == pytest.approx(0.004)
+    assert result["credential_planes"]["version"] == 1
+    assert result["credential_planes"]["local_usage"]["cli_requests_tracked"] is True
 
 
 @pytest.mark.asyncio
@@ -399,6 +401,9 @@ async def test_discover_self_tool():
     assert res.data["name"] == "uni-grok-mcp"
     assert "/docs/okf/index.md" in res.data["files"]
     assert "UniGrok MCP Discovery" in res.response
+    assert "credential_planes" in res.data
+    assert res.data["credential_planes"]["preferred_plane"] in {"CLI", "API"}
+    assert "local_usage" in res.data["credential_planes"]
 
 
 @pytest.mark.asyncio

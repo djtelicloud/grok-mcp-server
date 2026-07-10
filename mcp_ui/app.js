@@ -552,7 +552,7 @@ function renderMetricsSnapshot() {
   $("providerUsageValue").innerText = provider.usage_usd === null || provider.usage_usd === undefined
     ? "Not connected"
     : `$${Number(provider.usage_usd).toFixed(5)} team-wide today`;
-  $("providerUsageDetail").innerText = provider.detail || "Optional team-wide API comparison via xAI Management API.";
+  $("providerUsageDetail").innerText = provider.detail || "Local API cost tracking works without optional organization billing setup.";
 
   $("cliUsageValue").innerText = `${cliRequests} locally tracked request${cliRequests === 1 ? "" : "s"}`;
   $("cliUsageDetail").innerText = payload.usage.cli_subscription.detail;
@@ -625,10 +625,45 @@ async function fetchRuntimeStatus() {
     const data = await res.json();
     $("runtimeChip").innerText = `runtime: ${data.runtime || "unknown"}`;
     $("transportChip").innerText = `transport: ${data.transport || "unknown"}`;
+    renderCredentialPlanes(data.credential_planes || null);
   } catch {
     $("runtimeChip").innerText = "runtime: unknown";
     $("transportChip").innerText = "transport: unknown";
+    $("planeChip").innerText = "plane: unknown";
   }
+}
+
+function renderCredentialPlanes(contract) {
+  const alertCard = $("credentialAlert");
+  const planeChip = $("planeChip");
+  if (!contract || !alertCard || !planeChip) return;
+
+  const preferred = contract.preferred_plane || "unknown";
+  const effective = contract.effective_plane || "none";
+  planeChip.innerText = `plane: ${preferred} first → ${effective}`;
+
+  const notice = (contract.notices || []).find((item) => item.prompt_user);
+  if (!notice) {
+    alertCard.classList.add("hidden");
+    return;
+  }
+
+  const plane = notice.plane === "CLI" ? contract.cli : contract.api;
+  const action = (plane && plane.action) || {};
+  $("credentialAlertTitle").innerText = notice.blocking
+    ? "Model access needs setup"
+    : `${notice.plane} plane needs attention`;
+  $("credentialAlertMessage").innerText = ` ${notice.message}`;
+  alertCard.classList.toggle("blocking", Boolean(notice.blocking));
+  alertCard.classList.remove("hidden");
+
+  const command = $("credentialActionCommand");
+  const copyButton = $("copyCredentialActionBtn");
+  const safeCommand = typeof action.command === "string" ? action.command : "";
+  command.innerText = safeCommand;
+  command.classList.toggle("hidden", !safeCommand);
+  copyButton.classList.toggle("hidden", !safeCommand);
+  copyButton.dataset.command = safeCommand;
 }
 
 async function fetchMcpListTools() {
@@ -1249,6 +1284,19 @@ function setupDockerRestart() {
   setInterval(pollReadyz, 5000);
 }
 
+function setupCredentialActions() {
+  const copyButton = $("copyCredentialActionBtn");
+  if (!copyButton) return;
+  copyButton.addEventListener("click", async () => {
+    const command = copyButton.dataset.command || "";
+    if (!command) return;
+    await navigator.clipboard.writeText(command);
+    const original = copyButton.innerText;
+    copyButton.innerText = "Copied";
+    setTimeout(() => { copyButton.innerText = original; }, 1500);
+  });
+}
+
 function setupApiKeyWizard() {
   const saveBtn = $("saveWizardTokenBtn");
   const tokenInput = $("wizardTokenInput");
@@ -1328,6 +1376,7 @@ function init() {
   // Proactive safety checks initialization
   checkBrowserCompatibility();
   setupDockerRestart();
+  setupCredentialActions();
   setupApiKeyWizard();
   setupCostEstimator();
   setupMetricsControls();

@@ -162,6 +162,9 @@ def test_runtimez_reports_no_secret_runtime_status(monkeypatch):
     payload = res.json()
     assert payload["api_plane"]["xai_api_key"] is True
     assert payload["cli_plane"]["binary"] is True
+    assert payload["credential_planes"]["version"] == 1
+    assert payload["credential_planes"]["api"]["available"] is True
+    assert payload["credential_planes"]["notice_behavior"].startswith("Prompt once")
     assert payload["transport"] == "http"
     assert payload["service"]["requires_project_files"] is False
     assert payload["mode_dials"]["precedence"] == "explicit mode > dialed port > auto"

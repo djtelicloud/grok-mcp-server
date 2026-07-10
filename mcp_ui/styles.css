@@ -1115,6 +1115,58 @@ pre {
   display: none !important;
 }
 
+.credential-alert {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 24px;
+  background: rgba(255, 186, 8, 0.1);
+  border-bottom: 1px solid var(--orange);
+  color: var(--orange);
+  font-size: 12px;
+}
+
+.credential-alert.blocking {
+  background: rgba(240, 58, 71, 0.15);
+  border-bottom-color: var(--red);
+  color: var(--red);
+}
+
+.credential-alert.hidden,
+.credential-alert .hidden {
+  display: none !important;
+}
+
+.credential-alert-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.credential-alert code {
+  max-width: min(680px, 48vw);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink-soft);
+}
+
+@media (max-width: 800px) {
+  .credential-alert,
+  .credential-alert-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .credential-alert code {
+    max-width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+}
+
 /* Warning card for Browser Compatibility */
 .warning-card {
   padding: 12px;

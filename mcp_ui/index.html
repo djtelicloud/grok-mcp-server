@@ -3,12 +3,12 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>UniGrok MCP v0.5.0 Control Center</title>
+    <title>UniGrok MCP v0.5.1 Control Center</title>
     <!-- Premium Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Orbitron:wght@500;700;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="./styles.css?v=grok-v0.5.0" />
+    <link rel="stylesheet" href="./styles.css?v=grok-v0.5.1" />
   </head>
   <body>
     <main class="app-shell">
@@ -23,16 +23,27 @@
           </div>
         </div>
       </div>
+      <div id="credentialAlert" class="credential-alert hidden" aria-live="polite">
+        <div>
+          <strong id="credentialAlertTitle">Credential plane needs attention</strong>
+          <span id="credentialAlertMessage"></span>
+        </div>
+        <div class="credential-alert-actions">
+          <code id="credentialActionCommand" class="hidden"></code>
+          <button id="copyCredentialActionBtn" type="button" class="small-btn-glow hidden">Copy approved action</button>
+        </div>
+      </div>
       <!-- Premium Top Bar -->
       <header class="topbar">
         <div class="brand-block">
           <p class="eyebrow">UNIGROK GATEWAY</p>
-          <h1>Control Center <span class="version-badge">v0.5.0</span></h1>
+          <h1>Control Center <span class="version-badge">v0.5.1</span></h1>
         </div>
         <div class="signal-strip" aria-live="polite">
           <span id="connectionState" class="status-pill status-idle">Idle</span>
           <span id="runtimeChip" class="metric-chip">runtime: checking</span>
           <span id="transportChip" class="metric-chip">transport: checking</span>
+          <span id="planeChip" class="metric-chip">plane: checking</span>
           <span id="toolCountChip" class="metric-chip">tools: checking</span>
           <span id="lastLatency" class="metric-chip">0 ms</span>
         </div>
@@ -83,8 +94,8 @@
             
             <div class="form-layout">
               <div id="apiKeyWizard" class="wizard-card hidden">
-                <h4>🔑 API Credentials Wizard</h4>
-                <p class="wizard-desc">Rate limit or credential drift detected. Supply local Client Token to bypass:</p>
+                <h4>🔑 UniGrok Gateway Access</h4>
+                <p class="wizard-desc">This is the optional UniGrok client token, not your xAI API key. Never paste XAI_API_KEY into this page.</p>
                 <div class="wizard-inputs">
                   <input id="wizardTokenInput" type="text" placeholder="Client token..." class="wizard-input" aria-label="Client token" />
                   <button id="saveWizardTokenBtn" type="button" class="small-btn-glow">Save Token</button>
@@ -336,9 +347,9 @@
               <section class="usage-panel billing-panel">
                 <div class="section-title">Billing Boundaries</div>
                 <div class="billing-row">
-                  <div><span class="billing-label">xAI API team usage</span><span id="providerUsageState" class="state-chip">Checking</span></div>
+                  <div><span class="billing-label">Optional organization API comparison</span><span id="providerUsageState" class="state-chip">Checking</span></div>
                   <strong id="providerUsageValue">—</strong>
-                  <p id="providerUsageDetail">Optional team-wide comparison via Management API.</p>
+                  <p id="providerUsageDetail">Local API cost tracking works without organization billing setup.</p>
                 </div>
                 <div class="billing-row">
                   <div><span class="billing-label">SuperGrok CLI subscription</span><span id="cliUsageState" class="state-chip local">Local only</span></div>
@@ -424,6 +435,6 @@
 
       </section>
     </main>
-    <script type="module" src="./app.js?v=grok-v0.5.0"></script>
+    <script type="module" src="./app.js?v=grok-v0.5.1"></script>
   </body>
 </html>

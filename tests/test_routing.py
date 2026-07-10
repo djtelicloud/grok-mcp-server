@@ -156,7 +156,7 @@ async def test_live_selector_uses_grok_45_and_emits_reason(monkeypatch):
     from src import utils
 
     utils._MODEL_RESOLVER.invalidate()
-    monkeypatch.setattr(utils, "prefer_cli_when_api_key_missing", lambda: False)
+    monkeypatch.setattr(utils, "prefer_cli_for_route", lambda **_: False)
     model, why, receipt, reasoning = await utils._select_routing_model(
         prompt="Audit this architecture and propose a strategy",
         mode="auto",
@@ -178,7 +178,7 @@ async def test_research_route_selects_multi_agent_capability(monkeypatch):
     from src import utils
 
     utils._MODEL_RESOLVER.invalidate()
-    monkeypatch.setattr(utils, "prefer_cli_when_api_key_missing", lambda: False)
+    monkeypatch.setattr(utils, "prefer_cli_for_route", lambda **_: False)
     model, why, receipt, _ = await utils._select_routing_model(
         prompt="Research current evidence",
         mode="research",

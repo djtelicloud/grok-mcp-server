@@ -37,6 +37,7 @@ from ..utils import (
     get_circuit_breaker_state,
     get_routing_advisor,
     grok_cli_plane_status,
+    credential_plane_contract,
     scoped_session,
     input_limit,
     validate_local_input,
@@ -75,6 +76,7 @@ async def grok_mcp_status(view: Literal["text", "json"] = "text") -> str:
                 "setup_command": CLI_AUTH_SETUP_COMMAND,
             }
         cli_auth = f"{cli_plane['state']} ({cli_plane['auth']})"
+        credential_planes = credential_plane_contract(cli_plane)
 
         git_sha = "Unknown"
         try:
@@ -206,16 +208,15 @@ async def grok_mcp_status(view: Literal["text", "json"] = "text") -> str:
 
         if view == "json":
             provider_api = await fetch_provider_api_usage()
-            return json.dumps(
-                build_metrics_snapshot(
-                    stats,
-                    runtime=runtime,
-                    circuit_breakers=breakers,
-                    routing_advisor=advisor_view,
-                    provider_api=provider_api,
-                ),
-                separators=(",", ":"),
+            snapshot = build_metrics_snapshot(
+                stats,
+                runtime=runtime,
+                circuit_breakers=breakers,
+                routing_advisor=advisor_view,
+                provider_api=provider_api,
             )
+            snapshot["credential_planes"] = credential_planes
+            return json.dumps(snapshot, separators=(",", ":"))
 
         status_text = (
             "# UniGrok MCP Server Status\n\n"
@@ -229,6 +230,13 @@ async def grok_mcp_status(view: Literal["text", "json"] = "text") -> str:
             f"**CLI Authentication:** `{cli_auth}`\n"
             f"**CLI Auth Setup:** `{cli_plane['setup_command']}`\n"
             f"**Developer API Key:** `{'Configured' if XAI_API_KEY else 'Missing'}`\n\n"
+            "### Credential Planes\n"
+            f"- **Policy:** `{credential_planes['policy']}`\n"
+            f"- **Preferred Plane:** `{credential_planes['preferred_plane']}`\n"
+            f"- **Effective Plane:** `{credential_planes['effective_plane'] or 'none'}`\n"
+            f"- **Service Usable:** `{'yes' if credential_planes['service_usable'] else 'no'}`\n"
+            "- **Agent Rule:** ask before installation, device authentication, or secret configuration; "
+            "never request `XAI_API_KEY` in chat or store it in a caller project.\n\n"
             "### .grok Adapter\n"
             f"- **Profile Files:** `{adapter_status['profile_count']}`\n"
             f"- **Prompt Files:** `{', '.join(adapter_status['prompts']) or 'none'}`\n"
@@ -843,6 +851,21 @@ async def grok_mcp_discover_self() -> SystemResult:
 
         workspace = PathResolver.get_workspace_root()
         contributor = PathResolver.contributor_mode()
+        try:
+            cli_plane = await run_blocking(
+                grok_cli_plane_status,
+                timeout_sec=5.0,
+                timeout=6.0,
+            )
+        except Exception:
+            cli_plane = {
+                "state": "unreachable",
+                "ready": False,
+                "binary": False,
+                "auth": "probe_failed",
+                "setup_command": CLI_AUTH_SETUP_COMMAND,
+            }
+        credential_planes = credential_plane_contract(cli_plane)
         manifest = {
             "okf_version": "0.1",
             "name": "uni-grok-mcp",
@@ -859,6 +882,7 @@ async def grok_mcp_discover_self() -> SystemResult:
                 "context_transport": "workspace_context",
                 "automatic_project_discovery": False,
             },
+            "credential_planes": credential_planes,
             "contributor_features": {
                 "enabled": contributor,
                 "commit_anchored_memory": contributor,
@@ -894,6 +918,16 @@ async def grok_mcp_discover_self() -> SystemResult:
             "- Optional phoneword defaults: `2886=AUTO`, `3278=FAST`, `7327=REAS`, "
             "`8465=THNK`, `7724=RSCH`. All share the same service and state.\n"
             "- An explicit `agent.mode` always overrides a dialed-port default.\n\n"
+            "## Credential Planes\n"
+            f"- Default local policy: `{credential_planes['policy']}`; effective plane now: "
+            f"`{credential_planes['effective_plane'] or 'none'}`.\n"
+            "- Inspect `data.credential_planes.notices` on first connection. Prompt the user once per "
+            "notice id and only repeat after state changes.\n"
+            "- Ask permission before installing the CLI, starting device authentication, or changing "
+            "the global service environment. Never ask for `XAI_API_KEY` in chat or place it in the "
+            "caller's project.\n"
+            "- CLI requests through UniGrok are tracked locally; provider subscription quota and cost "
+            "remain unavailable and are never invented.\n\n"
             "## OKF (Open Knowledge Format) Bundle\n"
             "- **Manifest / Manifest Root:** `/docs/okf/okf-manifest.json`\n"
             "- **Index Document:** `/docs/okf/index.md`\n"

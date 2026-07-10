@@ -49,6 +49,22 @@ Primary entry point for any agent task.
       "evidence_source": "static",
       "catalog": {"source": "xai_api", "fallback": false}
     },
+    "credentials": {
+      "version": 1,
+      "policy": "cli_first",
+      "preferred_plane": "CLI",
+      "effective_plane": "API",
+      "service_usable": true,
+      "notices": [
+        {
+          "id": "cli:needs_auth:missing",
+          "plane": "CLI",
+          "blocking": false,
+          "prompt_user": true,
+          "action_id": "authenticate_grok_cli"
+        }
+      ]
+    },
     "degraded": false,
     "trace": null
   }
@@ -68,9 +84,10 @@ Dedicated tool wrapping a ReAct AgentLoop in a schema-enforced reflection review
 ## Operational Modes
 
 1. **Auto-routing (`auto`)**: Self-routes through bounded planning, coding,
-   vision, and research capability classes. The cached live catalog filters
-   candidates; mature local evidence can replace a stable default only after
-   clearing the quality margin.
+   vision, and research capability classes. Compatible unpinned local work is
+   CLI-first; explicit pins and API-native capabilities stay on API. The
+   cached live catalog filters API candidates; mature local evidence can
+   replace a stable default only after clearing the quality margin.
 2. **Fast path (`fast`)**: Toolless single turn.
 3. **Reasoning path (`reasoning`)**: Enforces planning model.
 4. **Thinking path (`thinking`)**: Executes thinking loop with reflection review.
@@ -81,3 +98,8 @@ Dedicated tool wrapping a ReAct AgentLoop in a schema-enforced reflection review
 The `routing` object is the explanation source of truth. It never contains the
 prompt: only bounded features, model slugs, evidence counts, catalog state, and
 failover facts safe to persist in local telemetry and display in the UI.
+
+The `credentials` object is the action source of truth. On first connection,
+inspect `notices`, prompt once per notice id, and ask the user before running
+installation, device-auth, or secret-configuration actions. Never request
+`XAI_API_KEY` in chat or store it in the caller's project.

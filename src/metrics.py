@@ -220,7 +220,11 @@ async def fetch_provider_api_usage() -> Dict[str, Any]:
         return {
             **base,
             "state": "not_configured",
-            "detail": "Set XAI_MANAGEMENT_API_KEY and UNIGROK_XAI_TEAM_ID for team-wide API comparison.",
+            "detail": (
+                "Optional organization-wide API billing comparison is off. "
+                "UniGrok still tracks its own API requests and exact response cost locally; "
+                "no additional setup is required."
+            ),
         }
 
     now = datetime.now(timezone.utc)

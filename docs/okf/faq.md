@@ -1,7 +1,7 @@
 ---
 okf_version: "0.1"
 faq_schema_version: "1"
-source_version: "0.5.0"
+source_version: "0.5.1"
 title: "UniGrok FAQ"
 type: "topic"
 description: "Verified local-first setup, routing, security, and troubleshooting answers for UniGrok MCP users."
@@ -109,10 +109,10 @@ when you intentionally want clients to share the same session namespace.
 
 **Keywords:** api plane, cli plane, subscription, routing, grok cli, cost
 
-UniGrok routes per request. The API plane uses `XAI_API_KEY` and supports the
-full API-backed capability set. The CLI plane uses an authenticated local Grok
-CLI subscription when its binary and OAuth session are available; it provides
-eligible CLI models and can be selected for cost-saving or API-failure fallback.
+UniGrok routes per request. Local service mode is CLI-first for compatible,
+unpinned work because the authenticated Grok CLI uses the user's subscription.
+The API plane remains authoritative for explicit API-model pins and API-native
+thinking, vision, and multi-agent research capabilities.
 
 Authenticate the running global Docker service once, from any directory, with
 `docker exec -it grok-mcp-server env -u XAI_API_KEY -u GROK_API_KEY grok login
@@ -123,6 +123,28 @@ as the independent subscription plane. The final response and Control Center
 show the selected `model`, `route`, `plane`, `cost_usd`, and latency. A request
 choosing the API plane is not an error: model compatibility, requested
 capabilities, and CLI readiness all influence routing.
+
+## What should an IDE agent do when a credential plane is unavailable? {#credential-plane-actions}
+
+**Keywords:** credentials, missing api key, cli auth, install cli, permission
+
+On first connection, inspect `grok_mcp_discover_self.data.credential_planes`.
+Each notice has a stable id, severity, whether it blocks model work, and a
+bounded action. Prompt the user once per notice id and repeat only after the
+reported state changes.
+
+- CLI missing or unauthenticated: ask permission before installing/rebuilding
+  the CLI or running its interactive device-auth command. Continue on API when
+  available.
+- API key missing while CLI is ready: prompt once without blocking compatible
+  CLI work; block only when the requested capability requires API.
+- Both unavailable: stop model execution and offer both actions.
+
+Never ask the user to paste `XAI_API_KEY` into chat, the Control Center, or an
+unrelated project. Offer to help configure it through a secure local editor or
+prompt in the global UniGrok service `.env`, recreate the service, then verify
+the new plane state. Team ids and management keys are advanced organization
+billing/RAG settings, not prerequisites for ordinary usage or local telemetry.
 
 ## How do I see the model, route, plane, and cost for a request? {#request-metadata}
 

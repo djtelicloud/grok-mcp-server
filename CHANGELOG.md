@@ -4,6 +4,25 @@ All notable changes to UniGrok MCP will be documented in this file.
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-07-10
+
+### Added
+- **Credential-plane action contract**: Discovery, status JSON, `/runtimez`,
+  public agent results, and the Control Center now expose the same non-secret
+  CLI/API readiness, one-shot prompt notices, and permission-gated install,
+  device-auth, and server-secret actions.
+- **Safe blocked state**: When neither plane can run model work, `agent`
+  returns an actionable local error instead of attempting doomed upstream
+  calls or asking for secrets in chat.
+
+### Changed
+- Compatible unpinned local requests are CLI-first by default to favor the
+  subscription allowance. Explicit/environment model pins and API-native
+  thinking, vision, and multi-agent research retain API precedence.
+- Control Center credential warnings distinguish the xAI service key from an
+  optional UniGrok client token. Advanced organization billing setup no longer
+  reads like a prerequisite; local API cost and CLI activity work without it.
+
 ## [0.5.0] - 2026-07-10
 
 ### Added

@@ -32,7 +32,7 @@ cost tracking, and a browser Control Center.
 
 ![UniGrok architecture — six MCP clients share one local gateway that routes across the metered xAI API plane and the ~$0-marginal Grok CLI plane, with SQLite-backed sessions, cost, and jobs](assets/architecture.svg)
 
-Current development release: **v0.5.0**.
+Current development release: **v0.5.1**.
 
 Use it as:
 
@@ -292,8 +292,9 @@ UniGrok has three boundaries:
 
 - Transport: stdio MCP, Streamable HTTP MCP, and an OpenAI-compatible `/v1`
   facade all route into the same agent harness.
-- Model plane: API-backed Grok models are primary; authenticated local Grok CLI
-  can serve CLI-plane models when available.
+- Model plane: authenticated local Grok CLI is preferred for compatible,
+  unpinned work; API-backed Grok models serve explicit pins and API-native
+  thinking, vision, and multi-agent research capabilities.
 - Local state: SQLite stores sessions, telemetry, research jobs, task memory,
   distilled knowledge, and commit-anchored workspace evidence under the
   configured state directory.
@@ -320,10 +321,29 @@ CLI/API routing split a real credential and allowance boundary.
 The Control Center usage ledger keeps those planes honest: xAI API requests
 store the exact per-response billed cost; CLI subscription requests store local
 counts, latency, success, model, and estimated tokens without inventing a
-per-request dollar cost. Optional `XAI_MANAGEMENT_API_KEY` plus
-`UNIGROK_XAI_TEAM_ID` enables a separately labeled, team-wide API billing
-comparison. xAI does not expose SuperGrok subscription quota through that API,
-so provider API totals are never added to CLI statistics.
+per-request dollar cost. xAI does not expose SuperGrok subscription quota, so
+UniGrok never invents remaining allowance or merges API billing into CLI
+statistics. An optional advanced organization-billing comparison exists, but
+ordinary users do not need a team id or management key for local telemetry.
+
+### Credential-plane onboarding
+
+`grok_mcp_discover_self`, `grok_mcp_status`, `/runtimez`, and every public
+`agent` result expose the same non-secret `credential_planes` contract. A fresh
+IDE agent should inspect its notices once per state:
+
+- If CLI is missing or unauthenticated, continue on API when possible and ask
+  permission before rebuilding/installing the CLI or starting device auth.
+- If `XAI_API_KEY` is missing but CLI is ready, prompt once without blocking
+  compatible CLI work; an API-only capability blocks until the key is securely
+  configured.
+- If both planes are unavailable, stop model work and present both repair
+  actions. Never request the API key in chat or write it into the caller's
+  project; it belongs only in the global UniGrok service environment.
+
+The local default is `UNIGROK_PLANE_POLICY=cli_first`. Explicit model pins and
+`UNIGROK_*_MODEL` overrides still win. Set the policy to `api_first` only when
+API-native behavior is intentionally preferred over subscription utilization.
 
 Useful endpoints in HTTP mode:
 

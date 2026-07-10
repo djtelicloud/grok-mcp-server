@@ -191,6 +191,7 @@ async def agent(
         plane=layer.plane if layer.plane in ["API", "CLI", "CLI-Fallback", "local", "utility"] else "API",
         why=layer.routing_why or "auto",
         routing=layer.routing_receipt or None,
+        credentials=getattr(layer, "credentials", None) or None,
         degraded=layer.degraded,
         citations=citations_mapped,
     )
