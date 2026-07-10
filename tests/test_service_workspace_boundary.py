@@ -83,6 +83,8 @@ async def test_discovery_explains_global_service_boundary(monkeypatch):
     assert result.data["workspace"]["attached"] is False
     assert result.data["workspace"]["context_transport"] == "workspace_context"
     assert result.data["contributor_features"]["commit_anchored_memory"] is False
+    assert result.data["canonical_endpoint"] == "http://localhost:4765/mcp"
+    assert result.data["mode_dials"]["ports"]["3278"] == "fast"
 
 
 @pytest.mark.asyncio
@@ -133,4 +135,9 @@ def test_stable_and_contributor_compose_files_are_separate():
     assert "UNIGROK_SERVICE_MODE=contributor" in contributor
     assert "name: grok-mcp-dev" in contributor
     assert ".:/workspace" in contributor
-    assert "${UNIGROK_DEV_PORT:-8081}" in contributor
+    assert "${UNIGROK_DEV_PORT:-4766}" in contributor
+
+    dials = Path("docker-compose.dials.yml").read_text(encoding="utf-8")
+    assert "UNIGROK_MODE_DIALS=1" in dials
+    for phoneword_port in (2886, 3278, 7327, 8465, 7724):
+        assert str(phoneword_port) in dials

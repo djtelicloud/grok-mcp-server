@@ -118,10 +118,10 @@ jobs:
           docker run -d --name grok-mcp-ci \
             -e XAI_API_KEY=dummy-ci-key \
             -e UNIGROK_API_KEYS=ci-client-key \
-            -p 8080:8080 \
+            -p 4765:8080 \
             grok-mcp:ci
           for _ in $(seq 1 30); do
-            if curl -fsS http://127.0.0.1:8080/healthz > /dev/null; then
+            if curl -fsS http://127.0.0.1:4765/healthz > /dev/null; then
               echo "healthz OK"
               exit 0
             fi

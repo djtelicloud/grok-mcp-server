@@ -45,5 +45,5 @@ git clone https://github.com/djtelicloud/grok-mcp-server.git
 cd grok-mcp-server && docker compose up --build -d
 ```
 
-Control Center: http://localhost:8080/ui/
+Control Center: http://localhost:4765/ui/
 Docs, IDE configs & release notes in the repo. MIT licensed. (4/4)

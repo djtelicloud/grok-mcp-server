@@ -22,13 +22,13 @@ This skill provides guidelines and instructions for developers and AI agents wor
 ### Shared Docker MCP Service for IDE Agents
 The shared local MCP endpoint is:
 ```text
-http://localhost:8080/mcp
+http://localhost:4765/mcp
 ```
 
 Start or refresh the service from the primary checkout with:
 ```bash
 docker compose up --build -d
-curl -s http://localhost:8080/healthz
+curl -s http://localhost:4765/healthz
 ```
 
 For IDE setup, use [docs/ide-setup.md](../../../docs/ide-setup.md) as the source of truth. Each IDE should use the same endpoint and set a stable `X-Client-ID` header (`codex`, `claude-code`, `vscode`, `antigravity`, etc.) so sessions and telemetry stay separated.
@@ -40,7 +40,7 @@ Credential boundary:
 
 For manual browser testing, open:
 ```text
-http://localhost:8080/ui/
+http://localhost:4765/ui/
 ```
 
 The browser UI is a static MCP test bench. It should test `/mcp` through JSON-RPC (`tools/list`, `tools/call`, raw requests) rather than calling `/v1`, `/metrics`, storage internals, or root-code admin endpoints.
@@ -62,7 +62,7 @@ To launch the server locally for stdio communication:
 ```bash
 uv run python main.py
 ```
-To launch the HTTP gateway server (which binds to `127.0.0.1:8080` by default):
+To launch the HTTP gateway server (which binds to `127.0.0.1:4765` by default):
 ```bash
 uv run python main.py --http
 ```

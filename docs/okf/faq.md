@@ -24,7 +24,7 @@ project root (or `~/.cursor/mcp.json` globally):
 {
   "mcpServers": {
     "unigrok": {
-      "url": "http://localhost:8080/mcp",
+      "url": "http://localhost:4765/mcp",
       "name": "UniGrok MCP Gateway",
       "headers": { "X-Client-ID": "cursor" }
     }
@@ -41,7 +41,7 @@ SSH host refers to that remote environment, not your laptop.
 **Keywords:** api key, xai api key, credentials, ide, shared gateway
 
 No. Set `XAI_API_KEY` only in UniGrok's server/container `.env` file. Every IDE
-connects to the local MCP endpoint at `http://localhost:8080/mcp`; do not paste
+connects to the local MCP endpoint at `http://localhost:4765/mcp`; do not paste
 the upstream xAI key into Cursor, Claude Code, VS Code, Codex, or Claude
 Desktop configurations.
 
@@ -54,7 +54,7 @@ token.
 
 **Keywords:** unrelated project, namespace, agents, codex, grok folder, global mcp, switch project
 
-No. Register `http://localhost:8080/mcp` once in the IDE's global or user
+No. Register `http://localhost:4765/mcp` once in the IDE's global or user
 configuration, then switch Git projects normally. The stable UniGrok service
 runs its own baked code and documentation; it does not require `.agents`,
 `.codex`, `.gemini`, `.grok`, `.github`, or any other UniGrok file in a caller's
@@ -73,9 +73,27 @@ with `workspace_label` when useful. This keeps project access explicit and
 prevents one persistent service from silently inheriting every IDE's filesystem.
 
 UniGrok contributors may instead run `docker compose -f
-docker-compose.dev.yml up --build -d` on port 8081. That separate development
+docker-compose.dev.yml up --build -d` on port 4766. That separate development
 service mounts the UniGrok repository and enables its local file/git/test and
 commit-memory workflows; it is not the globally registered stable service.
+
+## What are the Grok phoneword mode ports? {#mode-dial-ports}
+
+**Keywords:** dial plan, phoneword, auto port, fast port, thinking port, research port, mode alias
+
+The canonical endpoint is `4765`, which spells **GROK** on a phone keypad. An
+optional Compose overlay adds mode “speed dials” to the same service:
+
+- `2886` (**AUTO**) → `auto`
+- `3278` (**FAST**) → `fast`
+- `7327` (**REAS**) → `reasoning`
+- `8465` (**THNK**) → `thinking`
+- `7724` (**RSCH**) → `research`
+
+Enable them with `docker compose -f docker-compose.yml -f
+docker-compose.dials.yml up --build -d`. They do not create separate agents,
+databases, or session stores. The dial supplies a default only when the caller
+omits `mode`; an explicit `agent.mode` always wins.
 
 ## Why are my sessions and telemetry separate in each IDE? {#client-id-sessions}
 
@@ -105,18 +123,20 @@ requested capabilities, and CLI readiness all influence routing.
 
 **Keywords:** cost, tokens, model, route, plane, telemetry, control center
 
-Open the Control Center at `http://localhost:8080/ui/` after the gateway starts.
+Open the Control Center at `http://localhost:4765/ui/` after the gateway starts.
 Its result panel shows the request status, tokens, cost in USD, latency, route,
 and plane. MCP `agent` responses also carry structured execution metadata.
 
 These values describe the gateway request that produced the response. A
 zero-cost local FAQ lookup is documentation retrieval, not a model invocation.
 
-## Port 8080 is already in use. What should I change? {#port-in-use}
+## Why does UniGrok use port 4765, and what if it is occupied? {#port-in-use}
 
-**Keywords:** port, 8080, address in use, bind, docker compose
+**Keywords:** port, 4765, grok keypad, address in use, bind, docker compose
 
-Either stop the other local service or set a different stable host port when
+Port `4765` spells GROK, making the service memorable while avoiding the common
+development port `8080`. If it is occupied, either stop the other local service
+or set a different stable host port when
 starting Compose. For example:
 
 ```bash
@@ -134,7 +154,7 @@ running the HTTP server directly rather than through Docker Compose, set
 Check the gateway health endpoint with:
 
 ```bash
-curl -s http://localhost:8080/healthz
+curl -s http://localhost:4765/healthz
 ```
 
 Use `/readyz` when you also need readiness checks for model authentication,

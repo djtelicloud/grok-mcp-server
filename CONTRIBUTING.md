@@ -25,7 +25,7 @@ For the shared local service:
 
 ```bash
 docker compose up --build -d
-curl -s http://localhost:8080/healthz
+curl -s http://localhost:4765/healthz
 ```
 
 ## Pull Request Guidelines

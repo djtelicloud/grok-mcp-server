@@ -18,7 +18,7 @@ from urllib.request import Request, urlopen
 MAIN_REF = "refs/heads/main"
 DEFAULT_TEST_ARGS = ["uv", "run", "pytest", "-q"]
 DEV_COMPOSE_FILE = "docker-compose.dev.yml"
-DEV_BASE_URL = "http://127.0.0.1:8081"
+DEV_BASE_URL = "http://127.0.0.1:4766"
 
 
 class LandError(RuntimeError):

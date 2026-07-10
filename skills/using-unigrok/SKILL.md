@@ -41,7 +41,7 @@ degrade gracefully to it.
 
 ## Endpoint
 
-The shared gateway runs at `http://localhost:8080/mcp` (Streamable HTTP).
-Health: `GET /healthz`. Browser Control Center: `http://localhost:8080/ui/`.
+The shared gateway runs at `http://localhost:4765/mcp` (Streamable HTTP).
+Health: `GET /healthz`. Browser Control Center: `http://localhost:4765/ui/`.
 Send a stable `X-Client-ID` header so sessions and telemetry stay separated
 per client.

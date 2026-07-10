@@ -226,7 +226,7 @@ def test_runtime_wait_retries_expected_restart_handoff(monkeypatch, tmp_path):
     monkeypatch.setattr(land, "probe_mcp", lambda base_url, token=None: None)
     monkeypatch.setattr(land.time, "sleep", lambda seconds: None)
 
-    land.wait_for_runtime(tmp_path, base_url="http://127.0.0.1:8081", timeout=1.0)
+    land.wait_for_runtime(tmp_path, base_url="http://127.0.0.1:4766", timeout=1.0)
 
     assert attempts >= 3
 

@@ -49,7 +49,7 @@ def _grok_cli_auth_ready() -> bool:
 
 
 def _write_init_config(stream: TextIO, root: Path) -> None:
-    endpoint = "http://localhost:8080/mcp"
+    endpoint = "http://localhost:4765/mcp"
     print("", file=stream)
     print("Shared HTTP endpoint", file=stream)
     print(f"  {endpoint}", file=stream)
@@ -57,14 +57,14 @@ def _write_init_config(stream: TextIO, root: Path) -> None:
     print("Start the shared service", file=stream)
     print(f"  cd {root}", file=stream)
     print("  docker compose up --build -d", file=stream)
-    print("  curl -s http://localhost:8080/healthz", file=stream)
+    print("  curl -s http://localhost:4765/healthz", file=stream)
     print("", file=stream)
     print("VS Code (.vscode/mcp.json or user mcp.json)", file=stream)
     print("""{
   "servers": {
     "unigrok": {
       "type": "http",
-      "url": "http://localhost:8080/mcp",
+      "url": "http://localhost:4765/mcp",
       "headers": { "X-Client-ID": "vscode" }
     }
   }
@@ -76,7 +76,7 @@ def _write_init_config(stream: TextIO, root: Path) -> None:
     "unigrok": {
       "command": "npx",
       "args": [
-        "-y", "mcp-remote", "http://localhost:8080/mcp",
+        "-y", "mcp-remote", "http://localhost:4765/mcp",
         "--header", "X-Client-ID: claude-desktop"
       ]
     }
@@ -85,14 +85,14 @@ def _write_init_config(stream: TextIO, root: Path) -> None:
     print("", file=stream)
     print("Claude Code", file=stream)
     print(
-        "  claude mcp add --transport http unigrok http://localhost:8080/mcp "
+        "  claude mcp add --transport http unigrok http://localhost:4765/mcp "
         '--header "X-Client-ID: claude-code"',
         file=stream,
     )
     print("", file=stream)
     print("Codex (~/.codex/config.toml)", file=stream)
     print("""[mcp_servers.grok]
-url = "http://localhost:8080/mcp"
+url = "http://localhost:4765/mcp"
 http_headers = { "X-Client-ID" = "codex" }""", file=stream)
     print("", file=stream)
     print(

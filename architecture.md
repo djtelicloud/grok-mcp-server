@@ -18,6 +18,14 @@ filesystem access. A separate contributor Compose service mounts the UniGrok
 repository, enables local file/git/test tools and commit-anchored evidence, and
 is the only runtime that `scripts/land` may reconcile automatically.
 
+The canonical host endpoint uses `4765` (telephone-keypad **GROK**), while the
+contributor Forge uses `4766`. The optional Dial Plan overlay maps phoneword
+ports (`AUTO=2886`, `FAST=3278`, `REAS=7327`, `THNK=8465`, `RSCH=7724`) to the
+same stable container listener. Pure-ASGI request middleware derives a default
+mode from the preserved HTTP `Host` port and binds it in a context variable;
+`public_agent` resolves precedence as explicit mode, then dial, then `auto`.
+No dial owns separate state or broadens authorization.
+
 ```
                                   +----------------------------------+
                                   |      MCP IDE / Agent Hosts       |

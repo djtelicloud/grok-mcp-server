@@ -45,4 +45,4 @@ echo
 echo "Next steps:"
 echo "  1. Edit .env and set XAI_API_KEY."
 echo "  2. Start the shared MCP service: docker compose up --build -d"
-echo "  3. Check health: curl -s http://localhost:8080/healthz"
+echo "  3. Check health: curl -s http://localhost:4765/healthz"

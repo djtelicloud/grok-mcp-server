@@ -186,6 +186,8 @@ async def test_public_agent_uses_run_agent_turn(monkeypatch):
         thinking_mode=False,
         enable_agentic=True,
     )
+    assert result.requested_mode == "auto"
+    assert result.mode_source == "default"
 
 
 @pytest.mark.asyncio

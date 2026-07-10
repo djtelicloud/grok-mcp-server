@@ -1,0 +1,13 @@
+# Optional Grok Dial Plan overlay. Every phoneword port reaches the same stable
+# service and state. The original Host port selects a default `agent` mode;
+# an explicit `mode` argument always wins.
+services:
+  grok-mcp:
+    ports:
+      - "127.0.0.1:${UNIGROK_AUTO_PORT:-2886}:8080"      # AUTO
+      - "127.0.0.1:${UNIGROK_FAST_PORT:-3278}:8080"      # FAST
+      - "127.0.0.1:${UNIGROK_REASON_PORT:-7327}:8080"    # REAS
+      - "127.0.0.1:${UNIGROK_THINK_PORT:-8465}:8080"     # THNK
+      - "127.0.0.1:${UNIGROK_RESEARCH_PORT:-7724}:8080"  # RSCH
+    environment:
+      - UNIGROK_MODE_DIALS=1

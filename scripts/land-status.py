@@ -44,8 +44,8 @@ def main() -> int:
     if not ahead:
         print("  none")
     for label, url in (
-        ("Stable service", "http://127.0.0.1:8080/runtimez"),
-        ("Contributor dev service", "http://127.0.0.1:8081/runtimez"),
+        ("Stable service", "http://127.0.0.1:4765/runtimez"),
+        ("Contributor dev service", "http://127.0.0.1:4766/runtimez"),
     ):
         try:
             with urlopen(url, timeout=2) as response:  # noqa: S310

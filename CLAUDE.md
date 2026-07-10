@@ -11,7 +11,7 @@ shared conventions.
 A local-first, universal **MCP gateway for xAI's Grok models**. One server runs
 on the machine, holds the xAI credential server-side, and lets every MCP client
 (Claude Code, Claude Desktop, VS Code, Codex, Antigravity) share one Grok agent
-over Streamable HTTP at `http://localhost:8080/mcp`.
+over Streamable HTTP at `http://localhost:4765/mcp`.
 
 Full design: [architecture.md](architecture.md). IDE setup: [docs/ide-setup.md](docs/ide-setup.md).
 
@@ -68,13 +68,13 @@ model/cost metadata. Modes: `auto` (default), `fast`, `reasoning`, `thinking`,
 ```bash
 ./scripts/land-status             # visible main/worktree/runtime status
 uv run python main.py init        # bootstrap .env + print IDE configs
-docker compose up --build -d      # start shared service on :8080
-curl -s http://localhost:8080/healthz
+docker compose up --build -d      # start shared service on :4765
+curl -s http://localhost:4765/healthz
 uv run pytest -q                  # full test suite
 ./scripts/land                    # test and land committed task work to main
 ```
 
-Local test bench UI: `http://localhost:8080/ui/`.
+Local test bench UI: `http://localhost:4765/ui/`.
 
 ## Environment
 

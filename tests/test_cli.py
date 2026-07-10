@@ -19,7 +19,7 @@ def test_init_project_copies_example_env_and_prints_ide_configs(tmp_path: Path):
     assert "Claude Desktop" in out
     assert "Claude Code" in out
     assert "Codex" in out
-    assert "http://localhost:8080/mcp" in out
+    assert "http://localhost:4765/mcp" in out
 
 
 def test_init_project_leaves_existing_env_unchanged(tmp_path: Path):

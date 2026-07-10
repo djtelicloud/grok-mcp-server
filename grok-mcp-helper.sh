@@ -7,7 +7,7 @@ CHILD_PID_FILE="$DIR/logs/grok_mcp_child.pid"
 LOG_FILE="$DIR/logs/grok_mcp.log"
 
 # HTTP gateway port (matches src/http_server.py default) and health probe URL
-GROK_MCP_PORT="${PORT:-8080}"
+GROK_MCP_PORT="${PORT:-4765}"
 HEALTH_URL="http://127.0.0.1:${GROK_MCP_PORT}/healthz"
 
 mkdir -p "$DIR/logs"

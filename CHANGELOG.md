@@ -2,6 +2,16 @@
 
 All notable changes to UniGrok MCP will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- **Grok Dial Plan**: Made `4765` (telephone-keypad `GROK`) the canonical
+  stable endpoint and `4766` the contributor Forge endpoint. An optional
+  Compose overlay adds `AUTO=2886`, `FAST=3278`, `REAS=7327`, `THNK=8465`, and
+  `RSCH=7724` as mode-default aliases into the same stable process and state.
+  Explicit `agent.mode` arguments take precedence, and `/runtimez` reports the
+  dial observed for the current request.
+
 ## [0.4.1] - 2026-07-09
 
 ### Fixed

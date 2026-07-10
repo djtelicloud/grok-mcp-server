@@ -40,3 +40,18 @@ def test_wheel_configuration_includes_runtime_assets():
     assert included["docs/okf"] == "docs/okf"
     assert included[".grok"] == ".grok"
     assert included["example.env"] == "example.env"
+
+
+def test_public_setup_surfaces_use_the_grok_phoneword_endpoint():
+    paths = [
+        ROOT / "README.md",
+        ROOT / "docs" / "ide-setup.md",
+        ROOT / "docs" / "okf" / "faq.md",
+        ROOT / "src" / "cli.py",
+        ROOT / ".mcp.json",
+        ROOT / "skills" / "using-unigrok" / "SKILL.md",
+    ]
+    for path in paths:
+        text = path.read_text(encoding="utf-8")
+        assert "http://localhost:4765" in text, path
+        assert "http://localhost:8080" not in text, path

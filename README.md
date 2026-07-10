@@ -36,7 +36,7 @@ Current release: **v0.4.1**.
 
 Use it as:
 
-- A shared multi-IDE Grok MCP server at `http://localhost:8080/mcp`.
+- A shared multi-IDE Grok MCP server at `http://localhost:4765/mcp` (`4765` spells **GROK** on a phone keypad).
 - An OpenAI-compatible local gateway for `unigrok-agent`.
 - A structured agent harness with web search, X search, code execution, files,
   image/video generation, session memory, telemetry, and reflection.
@@ -69,7 +69,7 @@ Then start the shared service:
 
 ```bash
 docker compose up --build -d
-curl -s http://localhost:8080/healthz
+curl -s http://localhost:4765/healthz
 ```
 
 This is a standalone, workspace-neutral service. The image runs its baked
@@ -85,7 +85,7 @@ UniGrok never guesses that MCP registration grants filesystem access.
 Open the local Control Center:
 
 ```text
-http://localhost:8080/ui/
+http://localhost:4765/ui/
 ```
 
 ## Install Script
@@ -104,7 +104,7 @@ It checks for `uv`, `git`, and Docker, syncs the Python environment, runs
 The default architecture is one shared Docker service:
 
 ```text
-http://localhost:8080/mcp
+http://localhost:4765/mcp
 ```
 
 Each IDE should send a stable `X-Client-ID` header so telemetry, sessions, and
@@ -121,7 +121,7 @@ globally) and paste:
 {
   "mcpServers": {
     "unigrok": {
-      "url": "http://localhost:8080/mcp",
+      "url": "http://localhost:4765/mcp",
       "name": "UniGrok MCP Gateway",
       "description": "Shared Grok agent with live Control Center, cost tracking, reasoning guard, OKF + WebMCP self-discovery",
       "headers": { "X-Client-ID": "cursor" }
@@ -137,7 +137,7 @@ globally) and paste:
   "servers": {
     "unigrok": {
       "type": "http",
-      "url": "http://localhost:8080/mcp",
+      "url": "http://localhost:4765/mcp",
       "headers": { "X-Client-ID": "vscode" }
     }
   }
@@ -155,7 +155,7 @@ Claude Desktop config-file servers are stdio commands, so bridge to HTTP with
     "unigrok": {
       "command": "npx",
       "args": [
-        "-y", "mcp-remote", "http://localhost:8080/mcp",
+        "-y", "mcp-remote", "http://localhost:4765/mcp",
         "--header", "X-Client-ID: claude-desktop"
       ]
     }
@@ -166,7 +166,7 @@ Claude Desktop config-file servers are stdio commands, so bridge to HTTP with
 ### Claude Code
 
 ```bash
-claude mcp add --transport http unigrok http://localhost:8080/mcp \
+claude mcp add --transport http unigrok http://localhost:4765/mcp \
   --header "X-Client-ID: claude-code"
 ```
 
@@ -174,7 +174,7 @@ claude mcp add --transport http unigrok http://localhost:8080/mcp \
 
 ```toml
 [mcp_servers.grok]
-url = "http://localhost:8080/mcp"
+url = "http://localhost:4765/mcp"
 http_headers = { "X-Client-ID" = "codex" }
 ```
 
@@ -274,7 +274,7 @@ flowchart LR
     VS[VS Code] --> GW
     CX[Codex] --> GW
     AG[Antigravity] --> GW
-    GW["UniGrok gateway<br/>localhost:8080<br/>/mcp · /v1 · /ui"]
+    GW["UniGrok gateway<br/>localhost:4765 (GROK)<br/>/mcp · /v1 · /ui"]
     GW -->|API plane · XAI_API_KEY| API["xAI API<br/>grok-4.5 · grok-build-0.1"]
     GW -->|CLI plane · OAuth subscription| CLI["Grok CLI<br/>grok-build 512k · composer"]
     GW --- ST[("SQLite<br/>sessions · cost · jobs")]
@@ -305,7 +305,7 @@ The directory `/docs/okf/` contains a fully self-describing documentation bundle
 - Topic-specific files (e.g. `agent-tool.md`, `reasoning-guard.md`) detail tool schemas, inputs/outputs, model pinning, and telemetry budget controls.
 
 ### 2. WebMCP-Enabled Docs & Console
-When running the HTTP gateway, visiting `http://localhost:8080/ui/` exposes browser-native WebMCP tools under `document.modelContext`.
+When running the HTTP gateway, visiting `http://localhost:4765/ui/` exposes browser-native WebMCP tools under `document.modelContext`.
 Any agent visiting this page can automatically discover and call:
 - `get_schema(tool_name)`: Returns the Pydantic JSON schema of a given UniGrok tool.
 - `example_call(mode)`: Returns JSON templates/examples for different operational modes.
@@ -317,13 +317,13 @@ A project-specific experimental manifest is exposed at `/.well-known/webmcp`
 so compatible agents and extensions can pre-discover the page's capabilities
 without performing heavy DOM scrapes:
 ```bash
-curl -s http://localhost:8080/.well-known/webmcp
+curl -s http://localhost:4765/.well-known/webmcp
 ```
 
 ### 4. Running a WebMCP-Compatible Browser or Bridge
 To let an IDE agent call these experimental browser tools, use a browser build
 or extension that exposes `document.modelContext`, and keep the target tab at
-`http://localhost:8080/ui/` open.
+`http://localhost:4765/ui/` open.
 
 ## Security Model
 
@@ -331,7 +331,7 @@ or extension that exposes `document.modelContext`, and keep the target tab at
   each IDE client.
 - `example.env` is a template only. The runtime loads `.env` when present and
   rejects the placeholder key.
-- Docker publishes `127.0.0.1:8080` by default.
+- Docker publishes `127.0.0.1:4765` by default.
 - Set `UNIGROK_API_KEYS` before exposing the gateway beyond loopback.
 - Git write tools are disabled unless local runtime flags explicitly enable
   them.
@@ -352,7 +352,7 @@ docker compose -f docker-compose.dev.yml config
 ```
 
 Contributors who want live mounted source use the separate service on port
-8081:
+4766:
 
 ```bash
 docker compose -f docker-compose.dev.yml up --build -d
@@ -363,7 +363,29 @@ so repository-local IDE skills can recall and record verified landing evidence.
 Those tools never appear on the stable service used by unrelated projects.
 
 `scripts/land` may reconcile that contributor service after tests pass. It
-never rebuilds or restarts the stable port-8080 service automatically.
+never rebuilds or restarts the stable port-4765 service automatically.
+
+### Optional Grok Dial Plan
+
+UniGrok can expose memorable phoneword “speed-dial” ports without creating
+extra services or databases. Enable the overlay with:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dials.yml up --build -d
+```
+
+| Dial | Phoneword | Default `agent` mode |
+|---:|---|---|
+| `2886` | AUTO | `auto` |
+| `3278` | FAST | `fast` |
+| `7327` | REAS | `reasoning` |
+| `8465` | THNK | `thinking` |
+| `7724` | RSCH | `research` |
+
+Every dial reaches the same stable process, sessions, authentication, and
+Control Center. The original `Host` port supplies a default only when the MCP
+caller omits `mode`; an explicit tool argument always wins. Normal users should
+register `4765` once. The dial overlay is an optional power-user interface.
 
 Run the full local test suite before publishing changes. Offline evals can be
 run with:

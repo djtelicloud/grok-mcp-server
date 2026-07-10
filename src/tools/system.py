@@ -816,6 +816,10 @@ async def db_vacuum() -> str:
 async def grok_mcp_discover_self() -> SystemResult:
     """Exposes OKF bundle information, WebMCP manifests, and tool schemas for zero-configuration agent onboarding."""
     async with GrokInvocationContext("utility", logger, append_signature=False) as ctx:
+        # Late import avoids a module cycle: http_server imports this tool when
+        # constructing the public MCP surface.
+        from ..http_server import MODE_DIAL_PORTS
+
         workspace = PathResolver.get_workspace_root()
         contributor = PathResolver.contributor_mode()
         manifest = {
@@ -823,6 +827,12 @@ async def grok_mcp_discover_self() -> SystemResult:
             "name": "uni-grok-mcp",
             "service_mode": "contributor" if contributor else "stable",
             "requires_project_files": False,
+            "canonical_endpoint": "http://localhost:4765/mcp",
+            "mode_dials": {
+                "optional": True,
+                "ports": {str(port): mode for port, mode in MODE_DIAL_PORTS.items()},
+                "precedence": "explicit mode > dialed port > auto",
+            },
             "workspace": {
                 "attached": workspace is not None,
                 "context_transport": "workspace_context",
@@ -858,6 +868,11 @@ async def grok_mcp_discover_self() -> SystemResult:
             "- Stable mode never assumes it can browse the IDE's open project. Send only relevant, "
             "deliberately selected material through the `agent.workspace_context` field.\n"
             "- Repository memory, Git landing, and source mounts are contributor-only facilities.\n\n"
+            "## Grok Dial Plan\n"
+            "- Canonical endpoint: `http://localhost:4765/mcp` (`4765` spells GROK).\n"
+            "- Optional phoneword defaults: `2886=AUTO`, `3278=FAST`, `7327=REAS`, "
+            "`8465=THNK`, `7724=RSCH`. All share the same service and state.\n"
+            "- An explicit `agent.mode` always overrides a dialed-port default.\n\n"
             "## OKF (Open Knowledge Format) Bundle\n"
             "- **Manifest / Manifest Root:** `/docs/okf/okf-manifest.json`\n"
             "- **Index Document:** `/docs/okf/index.md`\n"

@@ -1,7 +1,8 @@
 # UniGrok as a shared local MCP service (multi-IDE setup)
 
 One persistent Docker container serves every IDE on this machine over
-streamable HTTP. Verified endpoint: **`http://localhost:8080/mcp`**.
+streamable HTTP. Verified endpoint: **`http://localhost:4765/mcp`**. The port
+spells **GROK** on a telephone keypad.
 
 ## Start the service
 
@@ -10,7 +11,7 @@ cd /path/to/uni-grok-mcp        # the real checkout, not a worktree
 uv run python main.py init      # first time only; creates .env if absent
 # edit .env: set XAI_API_KEY, and optionally UNIGROK_API_KEYS
 docker compose up -d --build
-curl -s http://localhost:8080/healthz   # -> {"status":"healthy"}
+curl -s http://localhost:4765/healthz   # -> {"status":"healthy"}
 ```
 
 Compose loads secrets from the launched checkout's `.env`. Agent worktrees
@@ -20,19 +21,19 @@ file from another checkout.
 
 The stable compose file runs the image's baked application at `/app`, stores
 mutable data in a Docker volume mounted at `/state`, and publishes
-`127.0.0.1:8080`. It does not mount the UniGrok checkout or an IDE project.
+`127.0.0.1:4765`. It does not mount the UniGrok checkout or an IDE project.
 Compose declares that this is a trusted loopback-only host publication so the
 local service can run without a client token. The application still requires `UNIGROK_API_KEYS` for any
 direct non-loopback bind or Cloud Run deployment. Remove the
 `UNIGROK_TRUSTED_LOOPBACK_PROXY` declaration and set `UNIGROK_API_KEYS` before
-changing the port mapping to `0.0.0.0:8080:8080` or `8080:8080`.
+changing the port mapping to `0.0.0.0:4765:8080` or `4765:8080`.
 
 Do not edit Compose to mount each project you open. MCP registration is global
 service access, not filesystem authority. A calling IDE supplies only the
 material Grok needs through the optional `agent.workspace_context` field.
 Projects therefore need no UniGrok-specific namespace folders.
 
-UniGrok contributors have a separate live-source service at port 8081:
+UniGrok contributors have a separate live-source “Forge” service at port 4766:
 
 ```bash
 docker compose -f docker-compose.dev.yml up --build -d
@@ -41,6 +42,21 @@ docker compose -f docker-compose.dev.yml up --build -d
 That contributor service mounts this repository at `/workspace` and enables
 local file/git/test and commit-memory facilities. It is not the service normal
 users register for arbitrary projects.
+
+## Optional Grok Dial Plan
+
+Power users can add phoneword mode defaults without running more UniGrok
+instances:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dials.yml up --build -d
+```
+
+The overlay publishes `AUTO=2886`, `FAST=3278`, `REAS=7327`, `THNK=8465`, and
+`RSCH=7724`. Each port maps to the same stable container, state, sessions, and
+authentication. The incoming `Host` port becomes the default `agent` mode only
+when the caller omits `mode`; an explicit mode always wins. Keep ordinary IDE
+registration on `4765` unless a particular IDE should always begin in one mode.
 
 ## Per-IDE identity: `X-Client-ID`
 
@@ -61,7 +77,7 @@ With Cursor joining the xAI family, it's the natural first-class Grok IDE.
 {
   "mcpServers": {
     "unigrok": {
-      "url": "http://localhost:8080/mcp",
+      "url": "http://localhost:4765/mcp",
       "name": "UniGrok MCP Gateway",
       "description": "Shared Grok agent with live Control Center, cost tracking, reasoning guard, OKF + WebMCP self-discovery",
       "headers": { "X-Client-ID": "cursor" }
@@ -76,7 +92,7 @@ the server under Settings → MCP; the `agent` tool appears in Composer/chat.
 ## Claude Code (CLI)
 
 ```bash
-claude mcp add --transport http unigrok http://localhost:8080/mcp \
+claude mcp add --transport http unigrok http://localhost:4765/mcp \
   --header "X-Client-ID: claude-code"
 ```
 
@@ -91,7 +107,7 @@ Claude Desktop config-file servers are stdio commands; bridge to HTTP with
     "unigrok": {
       "command": "npx",
       "args": [
-        "-y", "mcp-remote", "http://localhost:8080/mcp",
+        "-y", "mcp-remote", "http://localhost:4765/mcp",
         "--header", "X-Client-ID: claude-desktop"
       ]
     }
@@ -106,7 +122,7 @@ Claude Desktop config-file servers are stdio commands; bridge to HTTP with
   "servers": {
     "unigrok": {
       "type": "http",
-      "url": "http://localhost:8080/mcp",
+      "url": "http://localhost:4765/mcp",
       "headers": { "X-Client-ID": "vscode" }
     }
   }
@@ -117,7 +133,7 @@ Claude Desktop config-file servers are stdio commands; bridge to HTTP with
 
 ```toml
 [mcp_servers.grok]
-url = "http://localhost:8080/mcp"
+url = "http://localhost:4765/mcp"
 http_headers = { "X-Client-ID" = "codex" }
 ```
 
@@ -133,7 +149,7 @@ check `codex mcp --help`. Keep the server name as `grok`; this repo's
 {
   "mcpServers": {
     "unigrok": {
-      "httpUrl": "http://localhost:8080/mcp",
+      "httpUrl": "http://localhost:4765/mcp",
       "headers": { "X-Client-ID": "antigravity" }
     }
   }

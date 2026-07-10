@@ -10,6 +10,8 @@ from starlette.testclient import TestClient
 from src.http_server import (
     GatewayAuthMiddleware,
     MCPOriginMiddleware,
+    ModeDialContextMiddleware,
+    _ACTIVE_MODE_DIAL,
     _resolve_bind_host,
     _resolve_bind_port,
     create_app,
@@ -162,7 +164,22 @@ def test_runtimez_reports_no_secret_runtime_status(monkeypatch):
     assert payload["cli_plane"]["binary"] is True
     assert payload["transport"] == "http"
     assert payload["service"]["requires_project_files"] is False
+    assert payload["mode_dials"]["precedence"] == "explicit mode > dialed port > auto"
+    assert payload["mode_dials"]["ports"]["7724"] == "research"
     assert "secret-value" not in res.text
+
+
+def test_runtimez_reports_the_current_phoneword_dial(monkeypatch):
+    monkeypatch.setenv("UNIGROK_MODE_DIALS", "1")
+    monkeypatch.delenv("UNIGROK_API_KEYS", raising=False)
+
+    with TestClient(create_app(), base_url="http://localhost:7724") as client:
+        payload = client.get("/runtimez").json()
+
+    assert payload["mode_dials"]["request_dial"] == {
+        "port": 7724,
+        "default_mode": "research",
+    }
 
 
 def test_runtimez_is_exempt_from_gateway_auth(monkeypatch):
@@ -470,6 +487,7 @@ def test_middleware_is_pure_asgi():
 
     assert not issubclass(GatewayAuthMiddleware, BaseHTTPMiddleware)
     assert not issubclass(MCPOriginMiddleware, BaseHTTPMiddleware)
+    assert not issubclass(ModeDialContextMiddleware, BaseHTTPMiddleware)
 
 
 def test_mcp_rejects_untrusted_origin(monkeypatch):
@@ -566,7 +584,7 @@ def test_resolve_bind_port_handles_bad_env(monkeypatch, caplog):
     monkeypatch.setenv("PORT", "$PORT")
 
     with caplog.at_level("WARNING", logger="GrokMCP"):
-        assert _resolve_bind_port() == 8080
+        assert _resolve_bind_port() == 4765
 
     assert "Invalid PORT value" in caplog.text
 
@@ -648,6 +666,61 @@ async def test_public_agent_returns_structured_payload(monkeypatch):
     assert result.tokens == 42
     assert result.cost_usd == 0.012
     assert result.latency_sec == 1.5
+    assert result.requested_mode == "auto"
+    assert result.mode_source == "default"
+    assert result.dialed_port is None
+
+
+@pytest.mark.asyncio
+async def test_phoneword_dial_supplies_default_mode(monkeypatch):
+    mock_run = AsyncMock(return_value=MetaLayer(generation="ok"))
+    monkeypatch.setattr("src.http_server.run_agent_turn", mock_run)
+    token = _ACTIVE_MODE_DIAL.set((7724, "research"))
+    try:
+        result = await public_agent("research this")
+    finally:
+        _ACTIVE_MODE_DIAL.reset(token)
+
+    assert mock_run.await_args.kwargs["mode"] == "reasoning"
+    assert mock_run.await_args.kwargs["agent_count"] == 4
+    assert result.requested_mode == "research"
+    assert result.mode_source == "dial"
+    assert result.dialed_port == 7724
+
+
+@pytest.mark.asyncio
+async def test_explicit_mode_overrides_phoneword_dial(monkeypatch):
+    mock_run = AsyncMock(return_value=MetaLayer(generation="ok"))
+    monkeypatch.setattr("src.http_server.run_agent_turn", mock_run)
+    token = _ACTIVE_MODE_DIAL.set((7724, "research"))
+    try:
+        result = await public_agent("be quick", mode="fast")
+    finally:
+        _ACTIVE_MODE_DIAL.reset(token)
+
+    assert mock_run.await_args.kwargs["enable_agentic"] is False
+    assert "agent_count" not in mock_run.await_args.kwargs
+    assert result.requested_mode == "fast"
+    assert result.mode_source == "explicit"
+    assert result.dialed_port is None
+
+
+@pytest.mark.asyncio
+async def test_mode_dial_middleware_uses_host_port_only_when_enabled(monkeypatch):
+    seen = []
+
+    async def app(scope, receive, send):
+        seen.append(_ACTIVE_MODE_DIAL.get())
+
+    scope = {"type": "http", "headers": [(b"host", b"localhost:8465")]}
+    middleware = ModeDialContextMiddleware(app)
+
+    monkeypatch.delenv("UNIGROK_MODE_DIALS", raising=False)
+    await middleware(scope, None, None)
+    monkeypatch.setenv("UNIGROK_MODE_DIALS", "1")
+    await middleware(scope, None, None)
+
+    assert seen == [None, (8465, "thinking")]
 
 
 @pytest.mark.asyncio
@@ -1049,7 +1122,7 @@ def test_metrics_survives_telemetry_read_failure(monkeypatch):
 
 def test_run_http_server_port_parsing_fallback(monkeypatch):
     """Verify that run_http_server handles an invalid non-numeric PORT environment
-    variable by falling back to 8080 and logging a warning."""
+    variable by falling back to 4765 and logging a warning."""
     import uvicorn
 
     called_port = None
@@ -1061,7 +1134,7 @@ def test_run_http_server_port_parsing_fallback(monkeypatch):
     monkeypatch.setenv("PORT", "invalid_non_numeric_port")
 
     run_http_server(port=None)
-    assert called_port == 8080
+    assert called_port == 4765
 
 
 @pytest.mark.asyncio

@@ -38,7 +38,7 @@
   <!-- chips -->
   <g font-family="'SF Mono', 'Fira Code', Consolas, monospace" font-size="12">
     <rect x="64" y="226" width="152" height="26" rx="13" fill="#11203a" stroke="#2a4166"/>
-    <text x="140" y="243" text-anchor="middle" fill="#58e6d9">localhost:8080/mcp</text>
+    <text x="140" y="243" text-anchor="middle" fill="#58e6d9">localhost:4765/mcp</text>
     <rect x="228" y="226" width="120" height="26" rx="13" fill="#11203a" stroke="#2a4166"/>
     <text x="288" y="243" text-anchor="middle" fill="#8ab4ff">Streamable HTTP</text>
     <rect x="360" y="226" width="112" height="26" rx="13" fill="#11203a" stroke="#2a4166"/>

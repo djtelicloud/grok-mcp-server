@@ -61,6 +61,18 @@ FALLBACK_XAI_MODELS = FALLBACK_XAI_LANGUAGE_MODELS
 logger = logging.getLogger("GrokMCP")
 
 
+MODE_DIAL_PORTS: Dict[int, Literal["auto", "fast", "reasoning", "thinking", "research"]] = {
+    2886: "auto",       # AUTO
+    3278: "fast",       # FAST
+    7327: "reasoning",  # REAS
+    8465: "thinking",   # THNK
+    7724: "research",   # RSCH
+}
+_ACTIVE_MODE_DIAL: contextvars.ContextVar[Optional[tuple[int, str]]] = contextvars.ContextVar(
+    "unigrok_active_mode_dial", default=None
+)
+
+
 def _json_error(message: str, status_code: int = 400, code: str = "invalid_request_error") -> JSONResponse:
     return JSONResponse(
         {
@@ -240,6 +252,50 @@ def _scope_header(scope: Dict[str, Any], name: bytes) -> Optional[str]:
         if key.lower() == name:
             return value.decode("latin-1")
     return None
+
+
+def _mode_dials_enabled() -> bool:
+    return os.environ.get("UNIGROK_MODE_DIALS", "").strip().lower() in ("1", "true", "yes")
+
+
+def _host_port(scope: Dict[str, Any]) -> Optional[int]:
+    host = (_scope_header(scope, b"host") or "").strip()
+    if not host:
+        return None
+    try:
+        return urlsplit(f"//{host}").port
+    except ValueError:
+        return None
+
+
+def _mode_dial_for_scope(scope: Dict[str, Any]) -> Optional[tuple[int, str]]:
+    if not _mode_dials_enabled():
+        return None
+    port = _host_port(scope)
+    mode = MODE_DIAL_PORTS.get(port) if port is not None else None
+    return (port, mode) if port is not None and mode is not None else None
+
+
+class ModeDialContextMiddleware:
+    """Bind an optional phoneword-port default to this request.
+
+    Docker preserves the caller's original ``Host`` port when several host
+    ports map to the same internal listener. The dial is only a default:
+    ``agent(mode=...)`` remains authoritative.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        token = _ACTIVE_MODE_DIAL.set(_mode_dial_for_scope(scope))
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            _ACTIVE_MODE_DIAL.reset(token)
 
 
 # Health probes stay reachable without credentials so load balancers and
@@ -582,8 +638,9 @@ async def readyz(_: Request) -> JSONResponse:
     return JSONResponse({"status": status, "checks": checks}, status_code=200 if status == "ready" else 503)
 
 
-async def runtimez(_: Request) -> JSONResponse:
+async def runtimez(request: Request) -> JSONResponse:
     auth_state = Path.home() / ".grok" / "auth.json"
+    request_dial = _mode_dial_for_scope(request.scope)
     return JSONResponse(
         {
             "runtime": get_unigrok_runtime(),
@@ -592,6 +649,16 @@ async def runtimez(_: Request) -> JSONResponse:
                 "mode": "contributor" if PathResolver.contributor_mode() else "stable",
                 "workspace_attached": PathResolver.get_workspace_root() is not None,
                 "requires_project_files": False,
+            },
+            "mode_dials": {
+                "enabled": _mode_dials_enabled(),
+                "ports": {str(port): mode for port, mode in MODE_DIAL_PORTS.items()},
+                "precedence": "explicit mode > dialed port > auto",
+                "request_dial": (
+                    {"port": request_dial[0], "default_mode": request_dial[1]}
+                    if request_dial
+                    else None
+                ),
             },
             "api_plane": {
                 "xai_api_key": bool(os.environ.get("XAI_API_KEY", "").strip()),
@@ -1248,7 +1315,7 @@ async def public_agent(
     system_prompt: Optional[str] = None,
     workspace_context: Optional[str] = None,
     workspace_label: Optional[str] = None,
-    mode: Literal["auto", "fast", "reasoning", "thinking", "research"] = "auto",
+    mode: Optional[Literal["auto", "fast", "reasoning", "thinking", "research"]] = None,
     model: Optional[str] = None,
 ) -> AgentResult:
     """Single public remote MCP entry point for the UniGrok agent.
@@ -1262,7 +1329,9 @@ async def public_agent(
             current project (for example a file excerpt, diff, or error). The
             stable service cannot browse the IDE project automatically.
         workspace_label: Optional human-readable project name for that context.
-        mode: `"auto"` (default) self-routes; `"fast"` forces a single toolless
+        mode: Optional explicit mode. When omitted, a phoneword mode-dial port
+            supplies the default if enabled; otherwise `"auto"` self-routes.
+            `"fast"` forces a single toolless
             completion; `"reasoning"` pins the planning model; `"thinking"`
             runs the agent loop plus a schema-enforced reflection review
             (slowest, most expensive); `"research"` pins the planning route,
@@ -1298,15 +1367,18 @@ async def public_agent(
                 f"{safe_context}"
             )
             system_prompt = f"{system_prompt.rstrip()}\n\n{courier}" if system_prompt else courier
-    is_research = mode == "research"
+    active_dial = _ACTIVE_MODE_DIAL.get()
+    resolved_mode = mode or (active_dial[1] if active_dial else "auto")
+    mode_source = "explicit" if mode is not None else ("dial" if active_dial else "default")
+    is_research = resolved_mode == "research"
     kwargs: Dict[str, Any] = {
         "prompt": prompt,
         "session": _scoped_session(session),
         "system_prompt": system_prompt,
         "model": model,
-        "mode": "reasoning" if mode in ("reasoning", "research") else "auto",
-        "thinking_mode": mode == "thinking",
-        "enable_agentic": mode != "fast",
+        "mode": "reasoning" if resolved_mode in ("reasoning", "research") else "auto",
+        "thinking_mode": resolved_mode == "thinking",
+        "enable_agentic": resolved_mode != "fast",
     }
     if is_research:
         kwargs["agent_count"] = _research_agent_count()
@@ -1327,6 +1399,9 @@ async def public_agent(
         why=layer.routing_why or "auto",
         degraded=layer.degraded,
         citations=citations_mapped,
+        requested_mode=resolved_mode,
+        mode_source=mode_source,
+        dialed_port=active_dial[0] if active_dial and mode is None else None,
     )
 
 
@@ -1351,7 +1426,8 @@ def create_public_mcp() -> FastMCP:
             "alongside route/cost/finish_reason metadata. The stable service is "
             "workspace-neutral: include deliberately selected project material in "
             "`workspace_context` when Grok needs it. Call `grok_mcp_discover_self` "
-            "for the exact operating model and onboarding guidance."
+            "for the canonical 4765 GROK endpoint, optional phoneword mode dials, "
+            "and exact onboarding guidance."
         ),
         streamable_http_path="/mcp",
         stateless_http=True,
@@ -1482,6 +1558,7 @@ def create_app() -> Starlette:
             Middleware(CSPMiddleware),
             Middleware(MCPOriginMiddleware),
             Middleware(GatewayAuthMiddleware),
+            Middleware(ModeDialContextMiddleware),
             Middleware(CallerContextMiddleware),
         ],
         lifespan=app_lifespan,
@@ -1511,12 +1588,12 @@ def _resolve_bind_host() -> str:
 def _resolve_bind_port(port: Optional[int] = None) -> int:
     if port is not None:
         return port
-    raw = os.environ.get("PORT", "8080").strip() or "8080"
+    raw = os.environ.get("PORT", "4765").strip() or "4765"
     try:
         return int(raw)
     except ValueError:
-        logger.warning(f"Invalid PORT value {raw!r}; falling back to 8080.")
-        return 8080
+        logger.warning(f"Invalid PORT value {raw!r}; falling back to 4765.")
+        return 4765
 
 
 def _log_cli_plane_availability():

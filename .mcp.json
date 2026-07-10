@@ -1,7 +1,7 @@
 {
   "mcpServers": {
     "unigrok": {
-      "url": "http://localhost:8080/mcp",
+      "url": "http://localhost:4765/mcp",
       "headers": { "X-Client-ID": "plugin" }
     },
     "unigrok-stdio": {
