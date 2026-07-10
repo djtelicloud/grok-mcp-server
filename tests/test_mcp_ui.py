@@ -13,10 +13,10 @@ def test_mcp_ui_static_files_are_served(monkeypatch):
         styles = client.get("/ui/styles.css")
 
     assert index.status_code == 200
-    assert "<title>UniGrok MCP v0.4.1 Control Center</title>" in index.text
-    assert '<span class="version-badge">v0.4.1</span>' in index.text
-    assert 'script type="module" src="./app.js?v=grok-v0.4.1"' in index.text
-    assert '<link rel="stylesheet" href="./styles.css?v=grok-v0.4.1" />' in index.text
+    assert "<title>UniGrok MCP v0.4.2 Control Center</title>" in index.text
+    assert '<span class="version-badge">v0.4.2</span>' in index.text
+    assert 'script type="module" src="./app.js?v=grok-v0.4.2"' in index.text
+    assert '<link rel="stylesheet" href="./styles.css?v=grok-v0.4.2" />' in index.text
     assert "Control Center" in index.text
     assert "Bearer token" not in index.text
     assert "Quick Test Console" in index.text
@@ -27,6 +27,13 @@ def test_mcp_ui_static_files_are_served(monkeypatch):
     assert "grok_mcp_discover_self" in script.text
     assert "simulate_reasoning_guard" in script.text
     assert "fetch_okf_bundle" in script.text
+    assert 'fetchMcpCall("grok_mcp_status", { view: "json" })' in script.text
+    assert "Naive regex parse" not in script.text
+    assert 'id="metricApiCost"' in index.text
+    assert 'id="planeBreakdownBody"' in index.text
+    assert 'id="providerUsageState"' in index.text
+    assert 'id="cliUsageState"' in index.text
+    assert "SuperGrok CLI subscription" in index.text
     assert styles.status_code == 200
     assert ".console-grid" in styles.text
     assert ".metric-card" in styles.text
@@ -92,6 +99,8 @@ def test_mcp_ui_cost_estimator():
     assert index.status_code == 200
     assert 'id="costEstimator"' in index.text
     assert 'id="budgetGuardToggle"' in index.text
+    assert "Local input estimate" in index.text
+    assert "Estimated Cost" not in index.text
 
 
 def test_mcp_ui_accessibility_audit():
@@ -121,4 +130,3 @@ def test_mcp_ui_security_csp_headers():
     csp = index.headers["content-security-policy"]
     assert "default-src 'self'" in csp
     assert "frame-ancestors 'none'" in csp
-

@@ -32,7 +32,7 @@ cost tracking, and a browser Control Center.
 
 ![UniGrok architecture — six MCP clients share one local gateway that routes across the metered xAI API plane and the ~$0-marginal Grok CLI plane, with SQLite-backed sessions, cost, and jobs](assets/architecture.svg)
 
-Current release: **v0.4.1**.
+Current development release: **v0.4.2**.
 
 Use it as:
 
@@ -296,6 +296,14 @@ Full design detail lives in [architecture.md](architecture.md).
 UniGrok strips `XAI_API_KEY` from every CLI subprocess. This prevents a CLI
 invocation from silently charging the API credential and makes the reported
 CLI/API routing split a real credential and allowance boundary.
+
+The Control Center usage ledger keeps those planes honest: xAI API requests
+store the exact per-response billed cost; CLI subscription requests store local
+counts, latency, success, model, and estimated tokens without inventing a
+per-request dollar cost. Optional `XAI_MANAGEMENT_API_KEY` plus
+`UNIGROK_XAI_TEAM_ID` enables a separately labeled, team-wide API billing
+comparison. xAI does not expose SuperGrok subscription quota through that API,
+so provider API totals are never added to CLI statistics.
 
 Useful endpoints in HTTP mode:
 

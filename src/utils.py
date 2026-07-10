@@ -2512,6 +2512,10 @@ class GrokSessionStore:
         context_id: Optional[str] = None,
         caller: Optional[str] = None,
         request_id: Optional[str] = None,
+        model: Optional[str] = None,
+        tokens: Optional[int] = None,
+        token_kind: Optional[str] = None,
+        billing_source: Optional[str] = None,
     ):
         await self._ensure_initialized()
         # caller and request_id ride the metadata JSON column (v8) so future
@@ -2527,6 +2531,17 @@ class GrokSessionStore:
         clean_request_id = normalize_request_id(request_id) or get_request_id()
         if clean_request_id:
             meta["request_id"] = clean_request_id
+        clean_model = str(model or "").strip()
+        if clean_model:
+            meta["model"] = clean_model[:200]
+        if tokens is not None:
+            meta["tokens"] = max(0, int(tokens))
+        clean_token_kind = str(token_kind or "").strip().lower()
+        if clean_token_kind in ("provider_exact", "local_estimate", "unavailable"):
+            meta["token_kind"] = clean_token_kind
+        clean_billing_source = str(billing_source or "").strip().lower()
+        if clean_billing_source in ("xai_response_exact", "subscription_unmetered", "unknown"):
+            meta["billing_source"] = clean_billing_source
         meta_str = json.dumps(meta, separators=(",", ":")) if meta else None
         now_str = datetime.now().isoformat()
         async with self._lock:
@@ -3873,6 +3888,11 @@ def _compact_threshold_tokens() -> int:
 def _estimate_history_tokens(history: List[dict]) -> int:
     """Cheap len/4 token estimate over a session's message contents."""
     return sum(len(str(msg.get("content") or "")) for msg in history) // 4
+
+
+def _estimate_text_tokens(*parts: Any) -> int:
+    """Local estimate used only when the CLI exposes no usage metadata."""
+    return sum(len(str(part or "")) for part in parts) // 4
 
 
 async def maybe_compact_history(
@@ -6369,6 +6389,13 @@ async def run_thinking_loop(
             total_cost,
             context_id=context_id,
             caller=caller,
+            **_telemetry_usage_kwargs(
+                plane=layer.plane,
+                model=model,
+                tokens=layer.tokens,
+                prompt=prompt,
+                output=layer.generation,
+            ),
         )
     return layer
 
@@ -6827,6 +6854,31 @@ async def _save_task_memory_safe(
         logging.getLogger("GrokMCP").warning(f"Task memory save failed: {exc}")
 
 
+def _telemetry_usage_kwargs(
+    *,
+    plane: str,
+    model: str,
+    tokens: int,
+    prompt: str,
+    output: str,
+) -> Dict[str, Any]:
+    """Classify provider-exact API usage vs locally estimated CLI usage."""
+    is_cli = str(plane or "").lower().startswith("cli")
+    if is_cli:
+        return {
+            "model": model,
+            "tokens": _estimate_text_tokens(prompt, output),
+            "token_kind": "local_estimate",
+            "billing_source": "subscription_unmetered",
+        }
+    return {
+        "model": model,
+        "tokens": max(0, int(tokens or 0)),
+        "token_kind": "provider_exact" if tokens else "unavailable",
+        "billing_source": "xai_response_exact",
+    }
+
+
 # ─── Unified Orchestrate — Thin Router (v2) ──────────────────────────────────
 @_with_request_id
 async def orchestrate(
@@ -7030,7 +7082,14 @@ async def orchestrate(
             layer.degraded = False
             success = 1 if layer.finish_reason == "final_answer" else 0
             if store:
-                await store.save_telemetry(prompt[:100], layer.plane, success, layer.latency, layer.cost_usd, context_id=context_id, caller=caller)
+                await store.save_telemetry(
+                    prompt[:100], layer.plane, success, layer.latency,
+                    layer.cost_usd, context_id=context_id, caller=caller,
+                    **_telemetry_usage_kwargs(
+                        plane=layer.plane, model=actual_model,
+                        tokens=layer.tokens, prompt=prompt, output=layer.generation,
+                    ),
+                )
             await _save_task_memory_safe(store, prompt, layer, actual_model, success)
             return layer
         except Exception as e:
@@ -7074,7 +7133,14 @@ async def orchestrate(
         layer.routing_why = "failover" if degraded_route else routing_why
         layer.degraded = degraded_route
         if store:
-            await store.save_telemetry(prompt[:100], layer.plane, 1, time.time() - start_time, g_cost, context_id=context_id, caller=caller)
+            await store.save_telemetry(
+                prompt[:100], layer.plane, 1, time.time() - start_time,
+                g_cost, context_id=context_id, caller=caller,
+                **_telemetry_usage_kwargs(
+                    plane=layer.plane, model=actual_model,
+                    tokens=layer.tokens, prompt=prompt, output=layer.generation,
+                ),
+            )
 
     except Exception as e:
         if is_cli_model(actual_model):
@@ -7100,6 +7166,10 @@ async def orchestrate(
                     layer.cost_usd,
                     context_id=context_id,
                     caller=caller,
+                    **_telemetry_usage_kwargs(
+                        plane=layer.plane, model=actual_model,
+                        tokens=0, prompt=prompt, output="",
+                    ),
                 )
             layer.latency = time.time() - start_time
             await _save_task_memory_safe(store, prompt, layer, actual_model, 0)
@@ -7108,7 +7178,14 @@ async def orchestrate(
         # Graceful CLI fallback
         if is_cloudrun_runtime():
             if store:
-                await store.save_telemetry(prompt[:100], "API", 0, time.time() - start_time, layer.cost_usd, context_id=context_id, caller=caller)
+                await store.save_telemetry(
+                    prompt[:100], "API", 0, time.time() - start_time,
+                    layer.cost_usd, context_id=context_id, caller=caller,
+                    **_telemetry_usage_kwargs(
+                        plane="API", model=actual_model,
+                        tokens=0, prompt=prompt, output="",
+                    ),
+                )
             raise RuntimeError(f"xAI API execution failed in Cloud Run runtime: {e}") from e
 
         logging.getLogger("GrokMCP").warning(
@@ -7138,7 +7215,14 @@ async def orchestrate(
             layer.degraded = True
             layer.routing_why = "failover"
             if store:
-                await store.save_telemetry(prompt[:100], layer.plane, 1, time.time() - start_time, g_cost, context_id=context_id, caller=caller)
+                await store.save_telemetry(
+                    prompt[:100], layer.plane, 1, time.time() - start_time,
+                    g_cost, context_id=context_id, caller=caller,
+                    **_telemetry_usage_kwargs(
+                        plane=layer.plane, model=layer.model,
+                        tokens=layer.tokens, prompt=prompt, output=layer.generation,
+                    ),
+                )
         except Exception as cli_err:
             # Keep the original API-plane failure visible: on an API-only host
             # (no grok binary) the FileNotFoundError alone would mask the real
@@ -7153,7 +7237,14 @@ async def orchestrate(
             layer.degraded = True
             layer.routing_why = "failover"
             if store:
-                await store.save_telemetry(prompt[:100], layer.plane, 0, time.time() - start_time, layer.cost_usd, context_id=context_id, caller=caller)
+                await store.save_telemetry(
+                    prompt[:100], layer.plane, 0, time.time() - start_time,
+                    layer.cost_usd, context_id=context_id, caller=caller,
+                    **_telemetry_usage_kwargs(
+                        plane=layer.plane, model=layer.model,
+                        tokens=0, prompt=prompt, output="",
+                    ),
+                )
 
     layer.latency = time.time() - start_time
     await _save_task_memory_safe(store, prompt, layer, actual_model, 1 if layer.finish_reason == "final_answer" else 0)

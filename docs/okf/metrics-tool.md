@@ -13,15 +13,26 @@ UniGrok is built for zero-trust swarm environments, providing rich operational t
 
 ### 1. Stdio Status Tool (`grok_mcp_status`)
 For stdio MCP hosts, querying gateway metrics can be done directly through the tool:
-- **Response**: A formatted text report containing version, runtime model mapping, active session count, total daily cost, caller budgets, and circuit breaker status.
+- `view=text` (default) returns the human-readable operational report.
+- `view=json` returns the stable structured usage ledger consumed by the Control Center: today/lifetime summaries, per-plane/model/caller activity, data coverage, circuit breakers, and billing-source metadata.
 
 ### 2. Prometheus Endpoint (`/metrics`)
-For HTTP gateways, the server exposes a `/metrics` route (Prometheus text exposition format) that tracks:
-- `unigrok_request_total`: Request counter labelled by status and model.
-- `unigrok_tokens_total`: Counter for input and output token consumption.
-- `unigrok_latency_seconds`: Latency tracking.
-- `unigrok_plane_cost_usd_total`: Billing tracker mapped by plane.
-- `unigrok_caller_cost_usd_total`: Budget metrics mapped by client/caller identifier.
+For HTTP gateways, `/metrics` returns JSON by default and Prometheus text with
+`?format=prometheus`. Existing plane/caller/runtime families remain stable; the
+JSON payload additionally carries the same structured usage ledger used by the
+MCP UI.
+
+## Billing Truth
+
+- API calls record xAI's exact per-response billed cost and provider token
+  counts. No price-table estimate or later account lookup is needed.
+- CLI subscription calls record locally observed request count, success,
+  latency, model, and locally estimated tokens. Per-request dollar cost and
+  remaining SuperGrok quota are unavailable from xAI and are represented as
+  unknown, not zero.
+- Optional `XAI_MANAGEMENT_API_KEY` plus `UNIGROK_XAI_TEAM_ID` enables a cached
+  team-wide API usage comparison. It may include API traffic outside UniGrok
+  and never changes CLI statistics or the local ledger.
 
 ## Circuit Breakers & Failover
 

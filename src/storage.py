@@ -59,6 +59,10 @@ class SessionStoreProtocol(Protocol):
         context_id: Optional[str] = None,
         caller: Optional[str] = None,
         request_id: Optional[str] = None,
+        model: Optional[str] = None,
+        tokens: Optional[int] = None,
+        token_kind: Optional[str] = None,
+        billing_source: Optional[str] = None,
     ) -> None: ...
     async def get_telemetry_stats(self) -> List[Dict[str, Any]]: ...
     async def get_caller_cost_today(self, caller_substring: str) -> float: ...

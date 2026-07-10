@@ -3,12 +3,12 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>UniGrok MCP v0.4.1 Control Center</title>
+    <title>UniGrok MCP v0.4.2 Control Center</title>
     <!-- Premium Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Orbitron:wght@500;700;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="./styles.css?v=grok-v0.4.1" />
+    <link rel="stylesheet" href="./styles.css?v=grok-v0.4.2" />
   </head>
   <body>
     <main class="app-shell">
@@ -27,7 +27,7 @@
       <header class="topbar">
         <div class="brand-block">
           <p class="eyebrow">UNIGROK GATEWAY</p>
-          <h1>Control Center <span class="version-badge">v0.4.1</span></h1>
+          <h1>Control Center <span class="version-badge">v0.4.2</span></h1>
         </div>
         <div class="signal-strip" aria-live="polite">
           <span id="connectionState" class="status-pill status-idle">Idle</span>
@@ -118,9 +118,9 @@
                   <textarea id="promptInput" rows="5" placeholder="e.g. Compare the latency of WebMCP vs stdio JSON-RPC transport..." aria-label="Prompt task message input"></textarea>
                 </label>
                 <div class="estimator-row">
-                  <span id="costEstimator" class="estimator-text">Estimated Cost: $0.00000</span>
+                  <span id="costEstimator" class="estimator-text">Local input estimate: ~0 tokens</span>
                   <label class="budget-guard-label">
-                    <input id="budgetGuardToggle" type="checkbox" checked aria-label="Toggle budget safety guard" /> Budget Guard
+                    <input id="budgetGuardToggle" type="checkbox" checked aria-label="Toggle large prompt safety guard" /> Large Prompt Guard
                   </label>
                 </div>
               </div>
@@ -272,33 +272,93 @@
           <!-- TAB 6: Telemetry & Metrics Dashboard -->
           <div id="tab-metrics" class="tab-panel">
             <div class="panel-header">
-              <h2>Telemetry & Metrics</h2>
-              <button id="refreshMetricsBtn" type="button" class="small-btn-glow">Refresh Metrics</button>
+              <div>
+                <h2>Usage &amp; Telemetry</h2>
+                <p class="panel-desc">Local request truth, exact API billing, and honest CLI subscription activity.</p>
+              </div>
+              <div class="metrics-actions">
+                <div class="period-toggle" role="group" aria-label="Metrics period">
+                  <button id="metricsPeriodToday" type="button" class="period-btn active" data-period="today">Today</button>
+                  <button id="metricsPeriodLifetime" type="button" class="period-btn" data-period="lifetime">Lifetime</button>
+                </div>
+                <button id="refreshMetricsBtn" type="button" class="small-btn-glow">Refresh</button>
+              </div>
             </div>
-            <p class="panel-desc">Inspect daily cost summaries, model distribution, latency averages, and active circuit breakers.</p>
+
+            <div id="metricsStatus" class="metrics-status">Loading structured MCP telemetry…</div>
 
             <div class="metrics-grid">
               <div class="metric-card">
-                <h3>Daily Cost</h3>
-                <div id="metricCost" class="metric-value">$0.00000</div>
-                <span class="metric-sub">Calculated USD for today</span>
+                <h3>API Spend</h3>
+                <div id="metricApiCost" class="metric-value">—</div>
+                <span class="metric-sub">Exact billed cost from xAI responses</span>
+              </div>
+              <div class="metric-card">
+                <h3>Requests</h3>
+                <div id="metricRequests" class="metric-value">—</div>
+                <span class="metric-sub">Model executions observed by UniGrok</span>
               </div>
               <div class="metric-card">
                 <h3>Avg Latency</h3>
-                <div id="metricLatency" class="metric-value">0.00s</div>
+                <div id="metricLatency" class="metric-value">—</div>
                 <span class="metric-sub">Mean elapsed execution time</span>
               </div>
               <div class="metric-card">
-                <h3>Plane Distribution</h3>
-                <div id="metricPlane" class="metric-value">0 / 0</div>
-                <span class="metric-sub">API vs Local CLI executions</span>
+                <h3>Success Rate</h3>
+                <div id="metricSuccess" class="metric-value">—</div>
+                <span class="metric-sub">Successful completed requests</span>
               </div>
               <div class="metric-card">
-                <h3>Circuit Breaker</h3>
-                <div id="metricBreaker" class="metric-value">Closed</div>
-                <span class="metric-sub">Current outage filter state</span>
+                <h3>API / CLI</h3>
+                <div id="metricPlane" class="metric-value">—</div>
+                <span class="metric-sub">Independent credential planes</span>
+              </div>
+              <div class="metric-card">
+                <h3>Tracked Tokens</h3>
+                <div id="metricTokens" class="metric-value">—</div>
+                <span class="metric-sub">API exact; CLI locally estimated</span>
               </div>
             </div>
+
+            <div id="metricsCoverage" class="coverage-note"></div>
+
+            <div class="metrics-detail-grid">
+              <section class="usage-panel">
+                <div class="section-title">Plane Breakdown</div>
+                <div class="usage-table-wrap">
+                  <table class="usage-table">
+                    <thead><tr><th>Plane</th><th>Requests</th><th>Success</th><th>Latency</th><th>Tokens</th><th>Cost</th></tr></thead>
+                    <tbody id="planeBreakdownBody"><tr><td colspan="6" class="empty-cell">Loading…</td></tr></tbody>
+                  </table>
+                </div>
+              </section>
+
+              <section class="usage-panel billing-panel">
+                <div class="section-title">Billing Boundaries</div>
+                <div class="billing-row">
+                  <div><span class="billing-label">xAI API team usage</span><span id="providerUsageState" class="state-chip">Checking</span></div>
+                  <strong id="providerUsageValue">—</strong>
+                  <p id="providerUsageDetail">Optional team-wide comparison via Management API.</p>
+                </div>
+                <div class="billing-row">
+                  <div><span class="billing-label">SuperGrok CLI subscription</span><span id="cliUsageState" class="state-chip local">Local only</span></div>
+                  <strong id="cliUsageValue">—</strong>
+                  <p id="cliUsageDetail">Provider quota is not exposed; UniGrok tracks only calls routed through this service.</p>
+                </div>
+              </section>
+            </div>
+
+            <div class="metrics-detail-grid compact">
+              <section class="usage-panel">
+                <div class="section-title">Models</div>
+                <div id="modelBreakdown" class="breakdown-list"><span class="empty-cell">No model-attributed rows yet.</span></div>
+              </section>
+              <section class="usage-panel">
+                <div class="section-title">Callers</div>
+                <div id="callerBreakdown" class="breakdown-list"><span class="empty-cell">No caller-attributed rows yet.</span></div>
+              </section>
+            </div>
+
             <div class="section-title">Raw Telemetry Report</div>
             <pre><code id="rawMetricsReport" class="json-code">Loading metrics...</code></pre>
           </div>
@@ -348,6 +408,6 @@
 
       </section>
     </main>
-    <script type="module" src="./app.js?v=grok-v0.4.1"></script>
+    <script type="module" src="./app.js?v=grok-v0.4.2"></script>
   </body>
 </html>

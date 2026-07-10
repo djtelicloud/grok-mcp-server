@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, AsyncIterator, Dict, List, Literal, Optional
 from urllib.parse import urlsplit
 from .models.results import AgentResult
+from .metrics import build_metrics_snapshot, fetch_provider_api_usage
 
 import httpx
 from mcp.server.fastmcp import FastMCP
@@ -986,14 +987,15 @@ async def metrics(request: Request) -> Response:
     except Exception as exc:
         logger.warning(f"/metrics advisor view failed: {exc}")
 
-    snapshot = {
-        "format": "unigrok-json-v1",
-        "planes": _aggregate_telemetry_planes(rows),
-        "callers": _aggregate_telemetry_callers(rows),
-        "runtime": get_runtime_stats(),
-        "circuit_breakers": get_circuit_breaker_state(),
-        "routing_advisor": advisor_view,
-    }
+    provider_api = await fetch_provider_api_usage()
+    snapshot = build_metrics_snapshot(
+        rows,
+        runtime=get_runtime_stats(),
+        circuit_breakers=get_circuit_breaker_state(),
+        routing_advisor=advisor_view,
+        provider_api=provider_api,
+        caller_limit=_METRICS_TOP_CALLERS,
+    )
     if request.query_params.get("format", "").strip().lower() == "prometheus":
         return Response(
             _render_prometheus_metrics(snapshot),

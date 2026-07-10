@@ -5,6 +5,7 @@ Unit and integration tests for FastMCP tool endpoints in src/server.py.
 """
 
 import asyncio
+import json
 import os
 import pytest
 from pathlib import Path
@@ -61,6 +62,41 @@ async def test_grok_mcp_status():
         # Telemetry-informed borderline prior surface (RoutingAdvisor view)
         assert "Routing Advisor" in res
         assert "static prior" in res
+
+
+@pytest.mark.asyncio
+async def test_grok_mcp_status_json_view_is_structured(monkeypatch):
+    from datetime import datetime
+    import src.tools.system as system_module
+
+    rows = [{
+        "created_at": datetime.now().isoformat(),
+        "chosen_plane": "API",
+        "success": 1,
+        "latency": 1.25,
+        "cost": 0.004,
+        "metadata": '{"model":"grok-4.5","tokens":42,"token_kind":"provider_exact"}',
+    }]
+    monkeypatch.setattr(system_module.store, "get_telemetry_stats", AsyncMock(return_value=rows))
+    monkeypatch.setattr(
+        system_module,
+        "fetch_provider_api_usage",
+        AsyncMock(return_value={"state": "not_configured", "usage_usd": None}),
+    )
+    monkeypatch.setattr(
+        system_module,
+        "grok_cli_plane_status",
+        lambda **_: {
+            "state": "ready", "auth": "oauth_verified",
+            "setup_command": "docker exec auth",
+        },
+    )
+
+    result = json.loads(await grok_mcp_status(view="json"))
+
+    assert result["schema_version"] == 2
+    assert result["usage"]["today"]["summary"]["requests"] == 1
+    assert result["usage"]["today"]["summary"]["api_cost_usd"] == pytest.approx(0.004)
 
 
 @pytest.mark.asyncio

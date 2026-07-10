@@ -4,7 +4,15 @@ All notable changes to UniGrok MCP will be documented in this file.
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-07-10
+
 ### Added
+- **Usage truth and Control Center v0.4.2**: Replaced Markdown scraping with a
+  structured MCP metrics view; added today/lifetime, plane, model, caller,
+  latency, success, token-coverage, and billing-boundary displays; recorded
+  provider-exact API usage and clearly labeled local CLI estimates; added an
+  optional cached xAI Management API team-usage comparison without mixing it
+  into SuperGrok subscription statistics; and hardened tablet/mobile layouts.
 - **Grok Dial Plan**: Made `4765` (telephone-keypad `GROK`) the canonical
   stable endpoint and `4766` the contributor Forge endpoint. An optional
   Compose overlay adds `AUTO=2886`, `FAST=3278`, `REAS=7327`, `THNK=8465`, and

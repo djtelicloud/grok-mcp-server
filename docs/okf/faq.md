@@ -1,7 +1,7 @@
 ---
 okf_version: "0.1"
 faq_schema_version: "1"
-source_version: "0.4.1"
+source_version: "0.4.2"
 title: "UniGrok FAQ"
 type: "topic"
 description: "Verified local-first setup, routing, security, and troubleshooting answers for UniGrok MCP users."
@@ -134,6 +134,12 @@ and plane. MCP `agent` responses also carry structured execution metadata.
 
 These values describe the gateway request that produced the response. A
 zero-cost local FAQ lookup is documentation retrieval, not a model invocation.
+
+The Usage & Telemetry tab does not combine API-key billing with SuperGrok CLI
+activity. API spend is exact per response. CLI activity is tracked locally,
+but xAI exposes no SuperGrok quota/spend API, so subscription cost is shown as
+unknown/included rather than a misleading `$0`. Optional Management API
+credentials add a separately labeled team-wide API comparison only.
 
 ## Why does UniGrok use port 4765, and what if it is occupied? {#port-in-use}
 

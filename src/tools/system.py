@@ -3,16 +3,18 @@
 
 import logging
 import asyncio
+import json
 import os
 import subprocess
 import shutil
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional, List
+from typing import Any, Dict, Optional, List, Literal
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 from ..models.results import SystemResult
+from ..metrics import build_metrics_snapshot, fetch_provider_api_usage
 from ..version import __version__
 
 from ..utils import (
@@ -51,8 +53,8 @@ READONLY_TOOL = ToolAnnotations(readOnlyHint=True)
 DESTRUCTIVE_TOOL = ToolAnnotations(destructiveHint=True)
 
 
-async def grok_mcp_status() -> str:
-    """Inspect the current health, versions, CLI auth, and sqlite metrics of the Grok-MCP server."""
+async def grok_mcp_status(view: Literal["text", "json"] = "text") -> str:
+    """Inspect health and usage; ``view=json`` returns stable structured metrics."""
     async with GrokInvocationContext("utility", logger, append_signature=False) as ctx:
         server_version = __version__
         proj_root = PathResolver.get_service_root()
@@ -136,6 +138,7 @@ async def grok_mcp_status() -> str:
         success_rate = 0.0
         latest_context_id = "none"
 
+        stats: List[Dict[str, Any]] = []
         try:
             stats = await store.get_telemetry_stats()
             if stats:
@@ -185,20 +188,34 @@ async def grok_mcp_status() -> str:
 
         # Telemetry-informed borderline routing prior (RoutingAdvisor view)
         advisor_summary = "`unavailable`"
+        advisor_view: Optional[Dict[str, Any]] = None
         try:
-            advisor = await get_routing_advisor().status_view(store)
-            planning_view = advisor["planning"]
-            coding_view = advisor["coding"]
+            advisor_view = await get_routing_advisor().status_view(store)
+            planning_view = advisor_view["planning"]
+            coding_view = advisor_view["coding"]
             advisor_summary = (
-                f"borderline → `{advisor['borderline_choice']}` — "
-                f"planning `{advisor['planning_model']}`: {planning_view['samples']} samples, "
+                f"borderline → `{advisor_view['borderline_choice']}` — "
+                f"planning `{advisor_view['planning_model']}`: {planning_view['samples']} samples, "
                 f"{planning_view['success_rate'] * 100:.0f}% success, ${planning_view['avg_cost']:.4f} avg; "
-                f"coding `{advisor['coding_model']}`: {coding_view['samples']} samples, "
+                f"coding `{advisor_view['coding_model']}`: {coding_view['samples']} samples, "
                 f"{coding_view['success_rate'] * 100:.0f}% success, ${coding_view['avg_cost']:.4f} avg "
-                f"(margin {advisor['margin']:.2f}, min {advisor['min_samples']} samples/model)"
+                f"(margin {advisor_view['margin']:.2f}, min {advisor_view['min_samples']} samples/model)"
             )
         except Exception:
             pass
+
+        if view == "json":
+            provider_api = await fetch_provider_api_usage()
+            return json.dumps(
+                build_metrics_snapshot(
+                    stats,
+                    runtime=runtime,
+                    circuit_breakers=breakers,
+                    routing_advisor=advisor_view,
+                    provider_api=provider_api,
+                ),
+                separators=(",", ":"),
+            )
 
         status_text = (
             "# UniGrok MCP Server Status\n\n"

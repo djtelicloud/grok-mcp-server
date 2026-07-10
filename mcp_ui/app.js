@@ -9,6 +9,8 @@ const state = {
   busy: false,
   requestIdCounter: 1,
   clientToken: "",
+  metricsPeriod: "today",
+  metricsSnapshot: null,
 };
 
 // --- DOM Selector Helper ---
@@ -74,18 +76,18 @@ const enforcedSchemas = {
     properties: {
       response: { type: "string", description: "Core generated text content." },
       text: { type: "string", description: "Formatted markdown string with citation footers." },
-      finish_reason: { type: "string", enum: ["final_answer", "fallback", "length", "error"] },
+      finish_reason: { type: "string", enum: ["final_answer", "fallback", "tool_calls", "length", "unknown", "error"] },
       cost_usd: { type: "number", description: "Aggregated execution cost in USD." },
       model: { type: "string", description: "ID of the Grok model serving the call." },
       profile: { type: "string", description: "Adapter hyperparams profile name." },
       tokens: { type: "integer", description: "Aggregated tokens consumed." },
       latency_sec: { type: "number", description: "Total request round-trip time." },
-      route: { type: "string", enum: ["fast", "reasoning", "thinking", "research"] },
-      plane: { type: "string", enum: ["API", "CLI-Fallback"] },
+      route: { type: "string", enum: ["fast", "agentic", "thinking", "research", "cli-fallback", "utility"] },
+      plane: { type: "string", enum: ["API", "CLI", "CLI-Fallback", "local", "utility"] },
       citations: { type: "array", items: { type: "object", properties: { url: { type: "string" } } } },
       why: { type: "string", description: "Decision rationale metric." },
       degraded: { type: "boolean", description: "True if model fallback triggered." },
-      trace: { type: "string", description: "Inner step reasoning traces." }
+      trace: { type: "array", description: "Structured multi-step execution trace." }
     },
     required: ["response", "finish_reason", "cost_usd"]
   },
@@ -367,27 +369,148 @@ function checkWebMcpBridge() {
 
 // --- Telemetry & Metrics Dashboard ---
 async function fetchLiveMetrics() {
-  $("rawMetricsReport").innerText = "Polling status metrics...";
+  $("rawMetricsReport").innerText = "Polling structured MCP metrics...";
+  $("metricsStatus").innerText = "Refreshing local usage ledger…";
   try {
-    const res = await fetchMcpCall("grok_mcp_status", {});
+    const res = await fetchMcpCall("grok_mcp_status", { view: "json" });
     const payload = extractToolPayload(res);
-
-    $("rawMetricsReport").innerText = JSON.stringify(payload, null, 2);
-
-    // Naive regex parse of text status to populate grid chips
-    const text = String(payload.text || payload.response || "");
-    const costMatch = text.match(/Total Cost \(Developer API\):\s*`\$([\d\.]+)`/);
-    const latencyMatch = text.match(/Average Query Latency:\s*`([\d\.]+)s`/);
-    const splitMatch = text.match(/CLI vs API Routing Split:\s*`(\d+ CLI calls \/ \d+ API calls)`/);
-    const breakerMatch = text.match(/Circuit Breakers:\s*`([^`]+)`/);
-
-    if (costMatch) $("metricCost").innerText = `$${parseFloat(costMatch[1]).toFixed(5)}`;
-    if (latencyMatch) $("metricLatency").innerText = `${latencyMatch[1]}s`;
-    if (splitMatch) $("metricPlane").innerText = splitMatch[1].replace(" calls", "").replace(" calls", "");
-    if (breakerMatch) $("metricBreaker").innerText = breakerMatch[1].split(" ")[0];
+    if (!payload?.usage?.today || !payload?.usage?.lifetime) {
+      throw new Error("MCP returned an unsupported metrics payload");
+    }
+    state.metricsSnapshot = payload;
+    renderMetricsSnapshot();
   } catch (err) {
     $("rawMetricsReport").innerText = `Failed to fetch telemetry report: ${err.message}`;
+    $("metricsStatus").innerText = "Metrics unavailable — the MCP status call failed.";
   }
+}
+
+function formatMetric(value, formatter, empty = "—") {
+  return value === null || value === undefined ? empty : formatter(Number(value));
+}
+
+function formatTokens(value) {
+  const number = Number(value || 0);
+  if (number >= 1000000) return `${(number / 1000000).toFixed(2)}M`;
+  if (number >= 1000) return `${(number / 1000).toFixed(1)}K`;
+  return number.toLocaleString();
+}
+
+function planeRequests(planes, names) {
+  return names.reduce((total, name) => total + Number(planes?.[name]?.requests || 0), 0);
+}
+
+function renderBreakdownList(containerId, entries, valueLabel) {
+  const container = $(containerId);
+  container.replaceChildren();
+  if (!entries.length) {
+    const empty = document.createElement("span");
+    empty.className = "empty-cell";
+    empty.textContent = "No attributed activity yet.";
+    container.appendChild(empty);
+    return;
+  }
+  for (const [label, value] of entries.slice(0, 8)) {
+    const row = document.createElement("div");
+    row.className = "breakdown-row";
+    const name = document.createElement("span");
+    name.textContent = label;
+    const amount = document.createElement("strong");
+    amount.textContent = valueLabel(value);
+    row.append(name, amount);
+    container.appendChild(row);
+  }
+}
+
+function renderPlaneTable(planes) {
+  const body = $("planeBreakdownBody");
+  body.replaceChildren();
+  const entries = Object.entries(planes || {});
+  if (!entries.length) {
+    const row = document.createElement("tr");
+    const cell = document.createElement("td");
+    cell.colSpan = 6;
+    cell.className = "empty-cell";
+    cell.textContent = "No model executions in this period.";
+    row.appendChild(cell);
+    body.appendChild(row);
+    return;
+  }
+  for (const [plane, metrics] of entries) {
+    const row = document.createElement("tr");
+    const success = metrics.success_rate === null ? "—" : `${(metrics.success_rate * 100).toFixed(1)}%`;
+    const latency = metrics.avg_latency_sec === null ? "—" : `${metrics.avg_latency_sec.toFixed(2)}s`;
+    const cost = plane === "API" ? `$${Number(metrics.api_cost_usd || 0).toFixed(5)}` : "Subscription";
+    const values = [plane, metrics.requests, success, latency, formatTokens(metrics.tracked_tokens), cost];
+    values.forEach((value, index) => {
+      const cell = document.createElement(index === 0 ? "th" : "td");
+      cell.textContent = String(value);
+      row.appendChild(cell);
+    });
+    body.appendChild(row);
+  }
+}
+
+function renderMetricsSnapshot() {
+  const payload = state.metricsSnapshot;
+  if (!payload) return;
+  const period = payload.usage[state.metricsPeriod];
+  const summary = period.summary;
+  const planes = period.planes || {};
+  const apiRequests = planeRequests(planes, ["API"]);
+  const cliRequests = planeRequests(planes, ["CLI", "CLI-Fallback"]);
+
+  $("metricApiCost").innerText = `$${Number(summary.api_cost_usd || 0).toFixed(5)}`;
+  $("metricRequests").innerText = Number(summary.requests || 0).toLocaleString();
+  $("metricLatency").innerText = formatMetric(summary.avg_latency_sec, (v) => `${v.toFixed(2)}s`);
+  $("metricSuccess").innerText = formatMetric(summary.success_rate, (v) => `${(v * 100).toFixed(1)}%`);
+  $("metricPlane").innerText = `${apiRequests} / ${cliRequests}`;
+  $("metricTokens").innerText = formatTokens(summary.tracked_tokens);
+
+  const quality = payload.usage.data_quality;
+  const periodLabel = state.metricsPeriod === "today" ? "today" : "across the local ledger";
+  $("metricsCoverage").innerText = summary.requests
+    ? `${summary.requests} request${summary.requests === 1 ? "" : "s"} ${periodLabel}. Token coverage grows as new v2 telemetry is recorded; older rows remain valid for cost, latency, and plane counts.`
+    : `No model executions ${periodLabel}. Health checks, discovery, and status calls intentionally do not create billable telemetry.`;
+
+  const breakerCount = Object.values(payload.circuit_breakers || {}).filter((item) => item?.open).length;
+  $("metricsStatus").innerText = `Live local ledger • ${quality.telemetry_rows} stored row${quality.telemetry_rows === 1 ? "" : "s"} • ${breakerCount ? `${breakerCount} breaker open` : "all breakers closed"}`;
+
+  renderPlaneTable(planes);
+
+  const provider = payload.usage.api_billing.provider || {};
+  $("providerUsageState").innerText = String(provider.state || "unknown").replaceAll("_", " ");
+  $("providerUsageState").className = `state-chip ${provider.state === "ready" ? "ready" : ""}`;
+  $("providerUsageValue").innerText = provider.usage_usd === null || provider.usage_usd === undefined
+    ? "Not connected"
+    : `$${Number(provider.usage_usd).toFixed(5)} team-wide today`;
+  $("providerUsageDetail").innerText = provider.detail || "Optional team-wide API comparison via xAI Management API.";
+
+  $("cliUsageValue").innerText = `${cliRequests} locally tracked request${cliRequests === 1 ? "" : "s"}`;
+  $("cliUsageDetail").innerText = payload.usage.cli_subscription.detail;
+
+  renderBreakdownList(
+    "modelBreakdown",
+    Object.entries(summary.models || {}),
+    (value) => `${value} request${value === 1 ? "" : "s"}`
+  );
+  renderBreakdownList(
+    "callerBreakdown",
+    Object.entries(payload.callers || {}),
+    (value) => `${value.requests} req • $${Number(value.total_cost_usd || 0).toFixed(4)}`
+  );
+
+  $("rawMetricsReport").innerText = JSON.stringify(payload, null, 2);
+}
+
+function setupMetricsControls() {
+  document.querySelectorAll(".period-btn").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.metricsPeriod = button.dataset.period || "today";
+      document.querySelectorAll(".period-btn").forEach((item) => item.classList.toggle("active", item === button));
+      renderMetricsSnapshot();
+    });
+  });
 }
 
 // --- Discover Self Onboarding ---
@@ -1081,16 +1204,12 @@ function setupCostEstimator() {
 
   const updateCost = () => {
     const text = promptInput.value;
-    const model = modelInput ? modelInput.value : "";
-    const isExpensive = model === "grok-4.5";
-
     const estTokens = Math.ceil(text.length * 0.25);
-    const rate = isExpensive ? 0.015 : 0.00001;
-    const cost = estTokens * rate;
+    const isLarge = estTokens >= 100000;
 
-    estimator.innerText = `Estimated Cost: $${cost.toFixed(5)} (${isExpensive ? 'grok-4.5 - HIGH!' : 'standard'})`;
+    estimator.innerText = `Local input estimate: ~${estTokens.toLocaleString()} tokens • exact API cost is reported after execution`;
 
-    if (isExpensive) {
+    if (isLarge) {
       estimator.classList.add("expensive");
     } else {
       estimator.classList.remove("expensive");
@@ -1098,9 +1217,9 @@ function setupCostEstimator() {
 
     const budgetGuard = $("budgetGuardToggle");
     const sendBtn = $("sendBtn");
-    if (budgetGuard && budgetGuard.checked && isExpensive && cost > 0.005) {
+    if (budgetGuard && budgetGuard.checked && isLarge) {
       sendBtn.disabled = true;
-      sendBtn.innerText = "Blocked by Budget Guard";
+      sendBtn.innerText = "Blocked: Prompt Too Large";
       sendBtn.style.opacity = "0.5";
     } else if (sendBtn) {
       sendBtn.disabled = false;
@@ -1128,6 +1247,7 @@ function init() {
   setupDockerRestart();
   setupApiKeyWizard();
   setupCostEstimator();
+  setupMetricsControls();
 
   // Onboarding action
   $("copyDiscoverBtn").addEventListener("click", runDiscoverSelfOnboarding);
