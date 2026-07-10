@@ -176,6 +176,11 @@ carry the same versioned `credential_planes` contract. Agents prompt once per
 notice id and must obtain user approval before installation, device auth, or
 secure server-environment changes.
 
+CLI candidate slugs come from the model list returned by the cached,
+API-key-stripped OAuth health probe. Reasoning prefers the reported CLI default
+and coding prefers composer; the bundled fallback contains only a currently
+supported conservative composer slug, never a retired model name.
+
 ---
 
 ## 4. Component Specifications

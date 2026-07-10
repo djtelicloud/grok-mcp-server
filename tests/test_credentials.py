@@ -2,7 +2,11 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from src.credentials import build_credential_plane_contract, credential_plane_policy
+from src.credentials import (
+    CLI_AUTH_SETUP_COMMAND,
+    build_credential_plane_contract,
+    credential_plane_policy,
+)
 
 
 READY_CLI = {
@@ -64,6 +68,21 @@ def test_missing_cli_auth_prompts_for_device_flow(monkeypatch):
     assert action["command"] == "docker exec auth"
 
 
+def test_default_cli_auth_action_repairs_volume_then_drops_privileges():
+    contract = build_credential_plane_contract(
+        api_configured=True,
+        cli_status={
+            "state": "needs_auth", "ready": False, "binary": True,
+            "auth": "missing",
+        },
+    )
+    command = contract["cli"]["action"]["command"]
+    assert command == CLI_AUTH_SETUP_COMMAND
+    assert "docker exec -u 0 -it grok-mcp-server" in command
+    assert "chown -R 1000:1000 /home/appuser/.grok" in command
+    assert "setpriv --reuid=1000 --regid=1000 --clear-groups" in command
+
+
 def test_missing_api_prompts_once_but_does_not_block_when_cli_can_serve(monkeypatch):
     monkeypatch.setenv("UNIGROK_PLANE_POLICY", "cli_first")
     contract = build_credential_plane_contract(
@@ -99,6 +118,15 @@ async def test_cli_first_selector_uses_subscription_for_unpinned_planning(monkey
     monkeypatch.setenv("XAI_API_KEY", "configured")
     monkeypatch.setattr(utils, "XAI_API_KEY", "configured")
     monkeypatch.setattr(utils, "cli_plane_ready_for_local_runtime", lambda: True)
+    monkeypatch.setattr(
+        utils,
+        "grok_cli_plane_status",
+        lambda **_: {
+            **READY_CLI,
+            "models": ["grok-4.5", "grok-composer-2.5-fast"],
+            "default_model": "grok-4.5",
+        },
+    )
     model, why, receipt, _ = await utils._select_routing_model(
         prompt="Plan a robust migration strategy",
         mode="auto",
@@ -108,10 +136,45 @@ async def test_cli_first_selector_uses_subscription_for_unpinned_planning(monkey
         input_messages=None,
         enable_agentic=True,
     )
-    assert model == "grok-composer-2.5-fast"
+    assert model == "grok-4.5"
     assert why == "cost"
     assert receipt["why_detail"] == "cli_first_policy"
-    assert receipt["catalog"]["source"] == "grok_cli"
+    assert receipt["catalog"]["source"] == "grok_cli_live"
+    assert [item["model"] for item in receipt["candidates"]] == [
+        "grok-4.5", "grok-composer-2.5-fast"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_cli_first_coding_uses_live_composer_not_retired_build(monkeypatch):
+    from src import utils
+
+    monkeypatch.setenv("UNIGROK_PLANE_POLICY", "cli_first")
+    monkeypatch.setenv("UNI_GROK_TESTING", "0")
+    monkeypatch.setenv("XAI_API_KEY", "configured")
+    monkeypatch.setattr(utils, "XAI_API_KEY", "configured")
+    monkeypatch.setattr(utils, "cli_plane_ready_for_local_runtime", lambda: True)
+    monkeypatch.setattr(
+        utils,
+        "grok_cli_plane_status",
+        lambda **_: {
+            **READY_CLI,
+            "models": ["grok-4.5", "grok-composer-2.5-fast"],
+            "default_model": "grok-4.5",
+        },
+    )
+    model, _, receipt, _ = await utils._select_routing_model(
+        prompt="Reply with exactly OK.",
+        mode="auto",
+        thinking_mode=False,
+        requested_model=None,
+        active_store=None,
+        input_messages=None,
+        enable_agentic=False,
+    )
+    assert model == "grok-composer-2.5-fast"
+    assert "grok-build" not in str(receipt)
+    assert receipt["catalog"]["source"] == "grok_cli_live"
 
 
 @pytest.mark.asyncio

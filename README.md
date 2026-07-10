@@ -32,7 +32,7 @@ cost tracking, and a browser Control Center.
 
 ![UniGrok architecture — six MCP clients share one local gateway that routes across the metered xAI API plane and the ~$0-marginal Grok CLI plane, with SQLite-backed sessions, cost, and jobs](assets/architecture.svg)
 
-Current development release: **v0.5.1**.
+Current development release: **v0.5.2**.
 
 Use it as:
 
@@ -308,7 +308,7 @@ flowchart LR
     AG[Antigravity] --> GW
     GW["UniGrok gateway<br/>localhost:4765 (GROK)<br/>/mcp · /v1 · /ui"]
     GW -->|API plane · XAI_API_KEY| API["xAI API<br/>grok-4.5 · grok-build-0.1"]
-    GW -->|CLI plane · OAuth subscription| CLI["Grok CLI<br/>grok-build 512k · composer"]
+    GW -->|CLI plane · OAuth subscription| CLI["Grok CLI live catalog<br/>grok-4.5 · composer"]
     GW --- ST[("SQLite<br/>sessions · cost · jobs")]
 ```
 
@@ -344,6 +344,9 @@ IDE agent should inspect its notices once per state:
 The local default is `UNIGROK_PLANE_POLICY=cli_first`. Explicit model pins and
 `UNIGROK_*_MODEL` overrides still win. Set the policy to `api_first` only when
 API-native behavior is intentionally preferred over subscription utilization.
+CLI-first model slugs come from the authenticated live `grok models` catalog,
+not a hard-coded subscription catalog; coding currently prefers composer while
+reasoning uses the live CLI default.
 
 Useful endpoints in HTTP mode:
 

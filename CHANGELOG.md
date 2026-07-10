@@ -4,6 +4,20 @@ All notable changes to UniGrok MCP will be documented in this file.
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-07-10
+
+### Fixed
+- **Live CLI model selection**: CLI-first routing now consumes the model list
+  verified by the cached OAuth health probe. Reasoning prefers the live CLI
+  default (`grok-4.5` currently), coding prefers
+  `grok-composer-2.5-fast`, and the retired `grok-build` slug is no longer a
+  fallback. A model name shared by API and CLI is forced through the plane
+  selected in the routing receipt, so explicit API pins remain API pins.
+- **Persistent auth-volume ownership**: The permission-gated device-auth
+  action and Compose auth helper repair the dedicated volume as root, then
+  drop to uid/gid 1000 before login. Existing root-owned volumes can refresh
+  credentials without storing root-only tokens or manual Docker surgery.
+
 ## [0.5.1] - 2026-07-10
 
 ### Added

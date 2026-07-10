@@ -282,6 +282,7 @@ def grok_cli_plane_status(
         ):
             return dict(cached)
 
+    parsed_models: Dict[str, Any] = {"models": [], "default_model": None}
     try:
         completed = subprocess.run(
             [PathResolver.get_grok_cli_path(), "models"],
@@ -291,11 +292,13 @@ def grok_cli_plane_status(
             check=False,
             env=grok_cli_oauth_env(),
         )
-        output = (
+        combined_output = (
             completed.stdout.decode("utf-8", errors="replace")
             + "\n"
             + completed.stderr.decode("utf-8", errors="replace")
-        ).lower()
+        )
+        output = combined_output.lower()
+        parsed_models = _parse_grok_cli_models_output(combined_output)
         using_api_key = "using xai_api_key" in output or "using xai api key" in output
         oauth_verified = "logged in with grok.com" in output
         ready = completed.returncode == 0 and oauth_verified and not using_api_key
@@ -318,6 +321,8 @@ def grok_cli_plane_status(
         "binary": True,
         "auth": auth,
         "setup_command": setup,
+        "models": parsed_models["models"] if ready else [],
+        "default_model": parsed_models["default_model"] if ready else None,
     }
     with _CLI_PLANE_STATUS_LOCK:
         _CLI_PLANE_STATUS_CACHE.update({"key": cache_key, "at": now, "value": dict(result)})
@@ -748,7 +753,6 @@ FALLBACK_XAI_LANGUAGE_MODELS = [
 ]
 
 FALLBACK_GROK_CLI_MODELS = [
-    "grok-build",
     "grok-composer-2.5-fast",
 ]
 CLI_MODEL_IDS = tuple(FALLBACK_GROK_CLI_MODELS)
@@ -872,10 +876,27 @@ def is_cli_model(model: Optional[str]) -> bool:
     return bool(model and model in CLI_MODEL_IDS)
 
 
-def keyless_cli_model(requested_model: Optional[str], route_uses_reasoning: bool) -> str:
+def keyless_cli_model(
+    requested_model: Optional[str],
+    route_uses_reasoning: bool,
+    cli_status: Optional[Dict[str, Any]] = None,
+) -> str:
     if is_cli_model(requested_model):
         return str(requested_model)
-    return "grok-composer-2.5-fast" if route_uses_reasoning else "grok-build"
+    status = cli_status if cli_status is not None else grok_cli_plane_status()
+    model_ids = [str(model) for model in status.get("models", []) if str(model)]
+    default_model = str(status.get("default_model") or "")
+    preferred = (
+        [default_model, "grok-4.5", "grok-composer-2.5-fast"]
+        if route_uses_reasoning
+        else ["grok-composer-2.5-fast", default_model, "grok-4.5"]
+    )
+    for model_id in preferred:
+        if model_id and model_id in model_ids:
+            return model_id
+    # The current pinned CLI guarantees composer; unlike the retired
+    # ``grok-build`` slug this remains a valid conservative fallback.
+    return "grok-composer-2.5-fast"
 
 
 _CLI_SESSION_LOCKS: Dict[str, asyncio.Lock] = {}
@@ -6725,7 +6746,7 @@ async def _call_plane(
     else:
         model_name = await resolve_model("planning")
 
-    is_cli = is_cli_model(model_name)
+    is_cli = plane == "cli-fallback" or is_cli_model(model_name)
 
     if is_cli:
         if is_cloudrun_runtime():
@@ -7078,7 +7099,13 @@ async def _select_routing_model(
         return env_model, "pin", receipt, route_uses_reasoning
 
     if prefer_cli_for_route(route_class=route_class, thinking_mode=thinking_mode):
-        model = keyless_cli_model(None, route_uses_reasoning)
+        cli_status = grok_cli_plane_status()
+        model = keyless_cli_model(None, route_uses_reasoning, cli_status)
+        live_cli_models = [
+            str(candidate) for candidate in cli_status.get("models", [])
+            if str(candidate)
+        ][:3]
+        cli_candidates = live_cli_models or [model]
         why = "cost"
         why_detail = (
             "api_key_missing_cli"
@@ -7092,9 +7119,17 @@ async def _select_routing_model(
             why=why,
             why_detail=why_detail,
             features=features,
-            candidates=[{"model": model, "rank": 0, "selected": True}],
+            candidates=[
+                {
+                    "model": candidate,
+                    "rank": rank,
+                    "selected": candidate == model,
+                }
+                for rank, candidate in enumerate(cli_candidates)
+            ],
             evidence_source="credential_plane",
-            catalog_source="grok_cli",
+            catalog_source="grok_cli_live" if live_cli_models else "grok_cli_fallback",
+            catalog_fallback=not bool(live_cli_models),
         )
         return model, why, receipt, route_uses_reasoning
 
@@ -7192,7 +7227,12 @@ async def orchestrate(
         input_messages=input_messages,
         enable_agentic=enable_agentic,
     )
-    direct_cli = is_cli_model(profile_model)
+    direct_cli = (
+        is_cli_model(profile_model)
+        or routing_receipt.get("catalog", {}).get("source") in {
+            "grok_cli_live", "grok_cli_fallback"
+        }
+    )
     if direct_cli and thinking_mode:
         logging.getLogger("GrokMCP").info(
             "thinking_mode requires the xAI API plane; using direct Grok CLI route because XAI_API_KEY is not configured."
@@ -7319,7 +7359,7 @@ async def orchestrate(
     # profile_model is the requested slug or the resolved planning/coding alias.
     actual_model = profile_model
     active_profile = load_grok_profile(actual_model)
-    actual_mode: Literal["reasoning", "composer"] = "reasoning"
+    actual_mode: ModelPlane = "cli-fallback" if direct_cli else "reasoning"
     cli_max_turns = AgentLoopPolicy().max_depth if enable_agentic and not force_fast else None
 
     layer = MetaLayer(routing_receipt=routing_receipt)

@@ -103,3 +103,8 @@ The `credentials` object is the action source of truth. On first connection,
 inspect `notices`, prompt once per notice id, and ask the user before running
 installation, device-auth, or secret-configuration actions. Never request
 `XAI_API_KEY` in chat or store it in the caller's project.
+
+When CLI-first is active, the selected CLI slug comes from the authenticated
+live catalog carried by the health probe. Coding prefers composer; reasoning
+prefers the CLI's reported default. Explicit API model pins remain on API even
+when the same slug is also exposed by the CLI subscription.

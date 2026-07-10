@@ -1,7 +1,7 @@
 ---
 okf_version: "0.1"
 faq_schema_version: "1"
-source_version: "0.5.1"
+source_version: "0.5.2"
 title: "UniGrok FAQ"
 type: "topic"
 description: "Verified local-first setup, routing, security, and troubleshooting answers for UniGrok MCP users."
@@ -114,15 +114,21 @@ unpinned work because the authenticated Grok CLI uses the user's subscription.
 The API plane remains authoritative for explicit API-model pins and API-native
 thinking, vision, and multi-agent research capabilities.
 
-Authenticate the running global Docker service once, from any directory, with
-`docker exec -it grok-mcp-server env -u XAI_API_KEY -u GROK_API_KEY grok login
---device-auth`; do not authenticate separately inside caller projects. Check
-`/runtimez` or `grok_mcp_status` for the verified CLI state. UniGrok removes
+Authenticate the running global Docker service once using the permission-gated
+`setup_command` returned by `/runtimez` or `grok_mcp_status`; it repairs legacy
+volume ownership, drops back to the unprivileged service uid, and starts device
+auth without API-key variables. Do not authenticate separately inside caller
+projects. UniGrok removes
 `XAI_API_KEY` from CLI child processes so an API-backed CLI cannot masquerade
 as the independent subscription plane. The final response and Control Center
 show the selected `model`, `route`, `plane`, `cost_usd`, and latency. A request
 choosing the API plane is not an error: model compatibility, requested
 capabilities, and CLI readiness all influence routing.
+
+CLI-first selection uses the model ids returned by the authenticated live
+`grok models` probe. It never assumes a previously known subscription model
+still exists; the current catalog's default is preferred for reasoning and its
+composer model for coding.
 
 ## What should an IDE agent do when a credential plane is unavailable? {#credential-plane-actions}
 

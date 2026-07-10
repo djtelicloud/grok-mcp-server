@@ -20,7 +20,7 @@ with dual-plane routing that uses your Grok subscription to slash API costs.
 Why dual-plane?
 
 🔵 API plane: metered xAI API (grok-4.5, grok-build-0.1)
-🟣 CLI plane: your grok.com subscription — 512k-context grok-build at ~$0
+🟣 CLI plane: your live grok.com subscription catalog — currently Grok 4.5 + composer
 marginal cost
 
 UniGrok self-routes between them per request. Your XAI_API_KEY never leaves

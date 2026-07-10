@@ -1431,12 +1431,12 @@ class TestAgentLoopFailurePaths:
 
         mock_loop_cls.assert_not_called()
         mock_resolve.assert_not_called()
-        assert mock_call.await_args.kwargs["requested_model"] == "grok-build"
+        assert mock_call.await_args.kwargs["requested_model"] == "grok-composer-2.5-fast"
         assert layer.generation == "cli direct result"
         assert layer.plane == "CLI"
         assert layer.route == "fast"
         assert layer.finish_reason == "final_answer"
-        assert layer.model == "grok-build"
+        assert layer.model == "grok-composer-2.5-fast"
 
     @pytest.mark.asyncio
     async def test_keyless_reasoning_runtime_uses_cli_composer(self, monkeypatch):
@@ -1499,7 +1499,7 @@ class TestAgentLoopFailurePaths:
         assert layer.plane == "CLI"
         assert layer.route == "fast"
         assert layer.finish_reason == "error"
-        assert layer.model == "grok-build"
+        assert layer.model == "grok-composer-2.5-fast"
 
     # ── Test 8: mode=reasoning always triggers AgentLoop regardless of prompt ─
     @pytest.mark.asyncio
@@ -3533,7 +3533,9 @@ class TestCliPlaneV2:
 
         monkeypatch.setattr(utils.subprocess, "run", fake_run)
 
-        assert utils.grok_cli_plane_status(timeout_sec=3.0, force=True)["ready"] is True
+        status = utils.grok_cli_plane_status(timeout_sec=3.0, force=True)
+        assert status["ready"] is True
+        assert status["models"] == ["grok-4.5"]
         assert captured["cmd"] == ["/tmp/grok", "models"]
         assert captured["kwargs"]["timeout"] == 3.0
         assert "XAI_API_KEY" not in captured["kwargs"]["env"]

@@ -369,7 +369,7 @@ async def test_grok_cli_discovery_failure_returns_fallback(monkeypatch):
     discovered = await utils.discover_grok_cli_models()
 
     assert discovered["available"] is False
-    assert discovered["default_model"] == "grok-build"
+    assert discovered["default_model"] == "grok-composer-2.5-fast"
     assert [item["id"] for item in discovered["models"]] == utils.FALLBACK_GROK_CLI_MODELS
     assert discovered["warnings"]
 

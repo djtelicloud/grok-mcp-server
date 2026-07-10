@@ -43,8 +43,13 @@ services:
       context: .
       dockerfile: Dockerfile
     image: grok-mcp:latest
-    entrypoint: ["/usr/local/bin/grok"]
-    command: ["login", "--device-auth"]
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-lc"]
+    command:
+      - >-
+        chown -R 1000:1000 /home/appuser/.grok &&
+        exec setpriv --reuid=1000 --regid=1000 --clear-groups
+        env -u XAI_API_KEY -u GROK_API_KEY grok login --device-auth
     environment:
       # Auth must establish the independent grok.com plane, never use API billing.
       - XAI_API_KEY=

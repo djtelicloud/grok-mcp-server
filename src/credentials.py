@@ -12,8 +12,10 @@ from typing import Any, Dict, Optional
 
 
 CLI_AUTH_SETUP_COMMAND = (
-    "docker exec -it grok-mcp-server env -u XAI_API_KEY -u GROK_API_KEY "
-    "grok login --device-auth"
+    "docker exec -u 0 -it grok-mcp-server sh -lc "
+    "'chown -R 1000:1000 /home/appuser/.grok && exec setpriv "
+    "--reuid=1000 --regid=1000 --clear-groups env -u XAI_API_KEY "
+    "-u GROK_API_KEY grok login --device-auth'"
 )
 CLI_DOCKER_REBUILD_COMMAND = "docker compose up --build -d grok-mcp"
 CLI_NATIVE_INSTALL_COMMAND = "curl -fsSL https://x.ai/cli/install.sh | bash"

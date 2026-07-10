@@ -13,10 +13,10 @@ def test_mcp_ui_static_files_are_served(monkeypatch):
         styles = client.get("/ui/styles.css")
 
     assert index.status_code == 200
-    assert "<title>UniGrok MCP v0.5.1 Control Center</title>" in index.text
-    assert '<span class="version-badge">v0.5.1</span>' in index.text
-    assert 'script type="module" src="./app.js?v=grok-v0.5.1"' in index.text
-    assert '<link rel="stylesheet" href="./styles.css?v=grok-v0.5.1" />' in index.text
+    assert "<title>UniGrok MCP v0.5.2 Control Center</title>" in index.text
+    assert '<span class="version-badge">v0.5.2</span>' in index.text
+    assert 'script type="module" src="./app.js?v=grok-v0.5.2"' in index.text
+    assert '<link rel="stylesheet" href="./styles.css?v=grok-v0.5.2" />' in index.text
     assert "Control Center" in index.text
     assert "Bearer token" not in index.text
     assert "Quick Test Console" in index.text

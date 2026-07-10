@@ -187,7 +187,8 @@ The startup log and `/runtimez` report `ready`, `needs_auth`, `unreachable`, or
 other bounded state. When CLI auth is absent, the container still starts and
 the API plane remains available.
 
-After the service is running, the equivalent project-independent repair command
-is `docker exec -it grok-mcp-server env -u XAI_API_KEY -u GROK_API_KEY grok
-login --device-auth`. `/runtimez` and `grok_mcp_status` return that exact command
-when authentication needs attention.
+After the service is running, use the project-independent `setup_command`
+returned by `/runtimez` or `grok_mcp_status`. It repairs ownership of older
+named volumes, drops to the unprivileged service uid, removes API-key variables,
+and starts `grok login --device-auth`. The command is intentionally returned by
+the service so agents do not guess a stale bootstrap sequence.
