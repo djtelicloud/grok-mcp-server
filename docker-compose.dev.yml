@@ -1,6 +1,8 @@
 # Contributor-only live-source service. It is intentionally separate from the
 # stable service registered in IDEs. Start with:
 #   docker compose -f docker-compose.dev.yml up --build -d
+name: grok-mcp-dev
+
 services:
   grok-mcp:
     build:

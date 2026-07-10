@@ -262,7 +262,7 @@ def reconcile_runtime(repo: Path, paths: list[str]) -> str:
     if action == "none":
         return "unchanged"
     compose = run(
-        ["docker", "compose", "-f", DEV_COMPOSE_FILE, "ps", "--status", "running", "--services"],
+        ["docker", "compose", "-p", "grok-mcp-dev", "-f", DEV_COMPOSE_FILE, "ps", "--status", "running", "--services"],
         cwd=repo,
         check=False,
     )
@@ -272,13 +272,13 @@ def reconcile_runtime(repo: Path, paths: list[str]) -> str:
         return "contributor dev service not running; stable service untouched"
     if action == "rebuild":
         run(
-            ["docker", "compose", "-f", DEV_COMPOSE_FILE, "up", "--build", "-d", "grok-mcp"],
+            ["docker", "compose", "-p", "grok-mcp-dev", "-f", DEV_COMPOSE_FILE, "up", "--build", "-d", "grok-mcp"],
             cwd=repo,
             capture=False,
         )
     elif action == "restart":
         run(
-            ["docker", "compose", "-f", DEV_COMPOSE_FILE, "restart", "grok-mcp"],
+            ["docker", "compose", "-p", "grok-mcp-dev", "-f", DEV_COMPOSE_FILE, "restart", "grok-mcp"],
             cwd=repo,
             capture=False,
         )

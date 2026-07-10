@@ -131,5 +131,6 @@ def test_stable_and_contributor_compose_files_are_separate():
     assert ".:/workspace" not in stable
     assert "grok-mcp-state:/state" in stable
     assert "UNIGROK_SERVICE_MODE=contributor" in contributor
+    assert "name: grok-mcp-dev" in contributor
     assert ".:/workspace" in contributor
     assert "${UNIGROK_DEV_PORT:-8081}" in contributor

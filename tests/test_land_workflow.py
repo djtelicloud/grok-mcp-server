@@ -244,6 +244,6 @@ def test_runtime_reconciliation_only_inspects_contributor_compose(monkeypatch, t
 
     assert result == "contributor dev service not running; stable service untouched"
     assert calls == [[
-        "docker", "compose", "-f", "docker-compose.dev.yml",
+        "docker", "compose", "-p", "grok-mcp-dev", "-f", "docker-compose.dev.yml",
         "ps", "--status", "running", "--services",
     ]]
