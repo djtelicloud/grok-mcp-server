@@ -88,4 +88,6 @@ When querying Grok or using this server, take advantage of the following custom 
 Multiple IDE agents can collaborate on this project concurrently. Follow these rules to prevent merge conflicts and branch switching issues:
 1. **Never Branch-Switch `main`**: Keep the repository's shared primary checkout on `main`.
 2. **Worktrees for Parallel Tasks**: Always create a separate git worktree and work on an agent-prefixed branch (e.g., `gemini/task-name`, `claude/task-name`).
-3. **Clean Main Integration**: Verify all tests pass before fast-forward merging your branch into `main` (`git merge --ff-only <branch>`). If fast-forward is not possible, rebase your branch on `main`, run tests, and then fast-forward merge.
+3. **Mandatory Landing Gate**: Commit the intended work, then run `./scripts/land` from the task worktree. Do not manually merge or claim completion until it prints `LANDED TO MAIN: <sha>`.
+4. **Visible Main Is the Product**: Local `main` integration is mandatory. Remote fetch/push/publication is separate and happens only when the user explicitly asks for it.
+5. **Protect Open IDEs**: Never remove task worktrees after landing or overwrite a dirty tracked `main`; another IDE may still be using them.

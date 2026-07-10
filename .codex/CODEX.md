@@ -46,3 +46,15 @@ Use these files when a task needs one of the Codex-only surfaces:
 - Do not copy another provider's namespace config directly. Extract only the
   project risk knowledge and re-express it through Codex APIs, plugins, MCP
   routes, and validation files.
+
+## Implementation Completion Gate
+
+- Perform implementation in a `codex/*` task worktree, never directly in the
+  shared checked-out `main` folder.
+- Commit the intended changes and run `./scripts/land`. Do not manually merge
+  and do not tell the user work is complete until it prints
+  `LANDED TO MAIN: <sha>`.
+- A test pass or task-branch commit by itself is not completion. On failure,
+  report `NOT LANDED: <specific blocker>` and continue when agent-resolvable.
+- Do not remove the worktree after landing; another open Codex window or IDE
+  may still reference it. Remote publication is a separate user-requested task.

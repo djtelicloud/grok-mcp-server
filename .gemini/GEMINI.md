@@ -22,7 +22,9 @@ Select modular tools based on the nature of the request:
 
 ## 4. Multi-Agent Git Protocol
 * **No Main Branch Switch**: Do not switch the shared main folder branch. 
-* **Isolated Worktrees**: Work on task-specific sibling worktrees (`gemini/task-name`) and perform clean fast-forward merges to `main` once verified.
+* **Isolated Worktrees**: Work on task-specific sibling worktrees (`gemini/task-name`).
+* **Mandatory Landing Gate**: Commit the intended work and run `./scripts/land`. Do not manually merge and do not call an implementation complete until it prints `LANDED TO MAIN: <sha>`.
+* **Open IDE Safety**: Never remove a worktree after landing or overwrite a dirty tracked `main`; another IDE may still be using it.
 
 ## 5. Verification Requirements
-* Before completing any implementation, verify the MCP Server logic by running `pytest`.
+* `scripts/land` runs the full pytest suite against the exact commit that it fast-forwards to visible local `main`. Remote publishing is separate and only user-requested.

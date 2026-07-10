@@ -1,0 +1,367 @@
+#!/usr/bin/env python3
+"""Safely land one verified agent worktree onto the visible local main."""
+
+from __future__ import annotations
+
+import json
+import os
+import socket
+import subprocess
+import sys
+import time
+from contextlib import contextmanager
+from pathlib import Path
+from typing import Iterator, Optional
+from urllib.request import Request, urlopen
+
+
+MAIN_REF = "refs/heads/main"
+DEFAULT_TEST_ARGS = ["uv", "run", "pytest", "-q"]
+
+
+class LandError(RuntimeError):
+    pass
+
+
+def run(
+    args: list[str],
+    *,
+    cwd: Path,
+    check: bool = True,
+    capture: bool = True,
+) -> subprocess.CompletedProcess[str]:
+    result = subprocess.run(
+        args,
+        cwd=cwd,
+        check=False,
+        text=True,
+        capture_output=capture,
+    )
+    if check and result.returncode:
+        detail = (result.stderr or result.stdout or "command failed").strip()
+        raise LandError(f"{' '.join(args)}: {detail}")
+    return result
+
+
+def git(cwd: Path, *args: str, check: bool = True) -> str:
+    return run(["git", *args], cwd=cwd, check=check).stdout.strip()
+
+
+def worktrees(repo: Path) -> list[dict[str, str]]:
+    records: list[dict[str, str]] = []
+    current: dict[str, str] = {}
+    for line in git(repo, "worktree", "list", "--porcelain").splitlines():
+        if not line:
+            if current:
+                records.append(current)
+                current = {}
+            continue
+        key, _, value = line.partition(" ")
+        current[key] = value
+    if current:
+        records.append(current)
+    return records
+
+
+def main_worktree(repo: Path) -> Path:
+    matches = [Path(item["worktree"]) for item in worktrees(repo) if item.get("branch") == MAIN_REF]
+    if len(matches) != 1:
+        raise LandError(f"expected exactly one checked-out main worktree, found {len(matches)}")
+    return matches[0]
+
+
+def common_git_dir(repo: Path) -> Path:
+    raw = Path(git(repo, "rev-parse", "--git-common-dir"))
+    return raw if raw.is_absolute() else (repo / raw).resolve()
+
+
+def require_clean(repo: Path, *, include_untracked: bool, label: str) -> None:
+    args = ["status", "--porcelain=v1"]
+    if not include_untracked:
+        args.append("--untracked-files=no")
+    dirty = git(repo, *args)
+    if dirty:
+        raise LandError(f"{label} is dirty; refusing to overwrite or stash anything:\n{dirty}")
+
+
+def pid_is_live(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+@contextmanager
+def directory_lock(path: Path, *, timeout: float = 900.0) -> Iterator[None]:
+    deadline = time.monotonic() + timeout
+    owner_path = path / "owner.json"
+    while True:
+        try:
+            path.mkdir()
+            owner_path.write_text(
+                json.dumps({"pid": os.getpid(), "host": socket.gethostname(), "started": time.time()}),
+                encoding="utf-8",
+            )
+            break
+        except FileExistsError:
+            try:
+                owner = json.loads(owner_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError, TypeError):
+                owner = {}
+            if (
+                owner.get("host") == socket.gethostname()
+                and isinstance(owner.get("pid"), int)
+                and not pid_is_live(owner["pid"])
+            ):
+                try:
+                    owner_path.unlink(missing_ok=True)
+                    path.rmdir()
+                    continue
+                except OSError:
+                    pass
+            if time.monotonic() >= deadline:
+                raise LandError(f"timed out waiting for shared landing lock {path}")
+            time.sleep(0.25)
+    try:
+        yield
+    finally:
+        owner_path.unlink(missing_ok=True)
+        try:
+            path.rmdir()
+        except OSError:
+            pass
+
+
+def run_tests(repo: Path, expected_head: str) -> None:
+    command = DEFAULT_TEST_ARGS
+    print(f"Testing {expected_head[:12]}: {' '.join(command)}", flush=True)
+    result = run(command, cwd=repo, check=False, capture=False)
+    if result.returncode:
+        raise LandError(f"tests failed with exit code {result.returncode}")
+    if git(repo, "rev-parse", "HEAD") != expected_head:
+        raise LandError("worktree HEAD changed while tests were running")
+    require_clean(repo, include_untracked=True, label="agent worktree after tests")
+
+
+def changed_paths(repo: Path, old: str, new: str) -> list[str]:
+    if old == new:
+        return []
+    return [line for line in git(repo, "diff", "--name-only", f"{old}..{new}").splitlines() if line]
+
+
+def runtime_action(paths: list[str]) -> str:
+    rebuild_names = {"Dockerfile", "docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml", "pyproject.toml", "uv.lock"}
+    if any(path in rebuild_names or path.startswith("docker/") for path in paths):
+        return "rebuild"
+    if any(path == "main.py" or path.startswith("src/") for path in paths):
+        return "restart"
+    if any(path.startswith("mcp_ui/") for path in paths):
+        return "smoke"
+    return "none"
+
+
+def get_json(url: str) -> dict:
+    with urlopen(url, timeout=10) as response:  # noqa: S310 - fixed loopback URLs only
+        return json.load(response)
+
+
+def probe_json(url: str, expected_status: str) -> None:
+    payload = get_json(url)
+    if payload.get("status") != expected_status:
+        raise LandError(f"unexpected response from {url}: {payload}")
+
+
+def probe_ui() -> None:
+    with urlopen("http://127.0.0.1:8080/ui/", timeout=10) as response:  # noqa: S310
+        body = response.read(4096)
+    if b"UniGrok" not in body:
+        raise LandError("Control Center smoke check did not find the UniGrok marker")
+
+
+def configured_client_token(repo: Path) -> Optional[str]:
+    env_path = repo / ".env"
+    if not env_path.is_file():
+        return None
+    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        if key.strip() == "UNIGROK_API_KEYS":
+            return next((part.strip() for part in value.strip().strip('"\'').split(",") if part.strip()), None)
+    return None
+
+
+def probe_mcp(token: Optional[str] = None) -> None:
+    payload = json.dumps(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-03-26",
+                "capabilities": {},
+                "clientInfo": {"name": "unigrok-land", "version": "1"},
+            },
+        }
+    ).encode()
+    headers = {
+        "Accept": "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        "X-Client-ID": "unigrok-land",
+    }
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    request = Request(
+        "http://127.0.0.1:8080/mcp",
+        data=payload,
+        headers=headers,
+        method="POST",
+    )
+    with urlopen(request, timeout=15) as response:  # noqa: S310
+        body = response.read().decode("utf-8", errors="replace")
+    if "protocolVersion" not in body or '"result"' not in body:
+        raise LandError("MCP initialize smoke check returned an unexpected payload")
+
+
+def reconcile_runtime(repo: Path, paths: list[str]) -> str:
+    action = runtime_action(paths)
+    if action == "none":
+        return "unchanged"
+    compose = run(
+        ["docker", "compose", "ps", "--status", "running", "--services"],
+        cwd=repo,
+        check=False,
+    )
+    if compose.returncode:
+        raise LandError((compose.stderr or "cannot inspect Docker Compose").strip())
+    if "grok-mcp" not in compose.stdout.split():
+        return "service not running; start will use current main"
+    if action == "rebuild":
+        run(["docker", "compose", "up", "--build", "-d", "grok-mcp"], cwd=repo, capture=False)
+    elif action == "restart":
+        run(["docker", "compose", "restart", "grok-mcp"], cwd=repo, capture=False)
+    probe_json("http://127.0.0.1:8080/healthz", "healthy")
+    probe_json("http://127.0.0.1:8080/readyz", "ready")
+    probe_ui()
+    runtime = get_json("http://127.0.0.1:8080/runtimez")
+    token = configured_client_token(repo) if runtime.get("gateway_auth", {}).get("enabled") else None
+    if runtime.get("gateway_auth", {}).get("enabled") and not token:
+        raise LandError("MCP auth is enabled but no client token is available for the landing smoke check")
+    probe_mcp(token)
+    if action == "rebuild":
+        return "rebuilt and smoke-tested"
+    if action == "restart":
+        return "restarted and smoke-tested"
+    return "smoke-tested"
+
+
+def write_receipt(git_dir: Path, *, head: str, branch: str, main_path: Path) -> None:
+    receipts = git_dir / "unigrok-land" / "receipts"
+    receipts.mkdir(parents=True, exist_ok=True)
+    (receipts / f"{head}.json").write_text(
+        json.dumps(
+            {
+                "head": head,
+                "branch": branch,
+                "main_worktree": str(main_path),
+                "test_command": DEFAULT_TEST_ARGS,
+                "landed_at": time.time(),
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+def runtime_changes(git_dir: Path, repo: Path, *, fallback: str, target: str) -> tuple[list[str], Path]:
+    state_dir = git_dir / "unigrok-land"
+    state_dir.mkdir(parents=True, exist_ok=True)
+    marker = state_dir / "runtime-head"
+    start = fallback
+    try:
+        candidate = marker.read_text(encoding="utf-8").strip()
+    except OSError:
+        candidate = ""
+    if candidate:
+        valid = run(["git", "cat-file", "-e", f"{candidate}^{{commit}}"], cwd=repo, check=False)
+        ancestor = run(["git", "merge-base", "--is-ancestor", candidate, target], cwd=repo, check=False)
+        if valid.returncode == 0 and ancestor.returncode == 0:
+            start = candidate
+        else:
+            marker.write_text(fallback + "\n", encoding="utf-8")
+    else:
+        # Persist the known-good pre-landing runtime point before any restart
+        # or rebuild. If reconciliation fails after main moves, the next run
+        # still knows the full range that remains to be applied.
+        marker.write_text(fallback + "\n", encoding="utf-8")
+    return changed_paths(repo, start, target), marker
+
+
+def land(repo: Path) -> str:
+    repo = Path(git(repo, "rev-parse", "--show-toplevel"))
+    branch = git(repo, "symbolic-ref", "--short", "HEAD")
+    if branch == "main":
+        raise LandError("run scripts/land from an agent task worktree, never from shared main")
+    require_clean(repo, include_untracked=True, label="agent worktree")
+    main_path = main_worktree(repo)
+    common_dir = common_git_dir(repo)
+    attempts = 5
+
+    for attempt in range(1, attempts + 1):
+        baseline = git(main_path, "rev-parse", "HEAD")
+        ancestor = run(
+            ["git", "merge-base", "--is-ancestor", baseline, "HEAD"],
+            cwd=repo,
+            check=False,
+        )
+        if ancestor.returncode:
+            print(f"Rebasing {branch} onto current main {baseline[:12]}", flush=True)
+            run(["git", "rebase", baseline], cwd=repo, capture=False)
+        tested_head = git(repo, "rev-parse", "HEAD")
+        run_tests(repo, tested_head)
+
+        with directory_lock(common_dir / "unigrok-land.lock"):
+            current_main = git(main_path, "rev-parse", "HEAD")
+            if current_main != baseline:
+                print(
+                    f"Main advanced to {current_main[:12]} while tests ran; retrying ({attempt}/{attempts}).",
+                    flush=True,
+                )
+                continue
+            require_clean(main_path, include_untracked=False, label="shared main worktree")
+            run(["git", "merge", "--ff-only", tested_head], cwd=main_path, capture=False)
+            if git(main_path, "rev-parse", "HEAD") != tested_head:
+                raise LandError("shared main did not reach the tested commit")
+            write_receipt(common_dir, head=tested_head, branch=branch, main_path=main_path)
+            paths, runtime_marker = runtime_changes(
+                common_dir,
+                main_path,
+                fallback=baseline,
+                target=tested_head,
+            )
+            runtime = reconcile_runtime(main_path, paths)
+            runtime_marker.write_text(tested_head + "\n", encoding="utf-8")
+        print(f"Runtime: {runtime}", flush=True)
+        return tested_head
+
+    raise LandError(f"main kept advancing; gave up after {attempts} tested attempts")
+
+
+def main() -> int:
+    try:
+        head = land(Path.cwd())
+    except (LandError, OSError, ValueError, subprocess.SubprocessError) as exc:
+        print(f"NOT LANDED: {exc}", file=sys.stderr)
+        return 1
+    print(f"LANDED TO MAIN: {head}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

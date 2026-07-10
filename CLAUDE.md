@@ -66,10 +66,12 @@ model/cost metadata. Modes: `auto` (default), `fast`, `reasoning`, `thinking`,
 ## Common commands
 
 ```bash
+./scripts/land-status             # visible main/worktree/runtime status
 uv run python main.py init        # bootstrap .env + print IDE configs
 docker compose up --build -d      # start shared service on :8080
 curl -s http://localhost:8080/healthz
-uv run pytest -q                  # full test suite (run before any integration)
+uv run pytest -q                  # full test suite
+./scripts/land                    # test and land committed task work to main
 ```
 
 Local test bench UI: `http://localhost:8080/ui/`.
@@ -82,19 +84,13 @@ Local test bench UI: `http://localhost:8080/ui/`.
 `UNIGROK_STATE_DIR`. The xAI key belongs to the **server**, never to IDE MCP
 configs.
 
-## Git discipline (this is a shared, concurrent multi-agent repo)
+## Git completion contract (shared, concurrent workspace)
 
-Codex, Gemini, and Claude agents operate on this repo simultaneously. Before any
-push/merge/fast-forward:
-
-1. `git fetch origin`; check `origin/main` for drift **and** `git branch -r` for
-   new `codex/*`, `gemini/*`, `claude/*` (or ad-hoc) branches.
-2. Integrate other agents' fast-forwardable verified work first; rebase your
-   branch on top if `main` diverged.
-3. Re-run `uv run pytest -q`.
-4. Fast-forward `main` and push.
-
-Do parallel work in a per-agent worktree on a `claude/<task>` branch — never
-branch-switch or leave the shared `main` checkout dirty. **Once the full suite
-passes, commit AND push the branch AND update `main` immediately** — stopping at
-a local commit is treated as incomplete.
+Work in a `claude/*` task worktree and leave the shared checkout on `main`.
+After committing the intended changes, run `./scripts/land`. Passing tests or
+committing a task branch is not completion: do not tell the user an
+implementation is complete until the command prints `LANDED TO MAIN: <sha>`.
+Never manually merge, overwrite a dirty tracked `main`, or remove the task
+worktree after landing because another open IDE may still use it. Fetch, push,
+PR, and release publication are separate operations performed only when the
+user explicitly requests them.
