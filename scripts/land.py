@@ -227,6 +227,34 @@ def probe_mcp(token: Optional[str] = None) -> None:
         raise LandError("MCP initialize smoke check returned an unexpected payload")
 
 
+def wait_for_runtime(repo: Path, *, timeout: float = 60.0) -> None:
+    """Wait through the normal Docker restart window before failing smoke.
+
+    Uvicorn can close the first connection while the old process exits even
+    after ``docker compose restart`` returns. A landing receipt must reflect
+    eventual readiness, not a race with that expected handoff.
+    """
+    deadline = time.monotonic() + timeout
+    last_error: Optional[Exception] = None
+    while time.monotonic() < deadline:
+        try:
+            probe_json("http://127.0.0.1:8080/healthz", "healthy")
+            probe_json("http://127.0.0.1:8080/readyz", "ready")
+            probe_ui()
+            runtime = get_json("http://127.0.0.1:8080/runtimez")
+            token = configured_client_token(repo) if runtime.get("gateway_auth", {}).get("enabled") else None
+            if runtime.get("gateway_auth", {}).get("enabled") and not token:
+                raise LandError(
+                    "MCP auth is enabled but no client token is available for the landing smoke check"
+                )
+            probe_mcp(token)
+            return
+        except Exception as exc:  # expected briefly while Docker hands off
+            last_error = exc
+            time.sleep(0.5)
+    raise LandError(f"runtime did not become ready within {timeout:.0f}s: {last_error}")
+
+
 def reconcile_runtime(repo: Path, paths: list[str]) -> str:
     action = runtime_action(paths)
     if action == "none":
@@ -244,14 +272,7 @@ def reconcile_runtime(repo: Path, paths: list[str]) -> str:
         run(["docker", "compose", "up", "--build", "-d", "grok-mcp"], cwd=repo, capture=False)
     elif action == "restart":
         run(["docker", "compose", "restart", "grok-mcp"], cwd=repo, capture=False)
-    probe_json("http://127.0.0.1:8080/healthz", "healthy")
-    probe_json("http://127.0.0.1:8080/readyz", "ready")
-    probe_ui()
-    runtime = get_json("http://127.0.0.1:8080/runtimez")
-    token = configured_client_token(repo) if runtime.get("gateway_auth", {}).get("enabled") else None
-    if runtime.get("gateway_auth", {}).get("enabled") and not token:
-        raise LandError("MCP auth is enabled but no client token is available for the landing smoke check")
-    probe_mcp(token)
+    wait_for_runtime(repo)
     if action == "rebuild":
         return "rebuilt and smoke-tested"
     if action == "restart":
@@ -304,7 +325,9 @@ def write_receipt(
     )
 
 
-def runtime_changes(git_dir: Path, repo: Path, *, fallback: str, target: str) -> tuple[list[str], Path]:
+def runtime_changes(
+    git_dir: Path, repo: Path, *, fallback: str, target: str
+) -> tuple[list[str], Path, str]:
     state_dir = git_dir / "unigrok-land"
     state_dir.mkdir(parents=True, exist_ok=True)
     marker = state_dir / "runtime-head"
@@ -325,7 +348,7 @@ def runtime_changes(git_dir: Path, repo: Path, *, fallback: str, target: str) ->
         # or rebuild. If reconciliation fails after main moves, the next run
         # still knows the full range that remains to be applied.
         marker.write_text(fallback + "\n", encoding="utf-8")
-    return changed_paths(repo, start, target), marker
+    return changed_paths(repo, start, target), marker, start
 
 
 def land(repo: Path) -> str:
@@ -363,8 +386,7 @@ def land(repo: Path) -> str:
             run(["git", "merge", "--ff-only", tested_head], cwd=main_path, capture=False)
             if git(main_path, "rev-parse", "HEAD") != tested_head:
                 raise LandError("shared main did not reach the tested commit")
-            landing_paths = changed_paths(main_path, baseline, tested_head)
-            paths, runtime_marker = runtime_changes(
+            paths, runtime_marker, certified_base = runtime_changes(
                 common_dir,
                 main_path,
                 fallback=baseline,
@@ -380,8 +402,8 @@ def land(repo: Path) -> str:
                 head=tested_head,
                 branch=branch,
                 main_path=main_path,
-                previous_main=baseline,
-                changed_paths=landing_paths,
+                previous_main=certified_base,
+                changed_paths=paths,
             )
         print(f"Runtime: {runtime}", flush=True)
         return tested_head

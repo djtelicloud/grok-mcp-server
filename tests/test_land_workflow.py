@@ -170,6 +170,9 @@ def test_failed_runtime_reconciliation_is_retried_from_previous_main(repo_with_a
     assert seen == ["file.txt"]
     marker = main / ".git" / "unigrok-land" / "runtime-head"
     assert marker.read_text(encoding="utf-8").strip() == expected
+    receipt = main / ".git" / "unigrok-land" / "receipts" / f"{expected}.json"
+    receipt_data = __import__("json").loads(receipt.read_text(encoding="utf-8"))
+    assert receipt_data["changed_paths"] == ["file.txt"]
 
 
 def test_land_refuses_uncommitted_agent_work(repo_with_agent, monkeypatch):
@@ -201,3 +204,27 @@ def test_dead_process_lock_is_recovered(tmp_path: Path):
         assert lock.is_dir()
 
     assert not lock.exists()
+
+
+def test_runtime_wait_retries_expected_restart_handoff(monkeypatch, tmp_path):
+    attempts = 0
+
+    def flaky_probe(url, status):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise ConnectionResetError("container restarting")
+
+    monkeypatch.setattr(land, "probe_json", flaky_probe)
+    monkeypatch.setattr(land, "probe_ui", lambda: None)
+    monkeypatch.setattr(
+        land,
+        "get_json",
+        lambda url: {"gateway_auth": {"enabled": False}},
+    )
+    monkeypatch.setattr(land, "probe_mcp", lambda token=None: None)
+    monkeypatch.setattr(land.time, "sleep", lambda seconds: None)
+
+    land.wait_for_runtime(tmp_path, timeout=1.0)
+
+    assert attempts >= 3
