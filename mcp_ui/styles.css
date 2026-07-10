@@ -1010,6 +1010,10 @@ pre {
   overflow-wrap: anywhere;
 }
 
+.provider-model-card > div {
+  min-width: 0;
+}
+
 .model-badges {
   display: flex;
   flex-wrap: wrap;
@@ -1471,6 +1475,10 @@ pre {
   }
 
   .routing-policy-card {
+    grid-template-columns: 1fr;
+  }
+
+  .model-plane-grid {
     grid-template-columns: 1fr;
   }
 }
