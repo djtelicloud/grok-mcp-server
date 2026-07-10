@@ -901,8 +901,20 @@ def rag_cli(args: List[str], stream: Optional[TextIO] = None, store: Any = None)
 
         store = shared_store
 
+    async def _run(coro):
+        # Close the store before the loop ends: aiosqlite's connection
+        # thread is non-daemon, so an open store keeps the CLI process
+        # alive after the output is printed. close() is idempotent and
+        # reopenable (the src/storage.py contract), so injected stores
+        # are safe too.
+        try:
+            return await coro
+        finally:
+            with contextlib.suppress(Exception):
+                await store.close()
+
     if command == "status":
-        return asyncio.run(_rag_status(store, out))
+        return asyncio.run(_run(_rag_status(store, out)))
 
     dry_run = "--dry-run" in args
     retry_failed = "--retry-failed" in args
@@ -915,7 +927,7 @@ def rag_cli(args: List[str], stream: Optional[TextIO] = None, store: Any = None)
             print("--limit needs a positive integer", file=out)
             return 2
     return asyncio.run(
-        _rag_backfill(store, out, dry_run, limit, retry_failed, force_reupload)
+        _run(_rag_backfill(store, out, dry_run, limit, retry_failed, force_reupload))
     )
 
 
