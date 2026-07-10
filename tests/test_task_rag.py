@@ -577,6 +577,7 @@ class TestGatherSemanticEvidence:
     @pytest.mark.asyncio
     async def test_end_to_end_maps_remote_hits_and_caches(self, monkeypatch, tstore):
         monkeypatch.setenv("UNIGROK_TASK_RAG", "shadow")
+        monkeypatch.setenv("XAI_MANAGEMENT_API_KEY", "xai-mgmt-test")
         # Two synced memories the remote search will surface by file_id.
         await _save_memory(tstore, "plan the migration strategy carefully", model=PLANNING)
         await _save_memory(tstore, "plan the rollout of feature flags", model=PLANNING)
@@ -613,6 +614,7 @@ class TestGatherSemanticEvidence:
     @pytest.mark.asyncio
     async def test_header_fallback_maps_unmatched_file_id(self, monkeypatch, tstore):
         monkeypatch.setenv("UNIGROK_TASK_RAG", "shadow")
+        monkeypatch.setenv("XAI_MANAGEMENT_API_KEY", "xai-mgmt-test")
         await _save_memory(tstore, "tune the query planner statistics")
         # Synced under one id, but the search returns a DIFFERENT chunk file
         # id — the JSON header inside the chunk recovers the identity.
@@ -657,6 +659,7 @@ class TestSpawnSyncTask:
     @pytest.mark.asyncio
     async def test_single_flight_blocks_concurrent_drains(self, monkeypatch):
         monkeypatch.setenv("UNIGROK_TASK_RAG", "mirror")
+        monkeypatch.setenv("XAI_MANAGEMENT_API_KEY", "xai-mgmt-test")
         release = asyncio.Event()
 
         async def slow_sync(store, limit=4, max_attempts=5):
@@ -711,6 +714,7 @@ class TestSpawnSyncTask:
         import src.utils as utils_module
 
         monkeypatch.setenv("UNIGROK_TASK_RAG", "mirror")
+        monkeypatch.setenv("XAI_MANAGEMENT_API_KEY", "xai-mgmt-test")
         client, _service = _fake_collections_client()
         layer = SimpleNamespace(
             escalated=False, generation="fixed", reflection=None, reasoning=None,
@@ -768,6 +772,7 @@ class TestRagCli:
 
 
         monkeypatch.setenv("UNIGROK_TASK_RAG", "mirror")
+        monkeypatch.setenv("XAI_MANAGEMENT_API_KEY", "xai-mgmt-test")
         db = tmp_path / "cli-ready.db"
         _seed_db(db, [])
         client, _service = _fake_collections_client()
@@ -812,6 +817,7 @@ class TestRagCli:
 
 
         monkeypatch.setenv("UNIGROK_TASK_RAG", "mirror")
+        monkeypatch.setenv("XAI_MANAGEMENT_API_KEY", "xai-mgmt-test")
         db = tmp_path / "cli-drain.db"
         _seed_db(db, ["alpha task", "beta task", "gamma task"])
         client, service = _fake_collections_client()
@@ -828,6 +834,7 @@ class TestRagCli:
 
 
         monkeypatch.setenv("UNIGROK_TASK_RAG", "mirror")
+        monkeypatch.setenv("XAI_MANAGEMENT_API_KEY", "xai-mgmt-test")
         db = tmp_path / "cli-limit.db"
         _seed_db(db, ["alpha task", "beta task", "gamma task"])
         client, service = _fake_collections_client()
@@ -858,6 +865,7 @@ class TestRagCli:
 
 
         monkeypatch.setenv("UNIGROK_TASK_RAG", "mirror")
+        monkeypatch.setenv("XAI_MANAGEMENT_API_KEY", "xai-mgmt-test")
         db = tmp_path / "cli-force.db"
         _seed_db(db, ["alpha task"])
         client, service = _fake_collections_client()
@@ -891,6 +899,7 @@ class TestEndToEndIntegration:
 
         monkeypatch.setenv("UNI_GROK_TESTING", "0")  # exercise the real gather path
         monkeypatch.setenv("UNIGROK_TASK_RAG", "active")
+        monkeypatch.setenv("XAI_MANAGEMENT_API_KEY", "xai-mgmt-test")
         monkeypatch.setenv("UNIGROK_TASK_RAG_MIN_EVIDENCE", "3")
 
         # History for this kind of prompt: planning succeeded, coding failed.
@@ -984,3 +993,87 @@ class TestManagementKeyWiring:
     def test_blank_management_key_passes_none(self, monkeypatch):
         created = self._fresh_client(monkeypatch, "   ")
         assert created["management_api_key"] is None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Keyless operation (no XAI_MANAGEMENT_API_KEY — the common case)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestKeylessOperation:
+    """xAI Collections is a management API and most users only hold an
+    inference key: everything cloud must silently stand down while the
+    LOCAL semantic evidence keeps working end to end."""
+
+    @pytest.mark.asyncio
+    async def test_spawn_skipped_without_management_key(self, monkeypatch):
+        monkeypatch.setenv("UNIGROK_TASK_RAG", "mirror")
+        monkeypatch.delenv("XAI_MANAGEMENT_API_KEY", raising=False)
+        assert rag.spawn_sync_task(None) is None
+        assert rag._BG_TASKS == set()
+
+    @pytest.mark.asyncio
+    async def test_ready_keyless_reports_reason_without_probe(self, monkeypatch):
+        monkeypatch.setenv("UNIGROK_TASK_RAG", "mirror")
+        monkeypatch.delenv("XAI_MANAGEMENT_API_KEY", raising=False)
+        mirror = get_task_memory_mirror()
+        with patch("src.rag.get_xai_client") as mock_client:
+            assert await mirror.ready() is False
+        mock_client.assert_not_called()
+        assert "optional" in mirror._last_error
+        assert mirror.cooldown_remaining_sec() == 0.0  # no failure bookkeeping
+
+    @pytest.mark.asyncio
+    async def test_gather_decides_from_local_evidence_alone(
+        self, monkeypatch, tstore
+    ):
+        monkeypatch.setenv("UNIGROK_TASK_RAG", "shadow")
+        monkeypatch.delenv("XAI_MANAGEMENT_API_KEY", raising=False)
+        await _save_memory(
+            tstore, "plan the sprint retro notes", model=PLANNING, success=1
+        )
+        await _save_memory(
+            tstore, "plan the sprint kickoff agenda", model=PLANNING, success=1
+        )
+        await _save_memory(
+            tstore, "plan the sprint backlog grooming", model=CODING, success=0
+        )
+        with patch("src.rag.get_xai_client") as mock_client:
+            verdict = await gather_semantic_evidence(
+                tstore, "plan the sprint", None, PLANNING, CODING
+            )
+        mock_client.assert_not_called()
+        assert verdict is not None
+        assert verdict.remote_count == 0
+        assert verdict.evidence_count >= 3
+        assert verdict.prefers_planning is True
+
+    def test_backfill_keyless_explains_and_exits_1(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("UNIGROK_TASK_RAG", "mirror")
+        monkeypatch.delenv("XAI_MANAGEMENT_API_KEY", raising=False)
+        out = io.StringIO()
+        code = rag.rag_cli(
+            ["backfill"], stream=out,
+            store=GrokSessionStore(db_path=tmp_path / "keyless.db"),
+        )
+        assert code == 1
+        text = out.getvalue()
+        assert "XAI_MANAGEMENT_API_KEY" in text
+        assert "OPTIONAL" in text
+
+    def test_status_keyless_reports_local_first(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("UNIGROK_TASK_RAG", "shadow")
+        monkeypatch.delenv("XAI_MANAGEMENT_API_KEY", raising=False)
+        db = tmp_path / "keyless-status.db"
+        _seed_db(db, ["one task"])
+        out = io.StringIO()
+        with patch("src.rag.get_xai_client") as mock_client:
+            code = rag.rag_cli(
+                ["status"], stream=out, store=GrokSessionStore(db_path=db)
+            )
+        mock_client.assert_not_called()
+        assert code == 0
+        text = out.getvalue()
+        assert "local evidence: 1 task memories" in text
+        assert "cloud mirror: disabled" in text
+        assert "XAI_MANAGEMENT_API_KEY" in text
+        assert "unsynced: 1" in text

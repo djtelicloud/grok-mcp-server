@@ -95,6 +95,17 @@ def task_rag_collection_name() -> str:
     return os.environ.get("UNIGROK_TASK_RAG_COLLECTION", "").strip() or "unigrok-task-memories-v1"
 
 
+def has_management_key() -> bool:
+    """xAI Collections is a MANAGEMENT API: the inference key alone cannot
+    create/upload/search collections, and xAI exposes no public embedding
+    models to inference keys (/v1/embedding-models returns []). Most users
+    therefore run WITHOUT this key — the semantic routing evidence works
+    fully locally (task_memory_fts bm25 + recency + per-model success); the
+    cloud mirror is an optional boost gated on this check so keyless setups
+    never spawn doomed sync work or remote searches."""
+    return bool(os.environ.get("XAI_MANAGEMENT_API_KEY", "").strip())
+
+
 def task_rag_timeout() -> float:
     return _env_timeout("UNIGROK_TASK_RAG_TIMEOUT", 2.0)
 
@@ -300,6 +311,12 @@ class TaskMemoryMirror:
         any network call)."""
         if task_rag_mode() == "off":
             self.last_known_ready = False
+            return False
+        if not has_management_key():
+            # Not an error: the mirror is an optional boost. Report the
+            # reason without burning a probe or tripping failure backoff.
+            self.last_known_ready = False
+            self._last_error = "XAI_MANAGEMENT_API_KEY not set (cloud mirror is optional)"
             return False
 
         def _probe():
@@ -656,7 +673,12 @@ async def gather_semantic_evidence(
         local = await store.get_similar_task_memories(
             prompt, context_id=context_id, limit=10
         )
-        remote_hits = await get_task_memory_mirror().search(prompt, task_rag_top_k())
+        # Keyless setups (no XAI_MANAGEMENT_API_KEY — the common case) run
+        # pure local evidence: fusion and the decision signal work the same
+        # with an empty remote component.
+        remote_hits: List[Dict[str, Any]] = []
+        if has_management_key():
+            remote_hits = await get_task_memory_mirror().search(prompt, task_rag_top_k())
         mapped = await _map_remote_hits(store, remote_hits, local)
         local_weight, remote_weight = task_rag_fusion_weights()
         fused = fuse_task_evidence(
@@ -710,6 +732,11 @@ def spawn_sync_task(store: Any) -> Optional["asyncio.Task"]:
     raises and never blocks the caller."""
     if task_rag_mode() == "off":
         return None
+    if not has_management_key():
+        # Keyless (the common case): the cloud mirror can never accept the
+        # upload, so don't queue work that is doomed to fail — local
+        # retrieval and routing evidence are unaffected.
+        return None
     if _SYNC_INFLIGHT.is_set():
         return None
     _SYNC_INFLIGHT.set()
@@ -748,13 +775,32 @@ async def _rag_status(store: Any, out: TextIO) -> int:
     mode = task_rag_mode()
     mirror = get_task_memory_mirror()
     print(f"mode: {mode}", file=out)
+    try:
+        memories = await store.get_task_memory_count()
+        print(
+            f"local evidence: {memories} task memories "
+            "(semantic routing evidence works locally — no cloud needed)",
+            file=out,
+        )
+    except Exception as exc:
+        print(f"local evidence: unavailable ({exc})", file=out)
     print(f"collection: {task_rag_collection_name()}", file=out)
     if mode == "off":
+        print("cloud mirror: off (UNIGROK_TASK_RAG=off)", file=out)
         print("ready: no (UNIGROK_TASK_RAG=off)", file=out)
+    elif not has_management_key():
+        print(
+            "cloud mirror: disabled — optional; set XAI_MANAGEMENT_API_KEY "
+            "(xAI console) to sync/search collections",
+            file=out,
+        )
+        print("ready: no (XAI_MANAGEMENT_API_KEY not set; cloud mirror is optional)", file=out)
     elif await mirror.ready():
+        print("cloud mirror: enabled", file=out)
         print("ready: yes", file=out)
     else:
         reason = mirror._last_error or "unavailable"
+        print("cloud mirror: enabled but unreachable", file=out)
         print(f"ready: no ({reason})", file=out)
     try:
         unsynced = await store.count_unsynced_task_memories()
@@ -782,6 +828,15 @@ async def _rag_backfill(
     mode = task_rag_mode()
     if mode == "off":
         print("UNIGROK_TASK_RAG=off — nothing to backfill.", file=out)
+        return 1
+    if not has_management_key() and not dry_run:
+        # --dry-run stays available keyless (purely local outbox inspection).
+        print(
+            "The cloud mirror needs XAI_MANAGEMENT_API_KEY (created in the xAI "
+            "console, separate from the inference key). It is OPTIONAL: local "
+            "semantic routing evidence already works without it.",
+            file=out,
+        )
         return 1
     mirror = get_task_memory_mirror()
 

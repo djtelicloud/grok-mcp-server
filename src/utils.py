@@ -5435,6 +5435,7 @@ class RoutingAdvisor:
                 FUSED_SCORE_BUCKETS,
                 get_task_memory_mirror,
                 get_task_rag_stats,
+                has_management_key,
                 task_rag_collection_name,
                 task_rag_mode,
             )
@@ -5449,6 +5450,9 @@ class RoutingAdvisor:
             task_rag_view = {
                 "mode": rag_mode,
                 "collection": task_rag_collection_name(),
+                # Cloud mirror is optional: without a management key the
+                # semantic evidence still works from local FTS alone.
+                "management_key": has_management_key(),
                 "ready": get_task_memory_mirror().last_known_ready,
                 "unsynced": unsynced,
                 "fused_score_bucket_bounds": list(FUSED_SCORE_BUCKETS),
