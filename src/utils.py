@@ -1752,6 +1752,8 @@ class GrokSessionStore:
         # every init by _setup_knowledge_fts (FTS5 is a compile-time SQLite
         # option, so it is re-probed rather than persisted).
         self._knowledge_fts = False
+        # task_memory_fts availability — same contract as _knowledge_fts.
+        self._task_memory_fts = False
 
     @property
     def db_path(self) -> Path | str:
@@ -2122,6 +2124,7 @@ class GrokSessionStore:
             # versa). Never fatal — False just routes search_facts through
             # the LIKE/term-overlap fallback.
             self._knowledge_fts = await self._setup_knowledge_fts()
+            self._task_memory_fts = await self._setup_task_memory_fts()
 
             self._initialized = True
 
@@ -2177,6 +2180,46 @@ class GrokSessionStore:
                 await self._conn.rollback()
             logging.getLogger("GrokMCP").warning(
                 f"knowledge_fts unavailable; using term-overlap fallback ranking: {exc}"
+            )
+            return False
+
+    async def _setup_task_memory_fts(self) -> bool:
+        """Create/repair the task_memory_fts index; returns its availability.
+
+        Same contract as _setup_knowledge_fts: a REGULAR fts5 table
+        (rowid = task_memory.id, own copy of prompt_terms/prompt_excerpt)
+        kept in sync by a dual-write in save_task_memory — no triggers, so
+        plain saves never break on a build without FTS5. Divergence is
+        checked row-by-row on ids and repaired with a full rebuild.
+        task_memory rows are never deleted (no delete method exists), so
+        unlike knowledge there is no delete path to mirror."""
+        if not await self._probe_fts5(self._conn):
+            return False
+        try:
+            await self._conn.execute("BEGIN IMMEDIATE;")
+            await self._conn.execute(
+                "CREATE VIRTUAL TABLE IF NOT EXISTS task_memory_fts USING fts5(prompt_terms, prompt_excerpt);"
+            )
+            async with self._conn.execute(
+                "SELECT "
+                "(SELECT COUNT(*) FROM task_memory WHERE id NOT IN (SELECT rowid FROM task_memory_fts)) "
+                "+ (SELECT COUNT(*) FROM task_memory_fts WHERE rowid NOT IN (SELECT id FROM task_memory))"
+            ) as cursor:
+                row = await cursor.fetchone()
+                n_diverged = int(row[0] if row else 0)
+            if n_diverged:
+                await self._conn.execute("DELETE FROM task_memory_fts;")
+                await self._conn.execute(
+                    "INSERT INTO task_memory_fts(rowid, prompt_terms, prompt_excerpt) "
+                    "SELECT id, prompt_terms, prompt_excerpt FROM task_memory;"
+                )
+            await self._conn.commit()
+            return True
+        except Exception as exc:
+            with contextlib.suppress(Exception):
+                await self._conn.rollback()
+            logging.getLogger("GrokMCP").warning(
+                f"task_memory_fts unavailable; using term-overlap fallback ranking: {exc}"
             )
             return False
 
@@ -2435,9 +2478,11 @@ class GrokSessionStore:
         cost: float,
         context_id: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
-    ):
+    ) -> Optional[int]:
         await self._ensure_initialized()
         terms = _task_terms(prompt)
+        prompt_terms_text = " ".join(terms)
+        prompt_excerpt = _bounded_redacted(prompt, 500)
         now_str = datetime.now().isoformat()
         metadata_json = None
         if metadata:
@@ -2448,7 +2493,7 @@ class GrokSessionStore:
         async with self._lock:
             await self._conn.execute("BEGIN IMMEDIATE;")
             try:
-                await self._conn.execute(
+                cursor = await self._conn.execute(
                     """
                     INSERT INTO task_memory (
                         task_hash, prompt_terms, prompt_excerpt, outcome_summary,
@@ -2457,8 +2502,8 @@ class GrokSessionStore:
                     """,
                     (
                         _task_hash(prompt),
-                        " ".join(terms),
-                        _bounded_redacted(prompt, 500),
+                        prompt_terms_text,
+                        prompt_excerpt,
                         _bounded_redacted(outcome_summary, 1000),
                         str(plane or "unknown"),
                         str(model or "unknown"),
@@ -2471,11 +2516,27 @@ class GrokSessionStore:
                         metadata_json,
                     ),
                 )
+                memory_id = int(cursor.lastrowid)
+                if self._task_memory_fts:
+                    # Dual-write into the index — no triggers by design (see
+                    # _setup_task_memory_fts). A failing index write degrades
+                    # to fallback ranking, never fails the save.
+                    try:
+                        await self._conn.execute(
+                            "INSERT INTO task_memory_fts(rowid, prompt_terms, prompt_excerpt) VALUES (?, ?, ?)",
+                            (memory_id, prompt_terms_text, prompt_excerpt),
+                        )
+                    except Exception as fts_err:
+                        self._task_memory_fts = False
+                        logging.getLogger("GrokMCP").warning(
+                            f"task_memory_fts write failed; fallback ranking engaged: {fts_err}"
+                        )
                 await self._conn.commit()
             except Exception:
                 await self._conn.rollback()
                 raise
             await self._on_write_completed()
+        return memory_id
 
     @_with_read_retry_async
     async def get_similar_task_memories(
@@ -2484,9 +2545,70 @@ class GrokSessionStore:
         context_id: Optional[str] = None,
         limit: int = 3,
     ) -> List[Dict[str, Any]]:
+        """Rank stored task memories against a prompt; every row carries a
+        `score` (higher = better on both paths).
+
+        FTS5 path: MATCH over an OR-joined _task_terms expression (safe
+        tokens only — raw prompt text never reaches MATCH), bm25-ranked and
+        batch-normalized into the same 0..1 band as the fallback's
+        term-overlap fraction BEFORE the +2.0 context_id / +1.0 task_hash
+        bonuses, so downstream consumers see one score contract. A plain
+        context_id query is merged in because a same-context row with ZERO
+        term overlap must still surface (score 0 + 2.0 bonus — the
+        long-standing fallback semantics). Fallback (no FTS5): Python
+        term-overlap over the most recent 200 rows."""
         await self._ensure_initialized()
         prompt_terms = set(_task_terms(prompt))
         prompt_hash = _task_hash(prompt)
+        bounded = max(1, min(int(limit or 3), 10))
+
+        if self._task_memory_fts and prompt_terms:
+            match_expr = " OR ".join(sorted(prompt_terms))
+            async with self._read_conn() as conn:
+                async with conn.execute(
+                    "SELECT t.*, bm25(task_memory_fts) AS fts_rank FROM task_memory_fts "
+                    "JOIN task_memory t ON t.id = task_memory_fts.rowid "
+                    "WHERE task_memory_fts MATCH ? ORDER BY fts_rank LIMIT 50",
+                    (match_expr,),
+                ) as cursor:
+                    fts_rows = await cursor.fetchall()
+                context_rows: List[Any] = []
+                if context_id:
+                    async with conn.execute(
+                        "SELECT * FROM task_memory WHERE context_id = ? "
+                        "ORDER BY id DESC LIMIT 10",
+                        (context_id,),
+                    ) as cursor:
+                        context_rows = await cursor.fetchall()
+
+            candidates: Dict[int, Dict[str, Any]] = {}
+            for row in fts_rows:
+                item = self._decode_task_memory_row(row)
+                item["_fts_raw"] = max(0.0, -float(item.pop("fts_rank", 0.0) or 0.0))
+                candidates[int(item["id"])] = item
+            for row in context_rows:
+                item = self._decode_task_memory_row(row)
+                candidates.setdefault(int(item["id"]), item)
+
+            max_raw = max(
+                (item.get("_fts_raw", 0.0) for item in candidates.values()),
+                default=0.0,
+            )
+            scored = []
+            for item in candidates.values():
+                raw = float(item.pop("_fts_raw", 0.0))
+                score = raw / max_raw if max_raw > 0 else 0.0
+                if context_id and item.get("context_id") == context_id:
+                    score += 2.0
+                if item.get("task_hash") == prompt_hash:
+                    score += 1.0
+                if score <= 0:
+                    continue
+                item["score"] = score
+                scored.append(item)
+            scored.sort(key=lambda item: (float(item["score"]), int(item["id"])), reverse=True)
+            return scored[:bounded]
+
         async with self._read_conn() as conn:
             async with conn.execute(
                 "SELECT * FROM task_memory ORDER BY id DESC LIMIT 200"
@@ -2495,14 +2617,7 @@ class GrokSessionStore:
 
         scored = []
         for row in rows:
-            item = dict(row)
-            # metadata is stored as JSON text — hand callers a dict.
-            meta_raw = item.get("metadata")
-            if isinstance(meta_raw, str) and meta_raw:
-                try:
-                    item["metadata"] = json.loads(meta_raw)
-                except (TypeError, ValueError):
-                    pass
+            item = self._decode_task_memory_row(row)
             row_terms = set(str(item.get("prompt_terms") or "").split())
             overlap = len(prompt_terms & row_terms)
             score = 0.0
@@ -2518,7 +2633,7 @@ class GrokSessionStore:
             scored.append(item)
 
         scored.sort(key=lambda item: (float(item["score"]), int(item["id"])), reverse=True)
-        return scored[: max(1, min(int(limit or 3), 10))]
+        return scored[:bounded]
 
     @_with_read_retry_async
     async def get_task_memory_count(self) -> int:
