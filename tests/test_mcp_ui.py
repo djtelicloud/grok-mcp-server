@@ -13,10 +13,10 @@ def test_mcp_ui_static_files_are_served(monkeypatch):
         styles = client.get("/ui/styles.css")
 
     assert index.status_code == 200
-    assert "<title>UniGrok MCP v0.5.2 Control Center</title>" in index.text
-    assert '<span class="version-badge">v0.5.2</span>' in index.text
-    assert 'script type="module" src="./app.js?v=grok-v0.5.2"' in index.text
-    assert '<link rel="stylesheet" href="./styles.css?v=grok-v0.5.2" />' in index.text
+    assert "<title>UniGrok MCP v0.5.3 Control Center</title>" in index.text
+    assert '<span class="version-badge">v0.5.3</span>' in index.text
+    assert 'script type="module" src="./app.js?v=grok-v0.5.3"' in index.text
+    assert '<link rel="stylesheet" href="./styles.css?v=grok-v0.5.3" />' in index.text
     assert "Control Center" in index.text
     assert "Bearer token" not in index.text
     assert "Quick Test Console" in index.text
@@ -40,16 +40,28 @@ def test_mcp_ui_static_files_are_served(monkeypatch):
     assert 'id="factSelection"' in index.text
     assert 'id="credentialAlert"' in index.text
     assert 'id="planeChip"' in index.text
+    assert 'data-tab="tab-models"' in index.text
+    assert 'id="cliModelPlane"' in index.text
+    assert 'id="apiModelPlane"' in index.text
+    assert 'id="sharedModelsNote"' in index.text
+    assert "Models &amp; Credential Planes" in index.text
     assert 'id="copyCredentialActionBtn"' in index.text
     assert "renderCredentialPlanes" in script.text
     assert "Never paste XAI_API_KEY into this page" in index.text
     assert "Optional organization API comparison" in index.text
     assert "renderRoutingReceipts" in script.text
+    assert 'fetchMcpCall("grok_mcp_discover_self", { include_models: true })' in script.text
+    assert "renderPlaneModelCatalog" in script.text
+    assert "CLI subscription" in script.text
+    assert "API metered" in script.text
+    assert "list.replaceChildren()" in script.text
     assert "routing?.why_detail" in script.text
     assert styles.status_code == 200
     assert ".console-grid" in styles.text
     assert ".metric-card" in styles.text
     assert ".routing-receipt" in styles.text
+    assert ".model-plane-grid" in styles.text
+    assert ".provider-model-card" in styles.text
 
 
 def test_mcp_ui_loads_without_exposing_mcp_when_auth_is_active(monkeypatch):

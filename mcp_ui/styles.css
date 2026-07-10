@@ -869,6 +869,180 @@ pre {
 
 .routing-receipts-panel { margin: 18px 0; }
 
+/* Plane-aware model catalog */
+.routing-policy-card {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.45fr) minmax(260px, 0.8fr) minmax(260px, 1fr);
+  align-items: center;
+  gap: 18px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  padding: 16px;
+  background: linear-gradient(135deg, var(--cyan-soft), rgba(22, 240, 174, 0.025));
+}
+
+.routing-policy-card strong {
+  display: block;
+  margin-top: 4px;
+  color: var(--cyan);
+  font-family: 'JetBrains Mono', monospace;
+  text-transform: uppercase;
+}
+
+.routing-policy-card p,
+.plane-economics {
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.routing-policy-flow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink-faint);
+}
+
+.plane-route-chip {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 6px 9px;
+  color: var(--ink-soft);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.plane-route-chip.active {
+  border-color: rgba(22, 240, 174, 0.35);
+  color: var(--teal);
+  background: var(--teal-soft);
+}
+
+.model-plane-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.model-plane-card {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px;
+  background: var(--surface);
+}
+
+.model-plane-card.cli-plane { border-top: 3px solid var(--teal); }
+.model-plane-card.api-plane { border-top: 3px solid var(--orange); }
+
+.model-plane-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.model-plane-header h3 {
+  margin-top: 3px;
+  font-size: 18px;
+}
+
+.model-kicker {
+  color: var(--ink-faint);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+}
+
+.plane-economics {
+  min-height: 38px;
+  margin-top: 12px;
+}
+
+.plane-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 14px 0;
+}
+
+.plane-facts div {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 9px;
+  background: rgba(255, 255, 255, 0.015);
+}
+
+.plane-facts dt {
+  color: var(--ink-faint);
+  font-size: 9px;
+  text-transform: uppercase;
+}
+
+.plane-facts dd {
+  margin-top: 4px;
+  color: var(--ink);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.model-card-list {
+  display: grid;
+  gap: 8px;
+}
+
+.provider-model-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 11px 12px;
+  background: rgba(3, 6, 9, 0.3);
+}
+
+.provider-model-card strong {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.model-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 7px;
+}
+
+.model-badge {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 6px;
+  color: var(--ink-soft);
+  font-size: 9px;
+}
+
+.model-badge.cli { border-color: rgba(22, 240, 174, 0.3); color: var(--teal); }
+.model-badge.api { border-color: rgba(255, 140, 58, 0.35); color: var(--orange); }
+.model-badge.default { border-color: rgba(79, 231, 255, 0.35); color: var(--cyan); }
+.model-badge.shared { border-style: dashed; }
+
+.model-copy-btn { flex: 0 0 auto; }
+
+.model-warning-list {
+  border: 1px solid rgba(255, 140, 58, 0.35);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  background: var(--orange-soft);
+  color: var(--orange);
+  font-size: 11px;
+}
+
+.model-warning-list p + p { margin-top: 5px; }
+
 .routing-receipts {
   display: grid;
   gap: 8px;
@@ -1275,6 +1449,10 @@ pre {
   .metrics-detail-grid.compact {
     grid-template-columns: 1fr;
   }
+
+  .routing-policy-card {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 1050px) {
@@ -1291,13 +1469,18 @@ pre {
     width: 100%;
     justify-content: space-between;
   }
+
+  .routing-policy-card {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* Mobile responsive media queries */
 @media (max-width: 768px) {
   .metrics-grid,
   .metrics-detail-grid,
-  .metrics-detail-grid.compact {
+  .metrics-detail-grid.compact,
+  .model-plane-grid {
     grid-template-columns: 1fr;
   }
 

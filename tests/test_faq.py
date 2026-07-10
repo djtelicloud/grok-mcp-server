@@ -14,7 +14,7 @@ def test_faq_document_parses_release_versioned_entries():
     index = get_faq_index()
 
     assert index.schema_version == "1"
-    assert index.source_version == "0.5.2"
+    assert index.source_version == "0.5.3"
     assert index.get("cursor-connect") is not None
     assert index.get("CURSOR CONNECT") is not None
 
@@ -25,7 +25,7 @@ def test_faq_document_rejects_entries_without_keywords():
             """---
 okf_version: "0.1"
 faq_schema_version: "1"
-source_version: "0.5.2"
+source_version: "0.5.3"
 ---
 
 ## Question {#question}

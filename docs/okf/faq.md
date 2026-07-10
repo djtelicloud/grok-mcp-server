@@ -1,7 +1,7 @@
 ---
 okf_version: "0.1"
 faq_schema_version: "1"
-source_version: "0.5.2"
+source_version: "0.5.3"
 title: "UniGrok FAQ"
 type: "topic"
 description: "Verified local-first setup, routing, security, and troubleshooting answers for UniGrok MCP users."
@@ -169,6 +169,22 @@ but xAI exposes no SuperGrok quota/spend API, so subscription cost is shown as
 unknown/included rather than a misleading `$0`. Optional Management API
 credentials add a separately labeled team-wide API comparison only.
 
+## Which models are available on the CLI and API planes? {#models-by-plane}
+
+**Keywords:** models tab, cli models, api models, model catalog, shared model id
+
+Open the Control Center's **Models & Planes** tab. It queries
+`grok_mcp_discover_self` with `include_models: true` and shows the authenticated
+Grok CLI subscription catalog separately from the xAI developer API catalog.
+Each side reports readiness, live-versus-fallback source, the CLI default, and
+its usage-accounting boundary.
+
+The same model id may appear on both sides. That duplication is intentional:
+the model slug is not the credential plane. A pin selects a model while the
+router still chooses a healthy compatible plane according to policy and
+capability requirements. Headless clients can read the same structured truth
+from `data.model_catalog` in the opt-in discovery response.
+
 ## Why does UniGrok use port 4765, and what if it is occupied? {#port-in-use}
 
 **Keywords:** port, 4765, grok keypad, address in use, bind, docker compose
@@ -221,12 +237,14 @@ class, bounded prompt features, candidate models, evidence and catalog source,
 explicit pin source, selected model, and failover reason without storing the
 prompt itself.
 
-Cold-start defaults are `grok-4.5` for planning/vision and
-`grok-build-0.1` for coding. Research chooses the available Grok 4.20
-multi-agent slug. Explicit `model` arguments and `UNIGROK_*_MODEL` overrides
-always win. Fresh evaluation calibration or mature local telemetry can promote
-a peer only when its success rate clears the 0.15 quality margin, preventing
-small samples from making model selection flap.
+Cold-start API defaults are `grok-4.5` for planning/vision and
+`grok-build-0.1` for coding. On the preferred local CLI plane, UniGrok instead
+uses the authenticated live catalog: its reported default for reasoning and a
+live composer model for coding. Research chooses an available Grok 4.20
+multi-agent API slug. Explicit `model` arguments and `UNIGROK_*_MODEL`
+overrides always win. Fresh evaluation calibration or mature local telemetry
+can promote a peer only when its success rate clears the 0.15 quality margin,
+preventing small samples from making model selection flap.
 
 ## Docker started but UniGrok is not working. Where are the logs? {#docker-logs}
 

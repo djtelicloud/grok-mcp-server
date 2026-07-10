@@ -1464,6 +1464,10 @@ async def build_model_catalog(include_cli: bool = True) -> Dict[str, Any]:
             "grok_cli": grok_cli.get("source"),
             "local_profiles": local_profiles.get("source"),
         },
+        "availability": {
+            "xai_api": bool(xai_api.get("available")),
+            "grok_cli": bool(grok_cli.get("available")),
+        },
     }
 
 # Global Client Connection Pool

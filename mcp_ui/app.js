@@ -11,6 +11,7 @@ const state = {
   clientToken: "",
   metricsPeriod: "today",
   metricsSnapshot: null,
+  modelCatalog: null,
 };
 
 // --- DOM Selector Helper ---
@@ -63,6 +64,8 @@ function switchTab(tabId) {
     } else if (tabId === "tab-webmcp") {
       loadWebMcpManifest();
       checkWebMcpBridge();
+    } else if (tabId === "tab-models") {
+      loadPlaneModelCatalog();
     } else if (tabId === "tab-metrics") {
       fetchLiveMetrics();
     }
@@ -719,6 +722,152 @@ async function loadModelsList() {
     });
   } catch (err) {
     console.error("Failed to load models list: ", err);
+  }
+}
+
+function readableCatalogSource(source) {
+  const labels = {
+    grok_cli: "Live Grok CLI",
+    "cli-fallback": "Fallback list",
+    "cloudrun-disabled": "Unavailable in Cloud Run",
+    xai_api: "Live xAI API",
+    xai_api_fallback: "Fallback list",
+    skipped: "Not queried",
+  };
+  return labels[source] || String(source || "Unknown").replaceAll("_", " ");
+}
+
+function renderPlaneModels(planeName, plane, sharedIds) {
+  const prefix = planeName === "CLI" ? "cli" : "api";
+  const stateChip = $(`${prefix}ModelPlaneState`);
+  const source = $(`${prefix}ModelSource`);
+  const economics = $(`${prefix}ModelEconomics`);
+  const list = $(`${prefix}ModelList`);
+  const models = Array.isArray(plane?.models) ? plane.models : [];
+
+  const planeState = plane?.available
+    ? "Ready"
+    : plane?.credential_available && !plane?.catalog_available
+      ? "Catalog fallback"
+      : String(plane?.credential_state || "Unavailable").replaceAll("_", " ");
+  stateChip.innerText = planeState;
+  stateChip.className = `state-chip ${plane?.available ? "ready" : ""}`;
+  source.innerText = readableCatalogSource(plane?.source);
+  economics.innerText = plane?.economics || "Usage terms unavailable.";
+  if (prefix === "cli") {
+    $("cliDefaultModel").innerText = plane?.default_model || "Not reported";
+  }
+
+  list.replaceChildren();
+  if (!models.length) {
+    const empty = document.createElement("span");
+    empty.className = "empty-cell";
+    empty.innerText = `No ${planeName} models reported.`;
+    list.appendChild(empty);
+    return;
+  }
+
+  for (const model of models) {
+    const id = String(model?.id || "unknown");
+    const card = document.createElement("article");
+    card.className = "provider-model-card";
+
+    const identity = document.createElement("div");
+    const name = document.createElement("strong");
+    name.innerText = id;
+    identity.appendChild(name);
+
+    const badges = document.createElement("div");
+    badges.className = "model-badges";
+    const planeBadge = document.createElement("span");
+    planeBadge.className = `model-badge ${prefix}`;
+    planeBadge.innerText = planeName === "CLI" ? "CLI subscription" : "API metered";
+    badges.appendChild(planeBadge);
+
+    if (model?.default || id === plane?.default_model) {
+      const defaultBadge = document.createElement("span");
+      defaultBadge.className = "model-badge default";
+      defaultBadge.innerText = "Default";
+      badges.appendChild(defaultBadge);
+    }
+    if (sharedIds.has(id)) {
+      const sharedBadge = document.createElement("span");
+      sharedBadge.className = "model-badge shared";
+      sharedBadge.innerText = "Also on other plane";
+      badges.appendChild(sharedBadge);
+    }
+    if (model?.context_window) {
+      const contextBadge = document.createElement("span");
+      contextBadge.className = "model-badge context";
+      contextBadge.innerText = `${Number(model.context_window).toLocaleString()} context`;
+      badges.appendChild(contextBadge);
+    }
+    identity.appendChild(badges);
+
+    const copyButton = document.createElement("button");
+    copyButton.type = "button";
+    copyButton.className = "small-btn model-copy-btn";
+    copyButton.innerText = "Copy pin";
+    copyButton.setAttribute("aria-label", `Copy ${id} model pin`);
+    copyButton.addEventListener("click", () => copyTextToClipboard(id, copyButton));
+
+    card.append(identity, copyButton);
+    list.appendChild(card);
+  }
+}
+
+function renderPlaneModelCatalog(catalog) {
+  const routing = catalog?.routing || {};
+  const planes = catalog?.planes || {};
+  const sharedIds = new Set(catalog?.shared_model_ids || []);
+  state.modelCatalog = catalog;
+
+  $("modelsRoutingPolicy").innerText = String(routing.policy || "unknown").replaceAll("_", " ");
+  $("modelsPreferredPlane").innerText = `Preferred: ${routing.preferred_plane || "none"}`;
+  $("modelsEffectivePlane").innerText = `Effective now: ${routing.effective_plane || "none"}`;
+  $("modelsRoutingRule").innerText = routing.rule || "Model and credential-plane selection are separate routing decisions.";
+
+  renderPlaneModels("CLI", planes.CLI || {}, sharedIds);
+  renderPlaneModels("API", planes.API || {}, sharedIds);
+
+  const total = (planes.CLI?.models?.length || 0) + (planes.API?.models?.length || 0);
+  const generated = catalog?.generated_at ? new Date(catalog.generated_at).toLocaleString() : "just now";
+  $("modelsStatus").innerText = `${total} plane-specific model entr${total === 1 ? "y" : "ies"} • refreshed ${generated}`;
+
+  const sharedNote = $("sharedModelsNote");
+  if (sharedIds.size) {
+    sharedNote.classList.remove("hidden");
+    sharedNote.innerText = `${[...sharedIds].join(", ")} ${sharedIds.size === 1 ? "exists" : "exist"} on both planes. These are shown twice intentionally because authentication, availability, and usage accounting differ.`;
+  } else {
+    sharedNote.classList.add("hidden");
+    sharedNote.innerText = "";
+  }
+
+  const warningList = $("modelCatalogWarnings");
+  warningList.replaceChildren();
+  const warnings = Array.isArray(catalog?.warnings) ? catalog.warnings : [];
+  warningList.classList.toggle("hidden", warnings.length === 0);
+  for (const warning of warnings) {
+    const item = document.createElement("p");
+    item.innerText = warning;
+    warningList.appendChild(item);
+  }
+}
+
+async function loadPlaneModelCatalog() {
+  const refreshButton = $("refreshModelsBtn");
+  if (refreshButton) refreshButton.disabled = true;
+  $("modelsStatus").innerText = "Refreshing live CLI and API catalogs through MCP discovery…";
+  try {
+    const res = await fetchMcpCall("grok_mcp_discover_self", { include_models: true });
+    const payload = extractToolPayload(res);
+    const catalog = payload?.data?.model_catalog;
+    if (!catalog) throw new Error("Discovery response did not include a model catalog.");
+    renderPlaneModelCatalog(catalog);
+  } catch (err) {
+    $("modelsStatus").innerText = `Model catalog unavailable: ${err.message}`;
+  } finally {
+    if (refreshButton) refreshButton.disabled = false;
   }
 }
 
@@ -1380,6 +1529,8 @@ function init() {
   setupApiKeyWizard();
   setupCostEstimator();
   setupMetricsControls();
+
+  $("refreshModelsBtn").addEventListener("click", loadPlaneModelCatalog);
 
   // Onboarding action
   $("copyDiscoverBtn").addEventListener("click", runDiscoverSelfOnboarding);

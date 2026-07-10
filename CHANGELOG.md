@@ -4,6 +4,17 @@ All notable changes to UniGrok MCP will be documented in this file.
 
 ## [Unreleased]
 
+## [0.5.3] - 2026-07-10
+
+### Added
+- **Plane-aware Models tab**: The Control Center now renders the live Grok CLI
+  subscription catalog and xAI developer API catalog side by side through
+  public MCP discovery. Each plane reports credential readiness, catalog
+  source, defaults, and its honest usage-accounting boundary.
+- **Unambiguous shared slugs**: A model available on both planes is displayed
+  once per plane with explicit subscription or metered badges. Discovery now
+  offers an opt-in structured model catalog without slowing normal onboarding.
+
 ## [0.5.2] - 2026-07-10
 
 ### Fixed

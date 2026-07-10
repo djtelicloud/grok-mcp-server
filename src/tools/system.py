@@ -842,7 +842,7 @@ async def db_vacuum() -> str:
         return ctx.format_output("Database vacuum completed successfully.")
 
 
-async def grok_mcp_discover_self() -> SystemResult:
+async def grok_mcp_discover_self(include_models: bool = False) -> SystemResult:
     """Exposes OKF bundle information, WebMCP manifests, and tool schemas for zero-configuration agent onboarding."""
     async with GrokInvocationContext("utility", logger, append_signature=False) as ctx:
         # Late import avoids a module cycle: http_server imports this tool when
@@ -866,6 +866,47 @@ async def grok_mcp_discover_self() -> SystemResult:
                 "setup_command": CLI_AUTH_SETUP_COMMAND,
             }
         credential_planes = credential_plane_contract(cli_plane)
+        model_catalog = None
+        if include_models:
+            catalog = await build_model_catalog(include_cli=True)
+            api_ids = {item.get("id") for item in catalog["xai_api"] if item.get("id")}
+            cli_ids = {item.get("id") for item in catalog["grok_cli"] if item.get("id")}
+            model_catalog = {
+                "version": 1,
+                "generated_at": datetime.now().astimezone().isoformat(),
+                "routing": {
+                    "policy": credential_planes["policy"],
+                    "preferred_plane": credential_planes["preferred_plane"],
+                    "effective_plane": credential_planes["effective_plane"],
+                    "rule": "An explicit model pin selects a model; the router still chooses a healthy compatible credential plane.",
+                },
+                "planes": {
+                    "CLI": {
+                        "label": "Grok CLI subscription",
+                        "available": credential_planes["cli"]["available"] and catalog["availability"]["grok_cli"],
+                        "credential_available": credential_planes["cli"]["available"],
+                        "catalog_available": catalog["availability"]["grok_cli"],
+                        "credential_state": credential_planes["cli"]["state"],
+                        "source": catalog["sources"]["grok_cli"],
+                        "default_model": catalog["default_cli_model"],
+                        "models": catalog["grok_cli"],
+                        "economics": "Subscription-backed. UniGrok tracks local activity; provider quota and cost are not exposed.",
+                    },
+                    "API": {
+                        "label": "xAI developer API",
+                        "available": credential_planes["api"]["available"] and catalog["availability"]["xai_api"],
+                        "credential_available": credential_planes["api"]["available"],
+                        "catalog_available": catalog["availability"]["xai_api"],
+                        "credential_state": credential_planes["api"]["state"],
+                        "source": catalog["sources"]["xai_api"],
+                        "default_model": None,
+                        "models": catalog["xai_api"],
+                        "economics": "Metered developer API. Exact response cost is tracked locally when the provider returns it.",
+                    },
+                },
+                "shared_model_ids": sorted(api_ids & cli_ids),
+                "warnings": catalog["warnings"],
+            }
         manifest = {
             "okf_version": "0.1",
             "name": "uni-grok-mcp",
@@ -901,6 +942,8 @@ async def grok_mcp_discover_self() -> SystemResult:
                 "/docs/okf/faq.md"
             ]
         }
+        if model_catalog is not None:
+            manifest["model_catalog"] = model_catalog
 
         doc_text = (
             "# UniGrok MCP Discovery & Self-Description\n\n"

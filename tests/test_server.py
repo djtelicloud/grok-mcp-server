@@ -407,6 +407,54 @@ async def test_discover_self_tool():
 
 
 @pytest.mark.asyncio
+async def test_discover_self_model_catalog_is_opt_in_and_plane_specific(monkeypatch):
+    monkeypatch.setattr(
+        "src.tools.system.grok_cli_plane_status",
+        lambda timeout_sec=5.0: {
+            "state": "ready",
+            "ready": True,
+            "binary": True,
+            "auth": "oauth",
+            "setup_command": "unused",
+        },
+    )
+    catalog = AsyncMock(return_value={
+        "xai_api": [
+            {"id": "grok-4.5", "context_window": 131072},
+            {"id": "grok-api-only"},
+        ],
+        "grok_cli": [
+            {"id": "grok-4.5", "default": True},
+            {"id": "grok-composer-2.5-fast", "default": False},
+        ],
+        "local_profiles": [],
+        "default_cli_model": "grok-4.5",
+        "warnings": [],
+        "sources": {"xai_api": "xai_api", "grok_cli": "grok_cli", "local_profiles": ".grok/hyperparams"},
+        "availability": {"xai_api": True, "grok_cli": True},
+    })
+    monkeypatch.setattr("src.tools.system.build_model_catalog", catalog)
+
+    from src.server import grok_mcp_discover_self
+
+    compact = await grok_mcp_discover_self()
+    assert "model_catalog" not in compact.data
+    catalog.assert_not_awaited()
+
+    detailed = await grok_mcp_discover_self(include_models=True)
+    model_catalog = detailed.data["model_catalog"]
+    assert set(model_catalog["planes"]) == {"CLI", "API"}
+    assert model_catalog["planes"]["CLI"]["default_model"] == "grok-4.5"
+    assert model_catalog["planes"]["CLI"]["credential_available"] is True
+    assert model_catalog["planes"]["CLI"]["catalog_available"] is True
+    assert model_catalog["planes"]["CLI"]["economics"].startswith("Subscription-backed")
+    assert model_catalog["planes"]["API"]["economics"].startswith("Metered developer API")
+    assert model_catalog["shared_model_ids"] == ["grok-4.5"]
+    assert model_catalog["routing"]["preferred_plane"] in {"CLI", "API"}
+    catalog.assert_awaited_once_with(include_cli=True)
+
+
+@pytest.mark.asyncio
 async def test_mcp_tool_surface_consolidated():
     """Consolidation pins: agent is registered; grok_imagine and agentic_chat
     are gone; code_executor and the xAI file tools carry their new names."""

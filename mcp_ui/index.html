@@ -3,12 +3,12 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>UniGrok MCP v0.5.2 Control Center</title>
+    <title>UniGrok MCP v0.5.3 Control Center</title>
     <!-- Premium Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Orbitron:wght@500;700;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="./styles.css?v=grok-v0.5.2" />
+    <link rel="stylesheet" href="./styles.css?v=grok-v0.5.3" />
   </head>
   <body>
     <main class="app-shell">
@@ -37,7 +37,7 @@
       <header class="topbar">
         <div class="brand-block">
           <p class="eyebrow">UNIGROK GATEWAY</p>
-          <h1>Control Center <span class="version-badge">v0.5.2</span></h1>
+          <h1>Control Center <span class="version-badge">v0.5.3</span></h1>
         </div>
         <div class="signal-strip" aria-live="polite">
           <span id="connectionState" class="status-pill status-idle">Idle</span>
@@ -72,6 +72,9 @@
           </button>
           <button type="button" class="nav-btn" data-tab="tab-webmcp">
             <span class="btn-icon">🌐</span> WebMCP Tester
+          </button>
+          <button type="button" class="nav-btn" data-tab="tab-models">
+            <span class="btn-icon">◫</span> Models &amp; Planes
           </button>
           <button type="button" class="nav-btn" data-tab="tab-metrics">
             <span class="btn-icon">📊</span> Telemetry & Metrics
@@ -280,7 +283,70 @@
             </div>
           </div>
 
-          <!-- TAB 6: Telemetry & Metrics Dashboard -->
+          <!-- TAB 6: Models & Credential Planes -->
+          <div id="tab-models" class="tab-panel">
+            <div class="panel-header">
+              <div>
+                <h2>Models &amp; Credential Planes</h2>
+                <p class="panel-desc">Live provider catalogs kept separate so a model name never hides how the request is authenticated or billed.</p>
+              </div>
+              <button id="refreshModelsBtn" type="button" class="small-btn-glow">Refresh catalogs</button>
+            </div>
+
+            <div id="modelsStatus" class="metrics-status">Loading model catalogs through MCP discovery…</div>
+
+            <section class="routing-policy-card" aria-label="Current plane routing policy">
+              <div>
+                <span class="model-kicker">Current routing policy</span>
+                <strong id="modelsRoutingPolicy">Checking…</strong>
+              </div>
+              <div class="routing-policy-flow" aria-label="Plane preference and current effective plane">
+                <span id="modelsPreferredPlane" class="plane-route-chip">Preferred: —</span>
+                <span aria-hidden="true">→</span>
+                <span id="modelsEffectivePlane" class="plane-route-chip active">Effective: —</span>
+              </div>
+              <p id="modelsRoutingRule">An explicit model pin selects a model; the router still chooses a healthy compatible credential plane.</p>
+            </section>
+
+            <div class="model-plane-grid">
+              <section id="cliModelPlane" class="model-plane-card cli-plane">
+                <div class="model-plane-header">
+                  <div>
+                    <span class="model-kicker">Subscription plane</span>
+                    <h3>Grok CLI</h3>
+                  </div>
+                  <span id="cliModelPlaneState" class="state-chip">Checking</span>
+                </div>
+                <p id="cliModelEconomics" class="plane-economics">Subscription activity is tracked locally; provider quota and cost are not exposed.</p>
+                <dl class="plane-facts">
+                  <div><dt>Catalog</dt><dd id="cliModelSource">—</dd></div>
+                  <div><dt>Default</dt><dd id="cliDefaultModel">—</dd></div>
+                </dl>
+                <div id="cliModelList" class="model-card-list"><span class="empty-cell">Loading CLI models…</span></div>
+              </section>
+
+              <section id="apiModelPlane" class="model-plane-card api-plane">
+                <div class="model-plane-header">
+                  <div>
+                    <span class="model-kicker">Metered plane</span>
+                    <h3>xAI Developer API</h3>
+                  </div>
+                  <span id="apiModelPlaneState" class="state-chip">Checking</span>
+                </div>
+                <p id="apiModelEconomics" class="plane-economics">Exact response cost is tracked locally when the provider returns it.</p>
+                <dl class="plane-facts">
+                  <div><dt>Catalog</dt><dd id="apiModelSource">—</dd></div>
+                  <div><dt>Billing</dt><dd>Per API usage</dd></div>
+                </dl>
+                <div id="apiModelList" class="model-card-list"><span class="empty-cell">Loading API models…</span></div>
+              </section>
+            </div>
+
+            <div id="sharedModelsNote" class="coverage-note hidden"></div>
+            <div id="modelCatalogWarnings" class="model-warning-list hidden" aria-live="polite"></div>
+          </div>
+
+          <!-- TAB 7: Telemetry & Metrics Dashboard -->
           <div id="tab-metrics" class="tab-panel">
             <div class="panel-header">
               <div>
@@ -388,7 +454,7 @@
             <pre><code id="rawMetricsReport" class="json-code">Loading metrics...</code></pre>
           </div>
 
-          <!-- TAB 7: Onboarding (Self) -->
+          <!-- TAB 8: Onboarding (Self) -->
           <div id="tab-onboarding" class="tab-panel">
             <div class="panel-header">
               <h2>Zero-Configuration Onboarding</h2>
@@ -435,6 +501,6 @@
 
       </section>
     </main>
-    <script type="module" src="./app.js?v=grok-v0.5.2"></script>
+    <script type="module" src="./app.js?v=grok-v0.5.3"></script>
   </body>
 </html>
