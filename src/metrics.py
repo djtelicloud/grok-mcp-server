@@ -95,8 +95,11 @@ def _aggregate(rows: List[Dict[str, Any]], plane: Optional[str] = None) -> Dict[
     route_classes: Dict[str, int] = {}
     selection_reasons: Dict[str, int] = {}
     routing_receipt_rows = 0
+    caller_attributed_rows = 0
     for row in selected:
         meta = telemetry_metadata(row)
+        if str(meta.get("caller") or "").strip():
+            caller_attributed_rows += 1
         tokens = max(0, _safe_int(meta.get("tokens")))
         token_total += tokens
         token_kind = str(meta.get("token_kind") or "").lower()
@@ -133,6 +136,7 @@ def _aggregate(rows: List[Dict[str, Any]], plane: Optional[str] = None) -> Dict[
         "route_classes": dict(sorted(route_classes.items(), key=lambda item: (-item[1], item[0]))),
         "selection_reasons": dict(sorted(selection_reasons.items(), key=lambda item: (-item[1], item[0]))),
         "routing_receipt_requests": routing_receipt_rows,
+        "caller_attributed_requests": caller_attributed_rows,
     }
 
 

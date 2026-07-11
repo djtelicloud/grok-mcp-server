@@ -771,6 +771,7 @@ function renderMetricsSnapshot() {
     Object.entries(summary.models || {}),
     (value) => `${value} request${value === 1 ? "" : "s"}`
   );
+  $("callerBreakdownTitle").innerText = `Callers • ${Number(summary.caller_attributed_requests || 0)}/${Number(summary.requests || 0)} attributed`;
   renderBreakdownList(
     "callerBreakdown",
     Object.entries(period.callers || payload.callers || {}),

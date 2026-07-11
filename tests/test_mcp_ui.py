@@ -37,6 +37,8 @@ def test_mcp_ui_static_files_are_served(monkeypatch):
     assert 'id="routingReceipts"' in index.text
     assert 'id="routeClassBreakdown"' in index.text
     assert 'id="selectionReasonBreakdown"' in index.text
+    assert 'id="callerBreakdownTitle"' in index.text
+    assert "caller_attributed_requests" in script.text
     assert 'class="raw-telemetry-disclosure"' in index.text
     assert "period.callers || payload.callers" in script.text
     assert ".raw-telemetry-disclosure pre" in styles.text

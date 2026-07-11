@@ -43,6 +43,7 @@ def test_structured_metrics_separate_api_billing_from_cli_subscription():
     assert today["summary"]["requests"] == 2
     assert today["summary"]["api_cost_usd"] == pytest.approx(0.012)
     assert today["summary"]["tracked_tokens"] == 200
+    assert today["summary"]["caller_attributed_requests"] == 2
     assert today["planes"]["API"]["exact_token_requests"] == 1
     assert today["planes"]["CLI"]["estimated_token_requests"] == 1
     assert snapshot["usage"]["cli_subscription"]["cost_per_request_usd"] is None
@@ -70,6 +71,7 @@ def test_structured_metrics_empty_period_is_null_not_fake_zero():
     assert summary["success_rate"] is None
     assert summary["avg_latency_sec"] is None
     assert summary["p95_latency_sec"] is None
+    assert summary["caller_attributed_requests"] == 0
     assert snapshot["usage"]["today"]["planes"] == {}
     assert snapshot["usage"]["today"]["callers"] == {}
 
