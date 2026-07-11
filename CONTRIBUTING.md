@@ -10,8 +10,10 @@ uv sync
 uv run python main.py init
 ```
 
-Set `XAI_API_KEY` in `.env` for live xAI calls. Tests should not require a real
-key unless they are explicitly live tests.
+Set `XAI_API_KEY` in `.env` for live API-plane calls, or authenticate the
+container CLI plane with `docker compose run --rm grok-cli-auth` for compatible
+subscription work. Tests should not require either real credential unless they
+are explicitly live tests.
 
 ## Development Commands
 

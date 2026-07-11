@@ -41,8 +41,8 @@ case "$1" in
             exit 0
         fi
         
-        if [ -z "$XAI_API_KEY" ] && [ ! -f "$DIR/.env" ]; then
-            echo "Warning: XAI_API_KEY is not set and no .env file exists; the server will refuse to start."
+        if [ -z "${XAI_API_KEY:-}" ] && [ ! -f "$DIR/.env" ]; then
+            echo "Notice: no API credential file was found. API-plane calls need XAI_API_KEY; an authenticated CLI plane can still serve compatible requests."
         fi
 
         echo "Starting UniGrok MCP in the background (HTTP mode on port $GROK_MCP_PORT)..."

@@ -1,6 +1,6 @@
 {
   "name": "unigrok",
-  "version": "0.4.1",
+  "version": "0.5.3",
   "description": "Local-first Grok MCP server & gateway. One shared Grok agent for Cursor, Claude Code, VS Code, Codex & Desktop — dual-plane routing (xAI API + Grok CLI subscription), per-call cost tracking, browser Control Center.",
   "author": {
     "name": "David Johnston",

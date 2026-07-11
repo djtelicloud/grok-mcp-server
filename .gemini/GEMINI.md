@@ -15,7 +15,11 @@ Welcome, Gemini Agent! You are operating inside the local environment of the **G
 ## 3. Grok MCP Tool Routing
 Select modular tools based on the nature of the request:
 * **Server Health / Models**: Call `grok_mcp_status` or `list_models` for connectivity, circuit breaker, or routing status.
-* **Project Context**: Call `list_project_files` or `read_local_file` to read local workspace context.
+* **Project Context**: The stable UniGrok service is workspace-neutral. Call
+  `list_project_files` or `read_local_file` only when those tools are actually
+  exposed in the current trusted contributor/stdio session. Otherwise provide
+  deliberately selected excerpts through `agent.workspace_context`; never
+  invent or imply access to the caller's files.
 * **Git Operations**: Call `git_status`, `git_diff`, `git_log`, or `git_show` for read-only Git repository state.
 * **Core Agent Tasks**: Call `agent` (using `mode=reasoning` or `mode=thinking`) for multi-step tasks.
 * **Long-running Jobs**: Call `submit_research_job` (which uses `chat.defer()` server-side) for deferred research tasks.

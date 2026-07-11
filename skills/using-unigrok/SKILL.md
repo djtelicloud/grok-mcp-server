@@ -20,6 +20,9 @@ Call `agent` with:
 - `model` (optional): pin a Grok model id such as `grok-4.5`; leave unset to
   let routing choose.
 - `session` (optional): stable session name for multi-turn continuity.
+- `workspace_context` (optional): deliberately selected excerpts, diffs, or
+  errors when the task depends on the caller's project. The stable service
+  cannot browse the IDE workspace automatically.
 
 Every result includes `response` plus metadata: `model`, `route`, `plane`
 (`API` or `CLI`), `cost_usd`, `tokens`, `latency_sec`, and `citations` when
@@ -35,9 +38,25 @@ search grounding was used.
 ## Cost awareness
 
 Check `cost_usd` in each response. Session reuse lowers cost on follow-ups.
-Requests may route to the CLI plane (subscription, ~$0 marginal) when the
-gateway has an authenticated Grok CLI available; failures on the API plane
-degrade gracefully to it.
+The default `cli_first` policy prefers compatible, unpinned work on an
+authenticated CLI subscription. Explicit plane selection should pair with
+`fallback_policy="same_plane"` when the request must not cross into a different
+credential or billing plane; `cross_plane` allows bounded failover. CLI usage
+reports local counts and estimated tokens, not invented subscription cost or
+remaining provider quota.
+
+## Safe onboarding behavior
+
+- Treat `credential_planes` notices from status or an agent result as the
+  source of truth. Ask before device authentication, installation, or secret
+  configuration.
+- Never request `XAI_API_KEY` in chat or write it into the caller's project.
+- The stable service is workspace-neutral: do not assume MCP registration
+  grants filesystem access. Use
+  `workspace_context`, or local file tools only when those tools are actually
+  exposed in the current trusted contributor/stdio session.
+- Translate provider and transport errors into one concrete next action for
+  the user; do not require them to understand planes, MCP transport, or JSON-RPC.
 
 ## Endpoint
 

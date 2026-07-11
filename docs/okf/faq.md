@@ -40,10 +40,17 @@ SSH host refers to that remote environment, not your laptop.
 
 **Keywords:** api key, xai api key, credentials, ide, shared gateway
 
-No. Set `XAI_API_KEY` only in UniGrok's server/container `.env` file. Every IDE
-connects to the local MCP endpoint at `http://localhost:4765/mcp`; do not paste
-the upstream xAI key into Cursor, Claude Code, VS Code, Codex, or Claude
-Desktop configurations.
+No. Every IDE connects to the local MCP endpoint at
+`http://localhost:4765/mcp`; do not paste the upstream xAI key into Cursor,
+Claude Code, VS Code, Codex, or Claude Desktop configurations.
+
+UniGrok needs at least one model credential at the global service:
+
+- authenticate `docker compose run --rm grok-cli-auth` for compatible
+  SuperGrok subscription work without an API key;
+- set `XAI_API_KEY` only in UniGrok's server/container `.env` for API-plane
+  models and features; or
+- configure both for the broadest coverage.
 
 If you configure `UNIGROK_API_KEYS` to protect the gateway beyond its default
 loopback-only deployment, use one of those gateway client tokens in each client

@@ -43,6 +43,10 @@ fi
 
 echo
 echo "Next steps:"
-echo "  1. Edit .env and set XAI_API_KEY."
+echo "  1. Choose credentials:"
+echo "     - SuperGrok: docker compose run --rm grok-cli-auth"
+echo "     - xAI API: edit .env and replace the XAI_API_KEY placeholder"
+echo "     - Or configure both for maximum coverage"
 echo "  2. Start the shared MCP service: docker compose up --build -d"
 echo "  3. Check health: curl -s http://localhost:4765/healthz"
+echo "  4. Open Setup & Status: http://localhost:4765/ui/"

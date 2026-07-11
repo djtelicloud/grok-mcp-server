@@ -34,7 +34,7 @@ curl -s http://localhost:4765/healthz
 For IDE setup, use [docs/ide-setup.md](../../../docs/ide-setup.md) as the source of truth. Each IDE should use the same endpoint and set a stable `X-Client-ID` header (`codex`, `claude-code`, `vscode`, `antigravity`, etc.) so sessions and telemetry stay separated.
 
 Credential boundary:
-- `XAI_API_KEY` is server-side only. It must be available to the process/container running UniGrok; IDE clients should not be configured with the raw xAI key.
+- `XAI_API_KEY` is server-side only and is required for API-plane calls. An authenticated CLI plane can serve compatible requests without it. IDE clients should never be configured with the raw xAI key.
 - If `UNIGROK_API_KEYS` is set on the server, IDE clients also need `Authorization: Bearer <client-token>`.
 - If neither `XAI_API_KEY` nor an authenticated Grok CLI plane is available inside the runtime, MCP transport can still answer `tools/list` and the browser UI can load, but real Grok calls cannot produce model answers.
 

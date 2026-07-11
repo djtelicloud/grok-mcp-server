@@ -33,12 +33,13 @@ related but not interchangeable catalog identities. Plane membership is always
 the exact intersection/difference of the two live provider catalogs.
 
 Current state: the CLI plane **runs inside Docker** — the image bakes the
-Linux `grok` binary (`Dockerfile`, pinned) and `docker-compose.yml` mounts the
-host's `${HOME}/.grok` OAuth session at `/home/appuser/.grok`, so requests that
-pin a CLI model run on the grok.com subscription and API-plane failures degrade
-to it. Remove that volume for an API-only container. The routing itself,
-however, is still the thinner plane: it does not yet expose the full ReAct
-local-tool loop. `_call_plane` now invokes the headless CLI with
+Linux `grok` binary (`Dockerfile`, pinned) and `docker-compose.yml` persists a
+machine-level OAuth session in the dedicated `unigrok-cli-auth` volume. The
+default `cli_first` policy prefers compatible, unpinned CLI work. Explicit
+plane requests should use `fallback_policy=same_plane` when crossing credential
+planes is forbidden; `cross_plane` permits bounded failover. The CLI execution
+adapter does not expose the full API ReAct local-tool loop. `_call_plane`
+invokes the headless CLI with
 `--output-format json` or `streaming-json`, deterministic `-s` native session
 ids, optional `--json-schema`, `--effort`, and `--max-turns`, plus `grok
 --check` for plane readiness. Native CLI sessions are the continuity mechanism;

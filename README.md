@@ -20,8 +20,6 @@
 > subscription, with per-call cost tracking, while your API key never leaves
 > the server.
 
-![UniGrok Control Center in action — a fast-mode agent call streams back with live tokens, cost, latency, route, and plane metadata](assets/control-center-demo.gif)
-
 UniGrok is a local-first **Grok MCP server and gateway** for
 [xAI's Grok models](https://docs.x.ai/?utm_source=github&utm_medium=readme&utm_campaign=unigrok&utm_content=intro-docs).
 It runs once on your machine, keeps the xAI credential on the server side, and
@@ -43,6 +41,10 @@ Use it as:
 
 ## Quick Start
 
+This setup is designed to be copy-pasteable. You need Git, Docker Desktop, and
+[`uv`](https://docs.astral.sh/uv/getting-started/installation/). You do **not**
+need to understand MCP internals.
+
 ```bash
 git clone https://github.com/djtelicloud/grok-mcp-server.git
 cd grok-mcp-server
@@ -57,22 +59,29 @@ The init command:
 - points every IDE at the shared HTTP endpoint instead of asking each IDE for
   the raw xAI key.
 
-Edit `.env` and set your key — grab one from the
-[xAI Console](https://console.x.ai/?utm_source=github&utm_medium=readme&utm_campaign=unigrok&utm_content=quickstart-get-key)
-if you don't have one yet:
+Choose at least one credential path:
+
+- **SuperGrok subscription:** use the CLI device login below. This is the
+  preferred path for compatible requests and does not require an API key.
+- **xAI developer API:** edit `.env` and replace the placeholder with a key
+  from the [xAI Console](https://console.x.ai/?utm_source=github&utm_medium=readme&utm_campaign=unigrok&utm_content=quickstart-get-key).
+- **Both:** recommended for the broadest model and tool coverage. UniGrok
+  keeps the two credentials and their usage accounting separate.
+
+For the developer API path:
 
 ```bash
 XAI_API_KEY=your_real_xai_api_key
 ```
 
-Then start the shared service:
+Start the shared service:
 
 ```bash
 docker compose up --build -d
 curl -s http://localhost:4765/healthz
 ```
 
-Authenticate the independent CLI subscription plane once per machine:
+For the SuperGrok subscription path, authenticate once per machine:
 
 ```bash
 docker compose run --rm grok-cli-auth
@@ -81,7 +90,13 @@ docker compose run --rm grok-cli-auth
 The helper uses xAI's device-code login and stores the refreshable OAuth state
 in the dedicated `unigrok-cli-auth` Docker volume. It is service identity, not
 project identity: never repeat this when switching repositories. Ordinary
-startup is noninteractive and remains API-capable when CLI auth is absent.
+startup is noninteractive. The service is usable when either the API plane or
+the CLI plane is ready; features that exist only on the other plane remain
+unavailable until that credential is configured.
+
+You are done when health reports `{"status":"healthy"}` and the Control Center
+at `http://localhost:4765/ui/` says the gateway is live. Use host port `4765`
+for IDEs and browsers; `8080` is only the container's internal port.
 
 For an explicit no-API-billing agent call, set `plane="cli"` and
 `fallback_policy="same_plane"`. Use `plane="api"` for a strict metered API
@@ -234,10 +249,16 @@ Supervised helper:
 Start with `agent`. It is the headline tool and should handle most nontrivial
 requests.
 
-Core tools:
+The stable IDE-facing HTTP service intentionally starts with a small public
+surface centered on:
 
 - `agent`: auto-routed Grok agent with modes `auto`, `fast`, `reasoning`,
   `thinking`, and `research`.
+- status and discovery tools that explain readiness without running inference.
+
+Trusted stdio and contributor modes additionally expose specialist tools such
+as:
+
 - `grok_reflect`: focused structured critique for plans, code-review notes,
   outputs, and architecture decisions.
 - `chat`: plain Grok chat with optional model pinning and session history.
@@ -253,8 +274,9 @@ Core tools:
   UniGrok itself. Records require a verified `scripts/land` receipt; automatic
   prompt injection is off. These tools are not on the public HTTP service.
 - `web_search`, `x_search`, `remote_code_execution`: xAI server-side tools.
-- `read_local_file`, `list_project_files`: workspace inspection.
-- `git_status`, `git_diff`, `git_log`, `git_show`: read-only Git context.
+- `read_local_file`, `list_project_files`, Git inspection, tests, and guarded
+  writes: local contributor capabilities that are not implied by registering
+  the stable workspace-neutral service.
 - `generate_image`, `generate_video`, `extend_video`: Grok Imagine media.
 
 ### Explainable model selection

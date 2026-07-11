@@ -4,15 +4,31 @@ One persistent Docker container serves every IDE on this machine over
 streamable HTTP. Verified endpoint: **`http://localhost:4765/mcp`**. The port
 spells **GROK** on a telephone keypad.
 
+If you are new to local developer tools: install Git, Docker Desktop, and
+[`uv`](https://docs.astral.sh/uv/getting-started/installation/) first. The
+host-facing MCP, health, and Control Center URLs always use port `4765`;
+`8080` is container-internal and should not appear in an IDE config.
+
 ## Start the service
 
 ```bash
 cd /path/to/uni-grok-mcp        # the real checkout, not a worktree
 uv run python main.py init      # first time only; creates .env if absent
-# edit .env: set XAI_API_KEY, and optionally UNIGROK_API_KEYS
 docker compose up -d --build
 curl -s http://localhost:4765/healthz   # -> {"status":"healthy"}
 ```
+
+Choose at least one credential path:
+
+- **SuperGrok subscription:** run `docker compose run --rm grok-cli-auth` and
+  complete the device-code login. No `XAI_API_KEY` is required for compatible
+  CLI-plane work.
+- **xAI developer API:** edit `.env` and replace the `XAI_API_KEY` placeholder.
+- **Both:** recommended for maximum coverage. The default `cli_first` policy
+  prefers compatible subscription work while preserving API-only features.
+
+Open `http://localhost:4765/ui/` and use **Setup & Status** to confirm which
+credential planes are ready before configuring every IDE.
 
 Compose loads secrets from the launched checkout's `.env`. Agent worktrees
 often do not have that gitignored file; set

@@ -1,5 +1,8 @@
 # X (Twitter) Announcement Thread — Public Launch (v0.4.1)
 
+> Archived launch copy. Its screenshots and product labels intentionally show
+> v0.4.1 and should not be reused as current setup or Control Center guidance.
+
 Media: attach `docs/media/grok-imagine-arch-motion.mp4` (Grok Imagine motion
 render of the UniGrok architecture) to Tweet 1, and the README GIF
 (`assets/control-center-demo.gif`) to Tweet 3.

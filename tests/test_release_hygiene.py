@@ -1,3 +1,4 @@
+import json
 import tomllib
 from pathlib import Path
 
@@ -11,10 +12,12 @@ def test_release_version_is_aligned_across_package_runtime_and_ui():
     metadata = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     index = (ROOT / "mcp_ui" / "index.html").read_text(encoding="utf-8")
     changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    plugin = json.loads((ROOT / ".plugin" / "plugin.json").read_text(encoding="utf-8"))
 
     assert metadata["project"]["version"] == __version__ == "0.5.3"
     assert f"v{__version__} Control Center" in index
     assert f"## [{__version__}]" in changelog
+    assert plugin["version"] == __version__
 
 
 def test_public_runtime_files_do_not_embed_a_developer_home_path():
@@ -50,8 +53,19 @@ def test_public_setup_surfaces_use_the_grok_phoneword_endpoint():
         ROOT / "src" / "cli.py",
         ROOT / ".mcp.json",
         ROOT / "skills" / "using-unigrok" / "SKILL.md",
+        ROOT / ".agents" / "AGENTS.md",
+        ROOT / ".agents" / "skills" / "uni-grok-mcp" / "SKILL.md",
     ]
     for path in paths:
         text = path.read_text(encoding="utf-8")
         assert "http://localhost:4765" in text, path
         assert "http://localhost:8080" not in text, path
+
+
+def test_agent_guidance_preserves_workspace_and_credential_boundaries():
+    using_unigrok = (ROOT / "skills" / "using-unigrok" / "SKILL.md").read_text(encoding="utf-8")
+    gemini = (ROOT / ".gemini" / "GEMINI.md").read_text(encoding="utf-8")
+
+    assert 'fallback_policy="same_plane"' in using_unigrok
+    assert "workspace-neutral" in using_unigrok
+    assert "workspace-neutral" in gemini
