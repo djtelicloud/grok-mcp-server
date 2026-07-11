@@ -40,6 +40,9 @@ def test_github_review_workflow_never_checks_out_pr_code():
     assert "persist-credentials: false" in workflow
     assert "github.event.pull_request.head" not in workflow
     assert "UNIGROK_REVIEW_PLANE: cli" in workflow
+    assert "github.event.pull_request.author_association" in workflow
+    assert "github.event.comment.author_association" in workflow
+    assert '[\"OWNER\",\"MEMBER\",\"COLLABORATOR\"]' in workflow
 
 
 def test_chatgpt_github_operator_guide_keeps_credentials_separate():

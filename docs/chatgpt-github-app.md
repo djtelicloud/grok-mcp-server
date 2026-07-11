@@ -55,6 +55,9 @@ Repository configuration:
 - PR diffs and comments are untrusted evidence, not instructions.
 - The workflow uses `pull_request_target` only to execute the trusted workflow
   and script from the default branch.
+- Because this is a public repository, automatic and comment-triggered runs
+  are restricted to the owner, members, and collaborators. Outside
+  contributors cannot schedule work on the Mac runner themselves.
 - It never checks out, builds, imports, or runs code from the reviewed PR.
 - GitHub API responses are bounded before sending them to UniGrok.
 - The tool and workflow cannot merge, push, tag, release, or change protection.
