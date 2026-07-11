@@ -11,6 +11,14 @@ All notable changes to UniGrok MCP will be documented in this file.
   of one focus function, evaluated by the user's tests and benchmark).
   Storage and the off/dry_run/active rollout ladder only — no runtime
   behavior yet; candidate metadata deliberately never rides telemetry.
+- **Swarm optimizer AST core, sandbox, and preflight**: tree-sitter byte-exact
+  span extraction (decorators included, ambiguous references fatal), a
+  per-task evaluation sandbox (workspace copy with the venv symlinked and
+  `PYTHONPATH`-shadowed, secret-scrubbed + RLIMIT-bounded mutant subprocesses,
+  per-candidate hygiene), and a preflight oracle gate (import provenance,
+  baseline stage budget, focus-span coverage, benchmark stability) plus the
+  opt-in `scripts/swarm_bench.py` helper. Still no engine — inert unless a
+  future commit drives it.
 - **Shadow semantic evals** (`UNIGROK_SEMANTIC_EVALS`, off by default): a
   deterministic sample of live turns is graded by a cheap LLM judge
   (correctness / tool efficiency / safety, 1–5) and the scores ride the
