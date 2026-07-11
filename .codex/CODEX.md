@@ -33,6 +33,9 @@ Use these files when a task needs one of the Codex-only surfaces:
 - `mcp/grok-routing.json` describes Codex-to-UniGrok MCP routing.
 - `plugins/capabilities.json` lists installed Codex plugins and safe use cases.
 - `directives.md` documents Codex app response directives.
+- `memory/context.md` provides durable project identity and risk hints.
+- `memory/active-work.md` is the required cross-chat handoff for the latest
+  unfinished or recently completed Codex-owned work.
 
 ## Boundaries
 

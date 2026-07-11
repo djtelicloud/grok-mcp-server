@@ -3,6 +3,9 @@
 Use this as a compact Codex memory hint for UniGrok MCP. Do not treat it as
 proof; verify current files before editing.
 
+Every new Codex chat must also read `active-work.md`. Contributor-memory MCP
+recall supplements that project-local handoff; it does not replace it.
+
 - This repository is a UniGrok MCP server exposed through Codex as a trusted
   local project.
 - `.codex/` is Codex desktop control metadata only.

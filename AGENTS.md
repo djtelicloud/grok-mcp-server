@@ -105,3 +105,19 @@ For implementation, debugging, architecture, or review, use the tracked
 `.agents/skills/unigrok-workspace-memory/SKILL.md`. Recall against the Codex
 worktree's own full HEAD, and record durable evidence only after `scripts/land`
 certifies the exact commit.
+
+## Codex chat continuity
+
+At the start of every Codex chat rooted in this repository, read
+`.codex/memory/context.md` and `.codex/memory/active-work.md` before planning or
+acting. This project-local handoff is required even when chat history, browser
+state, Chronicle, or contributor-memory MCP tools are available. Treat it as a
+locator, not proof: verify drift-prone Git, CI, runtime, DNS, and cloud state
+against their live sources.
+
+Before ending a Codex chat with unfinished repository, deployment, release, or
+external integration work, update `.codex/memory/active-work.md` with the exact
+last verified state, remaining gates, and safety posture. Never put credentials,
+tokens, OAuth codes, private keys, or other secret values in that file. When the
+work is complete, replace the active handoff with a concise completed state so a
+new chat does not resume obsolete steps.
