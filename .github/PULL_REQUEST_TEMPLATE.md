@@ -10,7 +10,8 @@
 
 <!--
 Exact head SHA reviewed/tested:
-Contributor or agent identity:
+Accountable GitHub contributor:
+Assisting IDE/model (`Agent-Assisted-By`):
 Changed paths:
 Known risks, generated files, or follow-up work:
 -->

@@ -33,6 +33,8 @@ def test_mcp_ui_static_files_are_served(monkeypatch):
     assert "grok_mcp_discover_self" in script.text
     assert "simulate_reasoning_guard" in script.text
     assert "fetch_okf_bundle" in script.text
+    assert 'fetch("/docs/okf/okf-manifest.json")' in script.text
+    assert "source.files.map" in script.text
     assert 'fetchMcpCall("grok_mcp_status", { view: "json" })' in script.text
     assert "Naive regex parse" not in script.text
     assert 'id="metricApiCost"' in index.text

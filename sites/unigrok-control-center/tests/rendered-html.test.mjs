@@ -27,6 +27,21 @@ function workerEnvironment() {
             { headers: { "content-type": "application/json; charset=utf-8" } },
           );
         }
+        if (pathname.startsWith("/docs/okf/")) {
+          const fileName = pathname.slice("/docs/okf/".length);
+          const file = new URL(`../public/docs/okf/${fileName}`, import.meta.url);
+          try {
+            return new Response(await readFile(file, "utf8"), {
+              headers: {
+                "content-type": fileName.endsWith(".json")
+                  ? "application/json; charset=utf-8"
+                  : "text/markdown; charset=utf-8",
+              },
+            });
+          } catch {
+            return new Response("Not found", { status: 404 });
+          }
+        }
         return new Response("Not found", { status: 404 });
       },
     },
@@ -91,9 +106,22 @@ test("renders the public root without authentication or live-status claims", asy
   assert.match(html, /Published route contract · not a live runtime probe/);
   assert.match(html, /Private review pending · public MCP deferred/);
   assert.match(html, /uv run python main\.py init/);
+  assert.match(html, /\/docs\/okf\/index\.md/);
   assert.match(html, /status.*healthy/);
   assert.match(html, /https:\/\/grokmcp\.org\/og\.png/);
   assert.doesNotMatch(html, /installer@example\.org/);
+});
+
+test("serves the canonical OKF manifest and generated API reference publicly", async () => {
+  const worker = await loadWorker();
+  const manifestResponse = await request(worker, "/docs/okf/okf-manifest.json");
+  const apiResponse = await request(worker, "/docs/okf/api-reference.md");
+
+  assert.equal(manifestResponse.status, 200);
+  assert.equal(apiResponse.status, 200);
+  const manifest = await manifestResponse.json();
+  assert.ok(manifest.files.includes("api-reference.md"));
+  assert.match(await apiResponse.text(), /async def agent\(/);
 });
 
 test("redirects anonymous control visitors to dispatch-owned ChatGPT sign-in", async () => {
@@ -236,12 +264,14 @@ test("serves public project, discovery, and llms documents anonymously", async (
   assert.equal(project.name, "UniGrok");
   assert.equal(project.mcp.remote_status, "private-api-review-pending");
   assert.equal(project.control.authorization, "fresh-server-side-github-repository-role-check");
+  assert.equal(project.documentation.okf_manifest, "https://grokmcp.org/docs/okf/okf-manifest.json");
 
   const discoveryResponse = await request(worker, "/.well-known/unigrok.json");
   assert.equal(discoveryResponse.status, 200);
   const discovery = await discoveryResponse.json();
   assert.equal(discovery.name, "UniGrok");
   assert.equal(discovery.control, "https://control.grokmcp.org");
+  assert.equal(discovery.okf, "https://grokmcp.org/docs/okf/okf-manifest.json");
 
   const llmsResponse = await request(worker, "/llms.txt");
   assert.equal(llmsResponse.status, 200);
@@ -249,5 +279,6 @@ test("serves public project, discovery, and llms documents anonymously", async (
   const llms = await llmsResponse.text();
   assert.match(llms, /# UniGrok/);
   assert.match(llms, /fresh server-side repository role check/);
+  assert.match(llms, /OKF knowledge bundle/);
   assert.doesNotMatch(llms, /xai-[A-Za-z0-9_-]+/i);
 });

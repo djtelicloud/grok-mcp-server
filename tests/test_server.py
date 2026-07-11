@@ -400,6 +400,7 @@ async def test_discover_self_tool():
     assert res.data["okf_version"] == "0.1"
     assert res.data["name"] == "uni-grok-mcp"
     assert "/docs/okf/index.md" in res.data["files"]
+    assert "/docs/okf/api-reference.md" in res.data["files"]
     assert "UniGrok MCP Discovery" in res.response
     assert "credential_planes" in res.data
     assert res.data["credential_planes"]["preferred_plane"] in {"CLI", "API"}

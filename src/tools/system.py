@@ -854,6 +854,21 @@ async def db_vacuum() -> str:
         return ctx.format_output("Database vacuum completed successfully.")
 
 
+def load_okf_manifest() -> dict[str, Any]:
+    """Load and validate the packaged OKF manifest as the discovery source of truth."""
+    path = PathResolver.get_service_root() / "docs" / "okf" / "okf-manifest.json"
+    try:
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"OKF manifest is unavailable or invalid at {path}") from exc
+    files = manifest.get("files")
+    if not isinstance(files, list) or not files or not all(isinstance(item, str) for item in files):
+        raise RuntimeError("OKF manifest files must be a non-empty string array")
+    if manifest.get("root") not in files:
+        raise RuntimeError("OKF manifest root must be present in files")
+    return manifest
+
+
 async def grok_mcp_discover_self(include_models: bool = False) -> SystemResult:
     """Exposes OKF bundle information, WebMCP manifests, and tool schemas for zero-configuration agent onboarding."""
     async with GrokInvocationContext("utility", logger, append_signature=False) as ctx:
@@ -878,6 +893,7 @@ async def grok_mcp_discover_self(include_models: bool = False) -> SystemResult:
                 "setup_command": CLI_AUTH_SETUP_COMMAND,
             }
         credential_planes = credential_plane_contract(cli_plane)
+        okf_manifest = load_okf_manifest()
         model_catalog = None
         if include_models:
             catalog = await build_model_catalog(include_cli=True)
@@ -941,18 +957,9 @@ async def grok_mcp_discover_self(include_models: bool = False) -> SystemResult:
                 "commit_anchored_memory": contributor,
                 "serialized_landing": contributor,
             },
-            "okf_bundle_root": "/docs/okf/index.md",
+            "okf_bundle_root": f"/docs/okf/{okf_manifest['root']}",
             "webmcp_manifest": "/.well-known/webmcp",
-            "files": [
-                "/docs/okf/index.md",
-                "/docs/okf/agent-tool.md",
-                "/docs/okf/chat-modes.md",
-                "/docs/okf/reasoning-guard.md",
-                "/docs/okf/grok-4.5-pinning.md",
-                "/docs/okf/media-imagine.md",
-                "/docs/okf/metrics-tool.md",
-                "/docs/okf/faq.md"
-            ]
+            "files": [f"/docs/okf/{file_name}" for file_name in okf_manifest["files"]],
         }
         if model_catalog is not None:
             manifest["model_catalog"] = model_catalog
@@ -985,7 +992,7 @@ async def grok_mcp_discover_self(include_models: bool = False) -> SystemResult:
             "remain unavailable and are never invented.\n\n"
             "## OKF (Open Knowledge Format) Bundle\n"
             "- **Manifest / Manifest Root:** `/docs/okf/okf-manifest.json`\n"
-            "- **Index Document:** `/docs/okf/index.md`\n"
+            f"- **Index Document:** `/docs/okf/{okf_manifest['root']}`\n"
             "- **Verified FAQ:** `/docs/okf/faq.md` — consulted by Grok on demand for UniGrok support, never auto-injected.\n"
             "For full schemas, reasoning level weights, media generation params, metrics, and verified support answers, ingest these files.\n\n"
             "## WebMCP Manifest\n"

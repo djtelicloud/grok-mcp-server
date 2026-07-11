@@ -46,7 +46,10 @@ curl -s http://localhost:4765/healthz
 
 Human contributors and coding agents use the same evidence contract: explain
 the intent, list changed paths, report exact verification commands and results,
-and disclose known risks or generated files. Grok review comments are advisory;
+identify the accountable GitHub user and assisting IDE/model, and disclose known
+risks or generated files. Use `Agent-Assisted-By:` for agent provenance; use
+`Co-authored-by:` only for a real GitHub account whose linked email should receive
+contribution credit. Grok review comments are advisory;
 they do not authorize a merge. Codex reviews the current head and owns landing,
 merge, tag, and release decisions. See
 [ADR 0001](docs/adr/0001-cloud-control-plane-governance.md) for the current
@@ -63,6 +66,8 @@ worktree branch such as `codex/my-change`, `claude/my-change`, or
 `gemini/my-change`.
 
 An agent handoff must include its task branch or PR, full commit SHA, changed
-paths, test evidence, and unresolved risks. Agents other than Codex must not
-merge, push shared `main`, publish releases, delete shared worktrees, or treat
-an advisory model review as approval.
+paths, test evidence, unresolved risks, human sponsor, and agent provenance.
+For a local IDE agent, Codex publishes the branch and draft PR; an outside human
+contributor may publish their own fork/branch and PR. Agents other than Codex
+must not run `scripts/land`, merge, push shared `main`, publish releases, delete
+shared worktrees, or treat an advisory model review as approval.

@@ -1695,19 +1695,13 @@ async function registerWebMcpTools() {
         properties: {}
       },
       execute: async () => {
+        const response = await fetch("/docs/okf/okf-manifest.json");
+        if (!response.ok) throw new Error(`OKF manifest returned HTTP ${response.status}`);
+        const source = await response.json();
         const manifest = {
-          okf_version: "0.1",
-          name: "uni-grok-mcp",
-          root: "/docs/okf/index.md",
-          files: [
-            "/docs/okf/index.md",
-            "/docs/okf/agent-tool.md",
-            "/docs/okf/chat-modes.md",
-            "/docs/okf/reasoning-guard.md",
-            "/docs/okf/grok-4.5-pinning.md",
-            "/docs/okf/media-imagine.md",
-            "/docs/okf/metrics-tool.md"
-          ]
+          ...source,
+          root: `/docs/okf/${source.root}`,
+          files: source.files.map((fileName) => `/docs/okf/${fileName}`)
         };
         return {
           content: [{

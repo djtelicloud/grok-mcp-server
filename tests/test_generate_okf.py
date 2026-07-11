@@ -1,44 +1,91 @@
-import os
-import sys
+import importlib.util
+import json
 from pathlib import Path
 
-# Add the scripts directory to the path so we can import the script
-ROOT_DIR = Path(__file__).parent.parent
-sys.path.insert(0, str(ROOT_DIR / "scripts"))
+import pytest
 
-from generate_okf import extract_docs_from_file, get_keywords
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def load_generator():
+    spec = importlib.util.spec_from_file_location("generate_okf", ROOT / "scripts" / "generate_okf.py")
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+generator = load_generator()
+
 
 def test_get_keywords():
-    assert get_keywords("CamelCaseTest") == "camel, case, test"
-    assert get_keywords("snake_case_test") == "snake, case, test"
-    assert get_keywords("FAQDocumentError") == "faq, document, error"
+    assert generator.get_keywords("CamelCaseTest") == "camel, case, test"
+    assert generator.get_keywords("snake_case_test") == "snake, case, test"
+    assert generator.get_keywords("FAQDocumentError") == "faq, document, error"
+    assert generator.get_keywords("Agent.run_async") == "agent, run, async"
 
-def test_extract_docs_from_file(tmp_path):
+
+def test_extracts_sync_async_classes_and_public_methods(tmp_path):
     py_file = tmp_path / "test_module.py"
-    py_file.write_text('''
-"""Module docstring."""
-
+    py_file.write_text(
+        '''
 class MyClass:
     """Class docstring."""
-    pass
 
-def my_func():
+    async def run_async(self, value: str) -> bool:
+        """Run asynchronously."""
+
+    def _private(self):
+        """Hidden method."""
+
+def my_func(value: int = 1) -> str:
     """Func docstring."""
-    pass
 
-def _private_func():
-    """Private func docstring."""
-    pass
-''')
-    items = extract_docs_from_file(py_file)
-    assert len(items) == 2
-    
-    assert items[0]["type"] == "class"
-    assert items[0]["name"] == "MyClass"
-    assert items[0]["docstring"] == "Class docstring."
-    assert items[0]["keywords"] == "my, class"
+async def my_async_func(*, enabled: bool = True) -> None:
+    """Async docstring."""
+''',
+        encoding="utf-8",
+    )
 
-    assert items[1]["type"] == "function"
-    assert items[1]["name"] == "my_func"
-    assert items[1]["docstring"] == "Func docstring."
-    assert items[1]["keywords"] == "my, func"
+    items = generator.extract_docs_from_file(py_file)
+
+    assert [item["name"] for item in items] == [
+        "MyClass",
+        "MyClass.run_async",
+        "my_func",
+        "my_async_func",
+    ]
+    assert items[1]["signature"] == "async def MyClass.run_async(self, value: str) -> bool"
+    assert items[2]["signature"] == "def my_func(value: int=1) -> str"
+    assert items[3]["signature"] == "async def my_async_func(*, enabled: bool=True) -> None"
+
+
+def test_parse_failure_is_fatal(tmp_path):
+    broken = tmp_path / "broken.py"
+    broken.write_text("def broken(:\n", encoding="utf-8")
+
+    with pytest.raises(generator.GenerationError, match="cannot parse"):
+        generator.extract_docs_from_file(broken)
+
+
+def test_render_is_deterministic_and_contains_async_public_tools():
+    first = generator.render_api_reference()
+    second = generator.render_api_reference()
+
+    assert first == second
+    assert "async def agent(" in first
+    assert "async def generate_image(" in first
+    assert "### Function: `agent`" in first
+    assert first.endswith("\n")
+
+
+def test_manifest_and_public_mirror_are_current():
+    generator.check_bundle()
+    manifest = json.loads(generator.MANIFEST_PATH.read_text(encoding="utf-8"))
+
+    assert manifest["files"].count("api-reference.md") == 1
+    for file_name in manifest["files"]:
+        canonical = generator.OKF_DIR / file_name
+        public = generator.PUBLIC_OKF_DIR / file_name
+        assert canonical.read_bytes() == public.read_bytes()

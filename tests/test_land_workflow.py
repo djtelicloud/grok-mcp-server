@@ -61,9 +61,27 @@ def configure_fast_test(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(land, "reconcile_runtime", lambda repo, paths: "test skipped")
 
 
+def test_run_tests_checks_generated_okf_before_pytest(monkeypatch, tmp_path):
+    calls = []
+
+    def fake_run(args, **kwargs):
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(land, "run", fake_run)
+    monkeypatch.setattr(land, "git", lambda repo, *args, **kwargs: "abc123")
+    monkeypatch.setattr(land, "require_clean", lambda *args, **kwargs: None)
+
+    land.run_tests(tmp_path, "abc123")
+
+    assert calls[0] == ["uv", "run", "python", "scripts/generate_okf.py", "--check"]
+    assert calls[1] == land.DEFAULT_TEST_ARGS
+
+
 def test_runtime_action_is_minimal():
     assert land.runtime_action(["README.md", "tests/test_x.py"]) == "none"
     assert land.runtime_action(["mcp_ui/index.html"]) == "smoke"
+    assert land.runtime_action(["docs/okf/api-reference.md"]) == "smoke"
     assert land.runtime_action(["src/server.py"]) == "restart"
     assert land.runtime_action(["uv.lock"]) == "rebuild"
     assert land.runtime_action(["docker-compose.dev.yml"]) == "rebuild"
@@ -193,6 +211,16 @@ def test_land_must_not_run_from_main(repo_with_agent, monkeypatch):
         land.land(main)
 
 
+def test_land_refuses_non_codex_contributor_branch(repo_with_agent, monkeypatch):
+    _, agent = repo_with_agent
+    git(agent, "branch", "-m", "gemini/task")
+    commit(agent, "agent change\n")
+    configure_fast_test(monkeypatch)
+
+    with pytest.raises(land.LandError, match="only a Codex-owned integration branch"):
+        land.land(agent)
+
+
 def test_dead_process_lock_is_recovered(tmp_path: Path):
     lock = tmp_path / "land.lock"
     lock.mkdir()
@@ -218,6 +246,7 @@ def test_runtime_wait_retries_expected_restart_handoff(monkeypatch, tmp_path):
 
     monkeypatch.setattr(land, "probe_json", flaky_probe)
     monkeypatch.setattr(land, "probe_ui", lambda base_url: None)
+    monkeypatch.setattr(land, "probe_okf", lambda base_url: None)
     monkeypatch.setattr(
         land,
         "get_json",
