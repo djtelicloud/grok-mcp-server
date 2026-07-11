@@ -123,7 +123,7 @@ function PullRequestSurface({ snapshot }: { snapshot: ControlCenterSnapshot }) {
           return (
             <li className="pr-row" key={item.number}>
             <span className="pr-number">#{boundedInteger(item.number)}</span>
-            <span className="pr-title-cell">{url ? <a href={url} target="_blank" rel="noreferrer">{item.title}</a> : <strong>{item.title}</strong>}<small>Open pull request</small></span>
+            <span className="pr-title-cell">{url ? <a href={url} target="_blank" rel="noreferrer">{item.title}</a> : <strong>{item.title}</strong>}<small>{item.releaseImpact === "blocking" ? "Explicit release blocker" : "Informational to release"}</small></span>
             <span className="author-cell"><span className="mini-avatar">{displayInitials(item.author)}</span><span>{item.author}</span></span>
             <span className="thread-count"><b>{boundedInteger(item.checksPassed)}/{boundedInteger(item.checksTotal)}</b><span>checks</span></span>
             <StatusPill tone={reviewStateTone(item.reviewState)}>{reviewStateLabel(item.reviewState)}</StatusPill>
@@ -517,7 +517,7 @@ function ConnectionWizard({ connection, copyText, mode, setMode }: { connection:
 function PullRequestDetail({ connection, snapshot }: { connection: PublicConnectionConfig; snapshot: ControlCenterSnapshot }) {
   return (
     <div className="drawer-content">
-      <DrawerHeader icon="pr" eyebrow="Pull-request status" title={integrationStateLabel(snapshot.pullRequests.state)} description="This surface displays only sanitized data from an installer-approved repository adapter. The open-source template does not embed GitHub authorization." />
+      <DrawerHeader icon="pr" eyebrow="Pull-request status" title={integrationStateLabel(snapshot.pullRequests.state)} description="Review state and release impact are separate. Changes requested affects that PR only unless an approved adapter explicitly marks it as a release blocker." />
       <section className="drawer-section embedded-surface"><PullRequestSurface snapshot={snapshot} /></section>
       <section className="drawer-section data-list"><h3>Adapter boundary</h3><div><span>Repository</span><strong>{connection.repository ?? "Not configured"}</strong></div><div><span>Source state</span><strong>{integrationStateLabel(snapshot.pullRequests.state)}</strong></div><div><span>GitHub token in template</span><strong className="green-text">None</strong></div></section>
     </div>

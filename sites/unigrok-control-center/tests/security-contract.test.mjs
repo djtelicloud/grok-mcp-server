@@ -33,6 +33,17 @@ test("keeps the connection wizard instructional", async () => {
   assert.doesNotMatch(controlCenter, /localStorage|sessionStorage|dangerouslySetInnerHTML/);
 });
 
+test("requires adapters to separate PR review state from release impact", async () => {
+  const contract = await readFile(new URL("../app/lib/control-center-contract.ts", import.meta.url), "utf8");
+  const controlCenter = await readFile(new URL("../app/control-center.tsx", import.meta.url), "utf8");
+
+  assert.match(contract, /releaseImpact: "blocking" \| "informational"/);
+  assert.match(contract, /item\.releaseImpact === "blocking"/);
+  assert.doesNotMatch(contract, /reviewState === "changes_requested"/);
+  assert.match(controlCenter, /Changes requested affects that PR only/);
+  assert.match(controlCenter, /Informational to release/);
+});
+
 test("defines no credential-bearing environment variable", async () => {
   const envExample = await readFile(new URL("../.env.example", import.meta.url), "utf8");
   assert.doesNotMatch(envExample, /(?:TOKEN|SECRET|PASSWORD|API_KEY)=/);

@@ -2,6 +2,11 @@
 
 This directory is a reusable ChatGPT Site template for a UniGrok control center. It is deliberately separate from every deployed Site and contains no project ID, deployment ID, credential, secret, account allowlist, or personal account identifier.
 
+Pull-request review state is not a deployment gate. A `changes_requested` review
+affects that PR only. Repository adapters must supply a separate `releaseImpact`
+value, and the Site may describe deployment as PR-blocked only when an approved
+adapter explicitly returns `blocking` for a release-critical PR.
+
 The template provides:
 
 - dispatch-owned Sign in with ChatGPT for each viewer;

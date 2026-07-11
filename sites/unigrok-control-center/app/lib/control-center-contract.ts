@@ -5,10 +5,16 @@ export type PullRequestSummary = {
   checksPassed: number;
   checksTotal: number;
   number: number;
+  releaseImpact: "blocking" | "informational";
   reviewState: "approved" | "changes_requested" | "pending";
   title: string;
   url: string;
 };
+
+export function releaseBlockingPullRequests(snapshot: ControlCenterSnapshot): PullRequestSummary[] {
+  if (snapshot.pullRequests.state !== "ready") return [];
+  return snapshot.pullRequests.items.filter((item) => item.releaseImpact === "blocking");
+}
 
 export type GrokReviewFinding = {
   evidencePath: string;
