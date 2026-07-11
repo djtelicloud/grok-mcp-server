@@ -9,8 +9,10 @@ drift-prone values live before acting. Do not copy secrets or OAuth codes here.
 
 ## Current repository state
 
-- Shared checkout and `origin/main` were last verified at
-  `3ed02c21b8b0d4b84f2dbbdbbe89edba64c4255f`.
+- The deployment implementation base was verified and pushed as
+  `3ed02c21b8b0d4b84f2dbbdbbe89edba64c4255f`. Always resolve the current full
+  `HEAD` and `origin/main` live; this tracked file cannot safely name the commit
+  that contains its own latest update.
 - `3182677` added the standalone Control Cloud Run image CI gate.
 - `3ed02c2` made `Dockerfile.cloudrun` compatible with the Google Cloud Build
   Docker builder.
