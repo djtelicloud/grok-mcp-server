@@ -318,21 +318,24 @@ guidance.
 ## Troubleshooting / FAQ
 
 <details>
-<summary><strong>Port 8080 is already in use</strong></summary>
+<summary><strong>Port 4765 is already in use</strong></summary>
 
-Another service is bound to port 8080. Either stop it or change the UniGrok
-Another service is bound to port 8080. Either stop it, or change the host
-port mapping in `docker-compose.yml` (e.g. `"127.0.0.1:9090:8080"`):
+UniGrok publishes its local service on host port `4765`. Either stop the
+conflicting process or choose another host port in `.env`:
 
-```yaml
-    ports:
-      - "127.0.0.1:9090:8080"
-
-```bash
+```dotenv
 UNIGROK_PORT=9090
 ```
 
-Then access the Control Center at `http://localhost:9090/ui/`.
+Recreate the service and use the selected port for the Control Center and MCP:
+
+```bash
+docker compose up --build -d
+curl http://localhost:9090/healthz
+```
+
+The corresponding MCP endpoint is `http://localhost:9090/mcp`. Port `8080`
+remains container-internal and should not be placed in IDE configuration.
 
 </details>
 
@@ -342,12 +345,13 @@ Then access the Control Center at `http://localhost:9090/ui/`.
 Make sure Docker Desktop (or the Docker daemon on Linux) is running. Then:
 
 ```bash
-docker compose down -v   # clean up any stale state
+docker compose down
 docker compose up --build -d
+docker compose ps
 ```
 
 On Windows with WSL2, ensure WSL integration is enabled in Docker Desktop
-settings.
+settings. If startup still fails, inspect `docker compose logs grok-mcp`.
 
 </details>
 
@@ -358,24 +362,25 @@ Verify your `XAI_API_KEY` in `.env` is valid and has not expired. You can
 test it directly:
 
 ```bash
-If using the Grok CLI plane, ensure `grok --check` succeeds (this is the
-same probe UniGrok's router uses for plane readiness).
+curl --fail --silent --show-error \
+  -H "Authorization: Bearer ${XAI_API_KEY}" \
+  https://api.x.ai/v1/models
 ```
 
-If using the Grok CLI plane, ensure `grok auth status` shows authenticated.
+For the subscription-backed CLI plane, open **Setup & Status** in the Control
+Center. If authentication is missing, run `docker compose run --rm
+grok-cli-auth` and complete the device-code login. UniGrok uses `grok --check`
+inside the service as its readiness probe.
 
 </details>
 
 <details>
 <summary><strong><code>mcp-remote</code> bridge not connecting</strong></summary>
 
-1. Confirm the server is running: `curl http://localhost:8080/healthz`
-endpoint:
-
-1. Confirm the server is running: `curl http://localhost:8080/health`
-2. Check that your IDE config points to `http://localhost:8080/mcp` (not
+1. Confirm the server is running: `curl http://localhost:4765/healthz`.
+2. Check that your IDE config points to `http://localhost:4765/mcp` (not
    `/sse` — UniGrok uses Streamable HTTP, not SSE)
-3. Restart the IDE's MCP client after configuration changes
+3. Restart the IDE's MCP client after configuration changes.
 
 </details>
 
@@ -383,10 +388,11 @@ endpoint:
 <summary><strong>Requests hang or timeout</strong></summary>
 
 Large prompts or long tool-use chains may exceed default timeouts. Check:
+
 - Server logs: `docker compose logs -f grok-mcp`
 - Network connectivity to `api.x.ai`
 - Docker resource limits (increase memory if containers are OOM-killed)
-- Server logs: `docker compose logs -f unigrok`
+- The request's route and degradation metadata in the Control Center
 
 </details>
 
