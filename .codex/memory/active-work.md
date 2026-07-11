@@ -2,7 +2,7 @@
 
 Last updated: 2026-07-11
 Owner: Codex
-Status: blocked on managed TLS activation and final public-invoker confirmation
+Status: ready for final public-invoker confirmation
 
 This is the required project-scoped handoff for new Codex chats. Verify all
 drift-prone values live before acting. Do not copy secrets or OAuth codes here.
@@ -18,6 +18,8 @@ drift-prone values live before acting. Do not copy secrets or OAuth codes here.
   Docker builder.
 - GitHub Actions run `29161522243` completed successfully with all six jobs
   green, including `Control Cloud Run Image`.
+- Project-continuity commit `6f24deb` is on `origin/main`; GitHub Actions run
+  `29162512551` completed successfully.
 - The shared checkout contains unrelated untracked user files. Preserve them.
 
 ## Cloud control deployment
@@ -41,8 +43,11 @@ drift-prone values live before acting. Do not copy secrets or OAuth codes here.
 - GoDaddy authoritative DNS and Google/Cloudflare public resolvers were last
   verified returning `136.69.127.81`.
 - Global load-balancer resources use the `unigrok-control-center-*` prefix.
-- Google-managed certificate `unigrok-control-center-cert` was still
-  `PROVISIONING` at the last check.
+- Google-managed certificate `unigrok-control-center-cert` is active and was
+  externally verified for `control.grokmcp.org`, issued by Google Trust
+  Services and valid from 2026-07-11 through 2026-10-09.
+- The production HTTPS edge currently returns the expected Google Frontend
+  `403` because anonymous Cloud Run invocation has not been granted.
 - Cloud Armor policy `unigrok-control-center-edge` is attached to backend
   `unigrok-control-center-backend`.
 - Cloud Armor priorities `100`, `200`, and `210` cover exact-host enforcement,
@@ -52,20 +57,19 @@ drift-prone values live before acting. Do not copy secrets or OAuth codes here.
 
 ## Remaining gates
 
-1. Verify the managed certificate and domain status are both `ACTIVE`.
-2. Immediately before changing IAM through browser Computer Use, obtain the
+1. Immediately before changing IAM through browser Computer Use, obtain the
    required action-time confirmation to grant `roles/run.invoker` to
    `allUsers`. Do not infer that permission from an older approval.
-3. Grant public invocation only after confirming ingress is still restricted to
+2. Grant public invocation only after confirming ingress is still restricted to
    internal traffic plus Cloud Load Balancing.
-4. Verify from an external path: public project API `200`, anonymous `/control`
+3. Verify from an external path: public project API `200`, anonymous `/control`
    redirects to GitHub, invalid OAuth state is rejected, the approved owner can
    complete login, and protected responses are private/no-store.
-5. After custom-domain checks pass, disable the Cloud Run default URL and prove
+4. After custom-domain checks pass, disable the Cloud Run default URL and prove
    the raw `run.app` hostname is unreachable.
-6. Cut over the public Site only after production OAuth works. Keep the Site
+5. Cut over the public Site only after production OAuth works. Keep the Site
    change independently reversible.
-7. Reconcile changelog/version/release metadata only after deployment truth is
+6. Reconcile changelog/version/release metadata only after deployment truth is
    complete; do not publish a release merely because CI is green.
 
 ## Safety posture
