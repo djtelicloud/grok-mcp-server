@@ -3099,7 +3099,9 @@ class GrokSessionStore:
         placeholders = ", ".join("?" for _ in wanted)
         async with self._read_conn() as conn:
             async with conn.execute(
-                f"SELECT * FROM task_memory WHERE remote_file_id IN ({placeholders})",
+                # Only literal ``?`` tokens generated from ``len(wanted)``
+                # enter the SQL text; every file id remains a bound value.
+                f"SELECT * FROM task_memory WHERE remote_file_id IN ({placeholders})",  # nosec B608
                 wanted,
             ) as cursor:
                 rows = await cursor.fetchall()
