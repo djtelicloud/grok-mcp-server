@@ -96,10 +96,22 @@ def _aggregate(rows: List[Dict[str, Any]], plane: Optional[str] = None) -> Dict[
     selection_reasons: Dict[str, int] = {}
     routing_receipt_rows = 0
     caller_attributed_rows = 0
+    semantic_rows = 0
+    semantic_sums = {"correctness": 0.0, "tool_efficiency": 0.0, "safety": 0.0, "overall": 0.0}
+    semantic_judge_cost = 0.0
     for row in selected:
         meta = telemetry_metadata(row)
         if str(meta.get("caller") or "").strip():
             caller_attributed_rows += 1
+        semantic = meta.get("semantic")
+        if isinstance(semantic, dict):
+            semantic_rows += 1
+            scores = semantic.get("scores")
+            scores = scores if isinstance(scores, dict) else {}
+            for key in ("correctness", "tool_efficiency", "safety"):
+                semantic_sums[key] += _safe_float(scores.get(key))
+            semantic_sums["overall"] += _safe_float(semantic.get("overall"))
+            semantic_judge_cost += _safe_float(semantic.get("judge_cost_usd"))
         tokens = max(0, _safe_int(meta.get("tokens")))
         token_total += tokens
         token_kind = str(meta.get("token_kind") or "").lower()
@@ -137,6 +149,17 @@ def _aggregate(rows: List[Dict[str, Any]], plane: Optional[str] = None) -> Dict[
         "selection_reasons": dict(sorted(selection_reasons.items(), key=lambda item: (-item[1], item[0]))),
         "routing_receipt_requests": routing_receipt_rows,
         "caller_attributed_requests": caller_attributed_rows,
+        # Shadow semantic-eval scores (observational only — routing never
+        # consumes these). Averages are None when no row was graded, matching
+        # success_rate's zero-row convention.
+        "semantic": {
+            "scored_requests": semantic_rows,
+            "avg_correctness": semantic_sums["correctness"] / semantic_rows if semantic_rows else None,
+            "avg_tool_efficiency": semantic_sums["tool_efficiency"] / semantic_rows if semantic_rows else None,
+            "avg_safety": semantic_sums["safety"] / semantic_rows if semantic_rows else None,
+            "avg_overall": semantic_sums["overall"] / semantic_rows if semantic_rows else None,
+            "judge_cost_usd": semantic_judge_cost,
+        },
     }
 
 
@@ -292,6 +315,7 @@ def build_metrics_snapshot(
     circuit_breakers: Optional[Dict[str, Any]] = None,
     routing_advisor: Optional[Dict[str, Any]] = None,
     provider_api: Optional[Dict[str, Any]] = None,
+    semantic_evals: Optional[Dict[str, Any]] = None,
     now: Optional[datetime] = None,
     caller_limit: int = 20,
 ) -> Dict[str, Any]:
@@ -307,6 +331,7 @@ def build_metrics_snapshot(
         "runtime": runtime or {},
         "circuit_breakers": circuit_breakers or {},
         "routing_advisor": routing_advisor,
+        "semantic_evals": semantic_evals,
         "usage": {
             "today": {
                 "summary": _aggregate(today),
@@ -344,6 +369,9 @@ def build_metrics_snapshot(
                 ),
                 "routing_receipt_rows": sum(
                     1 for row in rows if isinstance(telemetry_metadata(row).get("routing"), dict)
+                ),
+                "semantic_scored_rows": sum(
+                    1 for row in rows if isinstance(telemetry_metadata(row).get("semantic"), dict)
                 ),
             },
         },

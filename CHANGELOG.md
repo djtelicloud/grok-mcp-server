@@ -4,6 +4,26 @@ All notable changes to UniGrok MCP will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- **Shadow semantic evals** (`UNIGROK_SEMANTIC_EVALS`, off by default): a
+  deterministic sample of live turns is graded by a cheap LLM judge
+  (correctness / tool efficiency / safety, 1–5) and the scores ride the
+  telemetry metadata envelope for `/metrics` and `grok_mcp_status`.
+  Observational only — routing never consumes the scores, judge calls never
+  write circuit-breaker state, and raw trajectories are never persisted.
+  Judge spend rides a reservation-based daily budget that persists across
+  restarts via the durable telemetry record.
+- **Structured state folding for history compaction**: `maybe_compact_history`
+  now extracts a schema-enforced session state (goal, constraints, dead ends,
+  active files, narrative) instead of a lossy prose summary, so hard
+  constraints survive compaction verbatim; prose remains the same-call
+  fallback (`UNIGROK_COMPACT_FOLD=0` opts out), and consecutive fold failures
+  self-disable folding for the process so a persistently unavailable parse
+  capability never keeps double-paying. The trigger is additionally
+  budget-relative (`UNIGROK_COMPACT_CONTEXT_RATIO`, default 0.5 of the routed
+  model's context window) — behavior is unchanged at the defaults for
+  current large-context models.
+
 ## [0.6.0] - 2026-07-11
 
 ### Added

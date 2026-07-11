@@ -648,6 +648,97 @@ displace it only when both have mature calibration or telemetry and the
 peer's success rate clears QUALITY_MARGIN.  This margin is the hysteresis:
 ordinary noise cannot flap the route between releases or restarts.
 
+## semantic_evals.py {#semantic_evals}
+
+### Function: `semantic_evals_mode` {#semantic_evals-semantic_evals_mode}
+
+```python
+def semantic_evals_mode() -> str
+```
+
+**Keywords:** semantic, evals, mode
+
+The rollout mode, defaulting to 'off'. An unknown value warns ONCE and
+reads as 'off' (same rationale as rag.task_rag_mode: loud log + metrics
+visibility beats aborting a shared local server).
+
+### Function: `set_testing_override` {#semantic_evals-set_testing_override}
+
+```python
+def set_testing_override(enabled: bool) -> None
+```
+
+**Keywords:** set, testing, override
+
+Tests only: let the sampler run despite UNI_GROK_TESTING=1.
+
+### Function: `reset_semantic_evals_state` {#semantic_evals-reset_semantic_evals_state}
+
+```python
+def reset_semantic_evals_state() -> None
+```
+
+**Keywords:** reset, semantic, evals, state
+
+Reset every module-level accumulator (test isolation).
+
+### Class: `SemanticEvalVerdict` {#semantic_evals-semanticevalverdict}
+
+```python
+class SemanticEvalVerdict
+```
+
+**Keywords:** semantic, eval, verdict
+
+Schema-enforced judge verdict (1-5 integer scales; parsed via the same
+tool-free structured-parse machinery as ReflectionVerdict).
+
+### Class: `TrajectorySample` {#semantic_evals-trajectorysample}
+
+```python
+class TrajectorySample
+```
+
+**Keywords:** trajectory, sample
+
+In-memory judge input for one completed turn. Never persisted.
+
+### Function: `should_sample` {#semantic_evals-should_sample}
+
+```python
+def should_sample(request_id: str, rate: float) -> bool
+```
+
+**Keywords:** should, sample
+
+Deterministic per-request sampling: a stable hash of the request id
+against the rate. No RNG state — the same request id always yields the
+same verdict, so replays and tests are reproducible.
+
+### Function: `maybe_submit_semantic_eval` {#semantic_evals-maybe_submit_semantic_eval}
+
+```python
+def maybe_submit_semantic_eval(sample: TrajectorySample, store: Any) -> Optional['asyncio.Task']
+```
+
+**Keywords:** maybe, submit, semantic, eval
+
+Fire-and-forget judge task for a completed turn, or None when skipped.
+
+Gate order: mode, testing flag (explicit override required under
+UNI_GROK_TESTING so pytest and cassette evals stay byte-stable), gradeable
+outcome, deterministic hash sample, daily judge budget.
+
+### Function: `wait_for_pending` {#semantic_evals-wait_for_pending}
+
+```python
+async def wait_for_pending(timeout: float=10.0) -> None
+```
+
+**Keywords:** wait, for, pending
+
+Await outstanding judge tasks (tests and shutdown).
+
 ## storage.py {#storage}
 
 ### Class: `SessionStoreProtocol` {#storage-sessionstoreprotocol}
@@ -2008,6 +2099,40 @@ request_id (always present, "" when unset), and caller when known.
 The rendered message goes through redact_secrets so structured logs get
 the same secret hygiene as every persisted surface.
 
+### Method: `GrokSessionStore.attach_semantic_scores` {#utils-groksessionstore-attach_semantic_scores}
+
+```python
+async def GrokSessionStore.attach_semantic_scores(self, request_id: str, semantic: Dict[str, Any], *, scan_limit: int=200) -> bool
+```
+
+**Keywords:** grok, session, store, attach, semantic, scores
+
+Attach a shadow semantic-eval block to the turn's telemetry row.
+
+The judge runs asynchronously after the row was written, so this is a
+read-modify-write of the v8 metadata envelope keyed by the request id
+already inside it. The scan is bounded to the newest rows and matches
+in Python (never depends on the optional json1 extension — the
+get_caller_cost_today precedent). Rows written by auxiliary work
+sharing the same request context (history compaction) are skipped so
+the block always lands on the turn's own row. Returns False on a miss
+so the caller can count it; a second telemetry row is deliberately not
+written (it would inflate request/success aggregates).
+
+### Method: `GrokSessionStore.get_semantic_judge_cost_today` {#utils-groksessionstore-get_semantic_judge_cost_today}
+
+```python
+async def GrokSessionStore.get_semantic_judge_cost_today(self) -> float
+```
+
+**Keywords:** grok, session, store, get, semantic, judge, cost, today
+
+Durable sum of today's semantic-eval judge spend (the
+semantic.judge_cost_usd values in telemetry metadata) — rehydrates
+the in-process daily budget accumulator across restarts. Same bounded
+created_at scan + Python-side JSON match as get_caller_cost_today
+(never depends on the optional json1 extension).
+
 ### Method: `GrokSessionStore.get_caller_cost_today` {#utils-groksessionstore-get_caller_cost_today}
 
 ```python
@@ -2220,10 +2345,24 @@ def extract_cost_from_output(content: str) -> float
 
 Read the standard usage footer cost from nested local tool output.
 
+### Class: `FoldedSessionState` {#utils-foldedsessionstate}
+
+```python
+class FoldedSessionState
+```
+
+**Keywords:** folded, session, state
+
+Schema-enforced compaction fold: the per-session ephemeral working
+state a later turn needs verbatim (durable facts stay with the
+distiller/FactList — the two are deliberately separate). List bounds live
+in the schema; char caps live in _render_folded_state so an over-long
+field degrades by truncation instead of failing validation.
+
 ### Function: `maybe_compact_history` {#utils-maybe_compact_history}
 
 ```python
-async def maybe_compact_history(session: str, history: List[dict], store_param: Optional[Any]=None, force: bool=False) -> List[dict]
+async def maybe_compact_history(session: str, history: List[dict], store_param: Optional[Any]=None, force: bool=False, model_hint: Optional[str]=None) -> List[dict]
 ```
 
 **Keywords:** maybe, compact, history
@@ -2234,10 +2373,19 @@ LOCAL compaction by design: the installed SDK's compaction surface
 (Chat.compact() and client.chat.compact_context()) returns an OPAQUE
 ``encrypted_content`` blob meant to be re-sent as an assistant message —
 it cannot serve as the readable durable record this store keeps. Instead
-the oldest half of the history is summarized with ONE cheap coding-model
-call and replaced by a single system-role summary entry; the newest half
-stays verbatim. The replay paths (AgentLoop._init_chat, _call_plane)
-append system-role history entries so the summary reaches the model.
+the oldest half of the history is FOLDED into a schema-enforced
+FoldedSessionState (goal / constraints / dead ends / active files /
+narrative) via the shared tool-free structured-parse seam, so hard
+constraints survive compaction verbatim instead of dissolving into
+prose; any fold failure falls back to the legacy prose summary IN THE
+SAME CALL (worst case two bounded paid calls under the same
+UNIGROK_COMPACT_TIMEOUT each — UNIGROK_COMPACT_FOLD=0 opts out). The
+newest half stays verbatim, and the replay paths (AgentLoop._init_chat,
+_call_plane) append system-role history entries so the fold reaches the
+model. The trigger is min(UNIGROK_COMPACT_THRESHOLD_TOKENS,
+UNIGROK_COMPACT_CONTEXT_RATIO × model context) when model_hint is
+provided — bit-identical to the flat threshold at the defaults for
+current large-context models.
 
 Never compacts under UNI_GROK_TESTING unless force=True (hermetic tests
 exercise it with a mocked client). Returns the possibly-compacted history;

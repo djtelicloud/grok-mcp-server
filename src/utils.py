@@ -2623,6 +2623,7 @@ class GrokSessionStore:
         token_kind: Optional[str] = None,
         billing_source: Optional[str] = None,
         routing: Optional[Dict[str, Any]] = None,
+        folded: Optional[bool] = None,
     ):
         await self._ensure_initialized()
         # caller and request_id ride the metadata JSON column (v8) so future
@@ -2649,6 +2650,10 @@ class GrokSessionStore:
         clean_billing_source = str(billing_source or "").strip().lower()
         if clean_billing_source in ("xai_response_exact", "subscription_unmetered", "unknown"):
             meta["billing_source"] = clean_billing_source
+        if folded is not None:
+            # history-compaction rows only: whether the structured fold (vs
+            # the legacy prose summary) produced the compaction entry.
+            meta["folded"] = bool(folded)
         if isinstance(routing, dict):
             try:
                 # A receipt contains only bounded features, model slugs, and
@@ -2682,6 +2687,107 @@ class GrokSessionStore:
             async with conn.execute("SELECT * FROM telemetry ORDER BY id DESC") as cursor:
                 rows = await cursor.fetchall()
                 return [dict(row) for row in rows]
+
+    @_with_write_retry_async
+    async def attach_semantic_scores(
+        self, request_id: str, semantic: Dict[str, Any], *, scan_limit: int = 200
+    ) -> bool:
+        """Attach a shadow semantic-eval block to the turn's telemetry row.
+
+        The judge runs asynchronously after the row was written, so this is a
+        read-modify-write of the v8 metadata envelope keyed by the request id
+        already inside it. The scan is bounded to the newest rows and matches
+        in Python (never depends on the optional json1 extension — the
+        get_caller_cost_today precedent). Rows written by auxiliary work
+        sharing the same request context (history compaction) are skipped so
+        the block always lands on the turn's own row. Returns False on a miss
+        so the caller can count it; a second telemetry row is deliberately not
+        written (it would inflate request/success aggregates)."""
+        await self._ensure_initialized()
+        clean_id = normalize_request_id(request_id)
+        if not clean_id or not isinstance(semantic, dict):
+            return False
+        try:
+            clean_semantic = json.loads(json.dumps(semantic, separators=(",", ":")))
+        except (TypeError, ValueError):
+            return False
+        if not isinstance(clean_semantic, dict):
+            return False
+        if len(json.dumps(clean_semantic, separators=(",", ":"))) > 1500:
+            clean_semantic.pop("rationale", None)
+            if len(json.dumps(clean_semantic, separators=(",", ":"))) > 1500:
+                return False
+        async with self._lock:
+            await self._conn.execute("BEGIN IMMEDIATE;")
+            try:
+                async with self._conn.execute(
+                    "SELECT id, intent, metadata FROM telemetry ORDER BY id DESC LIMIT ?",
+                    (max(1, int(scan_limit)),),
+                ) as cursor:
+                    rows = await cursor.fetchall()
+                target_id = None
+                target_meta: Dict[str, Any] = {}
+                for row in rows:
+                    if str(row["intent"] or "") == "history-compaction":
+                        continue
+                    raw = row["metadata"]
+                    if not raw:
+                        continue
+                    try:
+                        meta = json.loads(raw)
+                    except (TypeError, ValueError):
+                        continue
+                    if isinstance(meta, dict) and meta.get("request_id") == clean_id:
+                        target_id = row["id"]
+                        target_meta = meta
+                        break
+                if target_id is None:
+                    await self._conn.rollback()
+                    return False
+                target_meta["semantic"] = clean_semantic
+                await self._conn.execute(
+                    "UPDATE telemetry SET metadata = ? WHERE id = ?",
+                    (json.dumps(target_meta, separators=(",", ":")), target_id),
+                )
+                await self._conn.commit()
+            except Exception:
+                await self._conn.rollback()
+                raise
+            await self._on_write_completed()
+        return True
+
+    @_with_read_retry_async
+    async def get_semantic_judge_cost_today(self) -> float:
+        """Durable sum of today's semantic-eval judge spend (the
+        semantic.judge_cost_usd values in telemetry metadata) — rehydrates
+        the in-process daily budget accumulator across restarts. Same bounded
+        created_at scan + Python-side JSON match as get_caller_cost_today
+        (never depends on the optional json1 extension)."""
+        await self._ensure_initialized()
+        day_start = datetime.now().date().isoformat()
+        async with self._read_conn() as conn:
+            async with conn.execute(
+                "SELECT metadata FROM telemetry WHERE created_at >= ?",
+                (day_start,),
+            ) as cursor:
+                rows = await cursor.fetchall()
+        total = 0.0
+        for row in rows:
+            raw = row["metadata"]
+            if not raw:
+                continue
+            try:
+                meta = json.loads(raw)
+            except (TypeError, ValueError):
+                continue
+            semantic = meta.get("semantic") if isinstance(meta, dict) else None
+            if not isinstance(semantic, dict):
+                continue
+            try:
+                total += max(0.0, float(semantic.get("judge_cost_usd") or 0.0))
+            except (TypeError, ValueError):
+                continue
+        return total
 
     @_with_read_retry_async
     async def get_caller_cost_today(self, caller_substring: str) -> float:
@@ -4015,11 +4121,150 @@ def _estimate_text_tokens(*parts: Any) -> int:
     return sum(len(str(part or "")) for part in parts) // 4
 
 
+class FoldedSessionState(BaseModel):
+    """Schema-enforced compaction fold: the per-session ephemeral working
+    state a later turn needs verbatim (durable facts stay with the
+    distiller/FactList — the two are deliberately separate). List bounds live
+    in the schema; char caps live in _render_folded_state so an over-long
+    field degrades by truncation instead of failing validation."""
+
+    user_goal: str = ""
+    established_constraints: List[str] = PydanticField(default_factory=list, max_length=8)
+    # Dead ends: approaches that already failed and must not be retried.
+    failed_attempts: List[str] = PydanticField(default_factory=list, max_length=8)
+    active_files: List[str] = PydanticField(default_factory=list, max_length=12)
+    narrative: str = ""
+
+
+_COMPACT_FOLD_SYS_PROMPT = (
+    "You compress a conversation transcript into the working state a coding "
+    "agent needs to continue the session. Extract: user_goal (one sentence), "
+    "established_constraints (hard requirements, decisions, exact file paths "
+    "and numbers that must hold), failed_attempts (dead ends that must not "
+    "be retried, with why each failed), active_files (paths currently being "
+    "worked on), and a brief narrative of everything else worth keeping. The "
+    "transcript may begin with an earlier state fold — merge it into the new "
+    "state and drop items that are no longer relevant."
+)
+
+
+def _render_folded_state(fold: FoldedSessionState, oldest_count: int) -> str:
+    """Render a fold into the stored system-role entry text.
+
+    The first line keeps the legacy `[Compacted` prefix so anything keying on
+    it still matches; `state fold` distinguishes folded entries. Per-field
+    char caps plus the hard tail cap bound successive re-folds (the fold
+    entry lands in the oldest half at the next compaction), and the block is
+    redacted because post-compaction it is the only surviving record of the
+    oldest half. Returns "" when nothing survives — callers treat that as a
+    fold failure."""
+    lines = [f"[Compacted state fold of {oldest_count} earlier messages in this session]"]
+    goal = str(fold.user_goal or "").strip()
+    if goal:
+        lines.append(f"GOAL: {goal[:400]}")
+    sections = (
+        ("CONSTRAINTS:", fold.established_constraints),
+        ("DEAD ENDS (do not retry):", fold.failed_attempts),
+        ("ACTIVE FILES:", fold.active_files),
+    )
+    for header, items in sections:
+        cleaned = [str(item or "").strip()[:200] for item in items if str(item or "").strip()]
+        if cleaned:
+            lines.append(header)
+            lines.extend(f"- {item}" for item in cleaned)
+    narrative = str(fold.narrative or "").strip()
+    if narrative:
+        lines.append(f"NARRATIVE: {narrative[:1200]}")
+    if len(lines) == 1:
+        return ""
+    return redact_secrets("\n".join(lines))[:3500]
+
+
+def _fold_enabled() -> bool:
+    """UNIGROK_COMPACT_FOLD=0/false/no forces the legacy prose-only path. A
+    failed fold falls back to prose in the same call — two bounded paid calls
+    worst case — so ops get a one-line opt-out without redeploying."""
+    return os.environ.get("UNIGROK_COMPACT_FOLD", "").strip().lower() not in ("0", "false", "no")
+
+
+# Fold self-disable latch: a fold failure costs an extra paid call (fold
+# attempt + prose fallback), so repeated consecutive failures — the signature
+# of a persistently unavailable parse capability rather than a transient
+# blip — stop fold attempts for the rest of the process. Any fold success
+# resets the count.
+_COMPACT_FOLD_MAX_CONSECUTIVE_FAILURES = 2
+_COMPACT_FOLD_STATE = {"consecutive_failures": 0, "disabled": False}
+
+
+def _fold_available() -> bool:
+    """Env kill switch AND the process-level failure latch."""
+    return _fold_enabled() and not _COMPACT_FOLD_STATE["disabled"]
+
+
+def _note_fold_failure() -> None:
+    _COMPACT_FOLD_STATE["consecutive_failures"] += 1
+    if (
+        _COMPACT_FOLD_STATE["consecutive_failures"] >= _COMPACT_FOLD_MAX_CONSECUTIVE_FAILURES
+        and not _COMPACT_FOLD_STATE["disabled"]
+    ):
+        _COMPACT_FOLD_STATE["disabled"] = True
+        logging.getLogger("GrokMCP").warning(
+            "History folding self-disabled for this process after "
+            f"{_COMPACT_FOLD_STATE['consecutive_failures']} consecutive fold "
+            "failures; compaction continues on the prose path "
+            "(UNIGROK_COMPACT_FOLD=0 makes this permanent)."
+        )
+
+
+def _note_fold_success() -> None:
+    _COMPACT_FOLD_STATE["consecutive_failures"] = 0
+
+
+def _reset_fold_latch() -> None:
+    """Test isolation for the process-level fold latch."""
+    _COMPACT_FOLD_STATE["consecutive_failures"] = 0
+    _COMPACT_FOLD_STATE["disabled"] = False
+
+
+def _compact_context_ratio() -> float:
+    """Fraction of the routed model's context window that triggers compaction
+    (UNIGROK_COMPACT_CONTEXT_RATIO, default 0.5; <=0 disables the clamp so
+    only the flat threshold applies)."""
+    try:
+        return float(os.environ.get("UNIGROK_COMPACT_CONTEXT_RATIO", "0.5"))
+    except ValueError:
+        return 0.5
+
+
+async def _compact_threshold_for(model_hint: Optional[str]) -> int:
+    """Effective compaction threshold: min(flat env threshold, ratio × the
+    model's context window). At the defaults the clamp never bites for
+    current large-context Grok models (0.5 × 131072 > 24000), so behavior is
+    bit-identical to the flat threshold unless the model is small or the flat
+    value was raised past half the window."""
+    flat = _compact_threshold_tokens()
+    ratio = _compact_context_ratio()
+    if not model_hint or ratio <= 0.0:
+        return flat
+    # get_model_max_tokens can hit the network on a cache miss: keep it off
+    # the event loop and fall back to the known limits (AgentLoop pattern).
+    try:
+        max_tokens = await run_blocking(
+            get_model_max_tokens,
+            model_hint,
+            timeout=_env_timeout("UNIGROK_MODEL_INFO_TIMEOUT", 5.0),
+        )
+    except Exception:
+        max_tokens = model_max_tokens_fallback(model_hint)
+    return max(1000, min(flat, int(ratio * max_tokens)))
+
+
 async def maybe_compact_history(
     session: str,
     history: List[dict],
     store_param: Optional[Any] = None,
     force: bool = False,
+    model_hint: Optional[str] = None,
 ) -> List[dict]:
     """Compact a session's local history once it exceeds the token budget.
 
@@ -4027,10 +4272,19 @@ async def maybe_compact_history(
     (Chat.compact() and client.chat.compact_context()) returns an OPAQUE
     ``encrypted_content`` blob meant to be re-sent as an assistant message —
     it cannot serve as the readable durable record this store keeps. Instead
-    the oldest half of the history is summarized with ONE cheap coding-model
-    call and replaced by a single system-role summary entry; the newest half
-    stays verbatim. The replay paths (AgentLoop._init_chat, _call_plane)
-    append system-role history entries so the summary reaches the model.
+    the oldest half of the history is FOLDED into a schema-enforced
+    FoldedSessionState (goal / constraints / dead ends / active files /
+    narrative) via the shared tool-free structured-parse seam, so hard
+    constraints survive compaction verbatim instead of dissolving into
+    prose; any fold failure falls back to the legacy prose summary IN THE
+    SAME CALL (worst case two bounded paid calls under the same
+    UNIGROK_COMPACT_TIMEOUT each — UNIGROK_COMPACT_FOLD=0 opts out). The
+    newest half stays verbatim, and the replay paths (AgentLoop._init_chat,
+    _call_plane) append system-role history entries so the fold reaches the
+    model. The trigger is min(UNIGROK_COMPACT_THRESHOLD_TOKENS,
+    UNIGROK_COMPACT_CONTEXT_RATIO × model context) when model_hint is
+    provided — bit-identical to the flat threshold at the defaults for
+    current large-context models.
 
     Never compacts under UNI_GROK_TESTING unless force=True (hermetic tests
     exercise it with a mocked client). Returns the possibly-compacted history;
@@ -4040,7 +4294,11 @@ async def maybe_compact_history(
         return history
     if not session or not history or len(history) < 4:
         return history
-    if _estimate_history_tokens(history) < _compact_threshold_tokens():
+    estimate = _estimate_history_tokens(history)
+    # Short-circuit: the budget-relative clamp can only LOWER the threshold,
+    # so the (possibly networked) capacity lookup runs only when the flat
+    # threshold has not already fired.
+    if estimate < _compact_threshold_tokens() and estimate < await _compact_threshold_for(model_hint):
         return history
 
     logger = logging.getLogger("GrokMCP")
@@ -4048,64 +4306,104 @@ async def maybe_compact_history(
     oldest, newest = history[:split], history[split:]
     transcript = "\n".join(
         f"{msg.get('role')}: {str(msg.get('content') or '')[:4000]}" for msg in oldest
-    )
+    )[:60000]
     model = await resolve_model("coding")
 
-    def _summarize():
-        from xai_sdk.chat import system, user
-
-        client = get_xai_client()
-        # Dedicated TOOL-FREE chat: one cheap summarization call, no tools.
-        chat = client.chat.create(model=model)
-        chat.append(system(
-            "Compress this conversation history into a dense factual summary. "
-            "Keep decisions, constraints, file paths, numbers, and unresolved "
-            "questions. Reply with the summary only."
-        ))
-        chat.append(user(transcript))
-        return chat.sample()
-
-    # The summarization is a real paid model call: it rides the per-model
-    # circuit breaker like every other upstream call (an open breaker skips
-    # compaction gracefully) and its cost is recorded in telemetry below so
-    # the /metrics aggregates never undercount actual spend.
+    # Compaction makes real paid model calls: they ride the per-model circuit
+    # breaker like every other upstream call (an open breaker skips compaction
+    # gracefully) and their summed cost is recorded in telemetry below so the
+    # /metrics aggregates never undercount actual spend.
     start_time = time.time()
     try:
         check_circuit_breaker(model)
     except Exception as exc:
         logger.warning(f"History compaction skipped for session '{session}': {exc}")
         return history
-    try:
-        response = await run_blocking(
-            _summarize,
-            timeout=_env_timeout("UNIGROK_COMPACT_TIMEOUT", 60.0),
-        )
-        summary = str(getattr(response, "content", "") or "").strip()
-    except Exception as exc:
-        record_xai_failure(model)
-        logger.warning(f"History compaction failed for session '{session}': {exc}")
-        return history
+
+    total_cost = 0.0
+    summary_content = ""
+    folded = False
+    if _fold_available():
+        # Load-bearing try: _parse_structured can raise on a malformed
+        # parse() return (the tuple unpack sits outside its own try). Fold
+        # failures never tick the circuit breaker (distiller rationale: a
+        # missing parse capability must not poison the model for real
+        # traffic) — they fall back to the prose path below, and consecutive
+        # failures trip the process-level fold latch so a persistently
+        # unavailable parse capability stops costing a doomed extra call.
+        try:
+            fold, _fold_tokens, fold_cost = await _parse_structured(
+                FoldedSessionState,
+                _COMPACT_FOLD_SYS_PROMPT,
+                transcript,
+                model,
+                timeout=_env_timeout("UNIGROK_COMPACT_TIMEOUT", 60.0),
+                logger=logger,
+            )
+        except Exception as exc:
+            fold, fold_cost = None, 0.0
+            logger.warning(f"History fold failed for session '{session}': {exc}")
+        total_cost += float(fold_cost or 0.0)
+        if fold is not None:
+            summary_content = _render_folded_state(fold, len(oldest))
+            folded = bool(summary_content)
+        if folded:
+            _note_fold_success()
+        else:
+            _note_fold_failure()
+
+    if not summary_content:
+        # Legacy prose path — failure semantics unchanged: a sample failure
+        # ticks the breaker and keeps the history untouched.
+        def _summarize():
+            from xai_sdk.chat import system, user
+
+            client = get_xai_client()
+            # Dedicated TOOL-FREE chat: one cheap summarization call, no tools.
+            chat = client.chat.create(model=model)
+            chat.append(system(
+                "Compress this conversation history into a dense factual summary. "
+                "Keep decisions, constraints, file paths, numbers, and unresolved "
+                "questions. Reply with the summary only."
+            ))
+            chat.append(user(transcript))
+            return chat.sample()
+
+        try:
+            response = await run_blocking(
+                _summarize,
+                timeout=_env_timeout("UNIGROK_COMPACT_TIMEOUT", 60.0),
+            )
+            summary = str(getattr(response, "content", "") or "").strip()
+        except Exception as exc:
+            record_xai_failure(model)
+            logger.warning(f"History compaction failed for session '{session}': {exc}")
+            return history
+        total_cost += float(getattr(response, "cost_usd", 0.0) or 0.0)
+        if summary:
+            summary_content = (
+                f"[Compacted summary of {len(oldest)} earlier messages in this session]\n"
+                f"{summary}"
+            )
+
     record_xai_success(model)
-    cost = float(getattr(response, "cost_usd", 0.0) or 0.0)
     try:
         active_store = store_param if store_param is not None else store
         if active_store is not None:
             await active_store.save_telemetry(
-                "history-compaction", "API", 1, time.time() - start_time, cost
+                "history-compaction", "API", 1, time.time() - start_time, total_cost,
+                model=model, folded=folded,
             )
     except Exception as telemetry_err:
         logger.warning(
             f"History compaction telemetry save failed for session '{session}': {telemetry_err}"
         )
-    if not summary:
+    if not summary_content:
         return history
 
     summary_entry = {
         "role": "system",
-        "content": (
-            f"[Compacted summary of {len(oldest)} earlier messages in this session]\n"
-            f"{summary}"
-        ),
+        "content": summary_content,
         "time": datetime.now().strftime("%d.%m.%Y %H:%M:%S"),
     }
     compacted = [summary_entry] + list(newest)
@@ -7897,11 +8195,36 @@ async def run_agent_turn(
         # placeholder (which the loop knows never to send upstream).
         await store.save_session(session, api_thread_id=layer.response_id or session, model=layer.model or model)
         try:
-            await maybe_compact_history(session, history, store)
+            await maybe_compact_history(session, history, store, model_hint=layer.model or model)
         except Exception as compact_err:
             logging.getLogger("GrokMCP").warning(
                 f"History compaction skipped for session '{session}': {compact_err}"
             )
+
+    # Shadow semantic evals: hand the completed trajectory (by reference,
+    # never persisted) to the sampled LLM judge. Best-effort and inert unless
+    # UNIGROK_SEMANTIC_EVALS=shadow — must never affect the turn's outcome.
+    try:
+        from .semantic_evals import TrajectorySample, maybe_submit_semantic_eval
+
+        maybe_submit_semantic_eval(
+            TrajectorySample(
+                request_id=get_request_id() or "",
+                prompt=final_prompt,
+                final_answer=layer.generation,
+                tool_trace=list(layer.tool_trace or []),
+                route=layer.route,
+                model=layer.model or model or "",
+                plane=layer.plane,
+                finish_reason=layer.finish_reason,
+                latency_sec=layer.latency,
+                cost_usd=layer.cost_usd,
+                caller=caller or "",
+            ),
+            store,
+        )
+    except Exception as eval_err:
+        logging.getLogger("GrokMCP").warning(f"Semantic eval sampling skipped: {eval_err}")
 
     return layer
 

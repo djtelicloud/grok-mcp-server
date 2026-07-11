@@ -4258,6 +4258,14 @@ class TestHistoryCompaction:
         yield s
         await s.close()
 
+    @pytest.fixture(autouse=True)
+    def _fold_latch_isolation(self):
+        from src.utils import _reset_fold_latch
+
+        _reset_fold_latch()
+        yield
+        _reset_fold_latch()
+
     @staticmethod
     def _history(n=8, pad=400):
         return [
@@ -4268,9 +4276,34 @@ class TestHistoryCompaction:
     def _mock_client(self, summary="COMPACT SUMMARY"):
         mock_chat = MagicMock()
         mock_chat.sample.return_value = SimpleNamespace(content=summary)
+        # Explicit: this client has no working structured parse, so the fold
+        # attempt degrades to the legacy prose path these tests exercise.
+        mock_chat.parse.side_effect = RuntimeError("parse unavailable")
         mock_client = MagicMock()
         mock_client.chat.create.return_value = mock_chat
         return mock_client
+
+    def _mock_fold_client(self, fold, cost=0.0):
+        """Client whose structured parse succeeds with the given fold."""
+        mock_chat = MagicMock()
+        mock_chat.parse.return_value = (SimpleNamespace(usage=None, cost_usd=cost), fold)
+        mock_client = MagicMock()
+        mock_client.chat.create.return_value = mock_chat
+        return mock_client, mock_chat
+
+    @staticmethod
+    def _fold(**overrides):
+        from src.utils import FoldedSessionState
+
+        defaults = dict(
+            user_goal="ship the compaction feature",
+            established_constraints=["must keep pytest green", "threshold stays env-driven"],
+            failed_attempts=["regex-based session sync"],
+            active_files=["src/utils.py"],
+            narrative="midway through the fold rework",
+        )
+        defaults.update(overrides)
+        return FoldedSessionState(**defaults)
 
     @pytest.mark.asyncio
     async def test_skipped_under_testing_without_force(self, monkeypatch, store):
@@ -4425,6 +4458,275 @@ class TestHistoryCompaction:
 
         # sys prompt + summary + q + a + new prompt + response = 6 appends.
         assert mock_chat.append.call_count == 6
+
+    # ── Structured state folding ─────────────────────────────────────────────
+
+    @pytest.mark.asyncio
+    async def test_folds_structured_state_into_system_entry(self, monkeypatch, store):
+        from src.utils import maybe_compact_history
+
+        monkeypatch.setenv("UNIGROK_COMPACT_THRESHOLD_TOKENS", "1000")
+        history = self._history(n=8, pad=800)
+        client, _chat = self._mock_fold_client(self._fold())
+        with patch("src.utils.get_xai_client", return_value=client):
+            result = await maybe_compact_history("sess-fold", history, store, force=True)
+
+        assert len(result) == 5  # 1 fold + newest 4
+        entry = result[0]
+        assert entry["role"] == "system"
+        assert entry["content"].startswith("[Compacted state fold of 4 earlier messages")
+        assert "GOAL: ship the compaction feature" in entry["content"]
+        assert "CONSTRAINTS:\n- must keep pytest green" in entry["content"]
+        assert "DEAD ENDS (do not retry):\n- regex-based session sync" in entry["content"]
+        assert "ACTIVE FILES:\n- src/utils.py" in entry["content"]
+        assert "NARRATIVE: midway through the fold rework" in entry["content"]
+        assert [m["content"] for m in result[1:]] == [m["content"] for m in history[4:]]
+        saved = await store.load_messages("sess-fold")
+        assert saved[0]["content"] == entry["content"]
+
+    @pytest.mark.asyncio
+    async def test_fold_failure_falls_back_to_prose_same_call(self, monkeypatch, store):
+        """A failed fold degrades to the prose summary in the SAME call (the
+        threshold already fired) and never ticks the circuit breaker."""
+        from src.utils import maybe_compact_history
+
+        monkeypatch.setenv("UNIGROK_COMPACT_THRESHOLD_TOKENS", "1000")
+        history = self._history(n=8, pad=800)
+        failure_spy = MagicMock()
+        monkeypatch.setattr("src.utils.record_xai_failure", failure_spy)
+        with patch("src.utils.get_xai_client", return_value=self._mock_client()):
+            result = await maybe_compact_history("sess-fb", history, store, force=True)
+
+        assert len(result) == 5
+        assert result[0]["content"].startswith("[Compacted summary of 4 earlier messages")
+        assert "COMPACT SUMMARY" in result[0]["content"]
+        failure_spy.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_fold_and_prose_failure_keeps_history(self, monkeypatch, store):
+        from src.utils import maybe_compact_history
+
+        monkeypatch.setenv("UNIGROK_COMPACT_THRESHOLD_TOKENS", "1000")
+        history = self._history(n=8, pad=800)
+        failure_spy = MagicMock()
+        monkeypatch.setattr("src.utils.record_xai_failure", failure_spy)
+        mock_chat = MagicMock()
+        mock_chat.parse.side_effect = RuntimeError("parse down")
+        mock_chat.sample.side_effect = ConnectionError("down")
+        mock_client = MagicMock()
+        mock_client.chat.create.return_value = mock_chat
+        with patch("src.utils.get_xai_client", return_value=mock_client):
+            result = await maybe_compact_history("sess-both", history, store, force=True)
+
+        assert result is history
+        assert await store.load_messages("sess-both") == []
+        failure_spy.assert_called_once()  # prose only — never the fold
+
+    @pytest.mark.asyncio
+    async def test_fold_disabled_env_forces_prose(self, monkeypatch, store):
+        from src.utils import maybe_compact_history
+
+        monkeypatch.setenv("UNIGROK_COMPACT_THRESHOLD_TOKENS", "1000")
+        monkeypatch.setenv("UNIGROK_COMPACT_FOLD", "0")
+        history = self._history(n=8, pad=800)
+        client, chat = self._mock_fold_client(self._fold())
+        chat.sample.return_value = SimpleNamespace(content="COMPACT SUMMARY")
+        with patch("src.utils.get_xai_client", return_value=client):
+            result = await maybe_compact_history("sess-off", history, store, force=True)
+
+        chat.parse.assert_not_called()
+        assert "COMPACT SUMMARY" in result[0]["content"]
+
+    @pytest.mark.asyncio
+    async def test_budget_relative_threshold_triggers_below_flat(self, monkeypatch, store):
+        """min(flat, ratio × model context): a small-context model_hint lowers
+        the effective threshold; the same history without a hint is a no-op."""
+        from src.utils import maybe_compact_history
+
+        monkeypatch.delenv("UNIGROK_COMPACT_THRESHOLD_TOKENS", raising=False)  # flat 24000
+        monkeypatch.setenv("UNIGROK_COMPACT_CONTEXT_RATIO", "0.5")
+        monkeypatch.setattr("src.utils.get_model_max_tokens", MagicMock(return_value=8000))
+        history = self._history(n=8, pad=2500)  # ~5000 estimated tokens
+        client, _chat = self._mock_fold_client(self._fold())
+
+        with patch("src.utils.get_xai_client", return_value=client):
+            no_hint = await maybe_compact_history("sess-b1", history, store, force=True)
+        assert no_hint is history  # 5000 < flat 24000, no hint → no clamp
+
+        with patch("src.utils.get_xai_client", return_value=client):
+            hinted = await maybe_compact_history(
+                "sess-b2", history, store, force=True, model_hint="grok-tiny"
+            )
+        assert len(hinted) == 5  # 5000 >= min(24000, 0.5*8000) = 4000
+
+    @pytest.mark.asyncio
+    async def test_context_ratio_zero_disables_budget_clamp(self, monkeypatch, store):
+        from src.utils import maybe_compact_history
+
+        monkeypatch.delenv("UNIGROK_COMPACT_THRESHOLD_TOKENS", raising=False)
+        monkeypatch.setenv("UNIGROK_COMPACT_CONTEXT_RATIO", "0")
+        monkeypatch.setattr("src.utils.get_model_max_tokens", MagicMock(return_value=8000))
+        history = self._history(n=8, pad=2500)
+        mock_get = MagicMock()
+        with patch("src.utils.get_xai_client", mock_get):
+            result = await maybe_compact_history(
+                "sess-r0", history, store, force=True, model_hint="grok-tiny"
+            )
+
+        assert result is history
+        mock_get.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_refold_previous_fold_stays_bounded(self, monkeypatch, store):
+        """A prior fold entry lands in the oldest half next compaction; the
+        result must contain exactly one bounded fold entry, never a stack."""
+        from src.utils import maybe_compact_history
+
+        monkeypatch.setenv("UNIGROK_COMPACT_THRESHOLD_TOKENS", "1000")
+        history = self._history(n=8, pad=800)
+        history[0] = {
+            "role": "system",
+            "content": "[Compacted state fold of 6 earlier messages in this session]\n"
+                       "GOAL: earlier goal\nNARRATIVE: " + "n" * 3000,
+        }
+        big_fold = self._fold(narrative="m" * 5000)  # render caps at 1200/3500
+        client, _chat = self._mock_fold_client(big_fold)
+        with patch("src.utils.get_xai_client", return_value=client):
+            result = await maybe_compact_history("sess-refold", history, store, force=True)
+
+        fold_entries = [m for m in result if "[Compacted state fold" in str(m.get("content"))]
+        assert len(fold_entries) == 1
+        assert len(fold_entries[0]["content"]) <= 3500
+
+    @pytest.mark.asyncio
+    async def test_fold_render_redacts_secrets(self, monkeypatch, store):
+        from src.utils import maybe_compact_history
+
+        monkeypatch.setenv("UNIGROK_COMPACT_THRESHOLD_TOKENS", "1000")
+        history = self._history(n=8, pad=800)
+        leaky = self._fold(established_constraints=["use key xai-abcdefgh12345678 for calls"])
+        client, _chat = self._mock_fold_client(leaky)
+        with patch("src.utils.get_xai_client", return_value=client):
+            result = await maybe_compact_history("sess-red", history, store, force=True)
+
+        assert "xai-abcdefgh12345678" not in result[0]["content"]
+        assert "[REDACTED_KEY]" in result[0]["content"]
+
+    @pytest.mark.asyncio
+    async def test_fold_telemetry_records_folded_flag_and_model(self, monkeypatch, store):
+        from src.utils import maybe_compact_history
+
+        monkeypatch.setenv("UNIGROK_COMPACT_THRESHOLD_TOKENS", "1000")
+        history = self._history(n=8, pad=800)
+        client, _chat = self._mock_fold_client(self._fold(), cost=0.002)
+        with patch("src.utils.get_xai_client", return_value=client):
+            await maybe_compact_history("sess-tel1", history, store, force=True)
+
+        rows = await store.get_telemetry_stats()
+        row = [r for r in rows if r["intent"] == "history-compaction"][0]
+        meta = json.loads(row["metadata"])
+        assert meta["folded"] is True
+        assert meta["model"]
+        assert row["cost"] == pytest.approx(0.002)
+
+    @pytest.mark.asyncio
+    async def test_prose_fallback_telemetry_sums_both_calls(self, monkeypatch, store):
+        """When the fold paid but failed and prose succeeded, the telemetry
+        row records folded=false and the summed spend of both calls."""
+        from src.utils import maybe_compact_history
+
+        monkeypatch.setenv("UNIGROK_COMPACT_THRESHOLD_TOKENS", "1000")
+        history = self._history(n=8, pad=800)
+        mock_chat = MagicMock()
+        # Fold parses but validation-fails inside _parse_structured → the
+        # seam reports (None, 0, 0.0); prose then succeeds with its own cost.
+        mock_chat.parse.side_effect = RuntimeError("validation failed")
+        mock_chat.sample.return_value = SimpleNamespace(content="COMPACT SUMMARY", cost_usd=0.004)
+        mock_client = MagicMock()
+        mock_client.chat.create.return_value = mock_chat
+        with patch("src.utils.get_xai_client", return_value=mock_client):
+            await maybe_compact_history("sess-tel2", history, store, force=True)
+
+        rows = await store.get_telemetry_stats()
+        row = [r for r in rows if r["intent"] == "history-compaction"][0]
+        assert json.loads(row["metadata"])["folded"] is False
+        assert row["cost"] == pytest.approx(0.004)
+
+    @pytest.mark.asyncio
+    async def test_fold_latch_disables_after_consecutive_failures(self, monkeypatch, store):
+        """A fold failure means paying for two calls (fold + prose). After
+        consecutive failures — persistent parse unavailability, not a blip —
+        folds self-disable for the process so compaction stops paying twice."""
+        from src.utils import maybe_compact_history
+
+        monkeypatch.setenv("UNIGROK_COMPACT_THRESHOLD_TOKENS", "1000")
+        history = self._history(n=8, pad=800)
+        with patch("src.utils.get_xai_client", return_value=self._mock_client()):
+            await maybe_compact_history("sess-l1", history, store, force=True)
+            await maybe_compact_history("sess-l2", history, store, force=True)
+
+        # Third compaction: even a fold-capable client is never asked to parse.
+        client, chat = self._mock_fold_client(self._fold())
+        chat.sample.return_value = SimpleNamespace(content="COMPACT SUMMARY")
+        with patch("src.utils.get_xai_client", return_value=client):
+            result = await maybe_compact_history("sess-l3", history, store, force=True)
+
+        chat.parse.assert_not_called()
+        assert "COMPACT SUMMARY" in result[0]["content"]
+
+    @pytest.mark.asyncio
+    async def test_fold_latch_resets_on_success(self, monkeypatch, store):
+        from src.utils import _COMPACT_FOLD_STATE, maybe_compact_history
+
+        monkeypatch.setenv("UNIGROK_COMPACT_THRESHOLD_TOKENS", "1000")
+        history = self._history(n=8, pad=800)
+        with patch("src.utils.get_xai_client", return_value=self._mock_client()):
+            await maybe_compact_history("sess-r1", history, store, force=True)
+        assert _COMPACT_FOLD_STATE["consecutive_failures"] == 1
+
+        client, _chat = self._mock_fold_client(self._fold())
+        with patch("src.utils.get_xai_client", return_value=client):
+            await maybe_compact_history("sess-r2", history, store, force=True)
+
+        assert _COMPACT_FOLD_STATE["consecutive_failures"] == 0
+        assert _COMPACT_FOLD_STATE["disabled"] is False
+
+    @pytest.mark.asyncio
+    async def test_agentloop_replays_folded_state_entry(self, monkeypatch):
+        """Folded state entries are system-role like prose summaries — the
+        replay path must forward their full content to the model."""
+        monkeypatch.setenv("UNIGROK_SERVER_STATE", "0")
+        seen_system = []
+
+        def _capture_system(content):
+            seen_system.append(content)
+            return ("system", content)
+
+        monkeypatch.setattr("xai_sdk.chat.system", _capture_system)
+        fold_block = (
+            "[Compacted state fold of 4 earlier messages in this session]\n"
+            "GOAL: keep the suite green\n"
+            "DEAD ENDS (do not retry):\n- reverting the schema"
+        )
+        history = [
+            {"role": "system", "content": fold_block},
+            {"role": "user", "content": "q"},
+            {"role": "assistant", "content": "a"},
+        ]
+        resp = _make_response(content="done", tool_calls=[], cost_usd=0.001)
+        mock_chat = MagicMock()
+        mock_chat.sample.return_value = resp
+        mock_client = MagicMock()
+        mock_client.chat.create.return_value = mock_chat
+
+        loop = AgentLoop(
+            policy=AgentLoopPolicy(max_depth=1), dynamic_sys_prompt="sys", model="grok-4.3",
+        )
+        with patch("xai_sdk.Client", return_value=mock_client):
+            await loop.run("prompt", session="sess-fold-replay", history=history)
+
+        assert mock_chat.append.call_count == 6
+        assert fold_block in seen_system
 
 
 # ─────────────────────────────────────────────────────────────────────────────

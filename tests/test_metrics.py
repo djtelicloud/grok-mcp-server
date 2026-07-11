@@ -82,6 +82,40 @@ def test_telemetry_metadata_tolerates_old_and_malformed_rows():
     assert telemetry_metadata({"metadata": {"model": "grok"}}) == {"model": "grok"}
 
 
+def test_semantic_eval_scores_aggregate_and_null_at_zero_rows():
+    now = datetime(2026, 7, 10, 12, 0, 0)
+    rows = [
+        _row(
+            created_at=now,
+            metadata='{"semantic":{"v":1,"scores":{"correctness":4,"tool_efficiency":5,"safety":5},"overall":4.67,"judge_cost_usd":0.0012}}',
+        ),
+        _row(
+            created_at=now,
+            metadata='{"semantic":{"v":1,"scores":{"correctness":2,"tool_efficiency":3,"safety":5},"overall":3.33,"judge_cost_usd":0.001}}',
+        ),
+        _row(created_at=now),  # ungraded row does not dilute the averages
+        _row(created_at=now, metadata='{"semantic":"malformed-not-a-dict"}'),
+        _row(created_at=now, metadata='{"semantic":{"scores":"also-malformed"}}'),
+    ]
+
+    snapshot = build_metrics_snapshot(rows, now=now, semantic_evals={"mode": "shadow"})
+    semantic = snapshot["usage"]["today"]["summary"]["semantic"]
+
+    # The scores-malformed row still counts as scored but contributes zeros.
+    assert semantic["scored_requests"] == 3
+    assert semantic["avg_correctness"] == pytest.approx((4 + 2) / 3)
+    assert semantic["avg_overall"] == pytest.approx((4.67 + 3.33) / 3)
+    assert semantic["judge_cost_usd"] == pytest.approx(0.0022)
+    assert snapshot["usage"]["data_quality"]["semantic_scored_rows"] == 3
+    assert snapshot["semantic_evals"] == {"mode": "shadow"}
+
+    empty = build_metrics_snapshot([], now=now)
+    empty_semantic = empty["usage"]["today"]["summary"]["semantic"]
+    assert empty_semantic["scored_requests"] == 0
+    assert empty_semantic["avg_overall"] is None
+    assert empty["semantic_evals"] is None
+
+
 @pytest.mark.asyncio
 async def test_provider_usage_is_explicitly_not_configured(monkeypatch):
     monkeypatch.delenv("XAI_MANAGEMENT_API_KEY", raising=False)

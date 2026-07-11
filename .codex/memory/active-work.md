@@ -9,10 +9,17 @@ drift-prone values live before acting. Do not copy secrets or OAuth codes here.
 
 ## Current repository state
 
-- Protected `origin/main` and visible local `main` were verified at
-  `a4ebcb369ec527da9ce0dee6d2a708437599dc94` after PR #4 merged through the
-  rebase path. The local landing receipt and contributor runtime marker name
-  the same commit.
+- Claude-originated intelligence upgrades are integrated through the protected
+  Codex path: shadow semantic evaluations remain off by default, use a durable
+  reservation-based spend cap, and never mutate production circuit-breaker
+  state. Structured history folding preserves constraints and dead ends, with
+  bounded output, legacy fallback, and a consecutive-failure latch that
+  prevents repeated double-paid parse failures.
+
+- Protected `origin/main`, visible local `main`, and the contributor runtime
+  marker were synchronized before this rollout. Resolve the exact current
+  commit with `scripts/land-status`; this tracked file cannot name the rebased
+  merge commit that contains its own latest update.
 - PR #4 preserves Gemini as the originating agent, Codex as repair/integration
   authority, and Grok 4.5 CLI-plane review evidence. All six required CI jobs
   passed on the reviewed head.

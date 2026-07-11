@@ -588,7 +588,8 @@ class TestTaskRagPrometheusRendering:
 # fails loudly (naming the member) instead of relying on isinstance alone.
 _PROTOCOL_MEMBERS = (
     "close", "vacuum_db",
-    "save_telemetry", "get_telemetry_stats", "get_caller_cost_today",
+    "save_telemetry", "get_telemetry_stats", "attach_semantic_scores",
+    "get_semantic_judge_cost_today", "get_caller_cost_today",
     "get_caller_stats_today", "get_recent_model_stats",
     "upsert_routing_calibration", "get_routing_calibration",
     "save_task_memory", "get_similar_task_memories", "get_task_memory_count",
