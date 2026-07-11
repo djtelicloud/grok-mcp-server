@@ -4,8 +4,10 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
+import re
 import sys
 import urllib.error
 import urllib.request
@@ -21,6 +23,7 @@ from mcp.client.streamable_http import streamable_http_client
 MARKER = "<!-- unigrok-review -->"
 MAX_DIFF_CHARS = 90_000
 MAX_DISCUSSION_CHARS = 8_000
+SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
 
 def _required(name: str) -> str:
@@ -67,6 +70,71 @@ def _pull_number(event: dict[str, Any]) -> int:
     raise RuntimeError("event does not identify a pull request")
 
 
+def _commit_sha(value: Any, *, label: str) -> str:
+    sha = str(value or "").strip().lower()
+    if not SHA_RE.fullmatch(sha):
+        raise RuntimeError(f"GitHub returned an invalid {label} commit SHA")
+    return sha
+
+
+def _expected_head_sha(event: dict[str, Any]) -> str | None:
+    configured = os.environ.get("EXPECTED_HEAD_SHA", "").strip()
+    event_sha = (event.get("pull_request") or {}).get("head", {}).get("sha")
+    value = configured or event_sha
+    return _commit_sha(value, label="expected head") if value else None
+
+
+def _expected_base_sha(event: dict[str, Any]) -> str | None:
+    configured = os.environ.get("EXPECTED_BASE_SHA", "").strip()
+    event_sha = (event.get("pull_request") or {}).get("base", {}).get("sha")
+    value = configured or event_sha
+    return _commit_sha(value, label="expected base") if value else None
+
+
+def _evidence_provenance(
+    *,
+    repository: str,
+    number: int,
+    pr: dict[str, Any],
+    diff: str,
+    discussion: str,
+) -> dict[str, str]:
+    head_sha = _commit_sha(pr.get("head", {}).get("sha"), label="head")
+    base_sha = _commit_sha(pr.get("base", {}).get("sha"), label="base")
+    envelope = {
+        "base_sha": base_sha,
+        "diff": diff,
+        "discussion": discussion,
+        "head_sha": head_sha,
+        "pull_number": number,
+        "repository": repository,
+        "title": str(pr.get("title") or ""),
+    }
+    digest = hashlib.sha256(
+        json.dumps(
+            envelope,
+            ensure_ascii=True,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+    ).hexdigest()
+    return {
+        "base_sha": base_sha,
+        "evidence_sha256": digest,
+        "head_sha": head_sha,
+    }
+
+
+def _workflow_run_url(repository: str) -> str | None:
+    run_id = os.environ.get("GITHUB_RUN_ID", "").strip()
+    if not run_id.isdigit():
+        return None
+    server = os.environ.get("GITHUB_SERVER_URL", "https://github.com").rstrip("/")
+    if server not in {"https://github.com", "https://github.com/"}:
+        return None
+    return f"https://github.com/{repository}/actions/runs/{run_id}"
+
+
 async def _call_unigrok(arguments: dict[str, Any]) -> dict[str, Any]:
     url = os.environ.get("UNIGROK_MCP_URL", "http://127.0.0.1:4765/mcp")
     headers = {"X-Client-ID": "github-actions"}
@@ -87,13 +155,21 @@ async def _call_unigrok(arguments: dict[str, Any]) -> dict[str, Any]:
     return structured
 
 
-def _format_comment(data: dict[str, Any]) -> str:
+def _format_comment(
+    data: dict[str, Any],
+    *,
+    provenance: dict[str, str],
+    run_url: str | None = None,
+) -> str:
     review = str(data.get("review") or "No review returned.")
+    run = f" · [workflow run]({run_url})" if run_url else ""
     return (
         f"{MARKER}\n## @grok review for Codex\n\n{review}\n\n"
         "---\n"
         f"Model: `{data.get('model', 'unknown')}` · Plane: `{data.get('plane', 'unknown')}` · "
         f"Route: `{data.get('route', 'unknown')}` · Cost: `${float(data.get('cost_usd') or 0):.5f}`\n\n"
+        f"Reviewed head: `{provenance['head_sha']}` · Base: `{provenance['base_sha']}`\n\n"
+        f"Evidence: `sha256:{provenance['evidence_sha256']}`{run}\n\n"
         "This is advisory evidence. Codex remains the sole landing and merge authority."
     )
 
@@ -119,7 +195,31 @@ async def main() -> None:
     api = os.environ.get("GITHUB_API_URL", "https://api.github.com").rstrip("/")
     pr_url = f"{api}/repos/{repository}/pulls/{number}"
     pr = _github_request(pr_url, token)
-    diff = _github_request(pr_url, token, accept="application/vnd.github.v3.diff")
+    expected_head = _expected_head_sha(event)
+    expected_base = _expected_base_sha(event)
+    fetched_head = _commit_sha(pr.get("head", {}).get("sha"), label="head")
+    fetched_base = _commit_sha(pr.get("base", {}).get("sha"), label="base")
+    if expected_head and fetched_head != expected_head:
+        raise RuntimeError(
+            "refusing stale review: event head "
+            f"{expected_head} no longer matches PR head {fetched_head}"
+        )
+    if expected_base and fetched_base != expected_base:
+        raise RuntimeError(
+            "refusing stale review: event base "
+            f"{expected_base} no longer matches PR base {fetched_base}"
+        )
+    # The PR diff endpoint is mutable. Fetching it after recording the PR SHAs
+    # permits an A -> B -> A race to bind B's diff to A's provenance. Comparing
+    # two validated full commit ids makes the reviewed evidence immutable.
+    compare_url = (
+        f"{api}/repos/{repository}/compare/{fetched_base}...{fetched_head}"
+    )
+    diff = _github_request(
+        compare_url,
+        token,
+        accept="application/vnd.github.v3.diff",
+    )
     reviews = _github_request(f"{pr_url}/reviews?per_page=100", token)
     discussion = "\n".join(
         f"- {item.get('user', {}).get('login', 'unknown')}: {item.get('state', 'COMMENTED')} — {item.get('body') or '(no body)'}"
@@ -129,19 +229,58 @@ async def main() -> None:
     diff = diff[:MAX_DIFF_CHARS]
     if truncated:
         diff += "\n\n[Diff truncated by UniGrok GitHub review safety limit.]"
+    provenance = _evidence_provenance(
+        repository=repository,
+        number=number,
+        pr=pr,
+        diff=diff,
+        discussion=discussion,
+    )
     data = await _call_unigrok(
         {
             "repository": repository,
             "pull_number": number,
             "title": pr.get("title") or "",
             "diff": diff,
-            "ci_summary": "GitHub Actions evidence is reviewed separately by Codex's maintainer sweep.",
+            "ci_summary": (
+                "GitHub Actions evidence is reviewed separately by Codex's maintainer sweep.\n"
+                "Trusted fetcher provenance:\n"
+                f"- head: {provenance['head_sha']}\n"
+                f"- base: {provenance['base_sha']}\n"
+                f"- bounded evidence sha256: {provenance['evidence_sha256']}"
+            ),
             "review_comments": discussion,
             "plane": os.environ.get("UNIGROK_REVIEW_PLANE", "cli"),
         }
     )
-    _upsert_comment(api, repository, number, token, _format_comment(data))
-    print(f"Updated UniGrok review for {repository}#{number}")
+    current = _github_request(pr_url, token)
+    current_head = _commit_sha(current.get("head", {}).get("sha"), label="current head")
+    current_base = _commit_sha(current.get("base", {}).get("sha"), label="current base")
+    if (
+        current_head != provenance["head_sha"]
+        or current_base != provenance["base_sha"]
+    ):
+        raise RuntimeError(
+            "refusing stale review comment: PR base/head changed while Grok was "
+            "reviewing "
+            f"(base {provenance['base_sha']} -> {current_base}; "
+            f"head {provenance['head_sha']} -> {current_head})"
+        )
+    _upsert_comment(
+        api,
+        repository,
+        number,
+        token,
+        _format_comment(
+            data,
+            provenance=provenance,
+            run_url=_workflow_run_url(repository),
+        ),
+    )
+    print(
+        f"Updated UniGrok review for {repository}#{number} "
+        f"at {provenance['head_sha']} ({provenance['evidence_sha256']})"
+    )
 
 
 if __name__ == "__main__":

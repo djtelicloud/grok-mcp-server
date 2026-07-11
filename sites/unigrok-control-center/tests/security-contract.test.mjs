@@ -2,24 +2,52 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-test("ships a structurally valid Sites manifest", async () => {
+test("binds source to a structurally valid Sites project", async () => {
   const manifest = JSON.parse(await readFile(new URL("../.openai/hosting.json", import.meta.url), "utf8"));
+  assert.deepEqual(Object.keys(manifest).sort(), ["d1", "project_id", "r2"]);
   assert.equal(manifest.d1, null);
   assert.equal(manifest.r2, null);
-  if (Object.hasOwn(manifest, "project_id")) {
-    assert.deepEqual(Object.keys(manifest).sort(), ["d1", "project_id", "r2"]);
-    const projectIdPattern = new RegExp(`^${["appgprj", "_"].join("")}[A-Za-z0-9]+$`);
-    assert.match(manifest.project_id, projectIdPattern);
-  } else {
-    assert.deepEqual(manifest, { d1: null, r2: null });
-  }
+  const projectIdPattern = new RegExp(`^${["appgprj", "_"].join("")}[A-Za-z0-9]+$`);
+  assert.match(manifest.project_id, projectIdPattern);
 });
 
-test("requires server-side ChatGPT identity", async () => {
-  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
-  assert.match(page, /requireChatGPTUser\("\/"\)/);
-  assert.match(page, /dynamic = "force-dynamic"/);
-  assert.doesNotMatch(page, /user\.email/);
+test("keeps the root public and protects control server-side", async () => {
+  const publicPage = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const controlPage = await readFile(new URL("../app/control/page.tsx", import.meta.url), "utf8");
+
+  assert.doesNotMatch(publicPage, /requireChatGPTUser/);
+  assert.match(publicPage, /Public project context/);
+  assert.match(controlPage, /requireChatGPTUser\("\/control"\)/);
+  assert.match(controlPage, /getGitHubProjectAuthorization\(user\.email\)/);
+  assert.match(controlPage, /if \(!authorization\.authorized\)/);
+  assert.match(controlPage, /dynamic = "force-dynamic"/);
+  assert.doesNotMatch(controlPage, /user\.email[},<]/);
+});
+
+test("authorization bindings fail closed and never claim live GitHub verification", async () => {
+  const authorization = await readFile(new URL("../app/lib/github-project-authorization.ts", import.meta.url), "utf8");
+  const denied = await readFile(new URL("../app/control/access-denied.tsx", import.meta.url), "utf8");
+  const controlCenter = await readFile(new URL("../app/control-center.tsx", import.meta.url), "utf8");
+
+  assert.match(authorization, /if \(!raw\) return \{ authorized: false, reason: "not-configured" \}/);
+  assert.match(authorization, /invalid-configuration/);
+  assert.match(authorization, /not-authorized/);
+  assert.doesNotMatch(authorization, /fetch\(|github\.com\/login\/oauth/);
+  assert.match(denied, /live GitHub collaborator verification is pending/);
+  assert.match(controlCenter, /live GitHub collaborator verification is pending/);
+});
+
+test("publishes three public-safe machine-readable routes", async () => {
+  const projectRoute = await readFile(new URL("../app/api/public/v1/project/route.ts", import.meta.url), "utf8");
+  const discoveryDocument = await readFile(new URL("../public/.well-known/unigrok.json", import.meta.url), "utf8");
+  const llmsRoute = await readFile(new URL("../app/llms.txt/route.ts", import.meta.url), "utf8");
+  const publicProject = await readFile(new URL("../app/lib/public-project.ts", import.meta.url), "utf8");
+
+  assert.match(projectRoute, /publicProjectDocument/);
+  assert.equal(JSON.parse(discoveryDocument).mcp.remote_status, "not-deployed-oauth-pending");
+  assert.match(llmsRoute, /publicLlmsText/);
+  assert.match(publicProject, /not-deployed-oauth-pending/);
+  assert.doesNotMatch(publicProject, /runtime ready|UNIGROK_GITHUB_IDENTITY_BINDINGS/);
 });
 
 test("keeps the connection wizard instructional", async () => {
@@ -44,8 +72,9 @@ test("requires adapters to separate PR review state from release impact", async 
   assert.match(controlCenter, /Informational to release/);
 });
 
-test("defines no credential-bearing environment variable", async () => {
+test("defines no browser-exposed or committed credential value", async () => {
   const envExample = await readFile(new URL("../.env.example", import.meta.url), "utf8");
+  assert.match(envExample, /^UNIGROK_GITHUB_IDENTITY_BINDINGS=$/m);
   assert.doesNotMatch(envExample, /(?:TOKEN|SECRET|PASSWORD|API_KEY)=/);
   assert.doesNotMatch(envExample, /NEXT_PUBLIC_/);
 });

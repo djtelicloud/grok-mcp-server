@@ -33,12 +33,24 @@ curl -s http://localhost:4765/healthz
 ## Pull Request Guidelines
 
 - Keep changes scoped to one behavior or feature.
+- Open contributions as pull requests; do not push directly to protected
+  `main`.
+- Record the exact head commit SHA in the handoff and refresh review evidence
+  after every new commit. A review of an older head is stale.
 - Add or update tests for new tool behavior, CLI behavior, and runtime fixes.
 - Keep credentials out of commits. Use `.env`; never commit real API keys.
 - Prefer existing helpers and architecture over new parallel abstractions.
 - Update `README.md`, `architecture.md`, or `docs/ide-setup.md` when behavior
   changes user setup, transport, tools, or runtime expectations.
 - Run `uv run pytest` before opening a PR.
+
+Human contributors and coding agents use the same evidence contract: explain
+the intent, list changed paths, report exact verification commands and results,
+and disclose known risks or generated files. Grok review comments are advisory;
+they do not authorize a merge. Codex reviews the current head and owns landing,
+merge, tag, and release decisions. See
+[ADR 0001](docs/adr/0001-cloud-control-plane-governance.md) for the current
+local landing contract and the explicitly not-yet-live remote broker design.
 
 Security vulnerabilities should be reported privately as described in
 [SECURITY.md](SECURITY.md), not opened as public issues.
@@ -49,3 +61,8 @@ This repository is often used from several IDE agents at once. Keep the shared
 checkout on integrated `main`, and do experimental work in an agent-prefixed
 worktree branch such as `codex/my-change`, `claude/my-change`, or
 `gemini/my-change`.
+
+An agent handoff must include its task branch or PR, full commit SHA, changed
+paths, test evidence, and unresolved risks. Agents other than Codex must not
+merge, push shared `main`, publish releases, delete shared worktrees, or treat
+an advisory model review as approval.

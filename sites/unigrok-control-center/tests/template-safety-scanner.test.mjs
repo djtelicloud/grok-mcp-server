@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { contentFindings, forbiddenFileReason, runSafetyCheck } from "../scripts/check-template-safety.mjs";
+import { binaryAssetFindings, contentFindings, forbiddenFileReason, runSafetyCheck, shouldScanFileContent } from "../scripts/check-template-safety.mjs";
 
 test("rejects personal identifiers and common credential formats", () => {
   const personalEmail = ["owner", "company.invalid"].join("@");
@@ -28,6 +28,30 @@ test("rejects credential-bearing filenames", () => {
   assert.match(forbiddenFileReason("config/.dev.vars") ?? "", /environment/);
   assert.match(forbiddenFileReason("certs/runtime.pem") ?? "", /key file/);
   assert.match(forbiddenFileReason("id_ed25519") ?? "", /SSH/);
+});
+
+test("scans text assets and parses PNG metadata separately", () => {
+  const personalEmail = ["owner", "company.invalid"].join("@");
+  assert.equal(shouldScanFileContent("app/page.tsx"), true);
+  assert.equal(shouldScanFileContent("public/favicon.svg"), true);
+  assert.equal(shouldScanFileContent("public/og.png"), false);
+  assert.deepEqual(binaryAssetFindings("public/fake.png", Buffer.from(personalEmail)), ["invalid PNG binary asset"]);
+
+  const signature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  const chunk = (type, data = Buffer.alloc(0)) => {
+    const header = Buffer.alloc(8);
+    header.writeUInt32BE(data.length, 0);
+    header.write(type, 4, 4, "ascii");
+    return Buffer.concat([header, data, Buffer.alloc(4)]);
+  };
+  const pngWithText = Buffer.concat([
+    signature,
+    chunk("tEXt", Buffer.from(`author\0${personalEmail}`, "latin1")),
+    chunk("IEND"),
+  ]);
+  const findings = binaryAssetFindings("public/metadata.png", pngWithText);
+  assert.ok(findings.includes("PNG text metadata is not allowed"));
+  assert.ok(findings.includes("personal email address"));
 });
 
 test("separates source and provisioned manifest checks", async (context) => {

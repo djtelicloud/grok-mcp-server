@@ -6,6 +6,15 @@
 
 <!-- Bullet list of the concrete changes. -->
 
+## Head and handoff evidence
+
+<!--
+Exact head SHA reviewed/tested:
+Contributor or agent identity:
+Changed paths:
+Known risks, generated files, or follow-up work:
+-->
+
 ## Fact-check checklist (required for docs & config changes)
 
 Commands and names in this repo are frequently guessed wrong — please verify
@@ -19,9 +28,23 @@ each claim you make against the actual source:
 
 ## Testing
 
-- [ ] `uv run pytest -q` passes locally (631+ tests, ~8s)
+- [ ] `uv run pytest -q` passes locally
 - [ ] For docs-only changes: every command in the diff was actually run against a live checkout
+- [ ] Results above apply to this PR's current head SHA (not an earlier commit)
+- [ ] Any `@grok` review shown as current names this exact head SHA
 
 ## Security
 
 - [ ] No secrets, tokens, or machine-specific absolute paths in the diff
+- [ ] Authentication, workflow, deployment, or landing changes include a
+      fail-closed test and identify the trust boundary they change
+- [ ] Contributor-controlled text is treated as untrusted evidence, not as
+      workflow commands or model-authorized mutation
+
+## Codex/project-admin landing gate
+
+<!-- Checked by Codex/project-admin automation, not the contributor or user. -->
+
+- [ ] Required CI and CODEOWNER review pass on the current head
+- [ ] Codex disposition applies to the current head
+- [ ] Landing/merge receipt is captured by the currently operative integration path

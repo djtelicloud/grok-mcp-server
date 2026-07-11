@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { ControlCenterSnapshot, IntegrationState } from "./lib/control-center-contract";
+import type { GitHubProjectAuthorization } from "./lib/github-project-authorization";
 import type { PublicConnectionConfig } from "./lib/unigrok-config";
 
 type IconName =
@@ -32,6 +33,7 @@ type PanelName = "connection" | "deployments" | "grok-review" | "pull-requests" 
 type WizardMode = "local" | "tunnel";
 
 type ControlCenterProps = {
+  authorization: Extract<GitHubProjectAuthorization, { authorized: true }>;
   connection: PublicConnectionConfig;
   previewMode?: boolean;
   signOutPath: string;
@@ -50,8 +52,8 @@ type CommandItem = {
 const secureTunnelGuide = "https://developers.openai.com/api/docs/guides/secure-mcp-tunnels";
 const sitesGuide = "https://learn.chatgpt.com/docs/sites";
 const guardrails = [
-  "Sign in with ChatGPT identifies each viewer",
-  "No project identity ships with the template",
+  "ChatGPT authentication and project authorization stay separate",
+  "Missing or invalid GitHub role bindings deny access",
   "No credential entry or browser-side secret storage",
   "Localhost is never presented as publicly reachable",
 ];
@@ -159,7 +161,7 @@ function GrokReviewSurface({ snapshot }: { snapshot: ControlCenterSnapshot }) {
   );
 }
 
-export default function ControlCenter({ connection, previewMode = false, signOutPath, siteProvisioned, snapshot, user }: ControlCenterProps) {
+export default function ControlCenter({ authorization, connection, previewMode = false, signOutPath, siteProvisioned, snapshot, user }: ControlCenterProps) {
   const [activeNav, setActiveNav] = useState("overview");
   const [commandOpen, setCommandOpen] = useState(false);
   const [expertOpen, setExpertOpen] = useState(false);
@@ -188,9 +190,9 @@ export default function ControlCenter({ connection, previewMode = false, signOut
     { action: () => openPanel("grok-review", "grok-review"), detail: "View the explicit Grok review integration state", icon: "review", label: "Open Grok review results" },
     { action: () => openPanel("connection", "connection"), detail: "Choose local development or Secure MCP Tunnel", icon: "cloud", label: "Open connection wizard" },
     { action: () => openPanel("repository", "repository"), detail: "Configure repository metadata without a GitHub token", icon: "github", label: "Review repository setup" },
-    { action: () => openPanel("review", "review"), detail: "Inspect template privacy and secret boundaries", icon: "review", label: "View template guardrails" },
+    { action: () => openPanel("review", "review"), detail: "Inspect control-surface privacy and secret boundaries", icon: "review", label: "View control guardrails" },
     { action: () => openPanel("runtime", "runtime"), detail: "Understand what the Site can and cannot verify", icon: "activity", label: "Review runtime boundary" },
-    { action: () => openPanel("deployments", "deployments"), detail: "Create a separate Site in your ChatGPT account", icon: "deploy", label: "Open deployment checklist" },
+    { action: () => openPanel("deployments", "deployments"), detail: "Review the canonical Site deployment gate", icon: "deploy", label: "Open deployment checklist" },
   ];
   const filteredCommands = commands.filter((command) =>
     `${command.label} ${command.detail}`.toLowerCase().includes(query.toLowerCase()),
@@ -280,7 +282,7 @@ export default function ControlCenter({ connection, previewMode = false, signOut
       <aside className="sidebar" aria-label="Primary navigation">
         <div className="brand-block">
           <div className="brand-mark"><Icon name="spark" size={21} /></div>
-          <div className="brand-copy"><strong>UniGrok</strong><span>Control Center Template</span></div>
+          <div className="brand-copy"><strong>UniGrok</strong><span>Contributor Control</span></div>
         </div>
         <nav className="main-nav">
           {navItems.map((item) => (
@@ -301,7 +303,7 @@ export default function ControlCenter({ connection, previewMode = false, signOut
         </nav>
         <div className="sidebar-security">
           <Icon name="lock" size={18} />
-          <div><strong>Per-deployer identity</strong><span>Signed in with ChatGPT</span></div>
+          <div><strong>Two checks passed</strong><span>ChatGPT + project role</span></div>
         </div>
       </aside>
 
@@ -316,7 +318,7 @@ export default function ControlCenter({ connection, previewMode = false, signOut
               <Icon name="github" size={20} /><span>Repository not configured</span><Icon name="chevron" size={15} />
             </button>
           )}
-          <div className="branch-select" aria-label="Template branch"><Icon name="branch" size={18} /><span>installer-owned</span></div>
+          <div className="branch-select" aria-label="Authorized GitHub role"><Icon name="branch" size={18} /><span>{authorization.role}</span></div>
           <div className="topbar-spacer" />
           <div className="sync-state"><span className={`sync-dot ${connection.configured ? "" : "pending"}`} /><span>{connection.configured ? "Setup selected" : "Setup required"}</span></div>
           <button className="avatar" onClick={() => openPanel("settings", "settings")} aria-label="Open identity and privacy settings">{initials}</button>
@@ -325,9 +327,9 @@ export default function ControlCenter({ connection, previewMode = false, signOut
         <div className="content-wrap">
           <section className="hero-section">
             <div className="hero-copy">
-              <div className="eyebrow"><span className="eyebrow-dot" /> Signed in with ChatGPT</div>
+              <div className="eyebrow"><span className="eyebrow-dot" /> ChatGPT identity + server-side project binding</div>
               <h1>{connection.configured ? "Your control-center shell is configured." : "Connect your UniGrok control plane."}</h1>
-              <p>This reusable Site keeps identity with each installer, secrets outside the browser, and local services local. The wizard explains the supported connection boundaries without pretending a hosted Site can reach your laptop.</p>
+              <p>This protected surface uses a server-configured GitHub identity bootstrap binding; live GitHub collaborator verification is pending. Secrets stay outside the browser and local services stay local.</p>
             </div>
             <button className="icon-button mobile-menu" onClick={() => setCommandOpen(true)} aria-label="Open command center"><Icon name="menu" /></button>
           </section>
@@ -351,7 +353,7 @@ export default function ControlCenter({ connection, previewMode = false, signOut
             </button>
             <button className="metric-card neutral" onClick={() => openPanel("settings", "settings")}>
               <span className="metric-icon"><Icon name="shield" size={25} /></span>
-              <span className="metric-copy"><small>Identity</small><strong className="metric-word">Signed in</strong><em>Dispatch-owned SIWC</em></span><Icon name="chevron" size={17} />
+              <span className="metric-copy"><small>Access</small><strong className="metric-word">Authorized</strong><em>@{authorization.githubLogin} · {authorization.role}</em></span><Icon name="chevron" size={17} />
             </button>
           </section>
 
@@ -406,11 +408,11 @@ export default function ControlCenter({ connection, previewMode = false, signOut
                 <StatusPill tone={connection.connectionMode === "tunnel" ? "green" : "blue"}>{connection.connectionMode === "tunnel" ? "Selected" : "Hosted"}</StatusPill>
               </button>
             </div>
-            <div className="pr-insight"><span className="insight-icon"><Icon name="shield" size={18} /></span><p><strong>Safe default:</strong> this Site never asks for an xAI key, tunnel credential, GitHub token, or project identity.</p></div>
+            <div className="pr-insight"><span className="insight-icon"><Icon name="shield" size={18} /></span><p><strong>Safe default:</strong> this Site never asks the browser for an xAI key, tunnel credential, GitHub token, or project identity.</p></div>
           </article>
 
           <section className="next-move">
-            <div className="next-label"><span className="next-icon"><Icon name="spark" size={21} /></span><div><small>Your next move</small><strong>{connection.configured ? "Review the installer-owned deployment checklist" : "Choose a safe UniGrok connection mode"}</strong></div></div>
+            <div className="next-label"><span className="next-icon"><Icon name="spark" size={21} /></span><div><small>Your next move</small><strong>{connection.configured ? "Review the canonical deployment checklist" : "Choose a safe UniGrok connection mode"}</strong></div></div>
             <button className="primary-action" onClick={() => openPanel(connection.configured ? "deployments" : "connection", connection.configured ? "deployments" : "connection")}><span>{connection.configured ? "Deployment checklist" : "Open connection wizard"}</span><Icon name="arrow" size={19} /></button>
             <button className="secondary-action" onClick={() => openPanel("review", "review")}><Icon name="shield" size={18} /><span>Review guardrails</span></button>
             <a className="link-action" href={sitesGuide} target="_blank" rel="noreferrer">Sites documentation <Icon name="external" size={16} /></a>
@@ -423,10 +425,11 @@ export default function ControlCenter({ connection, previewMode = false, signOut
             </button>
             {expertOpen && (
               <div className="engineering-grid">
-                <div><span>Identity</span><strong>Dispatch-owned SIWC</strong><small>Viewer identity arrives through trusted Sites request headers.</small></div>
+                <div><span>Authentication</span><strong>Dispatch-owned SIWC</strong><small>Viewer identity arrives through trusted Sites request headers.</small></div>
+                <div><span>Authorization</span><strong>@{authorization.githubLogin} · {authorization.role}</strong><small>Bootstrap binding; live GitHub verification pending.</small></div>
                 <div><span>Health contract</span><strong><code>GET /healthz</code></strong><small>Run from the UniGrok host or tunnel-client trust boundary.</small></div>
                 <div><span>MCP transport</span><strong><code>POST /mcp</code></strong><small>Streamable HTTP; no browser credential is collected here.</small></div>
-                <div><span>Site identity</span><strong>Provisioned per installer</strong><small>The repository ships an idless hosting manifest.</small></div>
+                <div><span>Site identity</span><strong>Canonical project</strong><small>The repository is bound to the existing UniGrok Site.</small></div>
               </div>
             )}
           </section>
@@ -455,7 +458,7 @@ export default function ControlCenter({ connection, previewMode = false, signOut
             {panel === "review" && <ReviewDetail />}
             {panel === "runtime" && <RuntimeDetail connection={connection} />}
             {panel === "deployments" && <DeploymentDetail siteProvisioned={siteProvisioned} />}
-            {panel === "settings" && <SettingsDetail displayName={user.displayName} previewMode={previewMode} signOutPath={signOutPath} />}
+            {panel === "settings" && <SettingsDetail authorization={authorization} displayName={user.displayName} previewMode={previewMode} signOutPath={signOutPath} />}
           </aside>
         </div>
       )}
@@ -519,7 +522,7 @@ function PullRequestDetail({ connection, snapshot }: { connection: PublicConnect
     <div className="drawer-content">
       <DrawerHeader icon="pr" eyebrow="Pull-request status" title={integrationStateLabel(snapshot.pullRequests.state)} description="Review state and release impact are separate. Changes requested affects that PR only unless an approved adapter explicitly marks it as a release blocker." />
       <section className="drawer-section embedded-surface"><PullRequestSurface snapshot={snapshot} /></section>
-      <section className="drawer-section data-list"><h3>Adapter boundary</h3><div><span>Repository</span><strong>{connection.repository ?? "Not configured"}</strong></div><div><span>Source state</span><strong>{integrationStateLabel(snapshot.pullRequests.state)}</strong></div><div><span>GitHub token in template</span><strong className="green-text">None</strong></div></section>
+      <section className="drawer-section data-list"><h3>Adapter boundary</h3><div><span>Repository</span><strong>{connection.repository ?? "Not configured"}</strong></div><div><span>Source state</span><strong>{integrationStateLabel(snapshot.pullRequests.state)}</strong></div><div><span>GitHub token in browser</span><strong className="green-text">None</strong></div></section>
     </div>
   );
 }
@@ -527,7 +530,7 @@ function PullRequestDetail({ connection, snapshot }: { connection: PublicConnect
 function GrokReviewDetail({ snapshot }: { snapshot: ControlCenterSnapshot }) {
   return (
     <div className="drawer-content">
-      <DrawerHeader icon="review" eyebrow="Grok review results" title={integrationStateLabel(snapshot.grokReview.state)} description="No score, verdict, or finding is invented. Results appear only after an installer connects an approved, server-side UniGrok review adapter." />
+      <DrawerHeader icon="review" eyebrow="Grok review results" title={integrationStateLabel(snapshot.grokReview.state)} description="No score, verdict, or finding is invented. Results appear only after an approved, server-side UniGrok review adapter is connected." />
       <section className="drawer-section embedded-surface"><GrokReviewSurface snapshot={snapshot} /></section>
       <div className="runtime-callout"><Icon name="shield" size={21} /><p><strong>Sanitized result contract</strong><span>An adapter must allowlist fields, cap strings and findings, and render all result text through React without raw HTML.</span></p></div>
     </div>
@@ -537,9 +540,9 @@ function GrokReviewDetail({ snapshot }: { snapshot: ControlCenterSnapshot }) {
 function RepositoryDetail({ connection }: { connection: PublicConnectionConfig }) {
   return (
     <div className="drawer-content">
-      <DrawerHeader icon="github" eyebrow="Repository metadata" title={connection.repository ?? "Repository not configured"} description="The template accepts a public owner/repository label for links. It does not contain a GitHub credential or make authenticated GitHub requests." />
+      <DrawerHeader icon="github" eyebrow="Repository metadata" title={connection.repository ?? "Repository not configured"} description="The Site accepts a public owner/repository label for links. It does not contain a GitHub credential or make authenticated GitHub requests." />
       <section className="drawer-section data-list"><h3>Configuration</h3><div><span>Environment key</span><strong><code>GITHUB_REPOSITORY</code></strong></div><div><span>Expected shape</span><strong><code>owner/repository</code></strong></div><div><span>GitHub token</span><strong className="green-text">Not used</strong></div><div><span>Current state</span><strong>{connection.repository ? "Configured" : "Missing"}</strong></div></section>
-      <div className="runtime-callout"><Icon name="shield" size={21} /><p><strong>Keep GitHub authorization separate</strong><span>Add repository integrations only through an installer-owned, server-side authorization flow. Never paste a personal access token into this Site.</span></p></div>
+      <div className="runtime-callout"><Icon name="shield" size={21} /><p><strong>Keep GitHub authorization separate</strong><span>Add repository integrations only through a reviewed, server-side authorization flow. Never paste a personal access token into this Site.</span></p></div>
       {connection.repositoryUrl && <a className="external-doc-link" href={connection.repositoryUrl} target="_blank" rel="noreferrer">Open configured repository <Icon name="external" size={16} /></a>}
     </div>
   );
@@ -548,9 +551,9 @@ function RepositoryDetail({ connection }: { connection: PublicConnectionConfig }
 function ReviewDetail() {
   return (
     <div className="drawer-content">
-      <DrawerHeader icon="review" eyebrow="Template safeguards" title="Review required before commit" description="These are template requirements, not a review receipt. Codex must inspect the complete diff before the changes are committed or published." />
-      <section className="drawer-section security-list">{guardrails.map((item) => <div key={item}><span className="security-check"><Icon name="check" size={16} /></span><p><strong>{item}</strong><small>Required by the repository template contract.</small></p></div>)}</section>
-      <div className="runtime-callout"><Icon name="lock" size={21} /><p><strong>Review before commit or publish</strong><span>Inspect the complete diff, run the template safety scan, and verify the idless hosting manifest before creating a commit or deployment.</span></p></div>
+      <DrawerHeader icon="review" eyebrow="Control safeguards" title="Review required before landing" description="These are product requirements, not a review receipt. Codex must inspect the complete diff before changes are landed or published." />
+      <section className="drawer-section security-list">{guardrails.map((item) => <div key={item}><span className="security-check"><Icon name="check" size={16} /></span><p><strong>{item}</strong><small>Required by the repository security contract.</small></p></div>)}</section>
+      <div className="runtime-callout"><Icon name="lock" size={21} /><p><strong>Review before commit or publish</strong><span>Inspect the complete diff, run the deployment safety scan, and verify the bound hosting manifest before creating a deployment.</span></p></div>
     </div>
   );
 }
@@ -568,19 +571,19 @@ function RuntimeDetail({ connection }: { connection: PublicConnectionConfig }) {
 function DeploymentDetail({ siteProvisioned }: { siteProvisioned: boolean }) {
   return (
     <div className="drawer-content">
-      <DrawerHeader icon="deploy" eyebrow="Installer-owned deployment" title={siteProvisioned ? "Review this Site’s deployment gate" : "Create a separate Site"} description={siteProvisioned ? "A provisioned identity is present. Confirm ownership, complete verification, and save a version only after review." : "Each installer provisions a new project identity in the ChatGPT account and workspace they intend to use."} />
-      <section className="pipeline"><div className="complete"><span><Icon name="check" size={16} /></span><p><strong>Clone or fork the repository</strong><small>Keep the source template manifest idless</small></p></div><div className={siteProvisioned ? "complete" : "blocked"}><span>{siteProvisioned ? <Icon name="check" size={16} /> : <Icon name="clock" size={16} />}</span><p><strong>{siteProvisioned ? "Provisioned Site identity present" : "Create a new Site with @Sites"}</strong><small>{siteProvisioned ? "Confirm this checkout belongs to your account before continuing" : "Let Sites write a new local project identity"}</small></p></div><div><span>3</span><p><strong>Configure local and hosted environment values</strong><small>Never commit installer-specific values</small></p></div><div><span>4</span><p><strong>Preview and request Codex review</strong><small>Do not deploy until the review is clean</small></p></div><div><span>5</span><p><strong>Approve a production deployment</strong><small>Choose the narrowest audience</small></p></div></section>
+      <DrawerHeader icon="deploy" eyebrow="Canonical Site deployment" title={siteProvisioned ? "Review this Site’s deployment gate" : "Site identity missing"} description={siteProvisioned ? "The canonical project identity is present. Complete verification and save a version only after review." : "The canonical project identity is required before this source can be deployed."} />
+      <section className="pipeline"><div className="complete"><span><Icon name="check" size={16} /></span><p><strong>Review the repository changes</strong><small>Keep credentials out of source and browser state</small></p></div><div className={siteProvisioned ? "complete" : "blocked"}><span>{siteProvisioned ? <Icon name="check" size={16} /> : <Icon name="clock" size={16} />}</span><p><strong>{siteProvisioned ? "Canonical Site identity present" : "Restore the canonical Site binding"}</strong><small>{siteProvisioned ? "Deployment is bound to the existing UniGrok project" : "Do not deploy an unbound checkout"}</small></p></div><div><span>3</span><p><strong>Configure hosted authorization bindings</strong><small>Missing or malformed bindings deny control access</small></p></div><div><span>4</span><p><strong>Preview and request Codex review</strong><small>Do not deploy until the review is clean</small></p></div><div><span>5</span><p><strong>Approve a production deployment</strong><small>Verify public and protected routes separately</small></p></div></section>
       <a className="external-doc-link" href={sitesGuide} target="_blank" rel="noreferrer">Open ChatGPT Sites documentation <Icon name="external" size={16} /></a>
     </div>
   );
 }
 
-function SettingsDetail({ displayName, previewMode, signOutPath }: { displayName: string; previewMode: boolean; signOutPath: string }) {
+function SettingsDetail({ authorization, displayName, previewMode, signOutPath }: { authorization: Extract<GitHubProjectAuthorization, { authorized: true }>; displayName: string; previewMode: boolean; signOutPath: string }) {
   return (
     <div className="drawer-content">
-      <DrawerHeader icon="shield" eyebrow="Identity and privacy" title="Signed in with ChatGPT" description="The Sites dispatcher authenticates the current viewer. This template does not implement a shared login, password store, or global account." />
-      <section className="drawer-section data-list"><h3>Current request</h3><div><span>Display name</span><strong>{displayName}</strong></div><div><span>Identity source</span><strong>ChatGPT</strong></div><div><span>Stored by template</span><strong className="green-text">Nothing</strong></div></section>
-      <div className="runtime-callout"><Icon name="shield" size={21} /><p><strong>Privacy disclosure</strong><span>Sites supplies the authenticated email and may supply a full name to the server for each request. Email is used only to establish signed-in identity. Only a normalized full name or generic label reaches this browser. Neither value is retained or sent to UniGrok.</span></p></div>
+      <DrawerHeader icon="shield" eyebrow="Identity and authorization" title="Two independent checks passed" description="The Sites dispatcher authenticates the current viewer. A server-configured GitHub identity bootstrap binding authorizes this control surface; live collaborator verification is pending." />
+      <section className="drawer-section data-list"><h3>Current request</h3><div><span>ChatGPT display</span><strong>{displayName}</strong></div><div><span>GitHub identity</span><strong>@{authorization.githubLogin}</strong></div><div><span>Project role</span><strong>{authorization.role}</strong></div><div><span>Browser credential storage</span><strong className="green-text">None</strong></div></section>
+      <div className="runtime-callout"><Icon name="shield" size={21} /><p><strong>Privacy disclosure</strong><span>Sites supplies the authenticated email and may supply a full name to the server for each request. Email is compared to the server-held project-role bindings and is never sent to the browser. Only a normalized full name or generic label reaches this browser. Neither value is retained or sent to UniGrok.</span></p></div>
       <a className="secondary-action drawer-wide-action" href={signOutPath}>{previewMode ? "Exit local preview" : "Sign out with ChatGPT"}</a>
     </div>
   );

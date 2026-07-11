@@ -8,6 +8,13 @@ This document is the production-grade architectural specification of **UniGrok**
 
 UniGrok is a Python implementation built on the `FastMCP` framework. It runs once on a developer's machine as a shared local gateway: every MCP client (Claude Code, Claude Desktop, VS Code, Codex, Antigravity) connects to the same endpoint, the xAI credential stays server-side, and requests self-route across two Grok planes — the metered xAI API and the Grok CLI subscription. It bridges cloud APIs with local execution fallbacks and workspace context sensing.
 
+The target public/control/GitHub trust zones and the staged move from local
+landing to a protected `origin/main` with signed remote receipts are specified
+in [ADR 0001](docs/adr/0001-cloud-control-plane-governance.md). That target does
+not change today's operational truth: until the broker is implemented and
+verified, `scripts/land` and the shared local `main` contract in `AGENTS.md`
+remain authoritative.
+
 The stable MCP is a product service, not an ambient view of the source checkout
 or the folder open in an IDE. Bundled code and support assets resolve from the
 immutable service root (`/app` in Docker), mutable sessions/logs/SQLite resolve

@@ -7,6 +7,9 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const scriptPath = fileURLToPath(import.meta.url);
 const root = path.resolve(path.dirname(scriptPath), "..");
 const ignoredDirectories = new Set([".git", ".next", ".sites-runtime", ".vinext", ".wrangler", "dist", "node_modules"]);
+const binaryAssetExtensions = new Set([".png"]);
+const pngSignature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const forbiddenPngTextChunks = new Set(["iTXt", "tEXt", "zTXt"]);
 const forbiddenPatterns = [
   ["Sites project identifier", /appgprj_/i],
   ["Sites version identifier", /appgver_/i],
@@ -51,6 +54,56 @@ export function forbiddenFileReason(relativePath) {
   return null;
 }
 
+export function shouldScanFileContent(relativePath) {
+  return !binaryAssetExtensions.has(path.extname(relativePath).toLowerCase());
+}
+
+export function binaryAssetFindings(relativePath, content) {
+  if (path.extname(relativePath).toLowerCase() !== ".png") return [];
+  if (!Buffer.isBuffer(content) || content.length < pngSignature.length || !content.subarray(0, 8).equals(pngSignature)) {
+    return ["invalid PNG binary asset"];
+  }
+
+  const findings = [];
+  let offset = pngSignature.length;
+  let sawEnd = false;
+  while (offset + 12 <= content.length) {
+    const length = content.readUInt32BE(offset);
+    const chunkEnd = offset + 12 + length;
+    if (chunkEnd > content.length) return ["invalid PNG binary asset"];
+    const type = content.toString("ascii", offset + 4, offset + 8);
+    const data = content.subarray(offset + 8, offset + 8 + length);
+    if (forbiddenPngTextChunks.has(type)) findings.push("PNG text metadata is not allowed");
+    if (type !== "IDAT") {
+      for (const finding of contentFindings(printableAsciiRuns(data))) {
+        findings.push(finding);
+      }
+    }
+    offset = chunkEnd;
+    if (type === "IEND") {
+      sawEnd = true;
+      break;
+    }
+  }
+  if (!sawEnd || offset !== content.length) findings.push("invalid PNG binary asset");
+  return [...new Set(findings)];
+}
+
+function printableAsciiRuns(content) {
+  const runs = [];
+  let current = "";
+  for (const byte of content) {
+    if (byte >= 0x20 && byte <= 0x7e) {
+      current += String.fromCharCode(byte);
+    } else {
+      if (current.length >= 4) runs.push(current);
+      current = "";
+    }
+  }
+  if (current.length >= 4) runs.push(current);
+  return runs.join("\n");
+}
+
 export async function runSafetyCheck({ allowProvisionedManifest = false, directory = root, logger = console, scanTrackedFiles = true } = {}) {
   const files = await collectFiles(directory, scanTrackedFiles);
   const failures = [];
@@ -61,8 +114,11 @@ export async function runSafetyCheck({ allowProvisionedManifest = false, directo
     const fileReason = forbiddenFileReason(relative);
     if (fileReason) failures.push(`${relative}: ${fileReason}`);
     if (file === scriptPath || file === manifestPath) continue;
-    const content = await readFile(file, "utf8");
-    for (const finding of contentFindings(content)) failures.push(`${relative}: ${finding}`);
+    const content = await readFile(file);
+    const findings = shouldScanFileContent(relative)
+      ? contentFindings(content.toString("utf8"))
+      : binaryAssetFindings(relative, content);
+    for (const finding of findings) failures.push(`${relative}: ${finding}`);
   }
 
   const manifest = JSON.parse(await readFile(manifestPath, "utf8"));

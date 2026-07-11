@@ -9,7 +9,7 @@
 [![MCP](https://img.shields.io/badge/MCP-Streamable%20HTTP-black?style=flat-square)](https://modelcontextprotocol.io)
 [![xAI Grok](https://img.shields.io/badge/xAI-Grok-000000?style=flat-square)](https://docs.x.ai/?utm_source=github&utm_medium=readme&utm_campaign=unigrok&utm_content=badge-docs)
 
-[Quick Start](#quick-start) · [IDE Setup](#ide-setup) · [Personal ChatGPT Site](#personal-chatgpt-site) · [Tool Surface](#tool-surface) · [Architecture](#architecture) · [Security](#security-model)
+[Quick Start](#quick-start) · [IDE Setup](#ide-setup) · [Public Project Site](#public-project-site-and-contributor-control) · [Tool Surface](#tool-surface) · [Architecture](#architecture) · [Security](#security-model)
 
 </div>
 
@@ -119,24 +119,27 @@ Open the local Control Center:
 http://localhost:4765/ui/
 ```
 
-## Personal ChatGPT Site
+## Public Project Site and Contributor Control
 
-The local Control Center remains the default operational surface. People who
-also want a private hosted dashboard can provision the reusable
-[UniGrok Control Center Site template](sites/unigrok-control-center/README.md)
-inside their own ChatGPT account.
+The source for the canonical public UniGrok Site lives in
+[sites/unigrok-control-center](sites/unigrok-control-center/README.md) and is
+bound to the existing project by its checked-in, non-secret Site project ID. It
+is not an idless installer template. The public root and machine-readable
+project routes require no account; `/control` is a separate protected surface.
 
-Each deployment receives its own Site identity and access policy. The public
-template contains no project ID, personal account identifier, GitHub token,
-xAI key, Grok CLI session, or shared UniGrok credential. A hosted Site also
-does not pretend it can reach the installer’s laptop through `localhost`; its
-wizard explains local-only development and the outbound Secure MCP Tunnel
-boundary separately.
+The protected route first uses dispatch-owned Sign in with ChatGPT to identify
+the viewer, then applies a fail-closed server-side project binding. The current
+`UNIGROK_GITHUB_IDENTITY_BINDINGS` adapter maps an authenticated ChatGPT email
+to a GitHub login and project role. It is an administrator-established
+bootstrap binding, **not** GitHub OAuth or a live collaborator lookup. Missing,
+malformed, or unmatched configuration denies control access; live GitHub
+verification remains pending.
 
-Clone or fork this repository, open it in ChatGPT Work, and follow the
-provisioning prompt and pre-deployment review gate in the template README.
-Every Sites deployment URL is production, so save and review a version before
-approving deployment.
+The hosted Site does not accept provider credentials and does not pretend it
+can reach a contributor's laptop through `localhost`. Local development and
+the outbound Secure MCP Tunnel boundary stay separate. Codex/project-admin
+automation owns the Site binding and deployment review; every Sites deployment
+URL is production and must pass the deployment-source gate before publication.
 
 ## Install Script
 
@@ -239,8 +242,10 @@ More detail, including Antigravity/Gemini notes, lives in
 The public MCP also exposes a read-only `review_pull_request` tool with a
 ChatGPT Apps widget. An optional self-hosted GitHub workflow can fetch PR
 evidence through GitHub's API, ask the local subscription plane for a review,
-and maintain one advisory PR comment for Codex. It never executes contributor
-code or grants Grok merge authority. See
+and maintain one advisory PR comment for Codex. The comment names the exact
+reviewed head/base commits and a digest of the bounded evidence, and the
+workflow refuses to publish if the PR head changes during review. It never
+executes contributor code or grants Grok merge authority. See
 [docs/chatgpt-github-app.md](docs/chatgpt-github-app.md) for the private
 ChatGPT App, Secure MCP Tunnel, runner, permissions, and threat model.
 
@@ -594,7 +599,11 @@ uv run python -m evals run --check-baseline
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution workflow and PR
-expectations.
+expectations. The staged public site, protected contributor control plane,
+GitHub authorization, and remote landing governance are defined in
+[ADR 0001](docs/adr/0001-cloud-control-plane-governance.md). The ADR clearly
+separates implemented behavior from the future GitHub App broker and signed
+remote receipt contract.
 
 ---
 

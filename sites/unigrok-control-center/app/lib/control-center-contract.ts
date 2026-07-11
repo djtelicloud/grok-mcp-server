@@ -40,7 +40,7 @@ export type ControlCenterSnapshot = {
 export function createUnconfiguredSnapshot(repository: string | null): ControlCenterSnapshot {
   const repositoryMessage = repository
     ? `Repository metadata is configured for ${repository}, but no approved PR data adapter is connected.`
-    : "Set GITHUB_REPOSITORY and connect an installer-owned PR data adapter.";
+    : "Set GITHUB_REPOSITORY and connect an approved server-side PR data adapter.";
 
   return {
     grokReview: {

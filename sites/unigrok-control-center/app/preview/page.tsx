@@ -12,6 +12,12 @@ export default function PreviewPage() {
 
   return (
     <ControlCenter
+      authorization={{
+        authorized: true,
+        githubLogin: "preview-contributor",
+        role: "contributor",
+        source: "server-configured-bootstrap-binding",
+      }}
       connection={connection}
       previewMode
       signOutPath="/"

@@ -10,7 +10,8 @@ permissions:
   contents: read
 
 jobs:
-  site-template:
+  project-site:
+    name: Project Site
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -32,11 +33,11 @@ jobs:
       - name: Audit Site dependencies
         run: npm audit --audit-level=moderate
 
-      - name: Lint Site template
+      - name: Lint project Site
         run: npm run lint
 
-      - name: Test Site template
-        run: npm test
+      - name: Test provisioned Site deployment source
+        run: npm run test:deployment
 
   build:
     runs-on: ubuntu-latest

@@ -1,71 +1,98 @@
-# UniGrok Control Center Site Template
+# UniGrok Project Site
 
-This directory is a reusable ChatGPT Site template for a UniGrok control center. It is deliberately separate from every deployed Site and contains no project ID, deployment ID, credential, secret, account allowlist, or personal account identifier.
+This directory is the source for the canonical UniGrok public project site and
+protected contributor control center.
 
-Pull-request review state is not a deployment gate. A `changes_requested` review
-affects that PR only. Repository adapters must supply a separate `releaseImpact`
-value, and the Site may describe deployment as PR-blocked only when an approved
-adapter explicitly returns `blocking` for a release-critical PR.
+It has three deliberately separate surfaces:
 
-The template provides:
+- `/` is public product documentation and contributor onboarding;
+- `/llms.txt`, `/.well-known/unigrok.json`, and
+  `/api/public/v1/project` expose public-safe project context to people and
+  agents without authentication;
+- `/control` requires both dispatch-owned Sign in with ChatGPT and an
+  independent server-side project authorization decision.
 
-- dispatch-owned Sign in with ChatGPT for each viewer;
-- an instructional connection wizard for local UniGrok and Secure MCP Tunnel;
-- an idless Sites manifest that must be provisioned in each installer’s ChatGPT account;
-- a responsive control-center interface with explicit runtime and credential boundaries;
-- deterministic checks that reject copied Site identifiers and common secret formats.
+The source is bound to the existing UniGrok Sites project. It is no longer a
+reusable, idless installer template.
 
-It does not proxy localhost, store an xAI key, accept a tunnel credential, authenticate to GitHub, or claim that an unverified runtime is healthy.
+## Authentication is not authorization
 
-## Security boundary
+Sites owns `/signin-with-chatgpt`, `/signout-with-chatgpt`, `/callback`, the
+SIWC cookies, and authenticated-user header injection. The app does not
+implement OAuth routes.
 
-The root page calls `requireChatGPTUser("/")` on the server and is dynamically rendered for each request. Sites owns `/signin-with-chatgpt`, `/signout-with-chatgpt`, `/callback`, cookies, and identity-header injection. The application does not implement OAuth routes or a global login.
+`/control` first calls `requireChatGPTUser("/control")`. A successful ChatGPT
+sign-in identifies the viewer, but does not prove GitHub project membership.
+The server then applies `getGitHubProjectAuthorization()` as an independent,
+fail-closed check.
 
-Sign in with ChatGPT establishes viewer identity. It does not choose the Site audience. Each installer must separately select the narrowest appropriate audience in Sites access settings.
+The initial authorization adapter reads
+`UNIGROK_GITHUB_IDENTITY_BINDINGS` from the hosted server environment. It is a
+bootstrap mapping established by a project administrator, not GitHub OAuth and
+not a live collaborator lookup. Live GitHub collaborator verification remains
+pending. Missing, malformed, duplicate, oversized, or unmatched bindings deny
+access and never render control-center data.
 
-For each signed-in request, the Sites dispatcher supplies the authenticated email and may supply an optional full name to the server. The server uses the email only to establish that the viewer is signed in. Only a normalized full name, or the neutral label `ChatGPT user` when no full name is available, reaches the client. The template retains neither value and sends neither value to UniGrok.
+The value is JSON with a maximum of 100 exact bindings:
 
-## Connection modes
-
-### Local UniGrok
-
-Local mode is for development on the same machine as UniGrok:
-
-```dotenv
-UNIGROK_CONNECTION_MODE=local
-UNIGROK_LOCAL_BASE_URL=http://127.0.0.1:4765
+```json
+[
+  {
+    "chatgpt_email": "contributor@example.org",
+    "github_login": "contributor-login",
+    "role": "contributor"
+  }
+]
 ```
 
-Verify UniGrok from that machine:
+Store real bindings only in the hosted server environment. Do not commit them.
+Only the normalized display name, GitHub login, and role can reach the control
+browser; the ChatGPT email is not serialized.
 
-```bash
-curl -fsS http://127.0.0.1:4765/healthz
-```
+The planned replacement is a reviewed GitHub App authorization broker with
+live repository-role checks. Do not add an app-owned GitHub OAuth flow to this
+Site until Sites documents and supports that deployment path.
 
-A deployed Site cannot reach the installer’s laptop through `localhost` or `127.0.0.1`. The wizard reports that boundary and never sends a browser request to the local service.
+## Public machine-readable contract
 
-### Secure MCP Tunnel
+The public endpoints contain only stable project information, documentation
+links, route boundaries, and truthful availability states. They do not expose
+credentials, private runtime state, contributor data, inference access, or a
+live health claim.
 
-Hosted deployments should use OpenAI’s Secure MCP Tunnel as the companion connection for ChatGPT:
+The remote MCP endpoint is reported as not deployed with OAuth work pending.
+The example terminal on the public page is visibly labeled as an example local
+command session, never as a live probe.
 
-```dotenv
-UNIGROK_CONNECTION_MODE=tunnel
-UNIGROK_TUNNEL_PROFILE=unigrok
-```
+## UniGrok connection boundaries
 
-The tunnel client runs beside UniGrok and makes an outbound connection. Configure and validate it in the same trust boundary as UniGrok, then select the Tunnel connection in ChatGPT Settings → Plugins. The Site stores only the non-secret profile label; tunnel credentials and account-scoped tunnel identifiers never enter this repository or the Site UI.
+The protected connection wizard remains instructional:
 
-Follow the current [Secure MCP Tunnel guide](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels).
+- local mode describes the loopback service at `http://127.0.0.1:4765`;
+- tunnel mode describes OpenAI Secure MCP Tunnel as an outbound companion;
+- the deployed Site never claims it can reach a contributor's laptop;
+- no browser form accepts an xAI key, GitHub token, or tunnel credential.
+
+PR, review, and runtime panels stay explicitly unconfigured until approved
+server-side adapters supply sanitized data. Pull-request review state remains
+separate from release impact.
+
+## Environment contract
+
+| Variable | Purpose | Repository value |
+| --- | --- | --- |
+| `GITHUB_REPOSITORY` | Public repository label and links | `djtelicloud/grok-mcp-server` |
+| `UNIGROK_CONNECTION_MODE` | Wizard state: `unconfigured`, `local`, or `tunnel` | `unconfigured` |
+| `UNIGROK_LOCAL_BASE_URL` | Local-only loopback metadata | `http://127.0.0.1:4765` |
+| `UNIGROK_TUNNEL_PROFILE` | Non-secret tunnel profile label | `unigrok` |
+| `UNIGROK_GITHUB_IDENTITY_BINDINGS` | Server-held bootstrap project bindings | empty |
+
+No variable uses a `NEXT_PUBLIC_` prefix. Real identity bindings are hosted
+configuration, never source.
 
 ## Local development
 
-Requirements:
-
-- Node.js `>=22.13.0`
-- Git
-- macOS or Linux for local development
-
-From this directory:
+Requirements: Node.js `>=22.13.0`, Git, and macOS or Linux.
 
 ```bash
 cp .env.example .env
@@ -73,82 +100,36 @@ npm ci
 npm run dev
 ```
 
-The optional `npm run install:ci` command is a hardened Linux CI installer and
-intentionally requires `flock`, `curl`, `sha256sum`, and GNU `timeout`. Ordinary
-local setup uses the portable `npm ci` path above; `npm test` uses a bounded
-cross-platform build runner when GNU `timeout` is unavailable.
+The public root works locally. The production control route expects
+Sites-provided ChatGPT identity headers. Use `/preview` for local visual work;
+that route is unavailable in production builds.
 
-The production root requires Sites-provided ChatGPT identity headers. Use the development-only `/preview` route for local visual testing. The route is unavailable in production builds.
+## Verification and deployment
 
-Run the complete source-template gate before asking Sites to provision a project identity:
+Run the complete deployment-source gate:
 
 ```bash
 npm run lint
-npm run check:template
+npm run check:deployment
 npm run typecheck
 npm test
 ```
 
-`npm test` includes the strict `check:template` gate and therefore requires the repository manifest to remain idless.
+`npm test` validates the bound manifest, typechecks, builds the Cloudflare
+Worker artifact, and exercises public, protected, denial, authorization, and
+machine-readable routes.
 
-## Deploy a separate Site in your own ChatGPT account
+Before deployment:
 
-Do not attach this directory to an existing Site and do not copy a deployed `.openai/hosting.json` into it.
+1. inspect the full source diff;
+2. verify anonymous access to `/` and all three public metadata routes;
+3. verify anonymous `/control` redirects to dispatch-owned SIWC;
+4. verify a signed-in but unbound viewer sees only the denial surface;
+5. verify the configured owner binding reaches the control center without
+   serializing the ChatGPT email;
+6. confirm the hosted binding value and the Sites audience policy;
+7. save and review a version before approving production deployment.
 
-1. Clone or fork the repository and open it in ChatGPT Work while signed into the account and workspace that should own the new Site.
-2. Ask Sites to create a separate checkout with this exact request:
-
-   > @Sites Create a new Site named UniGrok Control Center in my current ChatGPT account using `sites/unigrok-control-center` as the source template. Create a separate Sites checkout, generate a new project identity for that Site, preserve the idless template in this repository, and stop after provisioning. Do not save a version or deploy it.
-
-3. Confirm that the new Site’s generated project identity exists only in its separate Sites checkout.
-4. In that derived checkout, run `npm run lint` and `npm run test:deployment`. The deployment gate requires a valid installer-owned project identity while applying the same secret and personal-identifier checks.
-5. Configure the copied Site’s local `.env` values and hosted environment values in that Site’s settings. Never put installer-specific values in the open-source template or a prompt.
-6. Preview the new Site and ask Codex to review the complete diff, identity boundary, environment contract, and deployment safety output.
-7. Choose the narrowest Site audience. Audience controls and Sign in with ChatGPT are separate security layers.
-8. After Codex reports a clean review, ask Sites to save a version without deploying it and inspect the saved version.
-9. Approve a production deployment only after the saved version and audience are confirmed.
-
-Every Sites deployment URL is production. See the current [ChatGPT Sites documentation](https://learn.chatgpt.com/docs/sites) and [Sites management guide](https://help.openai.com/en/articles/20001339-creating-and-managing-chatgpt-sites).
-
-## Environment contract
-
-| Variable | Purpose | Repository-safe value |
-| --- | --- | --- |
-| `GITHUB_REPOSITORY` | Optional public repository label and link | `example-org/grok-mcp-server` |
-| `UNIGROK_CONNECTION_MODE` | Wizard state: `unconfigured`, `local`, or `tunnel` | `unconfigured` |
-| `UNIGROK_LOCAL_BASE_URL` | Local-development metadata only | `http://127.0.0.1:4765` |
-| `UNIGROK_TUNNEL_PROFILE` | Non-secret tunnel profile label | `unigrok` |
-
-No variable uses a `NEXT_PUBLIC_` prefix. No credential variable is defined because this template does not need or accept a credential.
-
-## Template identity
-
-`.openai/hosting.json` contains only:
-
-```json
-{
-  "d1": null,
-  "r2": null
-}
-```
-
-The missing `project_id` is intentional. Sites creates a new identity in the installer’s separate checkout. `npm run check:template` fails if a project identity or known private deployment marker is copied back into this directory.
-
-After Sites provisions a separate installer-owned checkout, use `npm run check:deployment` or the complete `npm run test:deployment` gate there. Those commands require a valid generated `project_id`; they are not source-template checks.
-
-## Review contract
-
-Before a source-template commit or pull request:
-
-1. inspect `git diff -- sites/unigrok-control-center`;
-2. run `npm run lint`;
-3. run `npm run check:template`;
-4. run `npm run typecheck`;
-5. run `npm test`;
-6. request Codex review;
-7. resolve all high- and medium-severity findings;
-8. repeat the checks and review.
-
-Before saving or deploying a separately provisioned Site, run `npm run lint` and `npm run test:deployment`, request another Codex review, resolve all high- and medium-severity findings, and repeat the deployment gate.
-
-Do not publish the template or a derived Site merely because a build succeeds.
+Every Sites deployment URL is production. See the current
+[ChatGPT Sites documentation](https://learn.chatgpt.com/docs/sites) and
+[Sites management guide](https://help.openai.com/en/articles/20001339-creating-and-managing-chatgpt-sites).

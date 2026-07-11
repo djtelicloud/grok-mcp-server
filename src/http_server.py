@@ -189,6 +189,12 @@ def _auth_is_active() -> bool:
 
 
 def _allow_unauthenticated() -> bool:
+    """Whether a developer explicitly requested a loopback-only auth bypass.
+
+    This flag is never a deployment escape hatch. ``create_app`` rejects it in
+    Cloud Run, ``run_http_server`` ignores it when deciding whether an exposed
+    bind is safe, and the middleware applies it only to a loopback Host.
+    """
     return os.environ.get("UNIGROK_ALLOW_UNAUTHENTICATED", "").lower() in ("1", "true", "yes")
 
 
@@ -305,10 +311,90 @@ class ModeDialContextMiddleware:
             _ACTIVE_MODE_DIAL.reset(token)
 
 
-# Health probes stay reachable without credentials so load balancers and
-# uptime checks work before any key is provisioned.
-_AUTH_EXEMPT_PATHS = ("/healthz", "/readyz", "/runtimez")
-_AUTH_EXEMPT_PREFIXES = ("/ui", "/.well-known", "/docs")
+# These endpoints are deliberately safe for public health checks and agent
+# discovery. Keep this allowlist exact: broad ``/.well-known`` exemptions can
+# accidentally publish future metadata routes that were intended to be
+# protected.
+_PUBLIC_AUTH_EXEMPT_PATHS = (
+    "/healthz",
+    "/readyz",
+    "/.well-known/unigrok",
+    "/.well-known/webmcp",
+    "/.well-known/oauth-protected-resource",
+    "/.well-known/oauth-protected-resource/mcp",
+)
+
+# The bundled Control Center, runtime diagnostics, and source documentation
+# are local operator surfaces. They stay convenient at localhost, including
+# when client bearer keys are configured, but are never exempt in Cloud Run or
+# when reached through a non-loopback Host.
+_LOCAL_OPERATOR_PATHS = ("/runtimez",)
+_LOCAL_OPERATOR_PREFIXES = ("/ui", "/docs")
+
+
+def _scope_host_is_loopback(scope: Dict[str, Any]) -> bool:
+    raw_host = (_scope_header(scope, b"host") or "").strip()
+    if not raw_host:
+        return False
+    try:
+        host = urlsplit(f"//{raw_host}").hostname
+    except ValueError:
+        return False
+    return _is_loopback_bind_host(host or "")
+
+
+def _scope_client_is_loopback(scope: Dict[str, Any]) -> bool:
+    client = scope.get("client")
+    if not isinstance(client, (tuple, list)) or not client:
+        return False
+    return _is_loopback_bind_host(str(client[0]))
+
+
+def _is_direct_loopback_request(scope: Dict[str, Any]) -> bool:
+    bound_host = str(scope.get("unigrok.bound_host") or "")
+    return (
+        get_unigrok_runtime() == "local"
+        and _is_loopback_bind_host(bound_host)
+        and _scope_host_is_loopback(scope)
+        and _scope_client_is_loopback(scope)
+    )
+
+
+def _is_verified_local_request(scope: Dict[str, Any]) -> bool:
+    """Require both a loopback Host and a trusted local network path.
+
+    Host alone is attacker-controlled. A direct local request must also have a
+    loopback peer; the Docker path may instead use the explicit
+    ``UNIGROK_TRUSTED_LOOPBACK_PROXY`` declaration because its bridge peer is
+    not a host-loopback address.
+    """
+    return _is_direct_loopback_request(scope) or (
+        _trusted_loopback_proxy() and _scope_host_is_loopback(scope)
+    )
+
+
+def _path_matches_prefix(path: str, prefix: str) -> bool:
+    return path == prefix or path.startswith(f"{prefix}/")
+
+
+def _is_public_auth_exempt_path(path: str) -> bool:
+    return path in _PUBLIC_AUTH_EXEMPT_PATHS
+
+
+def _is_local_operator_request(scope: Dict[str, Any]) -> bool:
+    if not _is_verified_local_request(scope):
+        return False
+    path = scope.get("path", "")
+    return path in _LOCAL_OPERATOR_PATHS or any(
+        _path_matches_prefix(path, prefix) for prefix in _LOCAL_OPERATOR_PREFIXES
+    )
+
+
+def _request_may_bypass_auth(scope: Dict[str, Any]) -> bool:
+    # The broad development bypass is stricter than the operator-static
+    # exemption: an asserted Docker proxy boundary may expose /ui and
+    # /runtimez, but it never disables auth for /mcp, /v1, or /metrics.
+    return _allow_unauthenticated() and _is_direct_loopback_request(scope)
 
 
 class GatewayAuthMiddleware:
@@ -319,18 +405,20 @@ class GatewayAuthMiddleware:
     streamable-HTTP /mcp mount.
     """
 
-    def __init__(self, app):
+    def __init__(self, app, bound_host: str):
         self.app = app
+        self.bound_host = bound_host
 
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
+        scope["unigrok.bound_host"] = self.bound_host
         path = scope.get("path", "")
-        if path in _AUTH_EXEMPT_PATHS or path.startswith(_AUTH_EXEMPT_PREFIXES):
+        if _is_public_auth_exempt_path(path) or _is_local_operator_request(scope):
             await self.app(scope, receive, send)
             return
-        if not _auth_is_active() or _allow_unauthenticated():
+        if not _auth_is_active() or _request_may_bypass_auth(scope):
             await self.app(scope, receive, send)
             return
         if _token_is_allowed(_extract_bearer_token(_scope_header(scope, b"authorization"))):
@@ -611,6 +699,169 @@ class CSPMiddleware:
         await self.app(scope, receive, send_with_csp)
 
 
+def _validated_https_url(value: str) -> Optional[str]:
+    """Return a normalized public HTTPS URL, or ``None`` when unsafe.
+
+    Discovery metadata is configuration, not a reflection of the incoming
+    Host header. That avoids publishing attacker-controlled resource or issuer
+    identifiers behind a permissive proxy.
+    """
+    raw = str(value or "").strip()
+    if not raw or any(ord(char) <= 32 or ord(char) == 127 for char in raw):
+        return None
+    try:
+        parsed = urlsplit(raw)
+        host = parsed.hostname
+        # Accessing ``port`` is itself validation (``:not-a-port`` raises).
+        parsed.port
+    except ValueError:
+        return None
+    if (
+        parsed.scheme.lower() != "https"
+        or not host
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+    ):
+        return None
+    normalized_host = host.lower().rstrip(".")
+    if normalized_host == "localhost" or normalized_host.endswith(
+        (".localhost", ".local", ".internal")
+    ):
+        return None
+    try:
+        address = ipaddress.ip_address(normalized_host)
+    except ValueError:
+        address = None
+    if address is not None and not address.is_global:
+        return None
+    normalized_path = parsed.path.rstrip("/")
+    return f"https://{parsed.netloc}{normalized_path}"
+
+
+def _public_mcp_resource() -> Optional[str]:
+    return _validated_https_url(os.environ.get("UNIGROK_PUBLIC_MCP_URL", ""))
+
+
+def _oauth_authorization_servers() -> List[str]:
+    raw_values = [
+        item.strip()
+        for item in os.environ.get("UNIGROK_OAUTH_AUTHORIZATION_SERVERS", "").split(",")
+        if item.strip()
+    ]
+    if not raw_values:
+        return []
+    validated = [_validated_https_url(item) for item in raw_values]
+    # One malformed issuer invalidates the document rather than quietly
+    # publishing a partial authorization policy.
+    if any(item is None for item in validated):
+        return []
+    return list(dict.fromkeys(item for item in validated if item is not None))
+
+
+_OAUTH_SCOPE_RE = re.compile(r'^[\x21\x23-\x5B\x5D-\x7E]{1,128}$')
+
+
+def _oauth_scopes() -> List[str]:
+    configured = [
+        item.strip()
+        for item in os.environ.get("UNIGROK_OAUTH_SCOPES", "unigrok:invoke").split(",")
+        if item.strip()
+    ]
+    if not configured or any(_OAUTH_SCOPE_RE.fullmatch(item) is None for item in configured):
+        return []
+    return list(dict.fromkeys(configured))
+
+
+async def unigrok_public_discovery(_: Request) -> JSONResponse:
+    """Sanitized, stable project discovery without runtime internals.
+
+    This intentionally contains no model availability, credential state,
+    filesystem/workspace information, client-token counts, or setup commands.
+    """
+    return JSONResponse(
+        {
+            "schema_version": 1,
+            "name": "UniGrok MCP",
+            "description": "A server-side xAI gateway exposed through MCP Streamable HTTP.",
+            "transport": {
+                "type": "streamable-http",
+                "endpoint": "/mcp",
+            },
+            "access": {
+                "context": "remote-deployment",
+                "public": [
+                    "/healthz",
+                    "/readyz",
+                    "/.well-known/unigrok",
+                    "/.well-known/webmcp",
+                    "/.well-known/oauth-protected-resource/mcp",
+                ],
+                "protected": [
+                    "/mcp",
+                    "/v1",
+                    "/runtimez",
+                    "/metrics",
+                    "/ui",
+                    "/docs",
+                ],
+            },
+            "credentials": {
+                "provider_credentials": "server-side-only",
+                "remote_inference": "authentication-required",
+            },
+            "oauth": {
+                "metadata": "/.well-known/oauth-protected-resource/mcp",
+                "status": "discovery-only",
+                "access_token_validation": "not-implemented",
+            },
+            "documentation": "https://grokmcp.org/",
+        },
+        headers={"Cache-Control": "public, max-age=300"},
+    )
+
+
+async def oauth_protected_resource_metadata(_: Request) -> JSONResponse:
+    """RFC 9728-shaped discovery for the planned external OAuth authority.
+
+    Publishing an authorization-server issuer is intentionally opt-in. The
+    extension fields state that this process does not yet validate OAuth access
+    tokens, so the metadata is an integration contract—not a false claim that
+    UniGrok already implements an authorization server or audience validation.
+    Static ``UNIGROK_API_KEYS`` remain the enforced gateway credential today.
+    """
+    resource = _public_mcp_resource()
+    authorization_servers = _oauth_authorization_servers()
+    scopes = _oauth_scopes()
+    if resource is None or not authorization_servers or not scopes:
+        return JSONResponse(
+            {
+                "status": "unavailable",
+                "code": "oauth_discovery_not_configured",
+                "detail": (
+                    "OAuth protected-resource discovery is reserved but no valid "
+                    "public MCP resource and authorization server are configured."
+                ),
+            },
+            status_code=503,
+            headers={"Cache-Control": "no-store"},
+        )
+
+    return JSONResponse(
+        {
+            "resource": resource,
+            "authorization_servers": authorization_servers,
+            "scopes_supported": scopes,
+            "bearer_methods_supported": ["header"],
+            "resource_documentation": "https://grokmcp.org/",
+            "x_unigrok_authorization_status": "discovery-only",
+            "x_unigrok_access_token_validation": False,
+        },
+        headers={"Cache-Control": "public, max-age=300"},
+    )
+
+
 async def healthz(_: Request) -> JSONResponse:
     return JSONResponse({"status": "healthy"})
 
@@ -693,7 +944,7 @@ async def runtimez(request: Request) -> JSONResponse:
                 "xai_api_key": bool(os.environ.get("XAI_API_KEY", "").strip()),
             },
             "gateway_auth": {
-                "enabled": _auth_is_active() and not _allow_unauthenticated(),
+                "enabled": _auth_is_active() and not _request_may_bypass_auth(request.scope),
                 "client_tokens_configured": bool(_api_keys()),
             },
             "cli_plane": {
@@ -1675,12 +1926,17 @@ async def webmcp_manifest(_: Request) -> JSONResponse:
     return JSONResponse(manifest)
 
 
-def create_app() -> Starlette:
-    if is_cloudrun_runtime() and not _allow_unauthenticated() and not _api_keys():
+def create_app(*, bound_host: Optional[str] = None) -> Starlette:
+    if is_cloudrun_runtime() and _allow_unauthenticated():
+        raise RuntimeError(
+            "UNIGROK_ALLOW_UNAUTHENTICATED is forbidden in Cloud Run runtime."
+        )
+    if is_cloudrun_runtime() and not _api_keys():
         raise RuntimeError("UNIGROK_API_KEYS must be set in Cloud Run runtime.")
 
     public_mcp = create_public_mcp()
     mcp_app = public_mcp.streamable_http_app()
+    effective_bound_host = bound_host or _resolve_bind_host()
 
     @asynccontextmanager
     async def app_lifespan(_: Starlette):
@@ -1699,7 +1955,18 @@ def create_app() -> Starlette:
             Route("/metrics", metrics, methods=["GET"]),
             Route("/v1/models", models, methods=["GET"]),
             Route("/v1/chat/completions", chat_completions, methods=["POST"]),
+            Route("/.well-known/unigrok", unigrok_public_discovery, methods=["GET"]),
             Route("/.well-known/webmcp", webmcp_manifest, methods=["GET"]),
+            Route(
+                "/.well-known/oauth-protected-resource",
+                oauth_protected_resource_metadata,
+                methods=["GET"],
+            ),
+            Route(
+                "/.well-known/oauth-protected-resource/mcp",
+                oauth_protected_resource_metadata,
+                methods=["GET"],
+            ),
             Mount(
                 "/docs",
                 app=create_docs_app(),
@@ -1722,7 +1989,7 @@ def create_app() -> Starlette:
             Middleware(RequestBodyLimitMiddleware),
             Middleware(CSPMiddleware),
             Middleware(MCPOriginMiddleware),
-            Middleware(GatewayAuthMiddleware),
+            Middleware(GatewayAuthMiddleware, bound_host=effective_bound_host),
             Middleware(ModeDialContextMiddleware),
             Middleware(CallerContextMiddleware),
         ],
@@ -1795,7 +2062,6 @@ def run_http_server(host: Optional[str] = None, port: Optional[int] = None):
     if (
         not _is_loopback_bind_host(selected_host)
         and not _auth_is_active()
-        and not _allow_unauthenticated()
         and not _trusted_loopback_proxy()
     ):
         raise RuntimeError(
@@ -1815,4 +2081,8 @@ def run_http_server(host: Optional[str] = None, port: Optional[int] = None):
             "this is allowed only because the deployment declared a trusted "
             "loopback-only proxy. Remove that declaration before exposing the port."
         )
-    uvicorn.run(create_app(), host=selected_host, port=selected_port)
+    uvicorn.run(
+        create_app(bound_host=selected_host),
+        host=selected_host,
+        port=selected_port,
+    )

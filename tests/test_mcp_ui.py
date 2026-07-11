@@ -128,7 +128,11 @@ def test_mcp_ui_loads_without_exposing_mcp_when_auth_is_active(monkeypatch):
     monkeypatch.setenv("UNIGROK_API_KEYS", "client-secret")
     monkeypatch.delenv("UNIGROK_ALLOW_UNAUTHENTICATED", raising=False)
 
-    with TestClient(create_app(), base_url="http://localhost:8080") as client:
+    with TestClient(
+        create_app(),
+        base_url="http://localhost:8080",
+        client=("127.0.0.1", 50000),
+    ) as client:
         index = client.get("/ui/")
         denied = client.post(
             "/mcp",
