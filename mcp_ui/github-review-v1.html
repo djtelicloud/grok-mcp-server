@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root { color-scheme: light dark; font-family: ui-sans-serif, system-ui, sans-serif; }
+    body { margin: 0; padding: 14px; background: transparent; color: CanvasText; }
+    .card { border: 1px solid color-mix(in srgb, CanvasText 16%, transparent); border-radius: 14px; padding: 14px; background: color-mix(in srgb, Canvas 96%, #4fe7ff 4%); }
+    .top { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+    h2 { margin: 0; font-size: 16px; }
+    .sub { margin-top: 4px; opacity: .68; font-size: 12px; overflow-wrap: anywhere; }
+    .badge { border-radius: 999px; padding: 4px 8px; background: color-mix(in srgb, #16f0ae 14%, transparent); color: #0fa878; font-size: 11px; white-space: nowrap; }
+    .meta { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0; }
+    .chip { padding: 4px 7px; border-radius: 7px; background: color-mix(in srgb, CanvasText 7%, transparent); font: 11px ui-monospace, monospace; }
+    pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.55 ui-sans-serif, system-ui, sans-serif; }
+    .loading { opacity: .65; }
+  </style>
+</head>
+<body>
+  <article class="card">
+    <div class="top">
+      <div><h2 id="heading">UniGrok PR Review</h2><div id="subtitle" class="sub">Waiting for review data…</div></div>
+      <span class="badge">For Codex</span>
+    </div>
+    <div id="meta" class="meta"></div>
+    <pre id="review" class="loading">Grok's review will appear here.</pre>
+  </article>
+  <script>
+    const heading = document.getElementById("heading");
+    const subtitle = document.getElementById("subtitle");
+    const meta = document.getElementById("meta");
+    const review = document.getElementById("review");
+    function render(payload) {
+      const data = payload?.structuredContent || payload || {};
+      if (!data.review) return;
+      heading.textContent = `PR #${data.pull_number} Review`;
+      subtitle.textContent = `${data.repository} · ${data.title || "Untitled"}`;
+      meta.replaceChildren();
+      for (const value of [`model: ${data.model}`, `plane: ${data.plane}`, `route: ${data.route}`, `cost: $${Number(data.cost_usd || 0).toFixed(5)}`]) {
+        const chip = document.createElement("span"); chip.className = "chip"; chip.textContent = value; meta.appendChild(chip);
+      }
+      review.textContent = data.review;
+      review.classList.remove("loading");
+    }
+    window.addEventListener("message", (event) => {
+      if (event.source !== window.parent) return;
+      const message = event.data;
+      if (message?.jsonrpc !== "2.0" || message.method !== "ui/notifications/tool-result") return;
+      render(message.params);
+    }, { passive: true });
+    if (window.openai?.toolOutput) render(window.openai.toolOutput);
+  </script>
+</body>
+</html>

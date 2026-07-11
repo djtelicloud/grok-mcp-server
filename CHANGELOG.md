@@ -4,6 +4,14 @@ All notable changes to UniGrok MCP will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- **Private ChatGPT PR-review app surface**: Added an Apps SDK-compatible,
+  read-only `review_pull_request` MCP tool and versioned review widget with
+  explicit annotations, bounded untrusted context, and no external CSP access.
+- **Self-hosted `@grok review` workflow**: Added a GitHub workflow that fetches
+  pull-request evidence through the API, calls the local UniGrok MCP without
+  checking out contributor code, and upserts one advisory comment for Codex.
+
 ## [0.5.3] - 2026-07-10
 
 ### Added

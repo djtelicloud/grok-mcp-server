@@ -215,6 +215,16 @@ If `UNIGROK_API_KEYS` is set in `.env`, also add
 More detail, including Antigravity/Gemini notes, lives in
 [docs/ide-setup.md](docs/ide-setup.md).
 
+### ChatGPT and GitHub `@grok` reviews
+
+The public MCP also exposes a read-only `review_pull_request` tool with a
+ChatGPT Apps widget. An optional self-hosted GitHub workflow can fetch PR
+evidence through GitHub's API, ask the local subscription plane for a review,
+and maintain one advisory PR comment for Codex. It never executes contributor
+code or grants Grok merge authority. See
+[docs/chatgpt-github-app.md](docs/chatgpt-github-app.md) for the private
+ChatGPT App, Secure MCP Tunnel, runner, permissions, and threat model.
+
 ## Run Modes
 
 Stdio MCP:

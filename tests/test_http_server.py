@@ -488,7 +488,13 @@ async def test_direct_xai_streaming_failure_returns_valid_sse(monkeypatch):
 async def test_public_mcp_exposes_only_agent():
     mcp = create_public_mcp()
     tools = await mcp.list_tools()
-    assert [tool.name for tool in tools] == ["agent", "grok_mcp_status", "grok_mcp_discover_self", "grok_mcp_restart_container"]
+    assert [tool.name for tool in tools] == [
+        "agent",
+        "review_pull_request",
+        "grok_mcp_status",
+        "grok_mcp_discover_self",
+        "grok_mcp_restart_container",
+    ]
 
 
 def test_mcp_streamable_http_mount_exists(monkeypatch):

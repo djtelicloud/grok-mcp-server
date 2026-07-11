@@ -1,0 +1,52 @@
+name: UniGrok PR Review
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, ready_for_review]
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Pull request number
+        required: true
+        type: number
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: unigrok-review-${{ github.event.pull_request.number || github.event.issue.number || inputs.pr_number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    if: >-
+      github.event_name != 'issue_comment' ||
+      (github.event.issue.pull_request && contains(github.event.comment.body, '@grok review'))
+    name: UniGrok review
+    runs-on: [self-hosted, unigrok-review]
+    timeout-minutes: 10
+    steps:
+      # pull_request_target is intentional: run only trusted default-branch code.
+      # Never check out, execute, install, or import code from the reviewed PR.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.3.2
+        with:
+          enable-cache: true
+
+      - name: Run read-only Grok review
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          INPUT_PR_NUMBER: ${{ inputs.pr_number }}
+          UNIGROK_MCP_URL: http://127.0.0.1:4765/mcp
+          UNIGROK_REVIEW_PLANE: cli
+          UNIGROK_CLIENT_TOKEN: ${{ secrets.UNIGROK_CLIENT_TOKEN }}
+        run: uv run python scripts/github-grok-review.py
