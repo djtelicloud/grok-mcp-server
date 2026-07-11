@@ -161,7 +161,8 @@ This ADR intentionally does not pretend the migration already happened.
 | Landing receipt | Local JSON receipt written by `scripts/land`; not cryptographically signed | Broker-issued signed receipt verifiable against a published key |
 | Canonical integration branch | Protected `origin/main` through PRs; Codex synchronizes local `main` and records the local landing receipt | Broker-verified merge with a signed receipt; local `main` remains a synchronized replica |
 | GitHub authorization | GitHub workflow association gates | GitHub App user identity plus fresh repository-role checks for the protected control surface |
-| GitHub mutation broker | Not implemented | Deployed GitHub App controller with short-lived tokens, allowlisted mutations, and audit log |
+| Codex approval | Owner-dispatched required status validates the exact open PR head without model usage | Dedicated project-admin App identity with signed dispositions |
+| GitHub mutation broker | Not implemented; GitHub protected merge remains the mutation boundary | Deployed GitHub App controller with short-lived tokens, allowlisted mutations, and audit log |
 
 Until the target broker and signed receipt verifier are deployed and exercised
 end to end, the repository's transitional `AGENTS.md` contract remains
