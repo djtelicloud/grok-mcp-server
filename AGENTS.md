@@ -91,13 +91,15 @@ configs.
 
 ## Git completion contract
 
-Codex and other IDE agents may operate concurrently. Work in a `codex/*` task
-worktree and leave the shared checkout on `main`. After committing intended
-changes, run `./scripts/land`. Passing tests or committing a task branch is not
-completion: do not tell the user an implementation is complete until the
-command prints `LANDED TO MAIN: <sha>`. Never remove the task worktree after
-landing, because another open IDE may still use it. Fetch, push, PR, and release
-publication are separate operations performed only when explicitly requested.
+Codex is the permanent Git and release-integration owner for this repository.
+Work in a `codex/*` task worktree and leave the shared checkout on `main`.
+Codex reviews all agent handoffs, runs `./scripts/land`, keeps local `main`
+coherent, and owns fetch, push, pull-request, tag, and release operations under
+the user's standing authorization. Other IDE agents may develop and commit in
+their own worktrees, but must hand off the commit SHA and test evidence instead
+of landing, pushing, merging shared `main`, or deleting worktrees. Passing tests
+or committing a task branch is not completion: do not call integrated work
+complete until Codex's landing command prints `LANDED TO MAIN: <sha>`.
 
 For implementation, debugging, architecture, or review, use the tracked
 `.agents/skills/unigrok-workspace-memory/SKILL.md`. Recall against the Codex

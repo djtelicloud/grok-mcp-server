@@ -27,9 +27,10 @@ Select modular tools based on the nature of the request:
 ## 4. Multi-Agent Git Protocol
 * **No Main Branch Switch**: Do not switch the shared main folder branch. 
 * **Isolated Worktrees**: Work on task-specific sibling worktrees (`gemini/task-name`).
-* **Mandatory Landing Gate**: Commit the intended work and run `./scripts/land`. Do not manually merge and do not call an implementation complete until it prints `LANDED TO MAIN: <sha>`.
+* **Codex Integration Owner**: Codex permanently owns landing, shared `main`, pushes, pull requests, tags, releases, and worktree cleanup for this repository.
+* **Handoff Instead of Landing**: Commit the intended work, run relevant tests, and give Codex the commit SHA plus verification results. Do not run `scripts/land`, push, merge/rebase shared `main`, publish releases, or delete worktrees.
 * **Open IDE Safety**: Never remove a worktree after landing or overwrite a dirty tracked `main`; another IDE may still be using it.
 
 ## 5. Verification Requirements
-* `scripts/land` runs the full pytest suite against the exact commit that it fast-forwards to visible local `main`. Remote publishing is separate and only user-requested.
-* Use `.agents/skills/unigrok-workspace-memory/SKILL.md` for commit-anchored recall. Pass the Gemini worktree's own full HEAD and record one concise outcome only after `scripts/land` succeeds.
+* Codex runs `scripts/land` against handed-off commits and owns remote publication under the user's standing Git-ownership authorization.
+* Use `.agents/skills/unigrok-workspace-memory/SKILL.md` for commit-anchored recall. Pass the Gemini worktree's own full HEAD; Codex records the verified outcome after landing.

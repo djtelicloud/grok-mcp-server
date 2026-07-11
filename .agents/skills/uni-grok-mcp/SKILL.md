@@ -88,7 +88,8 @@ When querying Grok or using this server, take advantage of the following custom 
 Multiple IDE agents can collaborate on this project concurrently. Follow these rules to prevent merge conflicts and branch switching issues:
 1. **Never Branch-Switch `main`**: Keep the repository's shared primary checkout on `main`.
 2. **Worktrees for Parallel Tasks**: Always create a separate git worktree and work on an agent-prefixed branch (e.g., `gemini/task-name`, `claude/task-name`).
-3. **Mandatory Landing Gate**: Commit the intended work, then run `./scripts/land` from the task worktree. Do not manually merge or claim completion until it prints `LANDED TO MAIN: <sha>`.
-4. **Visible Main Is the Product**: Local `main` integration is mandatory. Remote fetch/push/publication is separate and happens only when the user explicitly asks for it.
-5. **Protect Open IDEs**: Never remove task worktrees after landing or overwrite a dirty tracked `main`; another IDE may still be using them.
-6. **Commit-Anchored Memory**: Use the `unigrok-workspace-memory` skill to recall evidence using the agent worktree's own full HEAD. After landing, record a concise outcome against the exact SHA printed by `scripts/land`; do not write Git Notes directly.
+3. **Codex Owns Integration**: Codex is the permanent Git/release owner. Non-Codex agents commit and test in their task worktrees, then hand Codex the commit SHA and verification evidence; they do not land, push, merge shared `main`, publish, or delete worktrees.
+4. **Mandatory Landing Gate**: Codex reviews the handoff and runs `./scripts/land`. Do not claim integrated completion until it prints `LANDED TO MAIN: <sha>`.
+5. **Visible Main Is the Product**: Local `main` integration is mandatory. Codex owns remote fetch/push/publication under the user's standing authorization.
+6. **Protect Open IDEs**: Never remove task worktrees after landing or overwrite a dirty tracked `main`; another IDE may still be using them.
+7. **Commit-Anchored Memory**: Use the `unigrok-workspace-memory` skill to recall evidence using the agent worktree's own full HEAD. Codex records a concise outcome after landing; do not write Git Notes directly.

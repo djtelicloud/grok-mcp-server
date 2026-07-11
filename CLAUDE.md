@@ -86,15 +86,12 @@ configs.
 ## Git completion contract (shared, concurrent workspace)
 
 Work in a `claude/*` task worktree and leave the shared checkout on `main`.
-After committing the intended changes, run `./scripts/land`. Passing tests or
-committing a task branch is not completion: do not tell the user an
-implementation is complete until the command prints `LANDED TO MAIN: <sha>`.
-Never manually merge, overwrite a dirty tracked `main`, or remove the task
-worktree after landing because another open IDE may still use it. Fetch, push,
-PR, and release publication are separate operations performed only when the
-user explicitly requests them.
+After committing the intended changes, hand the commit SHA and verification
+results to Codex, the repository's permanent Git and release-integration owner.
+Do not run `scripts/land`, push, merge or rebase shared `main`, create PRs/tags/
+releases, or remove worktrees. Codex reviews the handoff and runs the landing
+gate; only its `LANDED TO MAIN: <sha>` result proves integration.
 
 For implementation, debugging, architecture, or review, use
 `.agents/skills/unigrok-workspace-memory/SKILL.md`. Recall against the Claude
-worktree's own full HEAD; after landing, record one concise verified outcome
-against the exact SHA printed by `scripts/land`.
+worktree's own full HEAD. Codex records the landed outcome after integration.
