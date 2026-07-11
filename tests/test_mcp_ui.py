@@ -15,8 +15,8 @@ def test_mcp_ui_static_files_are_served(monkeypatch):
     assert index.status_code == 200
     assert "<title>UniGrok MCP v0.5.3 Control Center</title>" in index.text
     assert '<span class="version-badge">v0.5.3</span>' in index.text
-    assert 'script type="module" src="./app.js?v=grok-v0.5.3-r2"' in index.text
-    assert '<link rel="stylesheet" href="./styles.css?v=grok-v0.5.3-r2" />' in index.text
+    assert 'script type="module" src="./app.js?v=grok-v0.5.3-r3"' in index.text
+    assert '<link rel="stylesheet" href="./styles.css?v=grok-v0.5.3-r3" />' in index.text
     assert "Control Center" in index.text
     assert "Bearer token" not in index.text
     assert "Quick Test Console" in index.text
