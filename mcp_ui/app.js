@@ -22,7 +22,9 @@ function readLayout() {
     const current = localStorage.getItem(LAYOUT_KEY);
     const saved = JSON.parse(current || localStorage.getItem("unigrok.mcp.console.layout.v1") || "{}");
     const legacyNav = saved.nav === "hidden" ? "hide" : "show";
-    const legacyInspector = saved.inspector === "open" ? "show" : "hide";
+    // v1 persisted resolver outcomes, not trustworthy user intent. Preserve a
+    // hidden nav choice, but retire its default-open inspector rail.
+    const legacyInspector = "hide";
     return {
       ...defaultLayout,
       ...saved,
