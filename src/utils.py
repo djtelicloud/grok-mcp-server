@@ -7026,6 +7026,7 @@ async def _select_routing_model(
     active_store: Any,
     input_messages: Optional[List[Dict[str, Any]]],
     enable_agentic: bool,
+    requested_plane: Literal["auto", "cli", "api"] = "auto",
 ) -> tuple[str, str, Dict[str, Any], bool]:
     """Select a model and emit the single routing receipt used everywhere."""
     reason_score = routing_reason_score(prompt) if mode == "auto" else 0
@@ -7043,6 +7044,23 @@ async def _select_routing_model(
                 "research mode requires a grok-4.20-multi-agent model; "
                 f"explicit model '{model}' is incompatible"
             )
+        catalog_source = "not_consulted"
+        if requested_plane == "cli":
+            cli_status = grok_cli_plane_status()
+            cli_models = {str(item) for item in cli_status.get("models", []) if str(item)}
+            if not cli_status.get("ready") or model not in cli_models:
+                raise ValueError(
+                    f"Model '{model}' is not available on the authenticated CLI subscription plane. "
+                    f"Available CLI models: {', '.join(sorted(cli_models)) or 'none'}."
+                )
+            catalog_source = "grok_cli_live"
+        elif requested_plane == "api":
+            api_models, api_source, api_available = await _MODEL_RESOLVER.catalog_snapshot()
+            if api_available and model not in set(api_models):
+                raise ValueError(
+                    f"Model '{model}' is not available on the xAI developer API plane."
+                )
+            catalog_source = api_source
         receipt = make_routing_receipt(
             mode=mode,
             route_class="pinned",
@@ -7052,7 +7070,7 @@ async def _select_routing_model(
             features=features,
             candidates=[{"model": model, "rank": 0, "selected": True}],
             evidence_source="explicit",
-            catalog_source="not_consulted",
+            catalog_source=catalog_source,
             pin_source="model",
         )
         return model, "pin", receipt, True
@@ -7078,12 +7096,23 @@ async def _select_routing_model(
         features=features,
         borderline_prefers_planning=borderline_prefers,
     )
+    if requested_plane == "cli" and (thinking_mode or route_class in {"vision", "research"}):
+        raise ValueError(
+            f"Route class '{route_class}' is API-only and cannot run on the strict CLI plane."
+        )
     route_uses_reasoning = route_class in ("planning", "vision", "research")
 
     alias = route_class if route_class in _MODEL_ALIAS_ENV_OVERRIDES else "planning"
     env_name = _MODEL_ALIAS_ENV_OVERRIDES[alias]
     env_model = os.environ.get(env_name, "").strip()
     if env_model:
+        if requested_plane == "cli":
+            cli_status = grok_cli_plane_status()
+            cli_models = {str(item) for item in cli_status.get("models", []) if str(item)}
+            if env_model not in cli_models:
+                raise ValueError(f"{env_name}='{env_model}' is not available on the CLI plane")
+        elif requested_plane == "api" and is_cli_model(env_model):
+            raise ValueError(f"{env_name}='{env_model}' is CLI-only and cannot run on the API plane")
         if route_class == "research" and not env_model.startswith("grok-4.20-multi-agent"):
             raise ValueError(
                 f"{env_name} must name a grok-4.20-multi-agent model for research mode"
@@ -7102,7 +7131,10 @@ async def _select_routing_model(
         )
         return env_model, "pin", receipt, route_uses_reasoning
 
-    if prefer_cli_for_route(route_class=route_class, thinking_mode=thinking_mode):
+    if requested_plane == "cli" or (
+        requested_plane == "auto"
+        and prefer_cli_for_route(route_class=route_class, thinking_mode=thinking_mode)
+    ):
         cli_status = grok_cli_plane_status()
         model = keyless_cli_model(None, route_uses_reasoning, cli_status)
         live_cli_models = [
@@ -7187,6 +7219,8 @@ async def orchestrate(
     include: Optional[List[str]] = None,
     caller: Optional[str] = None,
     require_reasoning_level: Optional[Literal["low", "medium", "high"]] = None,
+    requested_plane: Literal["auto", "cli", "api"] = "auto",
+    fallback_policy: Literal["same_plane", "cross_plane"] = "cross_plane",
 ) -> MetaLayer:
     """
     Route a prompt through the layered execution planes:
@@ -7230,6 +7264,7 @@ async def orchestrate(
         active_store=store,
         input_messages=input_messages,
         enable_agentic=enable_agentic,
+        requested_plane=requested_plane,
     )
     direct_cli = (
         is_cli_model(profile_model)
@@ -7237,6 +7272,15 @@ async def orchestrate(
             "grok_cli_live", "grok_cli_fallback"
         }
     )
+    resolved_plane = "CLI" if direct_cli else "API"
+    routing_receipt = {
+        **routing_receipt,
+        "requested_plane": requested_plane.upper() if requested_plane != "auto" else "auto",
+        "resolved_plane": resolved_plane,
+        "fallback_policy": fallback_policy,
+        "fallback_occurred": False,
+        "billing_class": "subscription" if direct_cli else "metered",
+    }
     if direct_cli and thinking_mode:
         logging.getLogger("GrokMCP").info(
             "thinking_mode requires the xAI API plane; using direct Grok CLI route because XAI_API_KEY is not configured."
@@ -7409,7 +7453,7 @@ async def orchestrate(
             )
 
     except Exception as e:
-        if is_cli_model(actual_model):
+        if direct_cli:
             logging.getLogger("GrokMCP").warning(f"Direct Grok CLI route failed: {e}")
             layer.generation = str(e)
             layer.tokens = 0
@@ -7442,7 +7486,31 @@ async def orchestrate(
             await _save_task_memory_safe(store, prompt, layer, actual_model, 0)
             return layer
 
-        # Graceful CLI fallback
+        # Graceful CLI fallback. A strict API request, or same-plane policy,
+        # must never silently cross the billing boundary.
+        if requested_plane == "api" or fallback_policy == "same_plane":
+            layer.generation = f"API execution failed without cross-plane fallback: {e}"
+            layer.tokens = 0
+            layer.cost_usd = 0.0
+            layer.plane = "API"
+            layer.route = "fast"
+            layer.model = actual_model
+            layer.finish_reason = "error"
+            layer.profile = str(active_profile.get("profile") or "")
+            layer.context_id = context_id
+            layer.routing_why = "error"
+            layer.degraded = False
+            layer.routing_receipt = {
+                **routing_receipt,
+                "why": "error",
+                "why_detail": "same_plane_failure",
+                "resolved_plane": "API",
+            }
+            layer.latency = time.time() - start_time
+            await _save_task_memory_safe(store, prompt, layer, actual_model, 0)
+            return layer
+
+        # Graceful CLI fallback for backward-compatible automatic routing.
         if is_cloudrun_runtime():
             if store:
                 await store.save_telemetry(
@@ -7488,6 +7556,9 @@ async def orchestrate(
                 "why": "failover",
                 "why_detail": "api_to_cli_fallback",
                 "fallback": {"from_model": actual_model, "to_model": layer.model},
+                "resolved_plane": "CLI",
+                "fallback_occurred": True,
+                "billing_class": "subscription",
             }
             if store:
                 await store.save_telemetry(
@@ -7518,6 +7589,9 @@ async def orchestrate(
                 "why": "failover",
                 "why_detail": "api_and_cli_failed",
                 "fallback": {"from_model": actual_model, "to_model": layer.model},
+                "resolved_plane": "CLI",
+                "fallback_occurred": True,
+                "billing_class": "subscription",
             }
             if store:
                 await store.save_telemetry(
@@ -7557,6 +7631,8 @@ async def run_agent_turn(
     include: Optional[List[str]] = None,
     caller: Optional[str] = None,
     require_reasoning_level: Optional[Literal["low", "medium", "high"]] = None,
+    plane: Literal["auto", "cli", "api"] = "auto",
+    fallback_policy: Literal["same_plane", "cross_plane"] = "cross_plane",
 ) -> MetaLayer:
     """Shared single-agent gateway boundary used by HTTP and remote MCP.
 
@@ -7645,16 +7721,45 @@ async def run_agent_turn(
             context_id=context_id,
         )
 
+    has_image = bool(extract_routing_features(
+        final_prompt,
+        reason_score=0,
+        input_messages=input_messages or None,
+        enable_agentic=enable_agentic,
+    ).get("has_image"))
+    if plane == "cli" and (thinking_mode or mode == "research" or has_image):
+        return MetaLayer(
+            generation=(
+                f"The requested {mode if mode == 'research' else 'thinking/vision'} capability "
+                "is API-only and cannot run with plane='cli'. Choose plane='api' or plane='auto'."
+            ),
+            finish_reason="error",
+            route="plane-validation",
+            plane="local",
+            model=model or "cli-incompatible",
+            routing_why="plane_validation",
+            routing_receipt={
+                "requested_plane": "CLI", "resolved_plane": None,
+                "fallback_policy": fallback_policy, "fallback_occurred": False,
+            },
+            credentials=credentials,
+            context_id=context_id,
+        )
+    if plane == "cli" and not credentials["cli"]["available"]:
+        return MetaLayer(
+            generation="The SuperGrok CLI subscription plane was requested but is not ready.",
+            finish_reason="error", route="credential-setup", plane="local",
+            model=model or "cli-required", routing_why="credentials",
+            credentials=credentials, context_id=context_id,
+        )
+
     request_requires_api = bool(
+        plane == "api"
+        or
         thinking_mode
         or mode == "research"
-        or (model and not is_cli_model(model))
-        or extract_routing_features(
-            final_prompt,
-            reason_score=0,
-            input_messages=input_messages or None,
-            enable_agentic=enable_agentic,
-        ).get("has_image")
+        or (plane == "auto" and model and not is_cli_model(model))
+        or has_image
     )
     if request_requires_api and not credentials["api"]["available"]:
         request_credentials = json.loads(json.dumps(credentials))
@@ -7703,6 +7808,8 @@ async def run_agent_turn(
         include=include,
         caller=caller,
         require_reasoning_level=require_reasoning_level,
+        requested_plane=plane,
+        fallback_policy=fallback_policy,
     )
     layer.credentials = credentials
 

@@ -179,11 +179,18 @@ Grok CLI subscription catalog separately from the xAI developer API catalog.
 Each side reports readiness, live-versus-fallback source, the CLI default, and
 its usage-accounting boundary.
 
-The same model id may appear on both sides. That duplication is intentional:
-the model slug is not the credential plane. A pin selects a model while the
-router still chooses a healthy compatible plane according to policy and
-capability requirements. Headless clients can read the same structured truth
-from `data.model_catalog` in the opt-in discovery response.
+The same exact model id may appear on both sides. That duplication is
+intentional: the model slug is not the credential plane. The public `agent`
+tool accepts `plane=auto|cli|api` and
+`fallback_policy=same_plane|cross_plane`. Strict `cli` and `api` requests do
+not cross the credential or billing boundary; `auto` preserves compatible
+routing. Headless clients can read the same structured truth from
+`data.model_catalog` in the opt-in discovery response.
+
+Grok Build is the coding-agent product name. `grok-build-0.1` is the exact
+metered API model slug. It belongs in the shared-id list only if the live CLI
+catalog also reports that exact string; the product relationship alone is not
+catalog equality.
 
 ## Why does UniGrok use port 4765, and what if it is occupied? {#port-in-use}
 

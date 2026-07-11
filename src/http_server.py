@@ -1349,6 +1349,8 @@ async def public_agent(
     workspace_label: Optional[str] = None,
     mode: Optional[Literal["auto", "fast", "reasoning", "thinking", "research"]] = None,
     model: Optional[str] = None,
+    plane: Literal["auto", "cli", "api"] = "auto",
+    fallback_policy: Literal["same_plane", "cross_plane"] = "cross_plane",
 ) -> AgentResult:
     """Single public remote MCP entry point for the UniGrok agent.
 
@@ -1370,6 +1372,11 @@ async def public_agent(
             enables multi-agent fan-out, and requests inline citations.
         model: Optional Grok model id. Leave unset (or pass the virtual
             `unigrok-agent`) to let routing choose.
+        plane: Credential plane contract. `auto` preserves compatible routing;
+            `cli` strictly uses the SuperGrok subscription; `api` strictly uses
+            the metered developer API.
+        fallback_policy: `same_plane` forbids crossing the billing boundary;
+            `cross_plane` preserves automatic recovery for legacy auto callers.
 
     Returns:
         AgentResult containing execution metadata and responses.
@@ -1411,6 +1418,8 @@ async def public_agent(
         "mode": resolved_mode if resolved_mode in ("reasoning", "research") else "auto",
         "thinking_mode": resolved_mode == "thinking",
         "enable_agentic": resolved_mode != "fast",
+        "plane": plane,
+        "fallback_policy": fallback_policy,
     }
     if is_research:
         kwargs["agent_count"] = _research_agent_count()
@@ -1436,6 +1445,10 @@ async def public_agent(
         requested_mode=resolved_mode,
         mode_source=mode_source,
         dialed_port=active_dial[0] if active_dial and mode is None else None,
+        requested_plane=plane,
+        resolved_plane=(layer.routing_receipt or {}).get("resolved_plane"),
+        fallback_policy=fallback_policy,
+        billing_class=(layer.routing_receipt or {}).get("billing_class"),
     )
 
 

@@ -73,6 +73,16 @@ def test_mcp_ui_static_files_are_served(monkeypatch):
     assert "mcp.console.layout.v1" in script.text
     assert "grid-template-columns: 1fr !important" not in styles.text
     assert "fonts.googleapis.com" not in index.text
+    assert 'id="planeInput"' in index.text
+    assert 'value="cli" selected' in index.text
+    assert 'id="fallbackPolicyInput"' in index.text
+    assert 'value="same_plane" selected' in index.text
+    assert 'id="factBilling"' in index.text
+    assert "syncModelOptions" in script.text
+    assert "Explicit pins use metered API" in script.text
+    assert "Direct CLI-only pins" in script.text
+    assert 'plane: $("planeInput").value' in script.text
+    assert 'fallback_policy: $("fallbackPolicyInput").value' in script.text
 
 
 def test_mcp_ui_layout_engine_is_local_and_ide_first():

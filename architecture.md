@@ -169,12 +169,14 @@ fresh eval calibration or mature local telemetry clears the 0.15 quality
 margin, which also provides deterministic anti-flap hysteresis.
 
 The local plane policy defaults to `cli_first`: compatible unpinned planning
-and coding work use the authenticated Grok CLI subscription. Explicit model or
-environment pins still win, while thinking, vision, and multi-agent research
-remain API-native. Discovery, status, `/runtimez`, and every public agent result
-carry the same versioned `credential_planes` contract. Agents prompt once per
-notice id and must obtain user approval before installation, device auth, or
-secure server-environment changes.
+and coding work use the authenticated Grok CLI subscription. The public agent
+also exposes a strict `plane=cli|api` contract plus `fallback_policy`; strict
+requests never cross the subscription/API billing boundary, and model pins are
+validated against the selected live catalog. Thinking, vision, and multi-agent
+research remain API-native. Discovery, status, `/runtimez`, and every public
+agent result carry the same versioned `credential_planes` contract. Agents
+prompt once per notice id and must obtain user approval before installation,
+device auth, or secure server-environment changes.
 
 CLI candidate slugs come from the model list returned by the cached,
 API-key-stripped OAuth health probe. Reasoning prefers the reported CLI default

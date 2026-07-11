@@ -185,6 +185,8 @@ async def test_public_agent_uses_run_agent_turn(monkeypatch):
         mode="auto",
         thinking_mode=False,
         enable_agentic=True,
+        plane="auto",
+        fallback_policy="cross_plane",
     )
     assert result.requested_mode == "auto"
     assert result.mode_source == "default"

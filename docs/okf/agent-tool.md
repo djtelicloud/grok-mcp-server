@@ -18,6 +18,11 @@ Primary entry point for any agent task.
   - `session` (string, optional): Context thread persistence.
   - `mode` (string, optional): `"auto"` (default), `"fast"`, `"reasoning"`, `"thinking"`, or `"research"`.
   - `model` (string, optional): Enforce a specific Grok model ID.
+  - `plane` (string, optional): `"auto"` (backward-compatible), `"cli"`
+    (strict SuperGrok subscription), or `"api"` (strict metered API).
+  - `fallback_policy` (string, optional): `"same_plane"` forbids crossing the
+    billing boundary; `"cross_plane"` preserves automatic recovery for legacy
+    auto callers.
   - `require_reasoning_level` (string, optional): `"low"`, `"medium"`, or `"high"`.
 - **Response Shape (`AgentResult`)**:
   ```json

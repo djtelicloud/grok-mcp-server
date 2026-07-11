@@ -21,13 +21,16 @@ Full design: [architecture.md](architecture.md). IDE setup:
 UniGrok is being evolved into a unified agent over **two Grok planes**:
 
 - **API plane** — `XAI_API_KEY`, per-token billing, reachable via the xAI API.
-  This is the mature, fully-wired plane (`grok-build-0.1` / `grok-code-fast-1`,
-  etc.). The `agent` tool's `fast` route runs here today.
+  Its live catalog includes the exact `grok-build-0.1` coding-model slug.
 - **CLI plane** — the Grok CLI's OAuth/OIDC session (`~/.grok/auth.json`,
   bearer against `https://cli-chat-proxy.grok.com/v1`). Grants access to
-  CLI-exclusive models `grok-build` (512k context) and `grok-composer-2.5-fast`
-  at ~zero marginal cost via a grok.com subscription — **not** reachable with
-  `XAI_API_KEY`.
+  the models returned by the authenticated live `grok models` catalog through
+  a grok.com subscription. Current observed IDs include `grok-4.5` and
+  `grok-composer-2.5-fast`; never infer CLI availability from a product name.
+
+The **Grok Build** coding-agent product and the API slug `grok-build-0.1` are
+related but not interchangeable catalog identities. Plane membership is always
+the exact intersection/difference of the two live provider catalogs.
 
 Current state: the CLI plane **runs inside Docker** — the image bakes the
 Linux `grok` binary (`Dockerfile`, pinned) and `docker-compose.yml` mounts the

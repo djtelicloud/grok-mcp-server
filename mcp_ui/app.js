@@ -931,6 +931,63 @@ async function loadModelsList() {
   }
 }
 
+function syncModelOptions() {
+  const select = $("modelInput");
+  const plane = $("planeInput")?.value || "auto";
+  const catalog = state.modelCatalog;
+  if (!select || !catalog?.planes) return;
+  const previous = select.value;
+  const cliModels = catalog.planes.CLI?.models || [];
+  const apiModels = catalog.planes.API?.models || [];
+  const apiIds = new Set(apiModels.map((model) => String(model?.id || "")));
+  const cliOnlyModels = cliModels.filter((model) => !apiIds.has(String(model?.id || "")));
+  const groups = plane === "cli"
+    ? [["CLI subscription models", cliModels]]
+    : plane === "api"
+      ? [["Metered API models", apiModels]]
+      : [["Direct CLI-only pins", cliOnlyModels], ["Explicit pins use metered API", apiModels]];
+  select.replaceChildren();
+  const automatic = document.createElement("option");
+  automatic.value = "";
+  automatic.innerText = plane === "cli" ? "auto CLI model (Recommended)" : plane === "api" ? "auto API model" : "auto route";
+  select.appendChild(automatic);
+  const seen = new Set();
+  for (const [label, models] of groups) {
+    const group = document.createElement("optgroup");
+    group.label = label;
+    for (const model of models) {
+      const id = String(model?.id || "");
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      const option = document.createElement("option");
+      option.value = id;
+      option.innerText = id;
+      group.appendChild(option);
+    }
+    if (group.children.length) select.appendChild(group);
+  }
+  select.value = seen.has(previous) ? previous : "";
+}
+
+function updatePlaneControls() {
+  const plane = $("planeInput")?.value || "auto";
+  const hint = $("planeHint");
+  const fallback = $("fallbackPolicyInput");
+  if (plane === "cli") {
+    hint.innerText = "Subscription only · no developer API billing";
+    hint.classList.remove("metered");
+    fallback.value = "same_plane";
+  } else if (plane === "api") {
+    hint.innerText = "Metered developer API · exact cost reported after execution";
+    hint.classList.add("metered");
+    fallback.value = "same_plane";
+  } else {
+    hint.innerText = "Subscription first · cross-plane fallback may incur API charges";
+    hint.classList.add("metered");
+  }
+  syncModelOptions();
+}
+
 function readableCatalogSource(source) {
   const labels = {
     grok_cli: "Live Grok CLI",
@@ -1027,6 +1084,7 @@ function renderPlaneModelCatalog(catalog) {
   const planes = catalog?.planes || {};
   const sharedIds = new Set(catalog?.shared_model_ids || []);
   state.modelCatalog = catalog;
+  syncModelOptions();
 
   $("modelsRoutingPolicy").innerText = String(routing.policy || "unknown").replaceAll("_", " ");
   $("modelsPreferredPlane").innerText = `Preferred: ${routing.preferred_plane || "none"}`;
@@ -1330,6 +1388,8 @@ function renderFactsPane(method, response, elapsed) {
   $("factCost").innerText = payload.cost_usd ? `$${payload.cost_usd.toFixed(5)}` : "-";
   $("factRoute").innerText = payload.route || "-";
   $("factPlane").innerText = payload.plane || "-";
+  $("factBilling").innerText = payload.billing_class || payload.routing?.billing_class || "-";
+  $("factRequestedPlane").innerText = payload.requested_plane || payload.routing?.requested_plane || "-";
   $("factModel").innerText = payload.model || "-";
   $("factSelection").innerText = routingLabel(payload.routing?.why_detail || payload.why || "-");
 }
@@ -1339,6 +1399,8 @@ async function callAgent(prompt) {
     prompt: prompt,
     mode: $("modeInput").value,
     session: $("sessionInput").value || "default",
+    plane: $("planeInput").value,
+    fallback_policy: $("fallbackPolicyInput").value,
   };
 
   const model = $("modelInput").value;
@@ -1390,6 +1452,8 @@ function setupConsoleActions() {
     const args = {
       prompt: $("promptInput").value.trim() || "Example task",
       mode: $("modeInput").value,
+      plane: $("planeInput").value,
+      fallback_policy: $("fallbackPolicyInput").value,
     };
     const model = $("modelInput").value;
     if (model) args.model = model;
@@ -1416,6 +1480,8 @@ function setupConsoleActions() {
       latency: $("factLatency").innerText,
       route: $("factRoute").innerText,
       plane: $("factPlane").innerText,
+      billing: $("factBilling").innerText,
+      requested_plane: $("factRequestedPlane").innerText,
       model: $("factModel").innerText,
       selection: $("factSelection").innerText,
     };
@@ -1808,7 +1874,7 @@ function init() {
   $("refreshMetricsBtn").addEventListener("click", fetchLiveMetrics);
 
   // Input listeners
-  const inputIds = ["clientIdInput", "callerInput", "sessionInput", "modeInput", "modelInput", "systemPromptInput"];
+  const inputIds = ["clientIdInput", "callerInput", "sessionInput", "modeInput", "modelInput", "planeInput", "fallbackPolicyInput", "systemPromptInput"];
   for (const id of inputIds) {
     const el = $(id);
     if (el) {
@@ -1816,6 +1882,8 @@ function init() {
       el.addEventListener("change", updateActiveContext);
     }
   }
+  $("planeInput")?.addEventListener("change", updatePlaneControls);
+  updatePlaneControls();
 
   resetConversation();
 
@@ -1826,6 +1894,7 @@ function init() {
     await runStartupCheck();
     await fetchRuntimeStatus();
     await loadModelsList();
+    await loadPlaneModelCatalog();
     await fetchMcpListTools();
     await registerWebMcpTools();
   }, 100);

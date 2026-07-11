@@ -83,6 +83,11 @@ in the dedicated `unigrok-cli-auth` Docker volume. It is service identity, not
 project identity: never repeat this when switching repositories. Ordinary
 startup is noninteractive and remains API-capable when CLI auth is absent.
 
+For an explicit no-API-billing agent call, set `plane="cli"` and
+`fallback_policy="same_plane"`. Use `plane="api"` for a strict metered API
+call. The default `plane="auto"` remains backward compatible; the Control
+Center defaults to the safer subscription-only contract.
+
 This is a standalone, workspace-neutral service. The image runs its baked
 application from `/app`, keeps mutable data in a Docker volume at `/state`, and
 does **not** mount this repository or whichever project an IDE currently has
@@ -259,7 +264,8 @@ Core tools:
 - capability classes are `planning`, `coding`, `vision`, and `research`;
 - planning cold-starts on `grok-4.5`, coding on `grok-build-0.1`, and research
   on the live Grok 4.20 multi-agent slug;
-- explicit model pins and `UNIGROK_*_MODEL` overrides always win;
+- explicit model pins and `UNIGROK_*_MODEL` overrides win only after strict
+  plane/catalog compatibility validation;
 - the live catalog is cached for 15 minutes and a discovery failure uses the
   bundled model directory instead of blocking a request;
 - fresh eval calibration is considered before local telemetry, but a peer

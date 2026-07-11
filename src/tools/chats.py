@@ -127,6 +127,8 @@ async def agent(
     mode: Literal["auto", "fast", "reasoning", "thinking", "research"] = "auto",
     model: Optional[str] = None,
     require_reasoning_level: Optional[Literal["low", "medium", "high"]] = None,
+    plane: Literal["auto", "cli", "api"] = "auto",
+    fallback_policy: Literal["same_plane", "cross_plane"] = "cross_plane",
     ctx: Optional[Context] = None,
 ) -> AgentResult:
     """Run the unified UniGrok agent on any task. This is the headline entry
@@ -155,6 +157,11 @@ async def agent(
             inline citations requested — sources come back under `citations`.
         model: Optional Grok model id. Leave unset to let routing choose.
         require_reasoning_level: Minimum required Grok reasoning level (low, medium, high).
+        plane: Credential plane contract. `auto` preserves compatible routing;
+            `cli` strictly uses the SuperGrok subscription; `api` strictly uses
+            the metered developer API.
+        fallback_policy: `same_plane` forbids crossing the billing boundary;
+            `cross_plane` preserves automatic API-to-CLI recovery in auto mode.
 
     Returns:
         AgentResult containing execution metadata and responses.
@@ -176,6 +183,8 @@ async def agent(
         # session metadata, and per-caller budgets downstream.
         caller=caller_from_mcp_context(ctx) if ctx is not None else None,
         require_reasoning_level=require_reasoning_level,
+        plane=plane,
+        fallback_policy=fallback_policy,
     )
     citations_mapped = [{"url": url} for url in layer.citations] if layer.citations else None
     return AgentResult(
@@ -194,6 +203,10 @@ async def agent(
         credentials=getattr(layer, "credentials", None) or None,
         degraded=layer.degraded,
         citations=citations_mapped,
+        requested_plane=plane,
+        resolved_plane=(layer.routing_receipt or {}).get("resolved_plane"),
+        fallback_policy=fallback_policy,
+        billing_class=(layer.routing_receipt or {}).get("billing_class"),
     )
 
 

@@ -371,9 +371,23 @@ body {
 
 .form-group.row-group {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
   gap: 16px;
 }
+
+.plane-hint {
+  align-self: end;
+  min-height: 38px;
+  padding: 9px 10px;
+  border: 1px solid rgba(22, 240, 174, 0.22);
+  border-radius: var(--radius-sm);
+  background: var(--teal-soft);
+  color: var(--teal);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.plane-hint.metered { color: var(--orange); border-color: rgba(255, 140, 58, .3); background: var(--orange-soft); }
 
 label {
   font-size: 12px;

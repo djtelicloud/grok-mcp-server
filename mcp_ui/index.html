@@ -109,6 +109,14 @@
                 </div>
               </div>
               <div class="form-group row-group">
+                <label for="planeInput">
+                  Run With
+                  <select id="planeInput" aria-label="Credential plane selection">
+                    <option value="cli" selected>SuperGrok subscription (Recommended)</option>
+                    <option value="auto">Smart routing (may use metered API)</option>
+                    <option value="api">Developer API (Metered)</option>
+                  </select>
+                </label>
                 <label for="modeInput">
                   Execution Mode
                   <select id="modeInput" aria-label="Execution mode selection">
@@ -126,6 +134,7 @@
                     <!-- Populated dynamically -->
                   </select>
                 </label>
+                <p id="planeHint" class="plane-hint">Subscription only · no developer API billing</p>
                 <label class="toggle-label-legacy">
                   <input id="legacyModeToggle" type="checkbox" aria-label="Toggle legacy mode output format" /> Legacy Mode
                 </label>
@@ -154,6 +163,12 @@
                   </label>
                   <label>Billing Caller (X-Caller)
                     <input id="callerInput" type="text" placeholder="e.g. swarm-agent-0" />
+                  </label>
+                  <label>Failure Policy
+                    <select id="fallbackPolicyInput">
+                      <option value="same_plane" selected>Stay on selected plane</option>
+                      <option value="cross_plane">Allow cross-plane fallback</option>
+                    </select>
                   </label>
                   <label>Injected System Rules
                     <textarea id="systemPromptInput" rows="3" placeholder="Additional system prompt instructions..."></textarea>
@@ -309,7 +324,7 @@
                 <span aria-hidden="true">→</span>
                 <span id="modelsEffectivePlane" class="plane-route-chip active">Effective: —</span>
               </div>
-              <p id="modelsRoutingRule">An explicit model pin selects a model; the router still chooses a healthy compatible credential plane.</p>
+              <p id="modelsRoutingRule">Plane and model are separate contracts. Strict CLI/API requests never cross billing boundaries.</p>
             </section>
 
             <div class="model-plane-grid">
@@ -347,6 +362,7 @@
             </div>
 
             <div id="sharedModelsNote" class="coverage-note hidden"></div>
+            <div class="coverage-note">Grok Build is the coding-agent product. <code>grok-build-0.1</code> is its exact metered API model slug; the current CLI catalog advertises different selectable model IDs.</div>
             <div id="modelCatalogWarnings" class="model-warning-list hidden" aria-live="polite"></div>
           </div>
 
@@ -501,6 +517,8 @@
               <dt>Latency</dt><dd id="factLatency">-</dd>
               <dt>Route</dt><dd id="factRoute">-</dd>
               <dt>Plane</dt><dd id="factPlane">-</dd>
+              <dt>Billing</dt><dd id="factBilling">-</dd>
+              <dt>Requested Plane</dt><dd id="factRequestedPlane">-</dd>
               <dt>Model</dt><dd id="factModel">-</dd>
               <dt>Selected Because</dt><dd id="factSelection">-</dd>
             </dl>

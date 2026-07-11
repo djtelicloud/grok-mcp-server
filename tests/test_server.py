@@ -548,6 +548,37 @@ async def test_agent_tool_returns_structured_metadata(monkeypatch):
     assert kwargs["thinking_mode"] is False
     assert kwargs["enable_agentic"] is True
     assert kwargs["model"] is None
+    assert kwargs["plane"] == "auto"
+    assert kwargs["fallback_policy"] == "cross_plane"
+
+
+@pytest.mark.asyncio
+async def test_agent_tool_forwards_strict_subscription_contract(monkeypatch):
+    mock_run = AsyncMock(return_value=MetaLayer(
+        generation="subscription answer",
+        plane="CLI",
+        model="grok-4.5",
+        routing_receipt={
+            "requested_plane": "CLI",
+            "resolved_plane": "CLI",
+            "fallback_policy": "same_plane",
+            "billing_class": "subscription",
+        },
+    ))
+    monkeypatch.setattr("src.tools.chats.run_agent_turn", mock_run)
+
+    result = await agent(
+        task="use subscription",
+        plane="cli",
+        fallback_policy="same_plane",
+        model="grok-4.5",
+    )
+
+    assert mock_run.call_args.kwargs["plane"] == "cli"
+    assert mock_run.call_args.kwargs["fallback_policy"] == "same_plane"
+    assert result.requested_plane == "cli"
+    assert result.resolved_plane == "CLI"
+    assert result.billing_class == "subscription"
 
 
 @pytest.mark.asyncio

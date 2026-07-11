@@ -205,6 +205,74 @@ async def test_cli_first_keeps_api_only_and_explicit_paths(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_strict_plane_pin_uses_matching_live_catalog(monkeypatch):
+    from src import utils
+
+    monkeypatch.setattr(
+        utils,
+        "grok_cli_plane_status",
+        lambda **_: {
+            **READY_CLI,
+            "models": ["grok-4.5", "grok-composer-2.5-fast"],
+            "default_model": "grok-4.5",
+        },
+    )
+    cli_model, _, cli_receipt, _ = await utils._select_routing_model(
+        prompt="Use my subscription", mode="auto", thinking_mode=False,
+        requested_model="grok-4.5", requested_plane="cli", active_store=None,
+        input_messages=None, enable_agentic=True,
+    )
+    assert cli_model == "grok-4.5"
+    assert cli_receipt["catalog"]["source"] == "grok_cli_live"
+
+    monkeypatch.setattr(
+        utils._MODEL_RESOLVER,
+        "catalog_snapshot",
+        AsyncMock(return_value=(["grok-4.5", "grok-build-0.1"], "xai_api", True)),
+    )
+    api_model, _, api_receipt, _ = await utils._select_routing_model(
+        prompt="Use metered API", mode="auto", thinking_mode=False,
+        requested_model="grok-build-0.1", requested_plane="api", active_store=None,
+        input_messages=None, enable_agentic=True,
+    )
+    assert api_model == "grok-build-0.1"
+    assert api_receipt["catalog"]["source"] == "xai_api"
+
+
+@pytest.mark.asyncio
+async def test_strict_cli_rejects_api_only_model(monkeypatch):
+    from src import utils
+
+    monkeypatch.setattr(
+        utils,
+        "grok_cli_plane_status",
+        lambda **_: {
+            **READY_CLI,
+            "models": ["grok-4.5", "grok-composer-2.5-fast"],
+            "default_model": "grok-4.5",
+        },
+    )
+    with pytest.raises(ValueError, match="not available on the authenticated CLI"):
+        await utils._select_routing_model(
+            prompt="Pin API coding model", mode="auto", thinking_mode=False,
+            requested_model="grok-build-0.1", requested_plane="cli", active_store=None,
+            input_messages=None, enable_agentic=True,
+        )
+
+
+@pytest.mark.asyncio
+async def test_direct_router_rejects_api_only_route_on_strict_cli():
+    from src import utils
+
+    with pytest.raises(ValueError, match="API-only"):
+        await utils._select_routing_model(
+            prompt="Research current evidence", mode="research", thinking_mode=False,
+            requested_model=None, requested_plane="cli", active_store=None,
+            input_messages=None, enable_agentic=True,
+        )
+
+
+@pytest.mark.asyncio
 async def test_agent_turn_returns_actions_when_both_planes_are_missing(monkeypatch):
     from src import utils
 

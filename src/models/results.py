@@ -42,6 +42,18 @@ class AgentResult(BaseResult):
         None, description="Where the resolved public agent mode came from."
     )
     dialed_port: Optional[int] = Field(None, description="Phoneword mode port used as the default, if any.")
+    requested_plane: Optional[Literal["auto", "cli", "api"]] = Field(
+        None, description="Caller-selected credential plane contract."
+    )
+    resolved_plane: Optional[Literal["API", "CLI", "CLI-Fallback", "local"]] = Field(
+        None, description="Credential plane that actually executed the request."
+    )
+    fallback_policy: Optional[Literal["same_plane", "cross_plane"]] = Field(
+        None, description="Whether execution may cross credential planes after failure."
+    )
+    billing_class: Optional[Literal["subscription", "metered"]] = Field(
+        None, description="Subscription-backed or metered execution classification."
+    )
 
 class ReflectionResult(BaseResult):
     ok: bool = Field(..., description="Whether the reflection was successful.")
