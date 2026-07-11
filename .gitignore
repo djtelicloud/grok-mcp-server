@@ -183,3 +183,8 @@ pyrightconfig.json
 # are raw material reviewed before being checked in as curated cassettes)
 evals/out/
 evals/cassettes/recorded.jsonl
+
+!sites/unigrok-control-center/app/lib/
+!sites/unigrok-control-center/app/lib/unigrok-config.ts
+!sites/unigrok-control-center/build/
+!sites/unigrok-control-center/build/sites-vite-plugin.ts

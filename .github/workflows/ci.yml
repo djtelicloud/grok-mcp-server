@@ -10,6 +10,34 @@ permissions:
   contents: read
 
 jobs:
+  site-template:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sites/unigrok-control-center
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: sites/unigrok-control-center/package-lock.json
+
+      - name: Install Site dependencies
+        run: npm ci
+
+      - name: Audit Site dependencies
+        run: npm audit --audit-level=moderate
+
+      - name: Lint Site template
+        run: npm run lint
+
+      - name: Test Site template
+        run: npm test
+
   build:
     runs-on: ubuntu-latest
     strategy:

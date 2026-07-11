@@ -9,7 +9,7 @@
 [![MCP](https://img.shields.io/badge/MCP-Streamable%20HTTP-black?style=flat-square)](https://modelcontextprotocol.io)
 [![xAI Grok](https://img.shields.io/badge/xAI-Grok-000000?style=flat-square)](https://docs.x.ai/?utm_source=github&utm_medium=readme&utm_campaign=unigrok&utm_content=badge-docs)
 
-[Quick Start](#quick-start) · [IDE Setup](#ide-setup) · [Tool Surface](#tool-surface) · [Architecture](#architecture) · [Security](#security-model)
+[Quick Start](#quick-start) · [IDE Setup](#ide-setup) · [Personal ChatGPT Site](#personal-chatgpt-site) · [Tool Surface](#tool-surface) · [Architecture](#architecture) · [Security](#security-model)
 
 </div>
 
@@ -118,6 +118,25 @@ Open the local Control Center:
 ```text
 http://localhost:4765/ui/
 ```
+
+## Personal ChatGPT Site
+
+The local Control Center remains the default operational surface. People who
+also want a private hosted dashboard can provision the reusable
+[UniGrok Control Center Site template](sites/unigrok-control-center/README.md)
+inside their own ChatGPT account.
+
+Each deployment receives its own Site identity and access policy. The public
+template contains no project ID, personal account identifier, GitHub token,
+xAI key, Grok CLI session, or shared UniGrok credential. A hosted Site also
+does not pretend it can reach the installer’s laptop through `localhost`; its
+wizard explains local-only development and the outbound Secure MCP Tunnel
+boundary separately.
+
+Clone or fork this repository, open it in ChatGPT Work, and follow the
+provisioning prompt and pre-deployment review gate in the template README.
+Every Sites deployment URL is production, so save and review a version before
+approving deployment.
 
 ## Install Script
 

@@ -1,0 +1,48 @@
+{
+  "name": "unigrok-control-center-template",
+  "version": "0.1.0",
+  "private": true,
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "install:ci": "bash scripts/install-ci.sh",
+    "dev": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vite",
+    "build": "bash scripts/build-verified.sh",
+    "start": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext start",
+    "test": "npm run check:template && npm run typecheck && npm run build && node --test tests/*.test.mjs",
+    "test:deployment": "npm run check:deployment && npm run typecheck && npm run build && node --test tests/*.test.mjs",
+    "check:template": "node scripts/check-template-safety.mjs",
+    "check:deployment": "node scripts/check-template-safety.mjs --allow-provisioned-manifest",
+    "typecheck": "tsc --noEmit",
+    "validate:artifact": "bash scripts/validate-artifact.sh",
+    "lint": "bash scripts/sites-env.sh -- eslint . --ignore-pattern dist --ignore-pattern .next"
+  },
+  "dependencies": {
+    "next": "16.2.10",
+    "react": "19.2.6",
+    "react-dom": "19.2.6"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "1.44.0",
+    "@tailwindcss/postcss": "4.2.1",
+    "@types/node": "22.19.19",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "6.0.2",
+    "@vitejs/plugin-rsc": "0.5.26",
+    "eslint": "9.39.4",
+    "eslint-config-next": "16.2.10",
+    "react-server-dom-webpack": "19.2.6",
+    "tailwindcss": "4.2.1",
+    "typescript": "5.9.3",
+    "vinext": "0.0.50",
+    "vite": "8.1.4",
+    "wrangler": "4.110.0"
+  },
+  "overrides": {
+    "postcss": "8.5.10"
+  },
+  "type": "module",
+  "displayName": "UniGrok Control Center Template"
+}
