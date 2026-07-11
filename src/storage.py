@@ -157,6 +157,41 @@ class SessionStoreProtocol(Protocol):
         self, limit: int = 20, scope: Optional[str] = None
     ) -> List[Dict[str, Any]]: ...
 
+    # ── Swarm optimizer state (v12, src/swarm/) ──────────────────────────────
+    async def create_swarm_task(
+        self,
+        task_id: str,
+        target_path: str,
+        focus_node: str,
+        base_file_hash: str,
+        test_target: str,
+        bench_command: str,
+        budget_usd: float,
+        seed: int,
+        caller: Optional[str] = None,
+        request_id: Optional[str] = None,
+    ) -> None: ...
+    async def update_swarm_task(
+        self,
+        task_id: str,
+        status: Optional[str] = None,
+        spent_usd: Optional[float] = None,
+        generation: Optional[int] = None,
+        baseline_json: Optional[str] = None,
+        oracle_json: Optional[str] = None,
+        folded_state: Optional[str] = None,
+    ) -> None: ...
+    async def get_swarm_task(self, task_id: str) -> Optional[Dict[str, Any]]: ...
+    async def list_swarm_tasks(self, limit: int = 20) -> List[Dict[str, Any]]: ...
+    async def insert_swarm_candidate(self, candidate: Dict[str, Any]) -> bool: ...
+    async def list_swarm_candidates(
+        self,
+        task_id: str,
+        feasible_only: bool = False,
+        generation: Optional[int] = None,
+        limit: int = 500,
+    ) -> List[Dict[str, Any]]: ...
+
     # ── Sessions & messages ──────────────────────────────────────────────────
     async def get_session(self, session_name: str) -> Optional[Dict[str, Any]]: ...
     async def save_session(

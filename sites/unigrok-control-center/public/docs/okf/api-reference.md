@@ -771,6 +771,95 @@ as sqlite). Unknown values fail fast with NotImplementedError naming the
 supported set — a typo must not silently fall back to SQLite. db_path is
 backend-specific (the SQLite file path; tests use per-test temp paths).
 
+## swarm/config.py {#swarm-config}
+
+### Function: `swarm_mode` {#swarm-config-swarm_mode}
+
+```python
+def swarm_mode() -> str
+```
+
+**Keywords:** swarm, mode
+
+The rollout mode, defaulting to 'off'. Unknown values warn once and
+read as 'off' (same rationale as rag.task_rag_mode / semantic_evals_mode:
+a loud log plus status visibility beats aborting a shared local server).
+
+### Function: `swarm_eval_timeout` {#swarm-config-swarm_eval_timeout}
+
+```python
+def swarm_eval_timeout() -> float
+```
+
+**Keywords:** swarm, eval, timeout
+
+Per-candidate evaluation (tests + bench) wall-clock ceiling.
+
+### Function: `swarm_stage_budget_fraction` {#swarm-config-swarm_stage_budget_fraction}
+
+```python
+def swarm_stage_budget_fraction() -> float
+```
+
+**Keywords:** swarm, stage, budget, fraction
+
+Fraction of the eval timeout the preflight baseline run must fit in —
+a test_target slower than this fails the task at start instead of
+producing a multi-hour zombie.
+
+### Function: `swarm_bench_repeats` {#swarm-config-swarm_bench_repeats}
+
+```python
+def swarm_bench_repeats() -> int
+```
+
+**Keywords:** swarm, bench, repeats
+
+Measured bench repeats (an additional first warmup run is discarded).
+
+### Function: `swarm_max_copy_mb` {#swarm-config-swarm_max_copy_mb}
+
+```python
+def swarm_max_copy_mb() -> int
+```
+
+**Keywords:** swarm, max, copy, mb
+
+Workspace-copy size guard for the per-task sandbox.
+
+### Function: `swarm_child_mem_mb` {#swarm-config-swarm_child_mem_mb}
+
+```python
+def swarm_child_mem_mb() -> int
+```
+
+**Keywords:** swarm, child, mem, mb
+
+RLIMIT_AS ceiling for mutant test/bench child processes.
+
+### Function: `swarm_stale_after_sec` {#swarm-config-swarm_stale_after_sec}
+
+```python
+def swarm_stale_after_sec() -> float
+```
+
+**Keywords:** swarm, stale, after, sec
+
+Heartbeat staleness horizon: a running task whose row has not been
+touched for this long is reported failed_stale (the runner touches
+updated_at after every candidate). Deliberately derived from the eval
+timeout — a healthy swarm can far exceed JobManager's global default.
+
+### Function: `reset_swarm_state` {#swarm-config-reset_swarm_state}
+
+```python
+def reset_swarm_state() -> None
+```
+
+**Keywords:** reset, swarm, state
+
+Test isolation for module-level flags.
+
 ## tools/chats.py {#tools-chats}
 
 ### Class: `GrokReflectionResult` {#tools-chats-grokreflectionresult}
@@ -2334,6 +2423,48 @@ async def GrokSessionStore.update_job(self, job_id: str, status: Optional[str]=N
 
 Update a job row; updated_at always bumps so staleness detection
 (JobManager) measures the last time the owning task touched the row.
+
+### Method: `GrokSessionStore.create_swarm_task` {#utils-groksessionstore-create_swarm_task}
+
+```python
+async def GrokSessionStore.create_swarm_task(self, task_id: str, target_path: str, focus_node: str, base_file_hash: str, test_target: str, bench_command: str, budget_usd: float, seed: int, caller: Optional[str]=None, request_id: Optional[str]=None) -> None
+```
+
+**Keywords:** grok, session, store, create, swarm, task
+
+Insert a 'queued' swarm task row. caller/request_id fall back to
+the identities bound to the current async context (the src/storage.py
+contract), matching create_job.
+
+### Method: `GrokSessionStore.update_swarm_task` {#utils-groksessionstore-update_swarm_task}
+
+```python
+async def GrokSessionStore.update_swarm_task(self, task_id: str, status: Optional[str]=None, spent_usd: Optional[float]=None, generation: Optional[int]=None, baseline_json: Optional[str]=None, oracle_json: Optional[str]=None, folded_state: Optional[str]=None) -> None
+```
+
+**Keywords:** grok, session, store, update, swarm, task
+
+Update a swarm task row. updated_at ALWAYS bumps — the runner calls
+this after every candidate as its heartbeat, and staleness detection
+measures the time since the owning task last touched the row.
+
+### Method: `GrokSessionStore.insert_swarm_candidate` {#utils-groksessionstore-insert_swarm_candidate}
+
+```python
+async def GrokSessionStore.insert_swarm_candidate(self, candidate: Dict[str, Any]) -> bool
+```
+
+**Keywords:** grok, session, store, insert, swarm, candidate
+
+Insert one evaluated candidate row; False on a duplicate
+(task_id, code_hash) — the engine treats duplicates as free discards.
+
+The stored code is the exact replacement slice apply_swarm_winner
+would splice, so it is NEVER silently truncated or rewritten: an
+oversized slice or one whose bytes redact_secrets would alter is
+rejected here with ValueError (a mutant carrying secret-shaped
+literals is suspect, and splicing a redacted variant would corrupt
+the file).
 
 ### Function: `extract_cost_from_output` {#utils-extract_cost_from_output}
 

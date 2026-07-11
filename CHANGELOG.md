@@ -5,6 +5,12 @@ All notable changes to UniGrok MCP will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- **Swarm optimizer storage skeleton** (`UNIGROK_SWARM`, off by default):
+  migration v12 adds `swarm_tasks` and `swarm_candidates` for the upcoming
+  contributor-only swarm code optimizer (budgeted Pareto search over rewrites
+  of one focus function, evaluated by the user's tests and benchmark).
+  Storage and the off/dry_run/active rollout ladder only — no runtime
+  behavior yet; candidate metadata deliberately never rides telemetry.
 - **Shadow semantic evals** (`UNIGROK_SEMANTIC_EVALS`, off by default): a
   deterministic sample of live turns is graded by a cheap LLM judge
   (correctness / tool efficiency / safety, 1–5) and the scores ride the
