@@ -1,8 +1,6 @@
 name: UniGrok PR Review
 
 on:
-  pull_request_target:
-    types: [opened, reopened, synchronize, ready_for_review]
   issue_comment:
     types: [created]
   workflow_dispatch:
@@ -24,8 +22,6 @@ jobs:
   review:
     if: >-
       github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'pull_request_target' &&
-       contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association)) ||
       (github.event_name == 'issue_comment' &&
        github.event.issue.pull_request &&
        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association) &&
@@ -37,8 +33,8 @@ jobs:
     runs-on: ${{ fromJSON(vars.UNIGROK_REVIEW_RUNNER_JSON || '["self-hosted","unigrok-review"]') }}
     timeout-minutes: 10
     steps:
-      # pull_request_target is intentional: run only trusted default-branch code.
-      # Never check out, execute, install, or import code from the reviewed PR.
+      # Run only trusted default-branch code. Never check out, execute, install,
+      # or import code from the reviewed PR.
       - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.repository.default_branch }}
@@ -53,8 +49,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           INPUT_PR_NUMBER: ${{ inputs.pr_number }}
-          EXPECTED_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           UNIGROK_MCP_URL: ${{ vars.UNIGROK_REVIEW_MCP_URL || 'http://127.0.0.1:4765/mcp' }}
           UNIGROK_REVIEW_PLANE: ${{ vars.UNIGROK_REVIEW_PLANE || 'cli' }}
           UNIGROK_CLIENT_TOKEN: ${{ secrets.UNIGROK_CLIENT_TOKEN }}

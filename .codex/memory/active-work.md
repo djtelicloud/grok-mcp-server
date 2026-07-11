@@ -2,12 +2,27 @@
 
 Last updated: 2026-07-11
 Owner: Codex
-Status: v0.6.0 production rollout and GitHub release complete
+Status: PR-first contributor governance and dynamic OKF wiki rollout complete
 
 This is the required project-scoped handoff for new Codex chats. Verify all
 drift-prone values live before acting. Do not copy secrets or OAuth codes here.
 
 ## Current repository state
+
+- Protected `origin/main` and visible local `main` were verified at
+  `a4ebcb369ec527da9ce0dee6d2a708437599dc94` after PR #4 merged through the
+  rebase path. The local landing receipt and contributor runtime marker name
+  the same commit.
+- PR #4 preserves Gemini as the originating agent, Codex as repair/integration
+  authority, and Grok 4.5 CLI-plane review evidence. All six required CI jobs
+  passed on the reviewed head.
+- Branch protection now requires all six CI jobs, strict up-to-date checks,
+  stale-review dismissal, CODEOWNER review, linear history, and conversation
+  resolution. Admin enforcement remains temporarily off until the independent
+  project-admin bot can approve owner-authored PRs.
+- Automatic Grok PR review is disabled. Approved collaborators request the
+  advisory review explicitly with `@grok review`, preventing surprise model
+  usage and permanently queued self-hosted jobs.
 
 - The deployment implementation base was verified and pushed as
   `3ed02c21b8b0d4b84f2dbbdbbe89edba64c4255f`. Always resolve the current full
@@ -27,6 +42,14 @@ drift-prone values live before acting. Do not copy secrets or OAuth codes here.
   Docker, offline evals, Project Site, and `Control Cloud Run Image`.
 
 ## Cloud control deployment
+
+- Cloud Run revision `unigrok-control-center-a4ebcb3` serves 100% of traffic
+  from immutable image digest
+  `sha256:299b95b453884ad729d2756dc69a97e8e241e9af6333913cf4bfdce0cf00cc7e`.
+- Sites version 4 is deployed from site-only commit
+  `bde70c90d6cac26bb4d0b92c91454092734e195f`.
+- `grokmcp.org` and `control.grokmcp.org` both return the canonical OKF manifest
+  and generated API reference. The raw Cloud Run URL remains disabled.
 
 - GCP project: `agentixai-inc`; region: `us-east1`.
 - Cloud Run service: `unigrok-control-center`.
