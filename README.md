@@ -448,6 +448,82 @@ To let an IDE agent call these experimental browser tools, use a browser build
 or extension that exposes `document.modelContext`, and keep the target tab at
 `http://localhost:4765/ui/` open.
 
+## Troubleshooting / FAQ
+
+<details>
+<summary><strong>Port 4765 is already in use</strong></summary>
+
+UniGrok publishes its local service on host port `4765`. Stop the conflicting
+process or set another host port in `.env`, then recreate the service:
+
+```dotenv
+UNIGROK_PORT=9090
+```
+
+```bash
+docker compose up --build -d
+curl http://localhost:9090/healthz
+```
+
+The Control Center is then at `http://localhost:9090/ui/` and MCP at
+`http://localhost:9090/mcp`. Port `8080` is container-internal and does not
+belong in IDE configuration.
+
+</details>
+
+<details>
+<summary><strong>Docker Compose fails to start</strong></summary>
+
+Make sure Docker Desktop (or the Docker daemon on Linux) is running, then:
+
+```bash
+docker compose down
+docker compose up --build -d
+docker compose ps
+```
+
+On Windows with WSL2, ensure WSL integration is enabled. If startup still
+fails, inspect `docker compose logs grok-mcp`.
+
+</details>
+
+<details>
+<summary><strong>Authentication or model access fails</strong></summary>
+
+Verify the API key held by the UniGrok service:
+
+```bash
+curl --fail --silent --show-error \
+  -H "Authorization: Bearer ${XAI_API_KEY}" \
+  https://api.x.ai/v1/models
+```
+
+For the subscription-backed CLI plane, open **Setup & Status** in the Control
+Center. If authentication is missing, run `docker compose run --rm
+grok-cli-auth` and complete the device-code login. UniGrok uses `grok --check`
+inside the service as its readiness probe.
+
+</details>
+
+<details>
+<summary><strong><code>mcp-remote</code> cannot connect</strong></summary>
+
+1. Confirm the server is running: `curl http://localhost:4765/healthz`.
+2. Point the IDE at `http://localhost:4765/mcp`, not `/sse`.
+3. Restart the IDE's MCP client after changing its configuration.
+
+</details>
+
+<details>
+<summary><strong>Requests hang or time out</strong></summary>
+
+- Inspect `docker compose logs -f grok-mcp`.
+- Check connectivity to `api.x.ai`.
+- Increase Docker memory if the container was OOM-killed.
+- Inspect the route and degradation metadata in the Control Center.
+
+</details>
+
 ## Security Model
 
 - `XAI_API_KEY` belongs in the UniGrok server/container environment, not in
