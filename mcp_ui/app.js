@@ -1439,10 +1439,49 @@ function resetConversation() {
   addMessageBubble("system", "Session started. Ready to execute prompts.");
 }
 
+async function verifyPlaygroundSetup() {
+  if (state.busy) return;
+  addMessageBubble("system", "Checking UniGrok setup without running a model…");
+  try {
+    const response = await fetchMcpCall("grok_mcp_status", {view: "json"});
+    const payload = extractToolPayload(response);
+    const credentials = payload.credential_planes || {};
+    const api = credentials.api?.available ? "API ready" : "API unavailable";
+    const cli = credentials.cli?.available ? "CLI subscription ready" : "CLI unavailable";
+    const policy = String(credentials.policy || "unknown").replaceAll("_", " ");
+    addMessageBubble("agent", `Setup verified. ${cli}; ${api}; routing policy: ${policy}. No inference turn was used.`);
+  } catch (err) {
+    addMessageBubble("system", `Setup check failed: ${err.message}`);
+  }
+}
+
 function setupConsoleActions() {
+  $("verifySetupBtn").addEventListener("click", verifyPlaygroundSetup);
+
+  $("runSampleBtn").addEventListener("click", async function() {
+    if (state.busy) return;
+    const prompt = this.dataset.prompt;
+    $("promptInput").value = prompt;
+    $("promptInput").dispatchEvent(new Event("input"));
+    await callAgent(prompt);
+  });
+
+  document.querySelectorAll(".prompt-preset").forEach((button) => {
+    button.addEventListener("click", () => {
+      $("promptInput").value = button.dataset.prompt || "";
+      $("promptInput").dispatchEvent(new Event("input"));
+      $("promptInput").focus();
+    });
+  });
+
   $("sendBtn").addEventListener("click", async () => {
     const prompt = $("promptInput").value.trim();
-    if (!prompt || state.busy) return;
+    if (state.busy) return;
+    if (!prompt) {
+      addMessageBubble("system", "Add a task, choose a preset, or use Verify Setup for a no-prompt health check.");
+      $("promptInput").focus();
+      return;
+    }
     await callAgent(prompt);
   });
 
@@ -1451,7 +1490,7 @@ function setupConsoleActions() {
   // Copy MCP JSON-RPC Payload
   $("copyConsoleCallBtn").addEventListener("click", function() {
     const args = {
-      prompt: $("promptInput").value.trim() || "Example task",
+      prompt: $("promptInput").value.trim() || "Reply with exactly: UniGrok agent is ready.",
       mode: $("modeInput").value,
       plane: $("planeInput").value,
       fallback_policy: $("fallbackPolicyInput").value,
@@ -1819,11 +1858,11 @@ function setupCostEstimator() {
     const sendBtn = $("sendBtn");
     if (budgetGuard && budgetGuard.checked && isLarge) {
       sendBtn.disabled = true;
-      sendBtn.innerText = "Blocked: Prompt Too Large";
+      sendBtn.innerText = "Blocked: Task Too Large";
       sendBtn.style.opacity = "0.5";
     } else if (sendBtn) {
       sendBtn.disabled = false;
-      sendBtn.innerText = "Send to Agent";
+      sendBtn.innerText = "Run Task";
       sendBtn.style.opacity = "";
     }
   };

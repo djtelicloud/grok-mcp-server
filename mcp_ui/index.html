@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>UniGrok MCP v0.5.3 Control Center</title>
     <meta name="unigrok-ui-regions" content="navigation,workbench,rpc-inspector,rpc-logs,result-facts" />
-  <link rel="stylesheet" href="./styles.css?v=grok-v0.5.3-r3" />
+  <link rel="stylesheet" href="./styles.css?v=grok-v0.5.3-r4" />
   </head>
   <body>
     <main class="app-shell">
@@ -59,30 +59,32 @@
           <div id="browserWarningCard" class="warning-card hidden" aria-live="assertive">
             <strong>⚠️ Browser compatibility:</strong> Experimental WebMCP features require a browser or extension that exposes document.modelContext.
           </div>
-          <div class="nav-title">Agent Showcase</div>
-          <button id="tab-btn-console" type="button" class="nav-btn active" data-tab="tab-console" role="tab" aria-selected="true" aria-controls="tab-console" tabindex="0" title="Quick Test Console">
-            <span class="btn-icon" aria-hidden="true">⚡</span><span class="btn-label">Quick Test Console</span>
+          <div class="nav-title">Start here</div>
+          <button id="tab-btn-console" type="button" class="nav-btn active" data-tab="tab-console" role="tab" aria-selected="true" aria-controls="tab-console" tabindex="0" title="Agent Playground">
+            <span class="btn-icon" aria-hidden="true">▶</span><span class="btn-label">Agent Playground</span>
           </button>
+          <button id="tab-btn-models" type="button" class="nav-btn" data-tab="tab-models" role="tab" aria-selected="false" aria-controls="tab-models" tabindex="-1" title="Models &amp; Planes">
+            <span class="btn-icon" aria-hidden="true">◫</span><span class="btn-label">Models &amp; Planes</span>
+          </button>
+          <button id="tab-btn-metrics" type="button" class="nav-btn" data-tab="tab-metrics" role="tab" aria-selected="false" aria-controls="tab-metrics" tabindex="-1" title="Usage &amp; Telemetry">
+            <span class="btn-icon" aria-hidden="true">📊</span><span class="btn-label">Usage &amp; Telemetry</span>
+          </button>
+          <div class="nav-title nav-title-group">Developer tools</div>
           <button id="tab-btn-schemas" type="button" class="nav-btn" data-tab="tab-schemas" role="tab" aria-selected="false" aria-controls="tab-schemas" tabindex="-1" title="Schema Explorer">
             <span class="btn-icon" aria-hidden="true">📋</span><span class="btn-label">Schema Explorer</span>
           </button>
           <button id="tab-btn-guard" type="button" class="nav-btn" data-tab="tab-guard" role="tab" aria-selected="false" aria-controls="tab-guard" tabindex="-1" title="Reasoning Guard">
             <span class="btn-icon" aria-hidden="true">🛡️</span><span class="btn-label">Reasoning Guard</span>
           </button>
+          <div class="nav-title nav-title-group">Agent integration</div>
+          <button id="tab-btn-onboarding" type="button" class="nav-btn" data-tab="tab-onboarding" role="tab" aria-selected="false" aria-controls="tab-onboarding" tabindex="-1" title="Agent Setup">
+            <span class="btn-icon" aria-hidden="true">🚀</span><span class="btn-label">Agent Setup</span>
+          </button>
           <button id="tab-btn-okf" type="button" class="nav-btn" data-tab="tab-okf" role="tab" aria-selected="false" aria-controls="tab-okf" tabindex="-1" title="OKF Browser">
             <span class="btn-icon" aria-hidden="true">📚</span><span class="btn-label">OKF Browser</span>
           </button>
           <button id="tab-btn-webmcp" type="button" class="nav-btn" data-tab="tab-webmcp" role="tab" aria-selected="false" aria-controls="tab-webmcp" tabindex="-1" title="WebMCP Tester">
             <span class="btn-icon" aria-hidden="true">🌐</span><span class="btn-label">WebMCP Tester</span>
-          </button>
-          <button id="tab-btn-models" type="button" class="nav-btn" data-tab="tab-models" role="tab" aria-selected="false" aria-controls="tab-models" tabindex="-1" title="Models &amp; Planes">
-            <span class="btn-icon" aria-hidden="true">◫</span><span class="btn-label">Models &amp; Planes</span>
-          </button>
-          <button id="tab-btn-metrics" type="button" class="nav-btn" data-tab="tab-metrics" role="tab" aria-selected="false" aria-controls="tab-metrics" tabindex="-1" title="Telemetry & Metrics">
-            <span class="btn-icon" aria-hidden="true">📊</span><span class="btn-label">Telemetry &amp; Metrics</span>
-          </button>
-          <button id="tab-btn-onboarding" type="button" class="nav-btn" data-tab="tab-onboarding" role="tab" aria-selected="false" aria-controls="tab-onboarding" tabindex="-1" title="Onboarding (Self)">
-            <span class="btn-icon" aria-hidden="true">🚀</span><span class="btn-label">Onboarding (Self)</span>
           </button>
         </nav>
 
@@ -91,13 +93,28 @@
         <!-- Main Workbench Content Area -->
         <section id="workbench" class="workbench" data-region="workbench" aria-label="Active tool workspace">
           
-          <!-- TAB 1: Quick Test Console -->
+          <!-- TAB 1: Agent Playground -->
           <div id="tab-console" class="tab-panel active" role="tabpanel" aria-labelledby="tab-btn-console" data-region="tab-console">
             <div class="panel-header">
-              <h2>Quick Test Console</h2>
+              <h2>Agent Playground</h2>
               <button id="copyConsoleCallBtn" type="button" class="small-btn-glow">Copy tool call</button>
             </div>
-            <p class="panel-desc">Interface with the unified Grok Agent. Automatically routes tasks through Web Search, X Search, and Sandboxed Code Execution.</p>
+            <p class="panel-desc">Verify the gateway with one click, run a useful sample, or give Grok a real task. No prompt is required for the setup check.</p>
+
+            <section class="playground-launcher" aria-label="Quick start actions">
+              <div>
+                <span class="model-kicker">No prompt needed</span>
+                <strong>Is UniGrok ready?</strong>
+                <p>Checks credentials, planes, routing policy, and local telemetry without spending an inference turn.</p>
+              </div>
+              <button id="verifySetupBtn" type="button" class="primary-btn-glow">Verify Setup</button>
+            </section>
+
+            <div class="task-presets" aria-label="Task presets">
+              <button id="runSampleBtn" type="button" class="preset-btn" data-prompt="Reply with exactly: UniGrok agent is ready.">Run zero-config sample</button>
+              <button type="button" class="preset-btn prompt-preset" data-prompt="Explain which credential plane and model you would use for a coding task, and why.">Explain routing</button>
+              <button type="button" class="preset-btn prompt-preset" data-prompt="Review this code or error and give me the three most useful next steps:\n\n">Review code or error</button>
+            </div>
             
             <div class="form-layout">
               <div id="apiKeyWizard" class="wizard-card hidden">
@@ -135,14 +152,11 @@
                   </select>
                 </label>
                 <p id="planeHint" class="plane-hint">Subscription only · no developer API billing</p>
-                <label class="toggle-label-legacy">
-                  <input id="legacyModeToggle" type="checkbox" aria-label="Toggle legacy mode output format" /> Legacy Mode
-                </label>
               </div>
 
               <div class="form-group">
-                <label for="promptInput">Prompt / Task
-                  <textarea id="promptInput" rows="5" placeholder="e.g. Compare the latency of WebMCP vs stdio JSON-RPC transport..." aria-label="Prompt task message input"></textarea>
+                <label for="promptInput">Your task
+                  <textarea id="promptInput" rows="5" placeholder="Describe what you want Grok to do, or choose a preset above…" aria-label="Prompt task message input"></textarea>
                 </label>
                 <div class="estimator-row">
                   <span id="costEstimator" class="estimator-text">Local input estimate: ~0 tokens</span>
@@ -177,7 +191,7 @@
               </details>
 
               <div class="form-actions">
-                <button id="sendBtn" type="button" class="primary-btn-glow" aria-label="Send query to agent">Send to Agent</button>
+                <button id="sendBtn" type="button" class="primary-btn-glow" aria-label="Run task with agent">Run Task</button>
                 <button id="clearBtn" type="button" class="secondary-btn" aria-label="Clear history log">Clear History</button>
               </div>
             </div>
@@ -533,6 +547,6 @@
 
       </section>
     </main>
-  <script type="module" src="./app.js?v=grok-v0.5.3-r3"></script>
+  <script type="module" src="./app.js?v=grok-v0.5.3-r4"></script>
   </body>
 </html>

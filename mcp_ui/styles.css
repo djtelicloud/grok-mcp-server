@@ -808,6 +808,59 @@ pre {
   margin: 16px 0 12px;
 }
 
+.nav-title-group {
+  margin-top: 12px;
+}
+
+.playground-launcher {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+  margin: 14px 0 12px;
+  padding: 14px;
+  border: 1px solid rgba(60, 224, 255, 0.24);
+  border-radius: var(--radius);
+  background: linear-gradient(135deg, rgba(60, 224, 255, 0.08), rgba(255, 255, 255, 0.015));
+}
+
+.playground-launcher strong,
+.playground-launcher p {
+  display: block;
+}
+
+.playground-launcher p {
+  margin: 4px 0 0;
+  color: var(--ink-soft);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.task-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.preset-btn {
+  min-height: 32px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 7px 10px;
+  background: rgba(255, 255, 255, 0.025);
+  color: var(--ink-soft);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+}
+
+.preset-btn:hover,
+.preset-btn:focus-visible {
+  border-color: rgba(60, 224, 255, 0.42);
+  color: var(--cyan);
+}
+
 .metrics-actions,
 .period-toggle {
   display: flex;
@@ -1735,6 +1788,10 @@ pre {
     width: 100%;
     justify-content: space-between;
     margin-top: 12px;
+  }
+
+  .playground-launcher {
+    grid-template-columns: 1fr;
   }
 
 }

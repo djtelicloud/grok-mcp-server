@@ -15,11 +15,17 @@ def test_mcp_ui_static_files_are_served(monkeypatch):
     assert index.status_code == 200
     assert "<title>UniGrok MCP v0.5.3 Control Center</title>" in index.text
     assert '<span class="version-badge">v0.5.3</span>' in index.text
-    assert 'script type="module" src="./app.js?v=grok-v0.5.3-r3"' in index.text
-    assert '<link rel="stylesheet" href="./styles.css?v=grok-v0.5.3-r3" />' in index.text
+    assert 'script type="module" src="./app.js?v=grok-v0.5.3-r4"' in index.text
+    assert '<link rel="stylesheet" href="./styles.css?v=grok-v0.5.3-r4" />' in index.text
     assert "Control Center" in index.text
     assert "Bearer token" not in index.text
-    assert "Quick Test Console" in index.text
+    assert "Agent Playground" in index.text
+    assert 'id="verifySetupBtn"' in index.text
+    assert 'id="runSampleBtn"' in index.text
+    assert "No prompt is required for the setup check" in index.text
+    assert "Legacy Mode" not in index.text
+    assert "verifyPlaygroundSetup" in script.text
+    assert "Add a task, choose a preset" in script.text
     assert script.status_code == 200
     assert "tools/call" in script.text
     assert "X-Client-ID" in script.text
