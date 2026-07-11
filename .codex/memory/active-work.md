@@ -2,7 +2,7 @@
 
 Last updated: 2026-07-11
 Owner: Codex
-Status: ready for final public-invoker confirmation
+Status: production control live; Sites cutover version saved pending approval
 
 This is the required project-scoped handoff for new Codex chats. Verify all
 drift-prone values live before acting. Do not copy secrets or OAuth codes here.
@@ -31,8 +31,10 @@ drift-prone values live before acting. Do not copy secrets or OAuth codes here.
 - Runtime service account:
   `unigrok-control-center@agentixai-inc.iam.gserviceaccount.com`.
 - Cloud Run ingress was last verified as `internal-and-cloud-load-balancing`.
-- Anonymous Cloud Run invocation has not been granted. The candidate therefore
-  remains closed to public traffic.
+- `allUsers` has `roles/run.invoker`; ingress remains restricted to
+  `internal-and-cloud-load-balancing`.
+- The Cloud Run default URL is disabled. Both known raw `run.app` hostnames
+  return `404` while the custom-domain public API returns `200`.
 - The GitHub App is installed only for `djtelicloud/grok-mcp-server`. Required
   application secrets exist in Secret Manager as version-pinned references;
   never read or print their values.
@@ -46,8 +48,12 @@ drift-prone values live before acting. Do not copy secrets or OAuth codes here.
 - Google-managed certificate `unigrok-control-center-cert` is active and was
   externally verified for `control.grokmcp.org`, issued by Google Trust
   Services and valid from 2026-07-11 through 2026-10-09.
-- The production HTTPS edge currently returns the expected Google Frontend
-  `403` because anonymous Cloud Run invocation has not been granted.
+- The production HTTPS edge is live. Anonymous `/control` redirects to GitHub,
+  invalid OAuth state returns `400`, and protected responses are private and
+  `no-store`.
+- The approved owner completed GitHub authorization at the production custom
+  domain and received fresh sanitized repository evidence as
+  `@djtelicloud · admin`.
 - Cloud Armor policy `unigrok-control-center-edge` is attached to backend
   `unigrok-control-center-backend`.
 - Cloud Armor priorities `100`, `200`, and `210` cover exact-host enforcement,
@@ -57,19 +63,15 @@ drift-prone values live before acting. Do not copy secrets or OAuth codes here.
 
 ## Remaining gates
 
-1. Immediately before changing IAM through browser Computer Use, obtain the
-   required action-time confirmation to grant `roles/run.invoker` to
-   `allUsers`. Do not infer that permission from an older approval.
-2. Grant public invocation only after confirming ingress is still restricted to
-   internal traffic plus Cloud Load Balancing.
-3. Verify from an external path: public project API `200`, anonymous `/control`
-   redirects to GitHub, invalid OAuth state is rejected, the approved owner can
-   complete login, and protected responses are private/no-store.
-4. After custom-domain checks pass, disable the Cloud Run default URL and prove
-   the raw `run.app` hostname is unreachable.
-5. Cut over the public Site only after production OAuth works. Keep the Site
-   change independently reversible.
-6. Reconcile changelog/version/release metadata only after deployment truth is
+1. Sites production environment revision `5` now includes the non-secret
+   `CONTROL_CENTER_ORIGIN=https://control.grokmcp.org`.
+2. Sites version `3` was built, source-pushed as site-only commit `668f56b`, and
+   saved but not deployed. Obtain explicit approval for the public Sites
+   deployment, then publish that exact saved version.
+3. Verify `https://grokmcp.org/control` hands off to the production control
+   origin and that the public home/metadata routes remain healthy. Keep the
+   previous Sites version available for immediate rollback.
+4. Reconcile changelog/version/release metadata only after deployment truth is
    complete; do not publish a release merely because CI is green.
 
 ## Safety posture
