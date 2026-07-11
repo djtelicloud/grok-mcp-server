@@ -190,6 +190,8 @@ def test_stable_and_contributor_compose_files_are_separate():
     assert ".:/workspace" not in stable
     assert "grok-mcp-state:/state" in stable
     assert "grok-mcp-cli-auth:/home/appuser/.grok" in stable
+    assert '127.0.0.1:${UNIGROK_PORT:-4765}:8080' in stable
+    assert "UNIGROK_TRUSTED_LOOPBACK_PROXY=1" in stable
     assert "${HOME}/.grok" not in stable
     assert "grok-cli-auth:" in stable
     assert 'user: "0:0"' in stable
@@ -201,6 +203,8 @@ def test_stable_and_contributor_compose_files_are_separate():
     assert "name: grok-mcp-dev" in contributor
     assert ".:/workspace" in contributor
     assert "${UNIGROK_DEV_PORT:-4766}" in contributor
+    assert '127.0.0.1:${UNIGROK_DEV_PORT:-4766}:8080' in contributor
+    assert "UNIGROK_TRUSTED_LOOPBACK_PROXY=1" in contributor
 
     dials = Path("docker-compose.dials.yml").read_text(encoding="utf-8")
     assert "UNIGROK_MODE_DIALS=1" in dials
