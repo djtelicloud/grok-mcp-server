@@ -14,6 +14,7 @@ export default function Home() {
         <nav aria-label="Public navigation">
           <a href="#how-it-works">How it works</a>
           <a href="#start">Get started</a>
+          <a href="/docs/okf/index.md">Knowledge</a>
           <a href="/contribute">Contribute</a>
           <a href={PUBLIC_PROJECT.repository.url}>GitHub</a>
         </nav>
@@ -103,6 +104,7 @@ export default function Home() {
         <div><p className="public-kicker"><span /> Built for people and agents</p><h2>Public project context,<br />in machine-readable form.</h2></div>
         <div className="public-machine-links">
           <a href="/llms.txt"><code>/llms.txt</code><span>Concise agent orientation →</span></a>
+          <a href="/docs/okf/index.md"><code>/docs/okf/</code><span>OKF knowledge bundle →</span></a>
           <a href="/.well-known/unigrok.json"><code>/.well-known/unigrok.json</code><span>Discovery contract →</span></a>
           <a href="/api/public/v1/project"><code>/api/public/v1/project</code><span>Versioned metadata →</span></a>
         </div>

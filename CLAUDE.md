@@ -88,10 +88,11 @@ configs.
 Work in a `claude/*` task worktree and leave the shared checkout on `main`.
 After committing the intended changes, hand the commit SHA and verification
 results to Codex, the repository's permanent Git and release-integration owner.
-Do not run `scripts/land`, push, merge or rebase shared `main`, create PRs/tags/
-releases, or remove worktrees. Codex reviews the handoff and runs the landing
+Do not run `scripts/land`, push the shared repository, merge or rebase shared `main`, create PRs/tags/
+releases, or remove worktrees. Every contribution reaches `origin/main` through a PR; Codex publishes the local agent branch and draft PR, reviews the exact head, and runs the landing
 gate; only its `LANDED TO MAIN: <sha>` result proves integration.
 
 For implementation, debugging, architecture, or review, use
 `.agents/skills/unigrok-workspace-memory/SKILL.md`. Recall against the Claude
 worktree's own full HEAD. Codex records the landed outcome after integration.
+Include the human sponsor and an `Agent-Assisted-By: Claude via <IDE>` provenance field in the handoff.

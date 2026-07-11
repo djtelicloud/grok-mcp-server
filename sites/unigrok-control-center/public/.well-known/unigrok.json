@@ -5,6 +5,7 @@
   "repository": "https://github.com/djtelicloud/grok-mcp-server",
   "project": "https://grokmcp.org/api/public/v1/project",
   "llms": "https://grokmcp.org/llms.txt",
+  "okf": "https://grokmcp.org/docs/okf/okf-manifest.json",
   "contribute": "https://grokmcp.org/contribute",
   "control": "https://control.grokmcp.org"
 }

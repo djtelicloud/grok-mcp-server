@@ -138,6 +138,12 @@ def directory_lock(path: Path, *, timeout: float = 900.0) -> Iterator[None]:
 
 
 def run_tests(repo: Path, expected_head: str) -> None:
+    print("Checking deterministic OKF bundle...", flush=True)
+    run(
+        ["uv", "run", "python", "scripts/generate_okf.py", "--check"],
+        cwd=repo,
+        capture=False,
+    )
     command = DEFAULT_TEST_ARGS
     print(f"Testing {expected_head[:12]}: {' '.join(command)}", flush=True)
     result = run(command, cwd=repo, check=False, capture=False)
@@ -160,7 +166,7 @@ def runtime_action(paths: list[str]) -> str:
         return "rebuild"
     if any(path == "main.py" or path.startswith("src/") for path in paths):
         return "restart"
-    if any(path.startswith("mcp_ui/") for path in paths):
+    if any(path.startswith("mcp_ui/") or path.startswith("docs/okf/") for path in paths):
         return "smoke"
     return "none"
 
@@ -181,6 +187,19 @@ def probe_ui(base_url: str) -> None:
         body = response.read(4096)
     if b"UniGrok" not in body:
         raise LandError("Control Center smoke check did not find the UniGrok marker")
+
+
+def probe_okf(base_url: str) -> None:
+    manifest = get_json(f"{base_url}/docs/okf/okf-manifest.json")
+    files = manifest.get("files")
+    if not isinstance(files, list) or "api-reference.md" not in files:
+        raise LandError("OKF manifest does not expose api-reference.md")
+    for file_name in files:
+        if not isinstance(file_name, str) or "/" in file_name or file_name.startswith("."):
+            raise LandError(f"unsafe OKF manifest entry: {file_name!r}")
+        with urlopen(f"{base_url}/docs/okf/{file_name}", timeout=10) as response:  # noqa: S310
+            if response.status != 200:
+                raise LandError(f"OKF document returned HTTP {response.status}: {file_name}")
 
 
 def configured_client_token(repo: Path) -> Optional[str]:
@@ -243,6 +262,7 @@ def wait_for_runtime(repo: Path, *, base_url: str, timeout: float = 60.0) -> Non
             probe_json(f"{base_url}/healthz", "healthy")
             probe_json(f"{base_url}/readyz", "ready")
             probe_ui(base_url)
+            probe_okf(base_url)
             runtime = get_json(f"{base_url}/runtimez")
             token = configured_client_token(repo) if runtime.get("gateway_auth", {}).get("enabled") else None
             if runtime.get("gateway_auth", {}).get("enabled") and not token:
@@ -367,6 +387,11 @@ def land(repo: Path) -> str:
     branch = git(repo, "symbolic-ref", "--short", "HEAD")
     if branch == "main":
         raise LandError("run scripts/land from an agent task worktree, never from shared main")
+    if not branch.startswith("codex/"):
+        raise LandError(
+            "only a Codex-owned integration branch may run scripts/land; "
+            "contributors must hand off their exact commit for PR review"
+        )
     require_clean(repo, include_untracked=True, label="agent worktree")
     main_path = main_worktree(repo)
     common_dir = common_git_dir(repo)
@@ -382,14 +407,6 @@ def land(repo: Path) -> str:
         if ancestor.returncode:
             print(f"Rebasing {branch} onto current main {baseline[:12]}", flush=True)
             run(["git", "rebase", baseline], cwd=repo, capture=False)
-            
-        print("Generating dynamic OKF docs...", flush=True)
-        run(["uv", "run", "python", "scripts/generate_okf.py"], cwd=repo, check=False, capture=False)
-        dirty_docs = [line for line in git(repo, "status", "--porcelain=v1").splitlines() if "docs/okf/" in line]
-        if dirty_docs:
-            print("Amending commit with updated OKF docs...", flush=True)
-            run(["git", "add", "docs/okf/"], cwd=repo, capture=False)
-            run(["git", "commit", "--amend", "--no-edit"], cwd=repo, capture=False)
 
         tested_head = git(repo, "rev-parse", "HEAD")
         run_tests(repo, tested_head)

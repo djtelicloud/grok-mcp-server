@@ -12,6 +12,7 @@ export const PUBLIC_PROJECT = {
     project: "/api/public/v1/project",
     discovery: "/.well-known/unigrok.json",
     llms: "/llms.txt",
+    okf: "/docs/okf/okf-manifest.json",
     contribute: "/contribute",
   },
   control: {
@@ -40,6 +41,7 @@ export function publicProjectDocument() {
       architecture: `${PUBLIC_PROJECT.repository.url}/blob/main/architecture.md`,
       ide_setup: `${PUBLIC_PROJECT.repository.url}/blob/main/docs/ide-setup.md`,
       contributing: `${PUBLIC_PROJECT.repository.url}/blob/main/CONTRIBUTING.md`,
+      okf_manifest: `${PUBLIC_PROJECT.homepage}${PUBLIC_PROJECT.publicSurfaces.okf}`,
     },
     control: {
       origin: PUBLIC_PROJECT.control.origin,
@@ -70,6 +72,7 @@ export function publicDiscoveryDocument() {
     repository: PUBLIC_PROJECT.repository.url,
     project: `${PUBLIC_PROJECT.homepage}${PUBLIC_PROJECT.publicSurfaces.project}`,
     llms: `${PUBLIC_PROJECT.homepage}${PUBLIC_PROJECT.publicSurfaces.llms}`,
+    okf: `${PUBLIC_PROJECT.homepage}${PUBLIC_PROJECT.publicSurfaces.okf}`,
     contribute: `${PUBLIC_PROJECT.homepage}${PUBLIC_PROJECT.publicSurfaces.contribute}`,
     control: PUBLIC_PROJECT.control.origin,
   };
@@ -82,5 +85,5 @@ function publicControlStatus(): "configured" | "deployment-pending" {
 }
 
 export function publicLlmsText(): string {
-  return `# UniGrok\n\n> ${PUBLIC_PROJECT.description}\n\nUniGrok gives MCP-compatible coding agents one shared, server-side gateway to Grok. The API and CLI execution planes remain distinct; never infer model availability across planes.\n\n## Canonical resources\n- Homepage: ${PUBLIC_PROJECT.homepage}\n- Repository: ${PUBLIC_PROJECT.repository.url}\n- Architecture: ${PUBLIC_PROJECT.repository.url}/blob/main/architecture.md\n- IDE setup: ${PUBLIC_PROJECT.repository.url}/blob/main/docs/ide-setup.md\n- Contribute: ${PUBLIC_PROJECT.homepage}${PUBLIC_PROJECT.publicSurfaces.contribute}\n- Public project JSON: ${PUBLIC_PROJECT.homepage}${PUBLIC_PROJECT.publicSurfaces.project}\n\n## Access boundaries\n- Public project information is available without authentication.\n- Contributor control uses GitHub login and a fresh server-side repository role check on every protected request. The minimum accepted role is ${PUBLIC_PROJECT.control.minimumRole}.\n- The default local MCP endpoint is ${PUBLIC_PROJECT.mcp.localDefault}.\n- No unauthenticated remote MCP or inference endpoint is published. Public machine-readable project information is deliberately separate from contributor controls.\n- Never send an xAI API key to this website or embed it in an IDE MCP configuration.\n`;
+  return `# UniGrok\n\n> ${PUBLIC_PROJECT.description}\n\nUniGrok gives MCP-compatible coding agents one shared, server-side gateway to Grok. The API and CLI execution planes remain distinct; never infer model availability across planes.\n\n## Canonical resources\n- Homepage: ${PUBLIC_PROJECT.homepage}\n- Repository: ${PUBLIC_PROJECT.repository.url}\n- Architecture: ${PUBLIC_PROJECT.repository.url}/blob/main/architecture.md\n- IDE setup: ${PUBLIC_PROJECT.repository.url}/blob/main/docs/ide-setup.md\n- Contribute: ${PUBLIC_PROJECT.homepage}${PUBLIC_PROJECT.publicSurfaces.contribute}\n- Public project JSON: ${PUBLIC_PROJECT.homepage}${PUBLIC_PROJECT.publicSurfaces.project}\n- OKF knowledge bundle: ${PUBLIC_PROJECT.homepage}${PUBLIC_PROJECT.publicSurfaces.okf}\n\n## Access boundaries\n- Public project information is available without authentication.\n- Contributor control uses GitHub login and a fresh server-side repository role check on every protected request. The minimum accepted role is ${PUBLIC_PROJECT.control.minimumRole}.\n- The default local MCP endpoint is ${PUBLIC_PROJECT.mcp.localDefault}.\n- No unauthenticated remote MCP or inference endpoint is published. Public machine-readable project information is deliberately separate from contributor controls.\n- Never send an xAI API key to this website or embed it in an IDE MCP configuration.\n`;
 }

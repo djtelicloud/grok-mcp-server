@@ -250,6 +250,20 @@ def test_cloudrun_rejects_missing_auth(monkeypatch):
     assert res.headers["WWW-Authenticate"] == "Bearer"
 
 
+def test_local_okf_manifest_and_generated_api_reference_are_served(monkeypatch):
+    monkeypatch.delenv("UNIGROK_RUNTIME", raising=False)
+    monkeypatch.delenv("UNIGROK_API_KEYS", raising=False)
+
+    with TestClient(create_app(), base_url="http://localhost:8080") as client:
+        manifest = client.get("/docs/okf/okf-manifest.json")
+        api_reference = client.get("/docs/okf/api-reference.md")
+
+    assert manifest.status_code == 200
+    assert "api-reference.md" in manifest.json()["files"]
+    assert api_reference.status_code == 200
+    assert "async def agent(" in api_reference.text
+
+
 def test_cloudrun_protects_mcp_inference_and_operator_surfaces(monkeypatch):
     """Remote clients never inherit the localhost UI/runtime exemptions."""
     monkeypatch.setenv("UNIGROK_RUNTIME", "cloudrun")

@@ -1,0 +1,18 @@
+{
+  "okf_version": "0.1",
+  "name": "uni-grok-mcp",
+  "title": "UniGrok MCP Knowledge Bundle",
+  "description": "Agent-readable documentation for the UniGrok Grok-native Model Context Protocol (MCP) server.",
+  "root": "index.md",
+  "files": [
+    "index.md",
+    "agent-tool.md",
+    "chat-modes.md",
+    "reasoning-guard.md",
+    "grok-4.5-pinning.md",
+    "media-imagine.md",
+    "metrics-tool.md",
+    "faq.md",
+    "api-reference.md"
+  ]
+}
