@@ -28,6 +28,16 @@ All notable changes to UniGrok MCP will be documented in this file.
   contract + one heal retry, and a JobManager-style runner with heartbeat
   staleness and cooperative cancel. Generation prefers the $0 CLI plane;
   API-plane fallback is budget-reserved. Still not surfaced as an MCP tool.
+- **Swarm optimizer MCP tools** (`start_code_swarm`, `get_swarm_status`,
+  `apply_swarm_winner`, `cancel_swarm`): the contributor-only public surface,
+  triple-gated (contributor mode + attached workspace + not Cloud Run). Status
+  renders an oracle-honesty block (focus-span coverage, bench stability,
+  import provenance) and the Pareto front with relative deltas. Apply is
+  byte-exact, guarded by a base_file_hash staleness check and post-apply
+  re-verification that reverts on test failure, and never commits. Ships a
+  golden O(N²) anti-pattern target under `evals/tasks/swarm_targets/`. This
+  completes the swarm optimizer's v1 (single-span, Python, $0 CLI-plane
+  generation, no readability judge).
 - **Shadow semantic evals** (`UNIGROK_SEMANTIC_EVALS`, off by default): a
   deterministic sample of live turns is graded by a cheap LLM judge
   (correctness / tool efficiency / safety, 1–5) and the scores ride the

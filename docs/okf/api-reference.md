@@ -1695,6 +1695,59 @@ def register_resource_primitives(mcp: FastMCP)
 
 Register the grok:// resources and the reusable prompts.
 
+## tools/swarm.py {#tools-swarm}
+
+### Function: `start_code_swarm` {#tools-swarm-start_code_swarm}
+
+```python
+async def start_code_swarm(target_path: str, focus_node: str, test_target: str, bench_command: str, budget_usd: Optional[float]=None, allow_unstable_bench: bool=False) -> str
+```
+
+**Keywords:** start, code, swarm
+
+Launch a swarm that searches rewrites of ONE focus function for
+latency/memory wins verified by your tests. Returns a task id to poll with
+get_swarm_status. focus_node is 'function:<name>' or 'method:<Class>.<name>';
+test_target and bench_command define the correctness oracle and the
+benchmark (the command must print a single SWARM_BENCH JSON line —
+scripts/swarm_bench.py is the easy path).
+
+### Function: `get_swarm_status` {#tools-swarm-get_swarm_status}
+
+```python
+async def get_swarm_status(task_id: str) -> str
+```
+
+**Keywords:** get, swarm, status
+
+Report a swarm's status, the oracle-honesty facts (focus-span coverage,
+bench stability), the current Pareto front with relative deltas, and
+spend.
+
+### Function: `apply_swarm_winner` {#tools-swarm-apply_swarm_winner}
+
+```python
+async def apply_swarm_winner(candidate_id: str) -> str
+```
+
+**Keywords:** apply, swarm, winner
+
+Splice a winning candidate into the live workspace file (contributor +
+active mode only). Guarded by a base_file_hash staleness check and
+post-apply re-verification: if the file changed since the swarm ran, or the
+candidate breaks the tests, the original bytes are restored and nothing
+lands. Never commits — that stays with you.
+
+### Function: `cancel_swarm` {#tools-swarm-cancel_swarm}
+
+```python
+async def cancel_swarm(task_id: str) -> str
+```
+
+**Keywords:** cancel, swarm
+
+Cooperatively cancel a running swarm; the partial Pareto front is kept.
+
 ## tools/system.py {#tools-system}
 
 ### Function: `grok_mcp_status` {#tools-system-grok_mcp_status}
