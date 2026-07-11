@@ -12,6 +12,7 @@
     "grok-4.5-pinning.md",
     "media-imagine.md",
     "metrics-tool.md",
-    "faq.md"
+    "faq.md",
+    "api-reference.md"
   ]
 }
