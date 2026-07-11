@@ -61,5 +61,5 @@ guidance, and telemetry improvements developed through the v0.5 series.
 - [x] Wheel contents and package metadata checks pass.
 - [x] Release-preparation commit lands to shared `main` and post-push CI is
   green.
-- [ ] `v0.6.0` tag is created from the verified `main` commit and pushed.
-- [ ] GitHub release is published from these notes.
+- [x] `v0.6.0` tag is created from the verified `main` commit and pushed.
+- [x] GitHub release is published from these notes.

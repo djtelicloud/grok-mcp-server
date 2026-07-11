@@ -2,7 +2,7 @@
 
 Last updated: 2026-07-11
 Owner: Codex
-Status: production control live; Sites cutover version saved pending approval
+Status: v0.6.0 production rollout and GitHub release complete
 
 This is the required project-scoped handoff for new Codex chats. Verify all
 drift-prone values live before acting. Do not copy secrets or OAuth codes here.
@@ -21,6 +21,10 @@ drift-prone values live before acting. Do not copy secrets or OAuth codes here.
 - Project-continuity commit `6f24deb` is on `origin/main`; GitHub Actions run
   `29162512551` completed successfully.
 - The shared checkout contains unrelated untracked user files. Preserve them.
+- Release `v0.6.0` is tagged at
+  `a44e6587c0fcf4c269fe9ba20e1bbb2795c5b1fb` and published on GitHub.
+- The exact tag commit passed all six CI jobs, including Python 3.11/3.12,
+  Docker, offline evals, Project Site, and `Control Cloud Run Image`.
 
 ## Cloud control deployment
 
@@ -63,16 +67,20 @@ drift-prone values live before acting. Do not copy secrets or OAuth codes here.
 
 ## Remaining gates
 
-1. Sites production environment revision `5` now includes the non-secret
+The v0.6.0 production and release gates are complete:
+
+1. Sites production environment revision `5` includes the non-secret
    `CONTROL_CENTER_ORIGIN=https://control.grokmcp.org`.
-2. Sites version `3` was built, source-pushed as site-only commit `668f56b`, and
-   saved but not deployed. Obtain explicit approval for the public Sites
-   deployment, then publish that exact saved version.
-3. Verify `https://grokmcp.org/control` hands off to the production control
-   origin and that the public home/metadata routes remain healthy. Keep the
-   previous Sites version available for immediate rollback.
-4. Reconcile changelog/version/release metadata only after deployment truth is
-   complete; do not publish a release merely because CI is green.
+2. Sites version `3`, sourced from site-only commit `668f56b`, is deployed.
+3. `https://grokmcp.org/control` redirects to the production control origin;
+   the public home, `llms.txt`, and discovery manifest remain healthy.
+4. Package, runtime, plugin, UI, FAQ, lockfile, changelog, and release metadata
+   are aligned at `0.6.0`.
+5. The GitHub tag and release are public. No package-registry publication was
+   performed because none was requested or configured as a release gate.
+
+Future follow-up is operational rather than a release blocker: review Cloud
+Armor preview logs and promote only rules with demonstrated safe thresholds.
 
 ## Safety posture
 
