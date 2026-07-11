@@ -1,33 +1,36 @@
 const STORAGE_KEY = "unigrok.mcp.console.settings.v4";
-const LAYOUT_KEY = "unigrok.mcp.console.layout.v1";
-const PANEL_MODES = ["open", "rail", "hidden"];
+const LAYOUT_KEY = "unigrok.mcp.console.layout.v2";
 const LAYOUT_LIMITS = {
   nav: [148, 340],
   inspector: [210, 460],
-  workbench: 320,
-  rail: 48,
-  splitter: 5,
+  workbench: 300,
+  workbenchComfort: 360,
+  rail: 44,
+  splitter: 4,
 };
 
 const defaultLayout = {
-  nav: "open",
-  inspector: "open",
-  navWidth: 216,
-  inspectorWidth: 292,
-  density: "comfortable",
+  navPresence: "show",
+  inspectorPresence: "hide",
+  navWidth: 200,
+  inspectorWidth: 280,
+  density: "auto",
 };
 
 function readLayout() {
   try {
-    const saved = JSON.parse(localStorage.getItem(LAYOUT_KEY) || "{}");
+    const current = localStorage.getItem(LAYOUT_KEY);
+    const saved = JSON.parse(current || localStorage.getItem("unigrok.mcp.console.layout.v1") || "{}");
+    const legacyNav = saved.nav === "hidden" ? "hide" : "show";
+    const legacyInspector = saved.inspector === "open" ? "show" : "hide";
     return {
       ...defaultLayout,
       ...saved,
-      nav: PANEL_MODES.includes(saved.nav) ? saved.nav : defaultLayout.nav,
-      inspector: PANEL_MODES.includes(saved.inspector) ? saved.inspector : defaultLayout.inspector,
+      navPresence: ["show", "hide"].includes(saved.navPresence) ? saved.navPresence : legacyNav,
+      inspectorPresence: ["show", "hide"].includes(saved.inspectorPresence) ? saved.inspectorPresence : legacyInspector,
       navWidth: clamp(Number(saved.navWidth) || defaultLayout.navWidth, ...LAYOUT_LIMITS.nav),
       inspectorWidth: clamp(Number(saved.inspectorWidth) || defaultLayout.inspectorWidth, ...LAYOUT_LIMITS.inspector),
-      density: saved.density === "compact" ? "compact" : "comfortable",
+      density: ["auto", "compact", "comfortable"].includes(saved.density) ? saved.density : "auto",
     };
   } catch (_) {
     return { ...defaultLayout };
@@ -35,36 +38,30 @@ function readLayout() {
 }
 
 let layoutState = readLayout();
+const layoutSession = { navDrawerOpen: false, inspectorDrawerOpen: false, resizing: false };
 let layoutAnimationTimer = null;
+let layoutResizeFrame = 0;
+let layoutResizeTimer = 0;
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
 
-function panelPixels(mode, width) {
-  if (mode === "open") return width + LAYOUT_LIMITS.splitter;
-  if (mode === "rail") return LAYOUT_LIMITS.rail + LAYOUT_LIMITS.splitter;
-  return 0;
-}
+function resolveLayout(width, height, intent = layoutState) {
+  const navDockCost = intent.navWidth + LAYOUT_LIMITS.splitter;
+  const inspectorDockCost = intent.inspectorWidth + LAYOUT_LIMITS.splitter;
+  let nav = intent.navPresence === "show" ? "dock" : "hidden";
+  let inspector = intent.inspectorPresence === "show" ? "dock" : "hidden";
 
-function fitLayout(width, preferred = layoutState) {
-  const fitted = { ...preferred };
-  const fits = () => panelPixels(fitted.nav, fitted.navWidth)
-    + panelPixels(fitted.inspector, fitted.inspectorWidth)
-    + LAYOUT_LIMITS.workbench <= width;
+  if (nav === "dock" && width < navDockCost + LAYOUT_LIMITS.workbenchComfort) nav = "rail";
+  if (nav === "rail" && width < LAYOUT_LIMITS.rail + LAYOUT_LIMITS.workbench) nav = "drawer";
+  const navCost = nav === "dock" ? navDockCost : nav === "rail" ? LAYOUT_LIMITS.rail + LAYOUT_LIMITS.splitter : 0;
+  if (inspector === "dock" && width < navCost + inspectorDockCost + LAYOUT_LIMITS.workbenchComfort) inspector = "drawer";
 
-  // Debug chrome yields before navigation; the workbench always keeps its floor.
-  const demotions = [
-    ["inspector", "open", "rail"],
-    ["nav", "open", "rail"],
-    ["inspector", "rail", "hidden"],
-    ["nav", "rail", "hidden"],
-  ];
-  for (const [side, from, to] of demotions) {
-    if (fits()) break;
-    if (fitted[side] === from) fitted[side] = to;
-  }
-  return fitted;
+  const density = intent.density === "auto"
+    ? (height < 640 || width < 520 ? "compact" : "comfortable")
+    : intent.density;
+  return { nav, inspector, density, stickyActions: height < 700 || density === "compact" };
 }
 
 function saveLayout() {
@@ -75,12 +72,15 @@ function applyLayout({ animate = false } = {}) {
   const grid = $("consoleGrid");
   if (!grid) return;
   const rect = grid.getBoundingClientRect();
-  const effective = fitLayout(rect.width || window.innerWidth);
-  const compact = layoutState.density === "compact" || rect.width < 720 || rect.height < 580;
+  const effective = resolveLayout(rect.width || window.innerWidth, rect.height || window.innerHeight);
 
   grid.dataset.nav = effective.nav;
   grid.dataset.inspector = effective.inspector;
-  grid.dataset.density = compact ? "compact" : "comfortable";
+  grid.dataset.navDrawer = layoutSession.navDrawerOpen ? "open" : "closed";
+  grid.dataset.inspectorDrawer = layoutSession.inspectorDrawerOpen ? "open" : "closed";
+  grid.dataset.density = effective.density;
+  grid.dataset.stickyActions = String(effective.stickyActions);
+  grid.dataset.resizing = String(layoutSession.resizing);
   grid.style.setProperty("--nav-width", `${layoutState.navWidth}px`);
   grid.style.setProperty("--inspector-width", `${layoutState.inspectorWidth}px`);
   grid.dataset.layout = JSON.stringify({
@@ -88,11 +88,14 @@ function applyLayout({ animate = false } = {}) {
     inspector: effective.inspector,
     navWidth: layoutState.navWidth,
     inspectorWidth: layoutState.inspectorWidth,
-    density: compact ? "compact" : "comfortable",
+    density: effective.density,
+    stickyActions: effective.stickyActions,
   });
 
-  $("toggleNavBtn")?.setAttribute("aria-expanded", String(effective.nav !== "hidden"));
-  $("toggleInspectorBtn")?.setAttribute("aria-expanded", String(effective.inspector !== "hidden"));
+  $("toggleNavBtn")?.setAttribute("aria-pressed", String(layoutState.navPresence === "show"));
+  $("toggleNavBtn")?.setAttribute("aria-expanded", String(effective.nav !== "hidden" && (effective.nav !== "drawer" || layoutSession.navDrawerOpen)));
+  $("toggleInspectorBtn")?.setAttribute("aria-pressed", String(layoutState.inspectorPresence === "show"));
+  $("toggleInspectorBtn")?.setAttribute("aria-expanded", String(effective.inspector !== "hidden" && (effective.inspector !== "drawer" || layoutSession.inspectorDrawerOpen)));
   $("densityBtn")?.setAttribute("aria-pressed", String(layoutState.density === "compact"));
   $("navSplitter")?.setAttribute("aria-valuenow", String(layoutState.navWidth));
   $("inspectorSplitter")?.setAttribute("aria-valuenow", String(layoutState.inspectorWidth));
@@ -104,9 +107,14 @@ function applyLayout({ animate = false } = {}) {
   }
 }
 
-function cyclePanel(side) {
-  const currentIndex = PANEL_MODES.indexOf(layoutState[side]);
-  layoutState[side] = PANEL_MODES[(currentIndex + 1) % PANEL_MODES.length];
+function togglePanel(side) {
+  const key = `${side}Presence`;
+  const showing = layoutState[key] === "show";
+  layoutState[key] = showing ? "hide" : "show";
+  const grid = $("consoleGrid");
+  const rect = grid?.getBoundingClientRect() || { width: window.innerWidth, height: window.innerHeight };
+  const resolved = resolveLayout(rect.width, rect.height);
+  layoutSession[`${side}DrawerOpen`] = !showing && resolved[side] === "drawer";
   saveLayout();
   applyLayout({ animate: true });
 }
@@ -120,7 +128,7 @@ function bindSplitter(id, side) {
   const resizeTo = (delta, startWidth) => {
     const direction = side === "nav" ? 1 : -1;
     layoutState[widthKey] = clamp(Math.round(startWidth + delta * direction), ...limits);
-    layoutState[side] = "open";
+    layoutState[`${side}Presence`] = "show";
     saveLayout();
     applyLayout();
   };
@@ -151,13 +159,8 @@ function bindSplitter(id, side) {
 
 function setupLayoutController() {
   applyLayout();
-  $("toggleNavBtn")?.addEventListener("click", () => cyclePanel("nav"));
-  $("toggleInspectorBtn")?.addEventListener("click", () => cyclePanel("inspector"));
-  $("inspectorRailBtn")?.addEventListener("click", () => {
-    layoutState.inspector = "open";
-    saveLayout();
-    applyLayout({ animate: true });
-  });
+  $("toggleNavBtn")?.addEventListener("click", () => togglePanel("nav"));
+  $("toggleInspectorBtn")?.addEventListener("click", () => togglePanel("inspector"));
   $("densityBtn")?.addEventListener("click", () => {
     layoutState.density = layoutState.density === "compact" ? "comfortable" : "compact";
     saveLayout();
@@ -170,14 +173,27 @@ function setupLayoutController() {
     const command = event.ctrlKey || event.metaKey;
     if (command && !event.shiftKey && event.key.toLowerCase() === "b") {
       event.preventDefault();
-      cyclePanel("nav");
+      togglePanel("nav");
     } else if (command && event.shiftKey && event.key.toLowerCase() === "i") {
       event.preventDefault();
-      cyclePanel("inspector");
+      togglePanel("inspector");
+    } else if (event.key === "Escape" && (layoutSession.navDrawerOpen || layoutSession.inspectorDrawerOpen)) {
+      layoutSession.navDrawerOpen = false;
+      layoutSession.inspectorDrawerOpen = false;
+      applyLayout({ animate: true });
     }
   });
 
-  const observer = new ResizeObserver(() => applyLayout());
+  const observer = new ResizeObserver(() => {
+    layoutSession.resizing = true;
+    cancelAnimationFrame(layoutResizeFrame);
+    layoutResizeFrame = requestAnimationFrame(() => applyLayout());
+    clearTimeout(layoutResizeTimer);
+    layoutResizeTimer = setTimeout(() => {
+      layoutSession.resizing = false;
+      applyLayout();
+    }, 140);
+  });
   observer.observe($("consoleGrid"));
 }
 
@@ -226,17 +242,18 @@ function setupTabRouter() {
     });
   });
   tablist?.addEventListener("keydown", (event) => {
-    const index = tabs.indexOf(document.activeElement);
+    const visibleTabs = tabs.filter((tab) => tab.offsetParent !== null);
+    const index = visibleTabs.indexOf(document.activeElement);
     if (index < 0) return;
     let next = index;
-    if (event.key === "ArrowDown" || event.key === "ArrowRight") next = (index + 1) % tabs.length;
-    else if (event.key === "ArrowUp" || event.key === "ArrowLeft") next = (index - 1 + tabs.length) % tabs.length;
+    if (event.key === "ArrowDown" || event.key === "ArrowRight") next = (index + 1) % visibleTabs.length;
+    else if (event.key === "ArrowUp" || event.key === "ArrowLeft") next = (index - 1 + visibleTabs.length) % visibleTabs.length;
     else if (event.key === "Home") next = 0;
-    else if (event.key === "End") next = tabs.length - 1;
+    else if (event.key === "End") next = visibleTabs.length - 1;
     else return;
     event.preventDefault();
-    tabs[next].focus();
-    tabs[next].click();
+    visibleTabs[next].focus();
+    visibleTabs[next].click();
   });
 }
 
@@ -255,6 +272,7 @@ function switchTab(tabId) {
   const targetPanel = $(tabId);
 
   if (targetBtn && targetPanel) {
+    if (targetBtn.closest("#advancedNav")) $("advancedNav").open = true;
     targetBtn.classList.add("active");
     targetBtn.setAttribute("aria-selected", "true");
     targetBtn.tabIndex = 0;
@@ -820,12 +838,31 @@ async function runStartupCheck() {
     const res = await fetch("/readyz");
     if (res.ok) {
       setStatus("active", "Live");
+      return true;
     } else {
       throw new Error();
     }
   } catch {
     setStatus("error", "Offline");
+    return false;
   }
+}
+
+function renderSetupStatus(data, ready = true) {
+  const target = $("setupStatusSummary");
+  if (!target) return;
+  const contract = data?.credential_planes || {};
+  const effective = contract.effective_plane || "none";
+  const runtime = data?.runtime || "unknown";
+  const notices = (contract.notices || []).filter((notice) => notice.prompt_user);
+  const attention = notices.map((notice) => notice.message).join(" ");
+  const title = document.createElement("strong");
+  title.textContent = ready ? "Gateway is live." : "Gateway needs attention.";
+  const detail = document.createElement("span");
+  detail.textContent = ready
+    ? `Runtime: ${runtime} · active credential plane: ${effective}.${attention ? ` ${attention}` : ""}`
+    : "The live readiness check failed. Restart or inspect the runtime before running a task.";
+  target.replaceChildren(title, document.createElement("br"), detail);
 }
 
 async function fetchRuntimeStatus() {
@@ -836,10 +873,14 @@ async function fetchRuntimeStatus() {
     $("runtimeChip").innerText = `runtime: ${data.runtime || "unknown"}`;
     $("transportChip").innerText = `transport: ${data.transport || "unknown"}`;
     renderCredentialPlanes(data.credential_planes || null);
+    renderSetupStatus(data, true);
+    return data;
   } catch {
     $("runtimeChip").innerText = "runtime: unknown";
     $("transportChip").innerText = "transport: unknown";
     $("planeChip").innerText = "plane: unknown";
+    renderSetupStatus(null, false);
+    return null;
   }
 }
 
@@ -1909,6 +1950,11 @@ function init() {
 
   // Onboarding action
   $("copyDiscoverBtn").addEventListener("click", runDiscoverSelfOnboarding);
+  $("setupRecheckBtn")?.addEventListener("click", async () => {
+    const ready = await runStartupCheck();
+    const runtime = await fetchRuntimeStatus();
+    renderSetupStatus(runtime, ready);
+  });
 
   // Telemetry refresh action
   $("refreshMetricsBtn").addEventListener("click", fetchLiveMetrics);
@@ -1931,8 +1977,10 @@ function init() {
   window.fetchMcpListTools = fetchMcpListTools;
 
   setTimeout(async () => {
-    await runStartupCheck();
-    await fetchRuntimeStatus();
+    const ready = await runStartupCheck();
+    const runtime = await fetchRuntimeStatus();
+    renderSetupStatus(runtime, ready);
+    if (!ready) switchTab("tab-onboarding");
     await loadModelsList();
     await loadPlaneModelCatalog();
     await fetchMcpListTools();

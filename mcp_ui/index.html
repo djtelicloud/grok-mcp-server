@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>UniGrok MCP v0.5.3 Control Center</title>
     <meta name="unigrok-ui-regions" content="navigation,workbench,rpc-inspector,rpc-logs,result-facts" />
-  <link rel="stylesheet" href="./styles.css?v=grok-v0.5.3-r4" />
+  <link rel="stylesheet" href="./styles.css?v=grok-v0.5.3-r5" />
   </head>
   <body>
     <main class="app-shell">
@@ -37,8 +37,8 @@
           <h1>Control Center <span class="version-badge">v0.5.3</span></h1>
         </div>
         <div class="layout-actions" aria-label="Workspace layout controls">
-          <button id="toggleNavBtn" type="button" class="chrome-btn" aria-controls="sidebarNav" aria-expanded="true" title="Cycle navigation (⌘/Ctrl+B)"><span aria-hidden="true">◧</span><span class="chrome-label">Sections</span></button>
-          <button id="toggleInspectorBtn" type="button" class="chrome-btn" aria-controls="inspector" aria-expanded="true" title="Cycle inspector (⌘/Ctrl+Shift+I)"><span aria-hidden="true">◨</span><span class="chrome-label">Inspector</span></button>
+          <button id="toggleNavBtn" type="button" class="chrome-btn" aria-controls="sidebarNav" aria-expanded="true" aria-pressed="true" title="Show or hide sections (⌘/Ctrl+B)"><span aria-hidden="true">◧</span><span class="chrome-label">Sections</span></button>
+          <button id="toggleInspectorBtn" type="button" class="chrome-btn" aria-controls="inspector" aria-expanded="false" aria-pressed="false" title="Show or hide inspector (⌘/Ctrl+Shift+I)"><span aria-hidden="true">◨</span><span class="chrome-label">Inspector</span></button>
           <button id="densityBtn" type="button" class="chrome-btn" aria-pressed="false" title="Toggle compact density"><span aria-hidden="true">↕</span><span class="chrome-label">Density</span></button>
         </div>
         <div class="signal-strip" aria-live="polite" aria-label="Gateway status">
@@ -52,33 +52,35 @@
       </header>
 
       <!-- Grid Layout: Sidebar Navigation + Workbench + Inspector -->
-      <section id="consoleGrid" class="console-grid" data-nav="open" data-inspector="open" data-density="comfortable" data-region="workspace" aria-label="Resizable Control Center workspace">
+      <section id="consoleGrid" class="console-grid" data-nav="dock" data-inspector="hidden" data-density="comfortable" data-nav-drawer="closed" data-inspector-drawer="closed" data-region="workspace" aria-label="Resizable Control Center workspace">
         
         <!-- Sidebar Navigation -->
         <nav id="sidebarNav" class="sidebar-nav" data-region="navigation" role="tablist" aria-label="Control Center sections" aria-orientation="vertical">
           <div id="browserWarningCard" class="warning-card hidden" aria-live="assertive">
             <strong>⚠️ Browser compatibility:</strong> Experimental WebMCP features require a browser or extension that exposes document.modelContext.
           </div>
-          <div class="nav-title">Start here</div>
+          <div class="nav-title">Run</div>
           <button id="tab-btn-console" type="button" class="nav-btn active" data-tab="tab-console" role="tab" aria-selected="true" aria-controls="tab-console" tabindex="0" title="Agent Playground">
             <span class="btn-icon" aria-hidden="true">▶</span><span class="btn-label">Agent Playground</span>
           </button>
+          <button id="tab-btn-onboarding" type="button" class="nav-btn" data-tab="tab-onboarding" role="tab" aria-selected="false" aria-controls="tab-onboarding" tabindex="-1" title="Setup &amp; Status">
+            <span class="btn-icon" aria-hidden="true">✓</span><span class="btn-label">Setup &amp; Status</span>
+          </button>
+          <div class="nav-title nav-title-group">Control</div>
           <button id="tab-btn-models" type="button" class="nav-btn" data-tab="tab-models" role="tab" aria-selected="false" aria-controls="tab-models" tabindex="-1" title="Models &amp; Planes">
             <span class="btn-icon" aria-hidden="true">◫</span><span class="btn-label">Models &amp; Planes</span>
           </button>
           <button id="tab-btn-metrics" type="button" class="nav-btn" data-tab="tab-metrics" role="tab" aria-selected="false" aria-controls="tab-metrics" tabindex="-1" title="Usage &amp; Telemetry">
             <span class="btn-icon" aria-hidden="true">📊</span><span class="btn-label">Usage &amp; Telemetry</span>
           </button>
-          <div class="nav-title nav-title-group">Developer tools</div>
+          <details id="advancedNav" class="nav-advanced">
+          <summary class="nav-title nav-title-group">Advanced</summary>
+          <div class="nav-advanced-items">
           <button id="tab-btn-schemas" type="button" class="nav-btn" data-tab="tab-schemas" role="tab" aria-selected="false" aria-controls="tab-schemas" tabindex="-1" title="Schema Explorer">
             <span class="btn-icon" aria-hidden="true">📋</span><span class="btn-label">Schema Explorer</span>
           </button>
           <button id="tab-btn-guard" type="button" class="nav-btn" data-tab="tab-guard" role="tab" aria-selected="false" aria-controls="tab-guard" tabindex="-1" title="Reasoning Guard">
             <span class="btn-icon" aria-hidden="true">🛡️</span><span class="btn-label">Reasoning Guard</span>
-          </button>
-          <div class="nav-title nav-title-group">Agent integration</div>
-          <button id="tab-btn-onboarding" type="button" class="nav-btn" data-tab="tab-onboarding" role="tab" aria-selected="false" aria-controls="tab-onboarding" tabindex="-1" title="Agent Setup">
-            <span class="btn-icon" aria-hidden="true">🚀</span><span class="btn-label">Agent Setup</span>
           </button>
           <button id="tab-btn-okf" type="button" class="nav-btn" data-tab="tab-okf" role="tab" aria-selected="false" aria-controls="tab-okf" tabindex="-1" title="OKF Browser">
             <span class="btn-icon" aria-hidden="true">📚</span><span class="btn-label">OKF Browser</span>
@@ -86,6 +88,8 @@
           <button id="tab-btn-webmcp" type="button" class="nav-btn" data-tab="tab-webmcp" role="tab" aria-selected="false" aria-controls="tab-webmcp" tabindex="-1" title="WebMCP Tester">
             <span class="btn-icon" aria-hidden="true">🌐</span><span class="btn-label">WebMCP Tester</span>
           </button>
+          </div>
+          </details>
         </nav>
 
         <div id="navSplitter" class="panel-splitter" data-side="nav" role="separator" aria-label="Resize section navigation" aria-controls="sidebarNav" aria-orientation="vertical" aria-valuemin="148" aria-valuemax="340" aria-valuenow="216" tabindex="0"></div>
@@ -97,9 +101,35 @@
           <div id="tab-console" class="tab-panel active" role="tabpanel" aria-labelledby="tab-btn-console" data-region="tab-console">
             <div class="panel-header">
               <h2>Agent Playground</h2>
-              <button id="copyConsoleCallBtn" type="button" class="small-btn-glow">Copy tool call</button>
+              <span class="panel-header-hint">Task first · details on demand</span>
             </div>
             <p class="panel-desc">Verify the gateway with one click, run a useful sample, or give Grok a real task. No prompt is required for the setup check.</p>
+
+            <div class="form-layout playground-form">
+              <div id="apiKeyWizard" class="wizard-card hidden">
+                <h4>🔑 UniGrok Gateway Access</h4>
+                <p class="wizard-desc">This is the optional UniGrok client token, not your xAI API key. Never paste XAI_API_KEY into this page.</p>
+                <div class="wizard-inputs">
+                  <input id="wizardTokenInput" type="text" placeholder="Client token..." class="wizard-input" aria-label="Client token" />
+                  <button id="saveWizardTokenBtn" type="button" class="small-btn-glow">Save Token</button>
+                </div>
+              </div>
+              <div class="form-group task-composer">
+                <label for="promptInput">Your task
+                  <textarea id="promptInput" rows="5" placeholder="Describe what you want Grok to do, or choose a preset below…" aria-label="Prompt task message input"></textarea>
+                </label>
+                <div class="estimator-row">
+                  <span id="costEstimator" class="estimator-text">Local input estimate: ~0 tokens</span>
+                  <label class="budget-guard-label">
+                    <input id="budgetGuardToggle" type="checkbox" checked aria-label="Toggle large prompt safety guard" /> Large Prompt Guard
+                  </label>
+                </div>
+              </div>
+              <div class="form-actions playground-action-dock">
+                <button id="sendBtn" type="button" class="primary-btn-glow" aria-label="Run task with agent">Run Task</button>
+                <button id="clearBtn" type="button" class="secondary-btn" aria-label="Clear history log">Clear History</button>
+              </div>
+            </div>
 
             <section class="playground-launcher" aria-label="Quick start actions">
               <div>
@@ -116,15 +146,9 @@
               <button type="button" class="preset-btn prompt-preset" data-prompt="Review this code or error and give me the three most useful next steps:\n\n">Review code or error</button>
             </div>
             
-            <div class="form-layout">
-              <div id="apiKeyWizard" class="wizard-card hidden">
-                <h4>🔑 UniGrok Gateway Access</h4>
-                <p class="wizard-desc">This is the optional UniGrok client token, not your xAI API key. Never paste XAI_API_KEY into this page.</p>
-                <div class="wizard-inputs">
-                  <input id="wizardTokenInput" type="text" placeholder="Client token..." class="wizard-input" aria-label="Client token" />
-                  <button id="saveWizardTokenBtn" type="button" class="small-btn-glow">Save Token</button>
-                </div>
-              </div>
+            <details class="run-options">
+              <summary>Run options · SuperGrok subscription · Auto</summary>
+              <div class="form-layout">
               <div class="form-group row-group">
                 <label for="planeInput">
                   Run With
@@ -154,18 +178,6 @@
                 <p id="planeHint" class="plane-hint">Subscription only · no developer API billing</p>
               </div>
 
-              <div class="form-group">
-                <label for="promptInput">Your task
-                  <textarea id="promptInput" rows="5" placeholder="Describe what you want Grok to do, or choose a preset above…" aria-label="Prompt task message input"></textarea>
-                </label>
-                <div class="estimator-row">
-                  <span id="costEstimator" class="estimator-text">Local input estimate: ~0 tokens</span>
-                  <label class="budget-guard-label">
-                    <input id="budgetGuardToggle" type="checkbox" checked aria-label="Toggle large prompt safety guard" /> Large Prompt Guard
-                  </label>
-                </div>
-              </div>
-
               <details class="advanced-settings">
                 <summary>Advanced RPC settings</summary>
                 <div class="advanced-grid">
@@ -189,16 +201,13 @@
                   </label>
                 </div>
               </details>
-
-              <div class="form-actions">
-                <button id="sendBtn" type="button" class="primary-btn-glow" aria-label="Run task with agent">Run Task</button>
-                <button id="clearBtn" type="button" class="secondary-btn" aria-label="Clear history log">Clear History</button>
-              </div>
+              <button id="copyConsoleCallBtn" type="button" class="small-btn-glow">Copy tool call</button>
             </div>
+            </details>
 
             <!-- Scrollable Conversation Log -->
             <div class="conversation-wrapper">
-              <div class="section-title">Conversation History</div>
+              <div class="section-title">Playground session</div>
               <div id="conversation" class="transcript"></div>
             </div>
           </div>
@@ -496,15 +505,18 @@
           <!-- TAB 8: Onboarding (Self) -->
           <div id="tab-onboarding" class="tab-panel">
             <div class="panel-header">
-              <h2>Zero-Configuration Onboarding</h2>
-              <button id="copyDiscoverBtn" type="button" class="primary-btn-glow">Run discover_self</button>
+              <h2>Setup &amp; Status</h2>
+              <button id="setupRecheckBtn" type="button" class="primary-btn-glow">Recheck setup</button>
             </div>
-            <p class="panel-desc">Exposes raw metadata to headless agent swarms. Invoking this tool lists manifest targets and OKF paths dynamically.</p>
+            <p class="panel-desc">Human-readable gateway readiness first. Agent integration metadata remains available below.</p>
 
-            <div class="onboarding-box">
-              <div class="section-title">Onboarding Tool Payload (`discover_self`)</div>
-              <pre><code id="discoverSelfCode" class="json-code">Click 'Run discover_self' to query the tool...</code></pre>
-            </div>
+            <div id="setupStatusSummary" class="setup-status-summary" aria-live="polite">Checking the live gateway…</div>
+
+            <details class="raw-telemetry-disclosure onboarding-box">
+              <summary><span>Agent-readable setup metadata</span><small>discover_self manifest and OKF paths</small></summary>
+              <button id="copyDiscoverBtn" type="button" class="small-btn-glow">Run discover_self</button>
+              <pre><code id="discoverSelfCode" class="json-code">Run discover_self to inspect the machine-readable contract.</code></pre>
+            </details>
           </div>
 
         </section>
@@ -513,7 +525,6 @@
 
         <!-- Right Inspector Panel -->
         <aside id="inspector" class="inspector" data-region="rpc-inspector" aria-label="RPC inspector">
-          <button id="inspectorRailBtn" type="button" class="inspector-rail-btn" aria-label="Expand RPC inspector" title="Expand RPC inspector">◨</button>
           <div class="inspector-body">
           <div class="panel-header">
             <h3>RPC Wire Logs</h3>
@@ -547,6 +558,6 @@
 
       </section>
     </main>
-  <script type="module" src="./app.js?v=grok-v0.5.3-r4"></script>
+  <script type="module" src="./app.js?v=grok-v0.5.3-r5"></script>
   </body>
 </html>

@@ -15,8 +15,8 @@ def test_mcp_ui_static_files_are_served(monkeypatch):
     assert index.status_code == 200
     assert "<title>UniGrok MCP v0.5.3 Control Center</title>" in index.text
     assert '<span class="version-badge">v0.5.3</span>' in index.text
-    assert 'script type="module" src="./app.js?v=grok-v0.5.3-r4"' in index.text
-    assert '<link rel="stylesheet" href="./styles.css?v=grok-v0.5.3-r4" />' in index.text
+    assert 'script type="module" src="./app.js?v=grok-v0.5.3-r5"' in index.text
+    assert '<link rel="stylesheet" href="./styles.css?v=grok-v0.5.3-r5" />' in index.text
     assert "Control Center" in index.text
     assert "Bearer token" not in index.text
     assert "Agent Playground" in index.text
@@ -79,9 +79,9 @@ def test_mcp_ui_static_files_are_served(monkeypatch):
     assert 'role="tablist"' in index.text
     assert 'role="separator"' in index.text
     assert "ResizeObserver" in script.text
-    assert "fitLayout" in script.text
+    assert "resolveLayout" in script.text
     assert "unigrok_ui_layout_get" in script.text
-    assert "mcp.console.layout.v1" in script.text
+    assert "mcp.console.layout.v2" in script.text
     assert "grid-template-columns: 1fr !important" not in styles.text
     assert "fonts.googleapis.com" not in index.text
     assert 'id="planeInput"' in index.text
@@ -102,12 +102,20 @@ def test_mcp_ui_layout_engine_is_local_and_ide_first():
         script = client.get("/ui/app.js")
         styles = client.get("/ui/styles.css")
 
-    assert 'data-nav="open"' in index.text
-    assert 'data-inspector="open"' in index.text
+    assert 'data-nav="dock"' in index.text
+    assert 'data-inspector="hidden"' in index.text
     assert 'aria-label="Workspace layout controls"' in index.text
-    assert "--workbench-min: 320px" in styles.text
+    assert "--workbench-min: 300px" in styles.text
     assert '.console-grid[data-nav="rail"]' in styles.text
     assert '.console-grid[data-inspector="hidden"]' in styles.text
+    assert '.console-grid[data-inspector="drawer"]' in styles.text
+    assert 'data-inspector-drawer="closed"' in index.text
+    assert 'class="form-actions playground-action-dock"' in index.text
+    assert "Setup &amp; Status" in index.text
+    assert 'id="advancedNav"' in index.text
+    assert 'inspectorPresence: "hide"' in script.text
+    assert "PANEL_MODES" not in script.text
+    assert "cyclePanel" not in script.text
     assert "pointerdown" in script.text
     assert 'event.key.toLowerCase() === "b"' in script.text
     resize_observer_body = script.text.split("new ResizeObserver", 1)[1].split("observer.observe", 1)[0]
