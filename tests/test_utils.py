@@ -926,6 +926,24 @@ class TestTier2ToolsRegistered:
         assert "src" in obs.content or "pyproject" in obs.content
 
     @pytest.mark.asyncio
+    async def test_list_project_files_skips_nested_worktrees(self, tmp_path, monkeypatch):
+        """Nested repositories must not consume the bounded project listing."""
+        (tmp_path / "src").mkdir()
+        (tmp_path / "src" / "app.py").write_text("pass\n")
+        nested = tmp_path / ".claude" / "worktrees" / "task"
+        nested.mkdir(parents=True)
+        (nested / ".git").write_text("gitdir: /tmp/example\n")
+        for index in range(250):
+            (nested / f"file-{index:03}.py").write_text("pass\n")
+        monkeypatch.setenv("WORKSPACE_ROOT", str(tmp_path))
+
+        obs = await dispatch_internal_tool("list_project_files", {})
+
+        assert obs.success is True
+        assert "`src/app.py`" in obs.content
+        assert ".claude/worktrees/task" not in obs.content
+
+    @pytest.mark.asyncio
     async def test_read_local_file_blocks_traversal(self):
         """raw_read_local_file must block paths escaping the project root."""
         obs = await dispatch_internal_tool(

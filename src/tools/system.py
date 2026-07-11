@@ -532,13 +532,25 @@ async def list_project_files(extensions: Optional[str] = None, max_results: int 
 
         def _scan():
             files = []
-            for p in proj_root.rglob("*"):
-                if p.is_file() and not is_path_ignored(p, proj_root, patterns):
-                    if ext_list:
-                        if p.suffix.lower().replace('.', '') in ext_list:
+            for root, dirs, names in os.walk(proj_root):
+                root_path = Path(root)
+                # IDE worktrees and nested repositories are separate workspace
+                # roots. Do not let their files consume this workspace's
+                # bounded listing budget.
+                dirs[:] = [
+                    name
+                    for name in dirs
+                    if not (root_path / name / ".git").exists()
+                    and not is_path_ignored(root_path / name, proj_root, patterns)
+                ]
+                for name in names:
+                    p = root_path / name
+                    if not is_path_ignored(p, proj_root, patterns):
+                        if ext_list:
+                            if p.suffix.lower().replace('.', '') in ext_list:
+                                files.append(p)
+                        else:
                             files.append(p)
-                    else:
-                        files.append(p)
             return files
 
         found_files = await run_blocking(_scan, timeout=30.0)
