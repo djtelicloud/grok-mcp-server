@@ -15,6 +15,7 @@ from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 from ..models.results import SystemResult
 from ..metrics import build_metrics_snapshot, fetch_provider_api_usage
+from ..semantic_evals import get_semantic_eval_stats
 from ..version import __version__
 
 from ..utils import (
@@ -206,6 +207,22 @@ async def grok_mcp_status(view: Literal["text", "json"] = "text") -> str:
         except Exception:
             pass
 
+        # Shadow semantic-eval judge (observational only; off by default)
+        semantic_summary = "`off`"
+        semantic_stats: Optional[Dict[str, Any]] = None
+        try:
+            semantic_stats = get_semantic_eval_stats()
+            if semantic_stats["mode"] == "shadow":
+                avg_scores = semantic_stats.get("avg_scores") or {}
+                overall = avg_scores.get("overall")
+                semantic_summary = (
+                    f"`shadow` (rate {semantic_stats['rate']:.2f}) — "
+                    f"graded {semantic_stats['graded']} this process, avg overall "
+                    + (f"`{overall:.2f}/5`" if overall is not None else "`n/a`")
+                )
+        except Exception:
+            pass
+
         if view == "json":
             provider_api = await fetch_provider_api_usage()
             snapshot = build_metrics_snapshot(
@@ -214,6 +231,7 @@ async def grok_mcp_status(view: Literal["text", "json"] = "text") -> str:
                 circuit_breakers=breakers,
                 routing_advisor=advisor_view,
                 provider_api=provider_api,
+                semantic_evals=semantic_stats,
             )
             snapshot["credential_planes"] = credential_planes
             return json.dumps(snapshot, separators=(",", ":"))
@@ -264,6 +282,7 @@ async def grok_mcp_status(view: Literal["text", "json"] = "text") -> str:
             f"- **CLI vs API Routing Split:** `{cli_count} CLI calls / {api_count} API calls`\n"
             f"- **Success Rate:** `{success_rate:.1f}%`\n"
             f"- **Top Callers Today:** {top_callers}\n"
+            f"- **Semantic Evals:** {semantic_summary}\n"
             f"- **Latest Context Snapshot:** `{latest_context_id}`\n"
         )
         return ctx.format_output(status_text)

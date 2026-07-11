@@ -15,6 +15,7 @@ from typing import Any, AsyncIterator, Dict, List, Literal, Optional
 from urllib.parse import urlsplit
 from .models.results import AgentResult
 from .metrics import build_metrics_snapshot, fetch_provider_api_usage
+from .semantic_evals import get_semantic_eval_stats
 
 import httpx
 from mcp.server.fastmcp import FastMCP
@@ -1215,6 +1216,40 @@ def _render_prometheus_metrics(snapshot: Dict[str, Any]) -> str:
                     f"unigrok_task_rag_fused_score_count {task_rag.get('fused_score_count', 0)}"
                 )
 
+    # Shadow semantic evals (UNIGROK_SEMANTIC_EVALS): unlabeled in-process
+    # counters plus lifetime average score gauges. Observational only — the
+    # mode string and rate stay JSON-only like the advisor's nested view.
+    semantic: Optional[Dict[str, Any]] = snapshot.get("semantic_evals")
+    if isinstance(semantic, dict):
+        family(
+            "unigrok_semantic_evals_sampled_total", "counter",
+            "Live turns handed to the shadow semantic-eval judge.",
+            [({}, semantic.get("sampled", 0))],
+        )
+        family(
+            "unigrok_semantic_evals_graded_total", "counter",
+            "Judge verdicts successfully attached to telemetry rows.",
+            [({}, semantic.get("graded", 0))],
+        )
+        family(
+            "unigrok_semantic_evals_judge_failures_total", "counter",
+            "Judge calls that failed, timed out, or hit an open breaker.",
+            [({}, semantic.get("judge_failures", 0))],
+        )
+        family(
+            "unigrok_semantic_evals_attach_misses_total", "counter",
+            "Judge verdicts whose telemetry row could not be found.",
+            [({}, semantic.get("attach_misses", 0))],
+        )
+        avg_scores = semantic.get("avg_scores")
+        if isinstance(avg_scores, dict):
+            for score_key in ("correctness", "tool_efficiency", "safety"):
+                family(
+                    f"unigrok_semantic_evals_avg_{score_key}", "gauge",
+                    f"Process-lifetime average {score_key.replace('_', ' ')} score (1-5) from the shadow judge.",
+                    [({}, avg_scores.get(score_key, 0.0))],
+                )
+
     return "\n".join(lines) + "\n"
 
 
@@ -1243,6 +1278,12 @@ async def metrics(request: Request) -> Response:
     except Exception as exc:
         logger.warning(f"/metrics advisor view failed: {exc}")
 
+    semantic_stats: Optional[Dict[str, Any]] = None
+    try:
+        semantic_stats = get_semantic_eval_stats()
+    except Exception as exc:
+        logger.warning(f"/metrics semantic eval stats failed: {exc}")
+
     provider_api = await fetch_provider_api_usage()
     snapshot = build_metrics_snapshot(
         rows,
@@ -1250,6 +1291,7 @@ async def metrics(request: Request) -> Response:
         circuit_breakers=get_circuit_breaker_state(),
         routing_advisor=advisor_view,
         provider_api=provider_api,
+        semantic_evals=semantic_stats,
         caller_limit=_METRICS_TOP_CALLERS,
     )
     if request.query_params.get("format", "").strip().lower() == "prometheus":
