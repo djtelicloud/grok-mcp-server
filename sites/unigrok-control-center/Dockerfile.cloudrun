@@ -29,7 +29,8 @@ RUN groupadd --system --gid 10001 unigrok \
 COPY --from=builder --chown=10001:10001 /workspace/public ./public
 COPY --from=builder --chown=10001:10001 /workspace/.next/standalone ./
 COPY --from=builder --chown=10001:10001 /workspace/.next/static ./.next/static
-COPY --from=builder --chown=10001:10001 --chmod=0555 /workspace/scripts/cloudrun-entrypoint.sh ./cloudrun-entrypoint.sh
+COPY --from=builder --chown=10001:10001 /workspace/scripts/cloudrun-entrypoint.sh ./cloudrun-entrypoint.sh
+RUN chmod 0555 ./cloudrun-entrypoint.sh
 
 USER 10001:10001
 EXPOSE 8080

@@ -31,6 +31,8 @@ test("builds an unprivileged image without credential inputs", async () => {
   assert.match(dockerfile, /USER 10001:10001/);
   assert.match(dockerfile, /node:22\.22\.0-bookworm-slim@sha256:[a-f0-9]{64}/);
   assert.match(dockerfile, /CMD \["\/app\/cloudrun-entrypoint\.sh"\]/);
+  assert.match(dockerfile, /RUN chmod 0555 \.\/cloudrun-entrypoint\.sh/);
+  assert.doesNotMatch(dockerfile, /COPY[^\n]*--chmod/);
   assert.match(dockerfile, /\/api\/public\/v1\/project/);
   assert.doesNotMatch(dockerfile, /ARG\s+.*(?:SECRET|PRIVATE_KEY|TOKEN)/i);
   assert.doesNotMatch(
