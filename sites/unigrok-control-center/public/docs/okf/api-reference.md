@@ -801,6 +801,20 @@ node, or an AMBIGUOUS node (multiple same-named matches — e.g.
 conditional redefinitions) — a wrong span that still passes tests would
 corrupt adjacent code at apply, so ambiguity is fatal by design.
 
+### Function: `signature_fingerprint` {#swarm-ast_utils-signature_fingerprint}
+
+```python
+def signature_fingerprint(source: bytes, focus_node: str) -> str
+```
+
+**Keywords:** signature, fingerprint
+
+Return a stable fingerprint for the focused callable's signature.
+
+The optimizer may change the body and decorators, but not sync/async kind
+or arguments. Tests rarely exercise every valid calling convention, so a
+passing suite alone is not enough to enforce this drop-in contract.
+
 ### Function: `span_line_range` {#swarm-ast_utils-span_line_range}
 
 ```python
@@ -933,19 +947,17 @@ class BudgetExceeded
 
 **Keywords:** budget, exceeded
 
-Raised when a metered (API-plane) generation would exceed the task's
-remaining budget. CLI-plane generation is $0 and never raises.
+Raised defensively if a swarm generation is non-CLI or charged.
 
 ### Function: `generate_mutation` {#swarm-generate-generate_mutation}
 
 ```python
-async def generate_mutation(prompt: str, system_prompt: str, *, remaining_budget_usd: float, per_call_reserve_usd: float=0.02, session: Optional[str]=None) -> GenerationResult
+async def generate_mutation(prompt: str, system_prompt: str, *, remaining_budget_usd: float, session: Optional[str]=None) -> GenerationResult
 ```
 
 **Keywords:** generate, mutation
 
-One toolless completion. Rides cli_first routing; if it lands on the
-metered API plane it must fit the remaining budget.
+One toolless completion, strictly on the CLI subscription plane.
 
 ## swarm/mutators.py {#swarm-mutators}
 

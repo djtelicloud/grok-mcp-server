@@ -1,10 +1,9 @@
 """Mutation generation seam — the one place the swarm calls a model.
 
-Generation prefers the $0 CLI subscription plane (cli_first), so a swarm on an
-authenticated CLI plane costs nothing; an API-plane fallback is metered and
-therefore reserves against the task budget BEFORE the call (the semantic-evals
-pattern) and settles the actual cost after. This function is the single
-injection point tests mock — the engine never imports run_agent_turn directly.
+Generation is pinned to the $0 CLI subscription plane with same-plane failure
+semantics.  A swarm must never discover that it used the metered API plane only
+after the charge occurred. This function is the single injection point tests
+mock — the engine never imports run_agent_turn directly.
 """
 
 from __future__ import annotations
@@ -22,8 +21,7 @@ class GenerationResult:
 
 
 class BudgetExceeded(RuntimeError):
-    """Raised when a metered (API-plane) generation would exceed the task's
-    remaining budget. CLI-plane generation is $0 and never raises."""
+    """Raised defensively if a swarm generation is non-CLI or charged."""
 
 
 async def generate_mutation(
@@ -31,11 +29,10 @@ async def generate_mutation(
     system_prompt: str,
     *,
     remaining_budget_usd: float,
-    per_call_reserve_usd: float = 0.02,
     session: Optional[str] = None,
 ) -> GenerationResult:
-    """One toolless completion. Rides cli_first routing; if it lands on the
-    metered API plane it must fit the remaining budget."""
+    """One toolless completion, strictly on the CLI subscription plane."""
+    _ = remaining_budget_usd  # retained in the injectable engine contract
     from ..utils import run_agent_turn
 
     layer = await run_agent_turn(
@@ -43,18 +40,22 @@ async def generate_mutation(
         system_prompt=system_prompt,
         mode="fast",
         enable_agentic=False,
-        plane="auto",
+        plane="cli",
+        fallback_policy="same_plane",
         session=session,
         caller="swarm",
     )
     plane = str(getattr(layer, "plane", "") or "unknown")
     cost = float(getattr(layer, "cost_usd", 0.0) or 0.0)
-    # Metered plane must respect the task budget; the CLI plane is free.
-    if cost > 0 and cost > remaining_budget_usd:
+    if plane not in {"CLI", "CLI-Fallback"} or cost > 0:
         raise BudgetExceeded(
-            f"API-plane generation cost ${cost:.4f} exceeds remaining "
-            f"budget ${remaining_budget_usd:.4f}"
+            "swarm generation refused a non-CLI or charged result "
+            f"(plane={plane!r}, cost=${cost:.4f})"
         )
+    if str(getattr(layer, "finish_reason", "") or "") not in {
+        "final_answer", "fallback"
+    }:
+        raise RuntimeError("CLI swarm generation did not produce a usable answer")
     return GenerationResult(
         text=str(getattr(layer, "generation", "") or ""),
         plane=plane,

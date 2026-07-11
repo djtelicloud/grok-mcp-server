@@ -15,7 +15,10 @@ OBJECTIVES = ("latency_ms", "peak_mem_bytes", "diff_bytes")
 
 
 def _objtuple(candidate: Dict[str, Any], objectives: Sequence[str]) -> Tuple[float, ...]:
-    return tuple(float(candidate.get(key, 0.0) or 0.0) for key in objectives)
+    return tuple(
+        float("inf") if candidate.get(key) is None else float(candidate[key])
+        for key in objectives
+    )
 
 
 def dominates(a: Tuple[float, ...], b: Tuple[float, ...]) -> bool:

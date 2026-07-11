@@ -6,6 +6,7 @@
 
 import asyncio
 import shutil
+import sys
 from pathlib import Path
 
 import pytest
@@ -118,6 +119,18 @@ class TestSandbox:
         assert "XAI_MANAGEMENT_API_KEY" not in env
         assert env["PYTHONPATH"].startswith(str(sandbox.work))
         assert env["PYTHONHASHSEED"] == "0"
+
+    def test_incompatible_workspace_venv_falls_back_to_runtime_python(
+        self, workspace, tmp_path
+    ):
+        fake_python = workspace / ".venv" / "bin" / "python"
+        fake_python.parent.mkdir(parents=True)
+        fake_python.write_bytes(b"not-an-executable-for-this-platform")
+        fake_python.chmod(0o755)
+        sb = SwarmSandbox(workspace, tmp_path / "wr", "slow_mod.py")
+        sb.create()
+        assert sb.python_bin() == sys.executable
+        sb.destroy()
 
     @pytest.mark.asyncio
     async def test_write_and_restore_target(self, sandbox):

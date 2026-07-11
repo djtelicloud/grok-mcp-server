@@ -1903,8 +1903,10 @@ def create_public_mcp() -> FastMCP:
     # downstream project's implied requirements.
     if PathResolver.contributor_mode():
         from .tools.workspace_memory import register_workspace_memory_tools
+        from .tools.swarm import register_swarm_tools
 
         register_workspace_memory_tools(mcp)
+        register_swarm_tools(mcp)
 
     return mcp
 

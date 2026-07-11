@@ -86,7 +86,7 @@ class SwarmRunner:
             file_source = sandbox.read_target()
             start, end = extract_node_span(file_source, spec["focus_node"])
             span_lines = span_line_range(file_source, start, end)
-            bench_argv = spec["bench_argv"]
+            bench_argv = [sandbox.python_bin(), *spec["bench_args"]]
 
             oracle = await run_preflight(
                 sandbox,
@@ -143,16 +143,35 @@ class SwarmRunner:
             final = "cancelled" if str(task_id) in self._cancelled else "completed"
             await self._store.update_swarm_task(task_id, status=final)
         except PreflightError as exc:
+            from ..utils import redact_secrets
+
+            oracle = dict(exc.oracle)
+            oracle["error"] = redact_secrets(str(exc))[:400]
             await self._store.update_swarm_task(
                 task_id,
                 status="failed",
-                oracle_json=json.dumps(exc.oracle, separators=(",", ":")),
+                oracle_json=json.dumps(oracle, separators=(",", ":")),
             )
         except (SandboxError, ValueError) as exc:
             await self._store.update_swarm_task(
                 task_id,
                 status="failed",
                 oracle_json=json.dumps({"error": str(exc)[:400]}, separators=(",", ":")),
+            )
+        except asyncio.CancelledError:
+            await self._store.update_swarm_task(task_id, status="cancelled")
+            raise
+        except Exception as exc:
+            # Keep durable state honest even when provider/model plumbing fails.
+            # Do not persist the exception text: provider errors can contain
+            # request material. The type is enough to route log inspection.
+            await self._store.update_swarm_task(
+                task_id,
+                status="failed",
+                oracle_json=json.dumps(
+                    {"error": f"unexpected swarm failure ({type(exc).__name__})"},
+                    separators=(",", ":"),
+                ),
             )
         finally:
             self._cancelled.discard(str(task_id))

@@ -8,6 +8,7 @@ rejected at task start rather than discovered as corrupted files at apply.
 
 from __future__ import annotations
 
+import ast
 from typing import List, Optional, Tuple
 
 import tree_sitter_python
@@ -114,6 +115,47 @@ def extract_node_span(source: bytes, focus_node: str) -> Tuple[int, int]:
     if not (0 <= start < end <= len(source)):
         raise ValueError("resolved span is out of bounds")  # defensive; should not happen
     return start, end
+
+
+def signature_fingerprint(source: bytes, focus_node: str) -> str:
+    """Return a stable fingerprint for the focused callable's signature.
+
+    The optimizer may change the body and decorators, but not sync/async kind
+    or arguments. Tests rarely exercise every valid calling convention, so a
+    passing suite alone is not enough to enforce this drop-in contract.
+    """
+    kind, _, spec = str(focus_node or "").partition(":")
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, UnicodeDecodeError) as exc:
+        raise ValueError("target file does not parse cleanly") from exc
+    nodes: List[ast.AST]
+    if kind == "function":
+        nodes = [
+            node for node in tree.body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name == spec
+        ]
+    elif kind == "method" and "." in spec:
+        class_name, fn_name = spec.split(".", 1)
+        classes = [
+            node for node in tree.body
+            if isinstance(node, ast.ClassDef) and node.name == class_name
+        ]
+        if len(classes) != 1:
+            raise ValueError(f"class {class_name!r} is missing or ambiguous")
+        nodes = [
+            node for node in classes[0].body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name == fn_name
+        ]
+    else:
+        raise ValueError(f"invalid focus node {focus_node!r}")
+    if len(nodes) != 1:
+        raise ValueError(f"focus node {focus_node!r} is missing or ambiguous")
+    node = nodes[0]
+    callable_kind = "async" if isinstance(node, ast.AsyncFunctionDef) else "sync"
+    return callable_kind + ":" + ast.dump(node.args, include_attributes=False)
 
 
 def span_line_range(source: bytes, start: int, end: int) -> Tuple[int, int]:

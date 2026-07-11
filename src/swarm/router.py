@@ -74,7 +74,12 @@ class DiscountedUCBRouter:
             "scores": {a: (round(s, 4) if s is not None else None) for a, s in scores.items()},
             "pulls": dict(self._pulls),
         }, separators=(",", ":"))
-        return {"arm": arm, "receipt": receipt}
+        return {
+            "arm": arm,
+            "pull": self._pulls[arm],
+            "step": self._step,
+            "receipt": receipt,
+        }
 
     def update(self, arm: str, reward: float) -> None:
         """Discount every arm, then credit the pulled arm's reward — standard

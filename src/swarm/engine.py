@@ -14,12 +14,18 @@ one mockable seam (generate.generate_mutation); everything else is real.
 from __future__ import annotations
 
 import asyncio
+import difflib
 import hashlib
 import json
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
-from .ast_utils import apply_byte_replacement, parse_ok, span_line_range
+from .ast_utils import (
+    apply_byte_replacement,
+    parse_ok,
+    signature_fingerprint,
+    span_line_range,
+)
 from .fold import build_folded_state
 from .generate import BudgetExceeded, generate_mutation
 from .mutators import (
@@ -215,7 +221,7 @@ class SwarmEngine:
     ) -> Optional[Dict[str, Any]]:
         arm = pick["arm"]
         candidate: Dict[str, Any] = {
-            "id": f"{self.task_id}-g{generation}-{self.router._pulls[arm]}-{arm}",
+            "id": f"{self.task_id}-g{generation}-s{pick['step']}-{arm}",
             "task_id": self.task_id,
             "generation": generation,
             "mutator": arm,
@@ -237,13 +243,18 @@ class SwarmEngine:
         self._seen_hashes.add(code_hash)
         candidate["code"] = replacement
         candidate["code_hash"] = code_hash
-        candidate["diff_bytes"] = abs(len(replacement_bytes) - len(self.original_span))
+        candidate["diff_bytes"] = _byte_diff_size(self.original_span, replacement_bytes)
 
         patched = apply_byte_replacement(
             self.file_source, self.span[0], self.span[1], replacement_bytes
         )
         if not parse_ok(patched):
             candidate["stage_reached"] = "parse"
+            return candidate
+        if signature_fingerprint(patched, self.focus_node) != signature_fingerprint(
+            self.file_source, self.focus_node
+        ):
+            candidate["stage_reached"] = "signature"
             return candidate
         try:
             compile(patched, self.target_rel, "exec")
@@ -332,3 +343,17 @@ async def _maybe_await(value):
     if asyncio.iscoroutine(value):
         return await value
     return value
+
+
+def _byte_diff_size(before: bytes, after: bytes) -> int:
+    """Changed byte count, not merely the length delta.
+
+    A same-length replacement can still rewrite every byte; scoring it as a
+    zero-byte diff would make the Pareto objective actively misleading.
+    """
+    matcher = difflib.SequenceMatcher(a=before, b=after, autojunk=False)
+    return sum(
+        max(i2 - i1, j2 - j1)
+        for tag, i1, i2, j1, j2 in matcher.get_opcodes()
+        if tag != "equal"
+    )
