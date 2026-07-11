@@ -7408,7 +7408,13 @@ async def orchestrate(
     actual_model = profile_model
     active_profile = load_grok_profile(actual_model)
     actual_mode: ModelPlane = "cli-fallback" if direct_cli else "reasoning"
-    cli_max_turns = AgentLoopPolicy().max_depth if enable_agentic and not force_fast else None
+    # The gateway's ReAct depth and the Grok CLI's native agent turns are
+    # different control loops.  Reusing max_depth here caused healthy native
+    # CLI work to fail after eight turns.  Leave the CLI uncapped by default;
+    # _call_plane still accepts max_turns when a caller deliberately requests
+    # a bounded run, while cancellation, the optional CLI timeout, provider
+    # errors, and the CLI's own completion signal remain authoritative.
+    cli_max_turns = None
 
     layer = MetaLayer(routing_receipt=routing_receipt)
     try:

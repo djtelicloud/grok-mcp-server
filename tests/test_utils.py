@@ -1832,6 +1832,33 @@ class TestDefaultAgenticRouting:
         assert layer.finish_reason == "final_answer"
 
     @pytest.mark.asyncio
+    async def test_native_cli_does_not_inherit_gateway_react_depth(self, monkeypatch):
+        """Native Grok owns its agent loop; the gateway's eight-step ReAct
+        guard must not become an implicit CLI --max-turns failure."""
+        from src.utils import orchestrate
+
+        monkeypatch.delenv("UNIGROK_FORCE_FAST", raising=False)
+        selection = (
+            "grok-composer-2.5-fast",
+            "cost",
+            {"resolved_model": "grok-composer-2.5-fast"},
+            False,
+        )
+        with patch(
+            "src.utils._select_routing_model", new=AsyncMock(return_value=selection)
+        ), patch("src.utils._call_plane", new_callable=AsyncMock) as mock_call:
+            mock_call.return_value = ("complete answer", 0, 0.0, True)
+            layer = await orchestrate(
+                prompt="finish the implementation",
+                mode="auto",
+                dynamic_sys_prompt="sys",
+            )
+
+        assert mock_call.await_args.kwargs["max_turns"] is None
+        assert layer.generation == "complete answer"
+        assert layer.finish_reason == "final_answer"
+
+    @pytest.mark.asyncio
     async def test_agentloop_failure_falls_back_with_fallback_label(self, monkeypatch):
         """When AgentLoop raises, the fast-path result must be labeled
         finish_reason='fallback' — not a clean final_answer."""
