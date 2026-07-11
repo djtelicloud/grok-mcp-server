@@ -3391,6 +3391,35 @@ class TestUtilsQuickWins:
         assert captured["timeout"] == 33.0
         assert "XAI_API_KEY" not in captured["env"]
 
+    @pytest.mark.asyncio
+    async def test_cli_has_no_implicit_wall_clock_timeout(self, monkeypatch):
+        """Slow native work must not fail at a hidden gateway deadline."""
+        from src.utils import _call_plane
+
+        monkeypatch.delenv("UNIGROK_CLI_TIMEOUT", raising=False)
+        monkeypatch.setenv("UNIGROK_RUNTIME", "local")
+        captured = {}
+
+        class FakeProc:
+            returncode = 0
+
+        async def fake_communicate(proc, timeout_sec, input_data=None):
+            captured["timeout"] = timeout_sec
+            return b"complete", b""
+
+        async def fake_exec(*cmd, **kwargs):
+            return FakeProc()
+
+        monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+        monkeypatch.setattr("src.utils.communicate_with_timeout", fake_communicate)
+
+        content, _, _, is_cli = await _call_plane(
+            "cli-fallback", "finish it", None, None, "sys"
+        )
+
+        assert (content, is_cli) == ("complete", True)
+        assert captured["timeout"] is None
+
 
 class TestCliPlaneV2:
     """Dual-plane upgrade: JSON output parsing, deterministic -s session

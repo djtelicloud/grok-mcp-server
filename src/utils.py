@@ -468,11 +468,26 @@ async def run_blocking(fn: Callable, *args, timeout: Optional[float] = None, **k
     return await loop.run_in_executor(_local_executor(), call)
 
 
-async def communicate_with_timeout(proc: Any, timeout_sec: float, input_data: Optional[bytes] = None):
-    """Communicate with a subprocess and always reap it on timeout."""
+async def communicate_with_timeout(
+    proc: Any, timeout_sec: Optional[float], input_data: Optional[bytes] = None
+):
+    """Communicate with a subprocess and always reap it on timeout.
+
+    ``None`` deliberately means no gateway deadline.  The caller can still
+    cancel the coroutine, and operators can configure a real deadline when
+    their deployment requires one.
+    """
     try:
         communicate = proc.communicate() if input_data is None else proc.communicate(input_data)
+        if timeout_sec is None:
+            return await communicate
         return await asyncio.wait_for(communicate, timeout=timeout_sec)
+    except asyncio.CancelledError:
+        with contextlib.suppress(AttributeError, ProcessLookupError):
+            proc.terminate()
+        with contextlib.suppress(Exception):
+            await proc.wait()
+        raise
     except asyncio.TimeoutError:
         with contextlib.suppress(AttributeError, ProcessLookupError):
             proc.terminate()
@@ -1116,6 +1131,21 @@ def _env_timeout(name: str, default: float) -> float:
         return max(1.0, float(os.getenv(name, str(default))))
     except ValueError:
         return default
+
+
+def _optional_env_timeout(name: str) -> Optional[float]:
+    """Return an opt-in positive timeout; unset, blank, or zero disables it."""
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return None
+    try:
+        value = float(raw)
+    except ValueError:
+        logging.getLogger("GrokMCP").warning(
+            "%s=%r is invalid; leaving the operation without a deadline", name, raw
+        )
+        return None
+    return value if value > 0 else None
 
 
 def bounded_env_int(name: str, default: int, minimum: int, maximum: int) -> int:
@@ -6785,17 +6815,30 @@ async def _call_plane(
                 cwd=str(PathResolver.get_workspace_root() or PathResolver.get_service_root()),
                 env=grok_cli_oauth_env(),
             )
-            cli_timeout = _env_timeout("UNIGROK_CLI_TIMEOUT", 120.0)
+            # Native coding work can legitimately run for many minutes.  Do
+            # not turn "slow" into a fabricated failure; deployments that
+            # require a wall-clock deadline can opt in explicitly.
+            cli_timeout = _optional_env_timeout("UNIGROK_CLI_TIMEOUT")
             try:
                 if on_event is not None:
-                    text, returned_id, stderr = await asyncio.wait_for(
-                        _consume_cli_stream(proc, on_event), timeout=cli_timeout
-                    )
+                    consume = _consume_cli_stream(proc, on_event)
+                    if cli_timeout is None:
+                        text, returned_id, stderr = await consume
+                    else:
+                        text, returned_id, stderr = await asyncio.wait_for(
+                            consume, timeout=cli_timeout
+                        )
                 else:
                     stdout, stderr = await communicate_with_timeout(proc, cli_timeout)
                     text, returned_id = _parse_cli_json_output(
                         stdout.decode("utf-8", errors="ignore")
                     )
+            except asyncio.CancelledError:
+                with contextlib.suppress(ProcessLookupError):
+                    proc.terminate()
+                with contextlib.suppress(Exception):
+                    await proc.wait()
+                raise
             except asyncio.TimeoutError:
                 try:
                     proc.kill()
