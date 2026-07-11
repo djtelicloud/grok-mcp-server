@@ -12,6 +12,7 @@ from src.swarm.ast_utils import (
     apply_byte_replacement,
     extract_node_span,
     parse_ok,
+    signature_fingerprint,
     span_line_range,
 )
 
@@ -95,6 +96,22 @@ class TestByteReplacement:
     def test_out_of_bounds_rejected(self, source):
         with pytest.raises(ValueError, match="out of bounds"):
             apply_byte_replacement(source, 5, len(source) + 10, b"x")
+
+
+class TestSignatureFingerprint:
+    def test_body_changes_preserve_signature(self):
+        a = b"def f(a, /, b=1, *, c=None):\n    return a\n"
+        b = b"def f(a, /, b=1, *, c=None):\n    return b + c\n"
+        assert signature_fingerprint(a, "function:f") == signature_fingerprint(
+            b, "function:f"
+        )
+
+    def test_argument_or_async_change_is_detected(self):
+        original = b"def f(a, b=1):\n    return a\n"
+        changed = b"async def f(a, b=2):\n    return a\n"
+        assert signature_fingerprint(original, "function:f") != signature_fingerprint(
+            changed, "function:f"
+        )
 
 
 class TestSpanLineRange:

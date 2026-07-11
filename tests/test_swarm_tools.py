@@ -94,6 +94,24 @@ class TestGates:
         )
         assert "python" in out.lower()
 
+    @pytest.mark.asyncio
+    async def test_test_target_traversal_refused(self, wired, monkeypatch):
+        monkeypatch.setenv("UNIGROK_SWARM", "dry_run")
+        out = await swarm_tools.start_code_swarm(
+            "pkg/dedup.py", "function:dedup", "../../outside.py",
+            "python pkg/bench_dedup.py",
+        )
+        assert "test_target" in out and "workspace" in out
+
+    @pytest.mark.asyncio
+    async def test_arbitrary_benchmark_executable_refused(self, wired, monkeypatch):
+        monkeypatch.setenv("UNIGROK_SWARM", "dry_run")
+        out = await swarm_tools.start_code_swarm(
+            "pkg/dedup.py", "function:dedup", "pkg/test_dedup.py",
+            "/bin/sh -c 'echo SWARM_BENCH'",
+        )
+        assert "bench_command" in out and "python" in out
+
 
 class TestEndToEnd:
     @pytest.mark.asyncio
@@ -143,6 +161,24 @@ class TestEndToEnd:
         after = (workspace / "pkg" / "dedup.py").read_text()
         assert after != before
         assert winner["code"].strip() in after  # the winning slice landed
+
+    @pytest.mark.asyncio
+    async def test_apply_refuses_non_front_candidate(self, wired, monkeypatch):
+        store, _workspace = wired
+        monkeypatch.setenv("UNIGROK_SWARM", "active")
+        monkeypatch.setenv("UNIGROK_SWARM_MAX_GENERATIONS", "1")
+        monkeypatch.setenv("UNIGROK_SWARM_BENCH_REPEATS", "3")
+
+        out = await swarm_tools.start_code_swarm(
+            "pkg/dedup.py", "function:dedup", "pkg/test_dedup.py",
+            "python pkg/bench_dedup.py", allow_unstable_bench=True,
+        )
+        task_id = out.split("`")[1]
+        await swarm_tools._get_runner().wait(task_id, timeout=60.0)
+        candidates = await store.list_swarm_candidates(task_id)
+        loser = next(candidate for candidate in candidates if not candidate["feasible"])
+        apply_out = await swarm_tools.apply_swarm_winner(loser["id"])
+        assert "not on the current verified Pareto front" in apply_out
 
     @pytest.mark.asyncio
     async def test_apply_refused_when_file_changed(self, wired, monkeypatch):

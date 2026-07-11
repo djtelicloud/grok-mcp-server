@@ -7,7 +7,7 @@ All notable changes to UniGrok MCP will be documented in this file.
 ### Added
 - **Swarm optimizer storage skeleton** (`UNIGROK_SWARM`, off by default):
   migration v12 adds `swarm_tasks` and `swarm_candidates` for the upcoming
-  contributor-only swarm code optimizer (budgeted Pareto search over rewrites
+  contributor-only swarm code optimizer (bounded Pareto search over rewrites
   of one focus function, evaluated by the user's tests and benchmark).
   Storage and the off/dry_run/active rollout ladder only — no runtime
   behavior yet; candidate metadata deliberately never rides telemetry.
@@ -26,8 +26,9 @@ All notable changes to UniGrok MCP will be documented in this file.
   start, constrained non-dominated sort + crowding, in-code deterministic
   state folding, prompt-injection-framed mutator prompts with a raw-code output
   contract + one heal retry, and a JobManager-style runner with heartbeat
-  staleness and cooperative cancel. Generation prefers the $0 CLI plane;
-  API-plane fallback is budget-reserved. Still not surfaced as an MCP tool.
+  staleness and cooperative cancel. Generation is pinned to the $0 CLI plane
+  and fails closed rather than crossing to the metered API plane. Still not
+  surfaced as an MCP tool.
 - **Swarm optimizer MCP tools** (`start_code_swarm`, `get_swarm_status`,
   `apply_swarm_winner`, `cancel_swarm`): the contributor-only public surface,
   triple-gated (contributor mode + attached workspace + not Cloud Run). Status

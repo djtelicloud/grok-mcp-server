@@ -165,6 +165,12 @@ async def test_contributor_http_service_exposes_repo_memory_only_there(monkeypat
         "explain_workspace_evidence",
         "workspace_memory_status",
     }.issubset(tools)
+    assert {
+        "start_code_swarm",
+        "get_swarm_status",
+        "apply_swarm_winner",
+        "cancel_swarm",
+    }.issubset(tools)
 
 
 def test_faq_answers_unrelated_project_setup_without_workspace_files():

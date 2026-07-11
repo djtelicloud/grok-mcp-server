@@ -23,6 +23,7 @@ import os
 import shutil
 import signal
 import statistics
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -33,10 +34,10 @@ _EXCLUDED_DIRS = {
     ".claude",
 }
 _ENV_ALLOWLIST = {
-    "PATH", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "TERM", "TMPDIR",
-    "USER", "SHELL", "UNI_GROK_TESTING",
+    "PATH", "LANG", "LC_ALL", "LC_CTYPE", "TERM", "USER", "SHELL",
+    "UNI_GROK_TESTING", "PYTHONIOENCODING", "PYTHONUTF8",
+    "PYTHONDONTWRITEBYTECODE",
 }
-_ENV_ALLOW_PREFIXES = ("PYTHON",)
 _BENCH_MARKER = "SWARM_BENCH "
 _OUTPUT_CAP = 20000
 
@@ -80,6 +81,7 @@ class SwarmSandbox:
         self.max_copy_bytes = int(max_copy_mb) * 1024 * 1024
         self.max_copy_files = int(max_copy_files)
         self.child_mem_bytes = int(child_mem_mb) * 1024 * 1024
+        self._python_bin: Optional[str] = None
 
     # ── Setup / teardown ─────────────────────────────────────────────────────
 
@@ -125,6 +127,7 @@ class SwarmSandbox:
         venv = self.workspace_root / ".venv"
         if venv.is_dir():
             (self.work / ".venv").symlink_to(venv)
+        self._python_bin = self._select_python_bin()
         if not self.target_path.is_file():
             raise SandboxError(f"target {self.target_rel!r} missing from workspace copy")
 
@@ -159,19 +162,48 @@ class SwarmSandbox:
     # ── Child processes ──────────────────────────────────────────────────────
 
     def python_bin(self) -> str:
+        if self._python_bin is not None:
+            return self._python_bin
+        self._python_bin = self._select_python_bin()
+        return self._python_bin
+
+    def _select_python_bin(self) -> str:
+        """Use the project venv only when it executes on this runtime.
+
+        A macOS worktree is commonly mounted into the Linux contributor
+        container. Its `.venv/bin/python` exists but is not a Linux binary;
+        blindly selecting it makes every preflight fail before model work.
+        """
         venv_python = self.work / ".venv" / "bin" / "python"
-        if venv_python.exists():
-            return str(venv_python)
+        if venv_python.is_file():
+            try:
+                probe = subprocess.run(
+                    [str(venv_python), "-c", "import sys; raise SystemExit(0)"],
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=5,
+                    check=False,
+                )
+                if probe.returncode == 0:
+                    return str(venv_python)
+            except (OSError, subprocess.SubprocessError):
+                pass
         return sys.executable
 
     def child_env(self) -> Dict[str, str]:
         env = {
             key: value
             for key, value in os.environ.items()
-            if key in _ENV_ALLOWLIST or key.startswith(_ENV_ALLOW_PREFIXES)
+            if key in _ENV_ALLOWLIST
         }
-        existing = env.get("PYTHONPATH", "")
-        env["PYTHONPATH"] = str(self.work) + (os.pathsep + existing if existing else "")
+        private_home = self.work_root / "home"
+        private_tmp = self.work_root / "tmp"
+        private_home.mkdir(parents=True, exist_ok=True)
+        private_tmp.mkdir(parents=True, exist_ok=True)
+        env["HOME"] = str(private_home)
+        env["TMPDIR"] = str(private_tmp)
+        env["PYTHONPATH"] = str(self.work)
         env["PYTHONHASHSEED"] = "0"
         return env
 

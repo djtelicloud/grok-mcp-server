@@ -77,6 +77,18 @@ class TestRankCandidates:
     def test_empty_when_none_feasible(self):
         assert rank_candidates([{"id": "x", "feasible": False}]) == []
 
+    def test_missing_objective_is_not_treated_as_zero(self):
+        cands = [
+            {"id": "complete", "feasible": True, "latency_ms": 10,
+             "peak_mem_bytes": 100, "diff_bytes": 5},
+            {"id": "missing", "feasible": True, "latency_ms": None,
+             "peak_mem_bytes": None, "diff_bytes": None},
+        ]
+        ranked = rank_candidates(cands)
+        assert ranked[0]["id"] == "complete"
+        missing = next(c for c in ranked if c["id"] == "missing")
+        assert missing["pareto_rank"] > 0
+
     def test_front_members_get_rank_zero(self):
         cands = [
             {"id": "fast", "feasible": True, "latency_ms": 5, "peak_mem_bytes": 200, "diff_bytes": 10},

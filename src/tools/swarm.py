@@ -11,9 +11,13 @@ or leave the tests broken.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
+import os
 import shlex
+import signal
+import tempfile
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -22,7 +26,13 @@ from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
 from ..swarm import config as swarm_config
-from ..swarm.ast_utils import apply_byte_replacement, extract_node_span, parse_ok
+from ..swarm.ast_utils import (
+    apply_byte_replacement,
+    extract_node_span,
+    parse_ok,
+    signature_fingerprint,
+)
+from ..swarm.pareto import rank_candidates
 from ..swarm.runner import SwarmRunner, effective_status
 from ..utils import (
     GrokInvocationContext,
@@ -87,6 +97,48 @@ def _resolve_target(target_path: str) -> Path:
     return candidate
 
 
+def _resolve_workspace_input(path_value: str, label: str) -> Path:
+    """Resolve an existing test/bench input inside the attached workspace."""
+    workspace = PathResolver.get_workspace_root()
+    assert workspace is not None
+    raw = str(path_value or "")
+    if not raw or raw.startswith("-"):
+        raise ValueError(f"{label} must be a workspace-relative path")
+    candidate = (workspace / raw).resolve()
+    try:
+        candidate.relative_to(workspace.resolve())
+    except ValueError:
+        raise ValueError(f"{label} escapes the workspace: {path_value!r}")
+    if not candidate.exists():
+        raise FileNotFoundError(f"{label} not found: {path_value}")
+    return candidate
+
+
+def _validate_test_target(test_target: str) -> None:
+    # Preserve pytest node ids while validating the file/directory prefix.
+    path_part = str(test_target or "").split("::", 1)[0]
+    _resolve_workspace_input(path_part, "test_target")
+
+
+def _parse_bench_command(bench_command: str) -> List[str]:
+    """Accept only a workspace Python script plus literal argv.
+
+    Arbitrary executables or ``python -c`` would turn a model-callable tool
+    into a generic command runner. The runner substitutes its scrubbed sandbox
+    interpreter for the user-facing ``python`` token.
+    """
+    argv = shlex.split(bench_command)
+    if len(argv) < 2 or Path(argv[0]).name not in {"python", "python3"}:
+        raise ValueError(
+            "bench_command must be 'python <workspace-relative-script.py> [args...]'"
+        )
+    script = argv[1]
+    if script.startswith("-") or Path(script).suffix != ".py":
+        raise ValueError("bench_command must name a Python script, not -c/-m or a module")
+    _resolve_workspace_input(script, "benchmark script")
+    return argv[1:]
+
+
 def _file_hash(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -115,9 +167,8 @@ async def start_code_swarm(
             if not parse_ok(source):
                 return ctx.format_output(f"target {target_path!r} does not parse.")
             extract_node_span(source, focus_node)  # validate focus now, not mid-run
-            bench_argv = shlex.split(bench_command)
-            if not bench_argv:
-                return ctx.format_output("bench_command must be a non-empty command.")
+            _validate_test_target(test_target)
+            bench_args = _parse_bench_command(bench_command)
         except (ValueError, FileNotFoundError) as exc:
             return ctx.format_output(f"cannot start swarm: {exc}")
 
@@ -146,7 +197,7 @@ async def start_code_swarm(
             "target_rel": target_rel,
             "focus_node": focus_node,
             "test_target": test_target,
-            "bench_argv": bench_argv,
+            "bench_args": bench_args,
             "budget_usd": budget,
             "seed": seed,
             "allow_unstable_bench": bool(allow_unstable_bench),
@@ -171,7 +222,7 @@ async def get_swarm_status(task_id: str) -> str:
         oracle = _load_json(task.get("oracle_json"))
         baseline = _load_json(task.get("baseline_json"))
         candidates = await store.list_swarm_candidates(task_id, feasible_only=True)
-        front = [c for c in candidates if c.get("pareto_rank") == 0]
+        front = _current_front(candidates)
 
         lines = [
             f"# Swarm `{task_id}`",
@@ -236,6 +287,12 @@ async def apply_swarm_winner(candidate_id: str) -> str:
         task = await store.get_swarm_task(candidate["task_id"])
         if not task:
             return ctx.format_output("owning swarm task not found.")
+        feasible = await store.list_swarm_candidates(task["id"], feasible_only=True)
+        front_ids = {c["id"] for c in _current_front(feasible)}
+        if candidate_id not in front_ids:
+            return ctx.format_output(
+                "refusing to apply: the candidate is not on the current verified Pareto front."
+            )
         try:
             target = _resolve_target(task["target_path"])
         except (ValueError, FileNotFoundError) as exc:
@@ -253,6 +310,12 @@ async def apply_swarm_winner(candidate_id: str) -> str:
         )
         if not parse_ok(patched):
             return ctx.format_output("refusing to apply: the result would not parse.")
+        if signature_fingerprint(patched, task["focus_node"]) != signature_fingerprint(
+            live, task["focus_node"]
+        ):
+            return ctx.format_output(
+                "refusing to apply: the candidate changes the callable signature."
+            )
         target.write_bytes(patched)
 
         passed, output = await _reverify(task, target, live)
@@ -307,27 +370,56 @@ async def _find_candidate(task_id: Optional[str], candidate_id: str) -> Optional
     return None
 
 
+def _current_front(candidates: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    ranked = rank_candidates([dict(candidate) for candidate in candidates])
+    return [candidate for candidate in ranked if candidate.get("pareto_rank") == 0]
+
+
 async def _reverify(task: Dict[str, Any], target: Path, original: bytes) -> tuple:
     """Run the task's test_target against the LIVE workspace; restore original
     bytes on failure."""
-    import asyncio
-
     workspace = PathResolver.get_workspace_root()
     python = str((workspace / ".venv" / "bin" / "python")) if (workspace / ".venv").exists() else "python3"
+    proc = None
+    runtime_dir = tempfile.TemporaryDirectory(prefix="unigrok-reverify-")
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if key in {
+            "PATH", "LANG", "LC_ALL", "LC_CTYPE", "TERM", "USER", "SHELL",
+            "PYTHONIOENCODING", "PYTHONUTF8", "PYTHONDONTWRITEBYTECODE",
+        }
+    }
+    env["HOME"] = runtime_dir.name
+    env["TMPDIR"] = runtime_dir.name
+    env["PYTHONPATH"] = str(workspace)
+    env["PYTHONHASHSEED"] = "0"
     try:
         proc = await asyncio.create_subprocess_exec(
             python, "-m", "pytest", "-q", "-p", "no:cacheprovider", task["test_target"],
             cwd=str(workspace),
+            env=env,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            start_new_session=True,
         )
         out, err = await asyncio.wait_for(
             proc.communicate(), timeout=swarm_config.swarm_eval_timeout()
         )
         passed = proc.returncode == 0
         output = (out + err).decode("utf-8", errors="replace")
-    except (asyncio.TimeoutError, OSError) as exc:
+    except asyncio.TimeoutError as exc:
+        if proc is not None:
+            try:
+                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            except (ProcessLookupError, OSError):
+                pass
+            await proc.wait()
         passed, output = False, f"re-verification error: {exc}"
+    except OSError as exc:
+        passed, output = False, f"re-verification error: {exc}"
+    finally:
+        runtime_dir.cleanup()
     if not passed:
         target.write_bytes(original)
     return passed, output

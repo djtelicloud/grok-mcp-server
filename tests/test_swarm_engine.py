@@ -8,9 +8,9 @@ from pathlib import Path
 import pytest
 
 from src.swarm.ast_utils import extract_node_span, span_line_range
-from src.swarm.engine import EngineConfig, SwarmEngine
+from src.swarm.engine import EngineConfig, SwarmEngine, _byte_diff_size
 from src.swarm.fold import build_folded_state
-from src.swarm.generate import GenerationResult
+from src.swarm.generate import BudgetExceeded, GenerationResult, generate_mutation
 from src.swarm.mutators import (
     build_mutation_prompt,
     build_system_prompt,
@@ -23,6 +23,7 @@ FIXTURE = Path(__file__).parent / "fixtures" / "swarm_target"
 
 _FAST_SORT = "def slow_sort(items):\n    return sorted(list(items))\n"
 _WRONG_SORT = "def slow_sort(items):\n    return list(items)\n"  # unsorted → tests fail
+_CHANGED_SIGNATURE = "def slow_sort(items, reverse=False):\n    return sorted(items)\n"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -47,6 +48,46 @@ class TestMutationParser:
         assert parse_mutation_output("Here is the optimized function:\n\ndef f(): pass") is None
         assert parse_mutation_output("") is None
         assert parse_mutation_output("I cannot help with that.") is None
+
+
+class TestGenerationPlane:
+    @pytest.mark.asyncio
+    async def test_generation_is_strict_cli_same_plane(self, monkeypatch):
+        from types import SimpleNamespace
+
+        seen = {}
+
+        async def fake_turn(**kwargs):
+            seen.update(kwargs)
+            return SimpleNamespace(
+                plane="CLI", cost_usd=0.0, finish_reason="final_answer",
+                generation="def f():\n    return 1",
+            )
+
+        monkeypatch.setattr("src.utils.run_agent_turn", fake_turn)
+        result = await generate_mutation("p", "s", remaining_budget_usd=0.0)
+        assert result.plane == "CLI"
+        assert seen["plane"] == "cli"
+        assert seen["fallback_policy"] == "same_plane"
+
+    @pytest.mark.asyncio
+    async def test_generation_rejects_charged_or_api_result(self, monkeypatch):
+        from types import SimpleNamespace
+
+        async def fake_turn(**_kwargs):
+            return SimpleNamespace(
+                plane="API", cost_usd=0.01, finish_reason="final_answer",
+                generation="def f():\n    return 1",
+            )
+
+        monkeypatch.setattr("src.utils.run_agent_turn", fake_turn)
+        with pytest.raises(BudgetExceeded):
+            await generate_mutation("p", "s", remaining_budget_usd=5.0)
+
+
+def test_diff_bytes_counts_same_length_rewrite():
+    assert _byte_diff_size(b"abcdef", b"UVWXYZ") == 6
+    assert _byte_diff_size(b"same", b"same") == 0
 
 
 class TestInjectionFraming:
@@ -176,6 +217,36 @@ class TestEngineLoop:
         snap = engine.router.snapshot()
         assert snap["algorithmic"]["mean_reward"] > snap["hot_loop"]["mean_reward"]
         assert engine.spent_usd == 0.0  # CLI plane
+
+    @pytest.mark.asyncio
+    async def test_repeated_arm_picks_keep_unique_candidate_ids(self, engine_env):
+        src, span, baseline = await _baseline(engine_env)
+
+        async def gen(prompt, system, *, remaining_budget_usd, **kw):
+            return GenerationResult(_WRONG_SORT, "CLI", 0.0, "final_answer")
+
+        engine = _engine(
+            engine_env, src, span, baseline, gen, population=8,
+            max_generations=1,
+        )
+        outcome = (await engine.run())[0]
+        ids = [candidate["id"] for candidate in outcome.candidates]
+        assert len(ids) == len(set(ids))
+
+    @pytest.mark.asyncio
+    async def test_signature_change_is_rejected_before_tests(self, engine_env):
+        src, span, baseline = await _baseline(engine_env)
+
+        async def gen(prompt, system, *, remaining_budget_usd, **kw):
+            return GenerationResult(_CHANGED_SIGNATURE, "CLI", 0.0, "final_answer")
+
+        engine = _engine(
+            engine_env, src, span, baseline, gen, population=1,
+            max_generations=1,
+        )
+        outcome = (await engine.run())[0]
+        assert outcome.candidates[0]["stage_reached"] == "signature"
+        assert not outcome.candidates[0]["feasible"]
 
     @pytest.mark.asyncio
     async def test_noise_floor_snaps_sub_threshold_gains(self, engine_env):
