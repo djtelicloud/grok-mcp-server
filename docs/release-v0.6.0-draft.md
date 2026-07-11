@@ -53,11 +53,13 @@ guidance, and telemetry improvements developed through the v0.5 series.
 
 ## Release Checklist
 
-- [ ] Version alignment and lockfile refresh pass.
-- [ ] Full Python tests pass on the exact release commit.
-- [ ] Site tests and standalone image gate pass on the exact release commit.
-- [ ] Source distribution and wheel build successfully.
-- [ ] Wheel contents and installed runtime smoke checks pass.
-- [ ] Release commit lands to shared `main` and post-push CI is green.
+- [x] Version alignment and lockfile refresh pass.
+- [x] Full Python tests pass on the release-preparation commit.
+- [x] Site tests and standalone image gate pass on the release-preparation
+  commit.
+- [x] Source distribution and wheel build successfully.
+- [x] Wheel contents and package metadata checks pass.
+- [x] Release-preparation commit lands to shared `main` and post-push CI is
+  green.
 - [ ] `v0.6.0` tag is created from the verified `main` commit and pushed.
 - [ ] GitHub release is published from these notes.
