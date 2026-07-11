@@ -2,12 +2,34 @@
 
 Last updated: 2026-07-11
 Owner: Codex
-Status: Claude intelligence rollout complete and live
+Status: Swarm optimizer rollout complete and live
 
 This is the required project-scoped handoff for new Codex chats. Verify all
 drift-prone values live before acting. Do not copy secrets or OAuth codes here.
 
 ## Current repository state
+
+- PR #10 merged the Claude-originated swarm optimizer through the protected
+  Codex path after landing review repaired strict CLI billing, candidate
+  identity, Pareto/apply selection, callable-signature preservation, path and
+  subprocess boundaries, contributor HTTP registration, Docker/host venv
+  compatibility, runtime pytest packaging, error visibility, and generated
+  docs/schema alignment. Resolve the exact rebased merge commit live.
+- The final exact-head gate passed 1,001 tests, 12/12 offline evals, Bandit,
+  pip-audit, Python 3.11/3.12, Docker, Project Site, Control Cloud Run Image,
+  and owner-dispatched Codex Approval. A contributor-mode live dry run used
+  four real Grok CLI arms over two generations, measured 100% focus-span
+  coverage with a stable benchmark, produced two verified Pareto candidates,
+  and spent $0.0000.
+- `UNIGROK_SWARM` remains `off` by default. Generation is strict CLI
+  same-plane, the stable service stays workspace-neutral, and dry-run/active
+  use requires contributor mode, an attached workspace, and non-Cloud-Run
+  runtime. Apply accepts only signature-preserving candidates on the current
+  test-verified Pareto front and never commits.
+- The exact `scripts/land` receipt commit was
+  `7a1e78b880cf8d6d527d6e258eeea78e841a1744`; GitHub rebased that identical
+  tree into protected `origin/main`. Workspace evidence
+  `ev-c5e6e8aeb8f4bfd629b72ad8` records the durable swarm invariant.
 
 - Claude-originated intelligence upgrades are integrated through the protected
   Codex path: shadow semantic evaluations remain off by default, use a durable
@@ -104,7 +126,7 @@ drift-prone values live before acting. Do not copy secrets or OAuth codes here.
 
 ## Remaining gates
 
-The v0.6.0 release and Claude intelligence production gates are complete:
+The v0.6.0 release, Claude intelligence, and swarm optimizer gates are complete:
 
 1. Sites production environment revision `5` includes the non-secret
    `CONTROL_CENTER_ORIGIN=https://control.grokmcp.org`.
@@ -117,6 +139,8 @@ The v0.6.0 release and Claude intelligence production gates are complete:
    performed because none was requested or configured as a release gate.
 6. The shared local service reports semantic evaluations `off` with zero
    sampled, graded, pending, or charged judge calls; CLI OAuth remains ready.
+7. The swarm optimizer is shipped off by default; no production activation or
+   API-plane spend is pending.
 
 Future follow-up is operational rather than a release blocker: review Cloud
 Armor preview logs and promote only rules with demonstrated safe thresholds.
@@ -129,3 +153,6 @@ Armor preview logs and promote only rules with demonstrated safe thresholds.
   reviewed and thresholds are demonstrated safe.
 - Preserve the previous healthy revision, image digest, and numeric secret
   versions for rollback.
+- Keep swarm generation pinned to CLI with same-plane failure, keep the stable
+  service workspace-neutral, and do not weaken the contributor/workspace/
+  non-Cloud-Run gates or current-front apply verification.
