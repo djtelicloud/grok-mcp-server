@@ -159,16 +159,17 @@ This ADR intentionally does not pretend the migration already happened.
 |---|---|---|
 | GitHub Grok review | Trusted default-branch script on a restricted self-hosted runner; advisory comment | Configurable authenticated API-plane endpoint on a hosted runner, with cost/rate controls |
 | Landing receipt | Local JSON receipt written by `scripts/land`; not cryptographically signed | Broker-issued signed receipt verifiable against a published key |
-| Canonical integration branch | Shared local `main`, then Codex-managed remote publication | Protected `origin/main` after broker-verified merge; local `main` becomes a synchronized replica |
+| Canonical integration branch | Protected `origin/main` through PRs; Codex synchronizes local `main` and records the local landing receipt | Broker-verified merge with a signed receipt; local `main` remains a synchronized replica |
 | GitHub authorization | GitHub workflow association gates | GitHub App user identity plus fresh repository-role checks for the protected control surface |
 | GitHub mutation broker | Not implemented | Deployed GitHub App controller with short-lived tokens, allowlisted mutations, and audit log |
 
 Until the target broker and signed receipt verifier are deployed and exercised
-end to end, the repository's existing `AGENTS.md` contract remains operative:
-Codex runs `scripts/land`, a local successful receipt is required, and local
-`main` is integrated before remote publication. Documentation or UI mockups
-must not label the future controller, remote landing, or GitHub authorization
-as live.
+end to end, the repository's transitional `AGENTS.md` contract remains
+operative: every change reaches `origin/main` through a PR, Codex records an
+exact-head disposition, only a `codex/*` integration branch may run
+`scripts/land`, and local `main` is synchronized to the protected merge. The
+connected maintainer identity remains a documented temporary bypass for
+owner-authored agent PRs; it is not the future independent bot approval.
 
 ## Required GitHub repository policy
 

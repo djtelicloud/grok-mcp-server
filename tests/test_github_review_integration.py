@@ -322,10 +322,12 @@ def test_github_review_rejects_base_change_before_comment(tmp_path, monkeypatch)
         asyncio.run(module.main())
 
 
-def test_github_review_workflow_never_checks_out_pr_code():
+def test_github_review_workflow_is_on_demand_and_never_checks_out_pr_code():
     workflow = (ROOT / ".github" / "workflows" / "grok-review.yml").read_text(encoding="utf-8")
 
-    assert "pull_request_target:" in workflow
+    assert "pull_request_target:" not in workflow
+    assert "issue_comment:" in workflow
+    assert "workflow_dispatch:" in workflow
     assert "contents: read" in workflow
     assert "pull-requests: write" in workflow
     assert "issues: write" not in workflow
@@ -334,12 +336,12 @@ def test_github_review_workflow_never_checks_out_pr_code():
     assert '["self-hosted","unigrok-review"]' in workflow
     assert "persist-credentials: false" in workflow
     assert "ref: ${{ github.event.pull_request.head" not in workflow
-    assert "EXPECTED_BASE_SHA: ${{ github.event.pull_request.base.sha }}" in workflow
-    assert "EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}" in workflow
+    assert "EXPECTED_BASE_SHA:" not in workflow
+    assert "EXPECTED_HEAD_SHA:" not in workflow
     assert "vars.UNIGROK_REVIEW_MCP_URL" in workflow
     assert "vars.UNIGROK_REVIEW_PLANE || 'cli'" in workflow
     assert "UNIGROK_REVIEW_EXTERNALS" not in workflow
-    assert "github.event.pull_request.author_association" in workflow
+    assert "github.event.pull_request.author_association" not in workflow
     assert "github.event.comment.author_association" in workflow
     assert '[\"OWNER\",\"MEMBER\",\"COLLABORATOR\"]' in workflow
 
