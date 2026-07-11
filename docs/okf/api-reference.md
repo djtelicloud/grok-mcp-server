@@ -771,6 +771,57 @@ as sqlite). Unknown values fail fast with NotImplementedError naming the
 supported set — a typo must not silently fall back to SQLite. db_path is
 backend-specific (the SQLite file path; tests use per-test temp paths).
 
+## swarm/ast_utils.py {#swarm-ast_utils}
+
+### Function: `parse_ok` {#swarm-ast_utils-parse_ok}
+
+```python
+def parse_ok(source: bytes) -> bool
+```
+
+**Keywords:** parse, ok
+
+Syntax filter: True when tree-sitter parses without any error node.
+A syntax filter ONLY — import-time and collection failures are the
+sandbox stages' job.
+
+### Function: `extract_node_span` {#swarm-ast_utils-extract_node_span}
+
+```python
+def extract_node_span(source: bytes, focus_node: str) -> Tuple[int, int]
+```
+
+**Keywords:** extract, node, span
+
+Resolve `focus_node` ("function:<name>" at module level, or
+"method:<Class>.<name>") to its exact byte span, decorators included.
+
+Raises ValueError on: unparseable source, malformed focus spec, missing
+node, or an AMBIGUOUS node (multiple same-named matches — e.g.
+conditional redefinitions) — a wrong span that still passes tests would
+corrupt adjacent code at apply, so ambiguity is fatal by design.
+
+### Function: `span_line_range` {#swarm-ast_utils-span_line_range}
+
+```python
+def span_line_range(source: bytes, start: int, end: int) -> Tuple[int, int]
+```
+
+**Keywords:** span, line, range
+
+1-based inclusive line range covered by a byte span (for coverage
+intersection in the preflight oracle check).
+
+### Function: `apply_byte_replacement` {#swarm-ast_utils-apply_byte_replacement}
+
+```python
+def apply_byte_replacement(source: bytes, start: int, end: int, replacement: bytes) -> bytes
+```
+
+**Keywords:** apply, byte, replacement
+
+Exact byte splice: everything outside [start:end) is byte-identical.
+
 ## swarm/config.py {#swarm-config}
 
 ### Function: `swarm_mode` {#swarm-config-swarm_mode}
@@ -859,6 +910,113 @@ def reset_swarm_state() -> None
 **Keywords:** reset, swarm, state
 
 Test isolation for module-level flags.
+
+## swarm/preflight.py {#swarm-preflight}
+
+### Class: `PreflightError` {#swarm-preflight-preflighterror}
+
+```python
+class PreflightError
+```
+
+**Keywords:** preflight, error
+
+A refusal with a user-actionable reason; partial oracle facts ride
+the .oracle attribute so status can show how far preflight got.
+
+### Function: `module_name_for` {#swarm-preflight-module_name_for}
+
+```python
+def module_name_for(target_rel: str) -> str
+```
+
+**Keywords:** module, name, for
+
+Dotted module name for a workspace-relative path, tolerating the
+src/ layout. Non-standard layouts fail the provenance probe loudly
+rather than guessing.
+
+### Function: `noise_floor_pct` {#swarm-preflight-noise_floor_pct}
+
+```python
+def noise_floor_pct(latency_samples: List[float]) -> float
+```
+
+**Keywords:** noise, floor, pct
+
+max(5%, 3σ relative to the median) — improvements below this are
+treated as zero everywhere (bench numbers, rewards, deltas).
+
+## swarm/sandbox.py {#swarm-sandbox}
+
+### Class: `SandboxError` {#swarm-sandbox-sandboxerror}
+
+```python
+class SandboxError
+```
+
+**Keywords:** sandbox, error
+
+Sandbox setup or evaluation infrastructure failure (not a candidate
+verdict): copy guard trips, missing target, malformed bench output.
+
+### Function: `parse_bench_line` {#swarm-sandbox-parse_bench_line}
+
+```python
+def parse_bench_line(stdout: str) -> Optional[Dict[str, float]]
+```
+
+**Keywords:** parse, bench, line
+
+Extract the single `SWARM_BENCH {...}` contract line; None when the
+contract is not met (missing, duplicated, or malformed).
+
+### Method: `SwarmSandbox.create` {#swarm-sandbox-swarmsandbox-create}
+
+```python
+def SwarmSandbox.create(self) -> None
+```
+
+**Keywords:** swarm, sandbox, create
+
+Copy the workspace (bounded, byte-exact, symlink-safe) and link
+the original venv in.
+
+### Method: `SwarmSandbox.hygiene` {#swarm-sandbox-swarmsandbox-hygiene}
+
+```python
+def SwarmSandbox.hygiene(self) -> None
+```
+
+**Keywords:** swarm, sandbox, hygiene
+
+Per-candidate cleanup so one mutant's cache pollution can't skew
+the next one's feasibility or bench numbers.
+
+### Method: `SwarmSandbox.run_child` {#swarm-sandbox-swarmsandbox-run_child}
+
+```python
+async def SwarmSandbox.run_child(self, argv: List[str], timeout: float) -> Tuple[int, str, str]
+```
+
+**Keywords:** swarm, sandbox, run, child
+
+Run one untrusted child: own session, RLIMITs, allowlisted env,
+process-group SIGKILL on timeout (rc -9).
+
+### Method: `SwarmSandbox.run_bench` {#swarm-sandbox-swarmsandbox-run_bench}
+
+```python
+async def SwarmSandbox.run_bench(self, bench_argv: List[str], repeats: int, timeout: float) -> Dict[str, Any]
+```
+
+**Keywords:** swarm, sandbox, run, bench
+
+1 discarded warmup + `repeats` measured runs of the SWARM_BENCH
+contract command; medians + raw samples (for noise-floor math).
+Raises SandboxError when the command fails or breaks the contract —
+for the BASELINE that fails the task; for a mutant the engine treats
+it as an infeasible candidate at the bench stage.
 
 ## tools/chats.py {#tools-chats}
 
