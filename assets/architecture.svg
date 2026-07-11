@@ -195,5 +195,5 @@
   </path>
 
   <!-- footer -->
-  <text x="1152" y="636" text-anchor="end" font-family="'SF Mono', 'Fira Code', Consolas, monospace" font-size="11" fill="#4a5f8f">unigrok &#183; v0.5.3</text>
+  <text x="1152" y="636" text-anchor="end" font-family="'SF Mono', 'Fira Code', Consolas, monospace" font-size="11" fill="#4a5f8f">unigrok &#183; v0.6.0</text>
 </svg>

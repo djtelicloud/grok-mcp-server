@@ -4,13 +4,52 @@ All notable changes to UniGrok MCP will be documented in this file.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-07-11
+
 ### Added
+- **Hosted contributor control plane**: Added a standalone, GitHub-authorized
+  control application at `control.grokmcp.org` with fresh repository-role
+  checks, sanitized project evidence, secure server-side GitHub App
+  credentials, and no browser-visible provider secrets.
+- **Public project-site handoff**: The public `grokmcp.org` Site now directs
+  `/control` to the hosted contributor application while the stable local MCP,
+  CLI OAuth session, and administrative runtime remain machine-local.
+- **Production edge and artifact gate**: Added a digest-pinned Cloud Run image,
+  dedicated service identity, Secret Manager bindings, load-balancer-only
+  ingress, managed TLS, preview Cloud Armor rules, and CI smoke coverage for
+  the exact standalone container artifact.
+- **Project-scoped Codex continuity**: Added a required tracked active-work
+  handoff so new Codex chats recover current Git, CI, deployment, release, and
+  safety state even when session history or contributor-memory tools are
+  unavailable.
 - **Private ChatGPT PR-review app surface**: Added an Apps SDK-compatible,
   read-only `review_pull_request` MCP tool and versioned review widget with
   explicit annotations, bounded untrusted context, and no external CSP access.
 - **Self-hosted `@grok review` workflow**: Added a GitHub workflow that fetches
   pull-request evidence through the API, calls the local UniGrok MCP without
   checking out contributor code, and upserts one advisory comment for Codex.
+
+### Changed
+- **Codex-owned integration contract**: Codex now owns shared `main`, landing,
+  pushes, tags, releases, and verified cross-worktree integration; other IDE
+  agents hand off committed work and evidence instead of publishing it.
+- **IDE-width Control Center**: Reworked the local Control Center into a
+  persistent workbench with an agent playground, bounded diagnostics, clearer
+  credential-plane status, model-plane visibility, and truthful telemetry
+  attribution.
+
+### Fixed
+- **Cloud Build portability**: Replaced Dockerfile-only `COPY --chmod` behavior
+  with a portable explicit chmod step accepted by Google Cloud Build's Docker
+  builder.
+- **Release and review isolation**: Kept advisory Grok review, contributor
+  control, public-site publishing, and local release gates from silently
+  granting one another merge or publication authority.
+
+### Security
+- The GitHub App installation is restricted to this repository, secrets remain
+  version-pinned in Secret Manager, Cloud CDN is disabled, the raw Cloud Run
+  URL is disabled, and protected responses use private/no-store caching.
 
 ## [0.5.3] - 2026-07-10
 

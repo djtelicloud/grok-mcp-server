@@ -30,7 +30,7 @@ cost tracking, and a browser Control Center.
 
 ![UniGrok architecture — six MCP clients share one local gateway that routes across the metered xAI API plane and the ~$0-marginal Grok CLI plane, with SQLite-backed sessions, cost, and jobs](assets/architecture.svg)
 
-Current development release: **v0.5.3**.
+Current release: **v0.6.0**.
 
 Use it as:
 
