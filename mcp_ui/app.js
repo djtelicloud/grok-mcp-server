@@ -773,7 +773,7 @@ function renderMetricsSnapshot() {
   );
   renderBreakdownList(
     "callerBreakdown",
-    Object.entries(payload.callers || {}),
+    Object.entries(period.callers || payload.callers || {}),
     (value) => `${value.requests} req • $${Number(value.total_cost_usd || 0).toFixed(4)}`
   );
   renderBreakdownList(

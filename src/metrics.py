@@ -307,11 +307,13 @@ def build_metrics_snapshot(
             "today": {
                 "summary": _aggregate(today),
                 "planes": {plane: _aggregate(today, plane) for plane in today_planes},
+                "callers": aggregate_telemetry_callers(today, limit=caller_limit),
                 "recent_routes": _recent_routes(today),
             },
             "lifetime": {
                 "summary": _aggregate(rows),
                 "planes": {plane: _aggregate(rows, plane) for plane in lifetime_planes},
+                "callers": aggregate_telemetry_callers(rows, limit=caller_limit),
                 "recent_routes": _recent_routes(rows),
             },
             "api_billing": {

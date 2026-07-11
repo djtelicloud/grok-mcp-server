@@ -904,6 +904,50 @@ pre {
   text-transform: uppercase;
 }
 
+.raw-telemetry-disclosure {
+  min-width: 0;
+  margin-top: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.raw-telemetry-disclosure > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.raw-telemetry-disclosure > summary small {
+  color: var(--ink-soft);
+  font-size: 10px;
+  font-weight: 400;
+}
+
+.raw-telemetry-disclosure pre {
+  max-width: 100%;
+  max-height: min(46vh, 420px);
+  margin: 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+  overflow: auto;
+}
+
+.raw-telemetry-disclosure .json-code {
+  display: block;
+  width: max-content;
+  min-width: 100%;
+  white-space: pre;
+}
+
 .billing-row + .billing-row {
   border-top: 1px solid var(--border);
   margin-top: 14px;

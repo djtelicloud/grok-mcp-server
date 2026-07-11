@@ -50,6 +50,11 @@ def test_structured_metrics_separate_api_billing_from_cli_subscription():
     assert snapshot["planes"]["CLI"]["total_cost_usd"] == 0.0
     assert today["summary"]["route_classes"] == {"planning": 1}
     assert today["summary"]["selection_reasons"] == {"reasoning_score": 1}
+    assert today["callers"] == {
+        "claude": {"requests": 1, "success_rate": 1.0, "total_cost_usd": 0.0},
+        "codex": {"requests": 1, "success_rate": 1.0, "total_cost_usd": pytest.approx(0.012)},
+    }
+    assert snapshot["usage"]["lifetime"]["callers"]["codex"]["requests"] == 1
     receipt = today["recent_routes"][0]
     assert receipt["routing"]["resolved_model"] == "grok-4.5"
     assert "intent" not in receipt
@@ -66,6 +71,7 @@ def test_structured_metrics_empty_period_is_null_not_fake_zero():
     assert summary["avg_latency_sec"] is None
     assert summary["p95_latency_sec"] is None
     assert snapshot["usage"]["today"]["planes"] == {}
+    assert snapshot["usage"]["today"]["callers"] == {}
 
 
 def test_telemetry_metadata_tolerates_old_and_malformed_rows():
