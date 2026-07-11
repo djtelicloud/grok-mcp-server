@@ -2467,6 +2467,81 @@ class GrokSessionStore:
                     await self._conn.rollback()
                     raise
 
+            if version < 12:
+                # Swarm optimizer state (contributor-only feature, src/swarm/).
+                # Candidate metadata deliberately lives HERE, never in the
+                # telemetry metadata envelope: a swarm generation would write
+                # dozens of rows that inflate request/success aggregates and
+                # pollute the shadow-judge validation signal. parent_id is
+                # reserved for v2 elite-offspring search (v1 is baseline-parent
+                # batch search); oracle_json is the preflight honesty surface
+                # (focus-span coverage, bench stability, import provenance).
+                await self._conn.execute("BEGIN IMMEDIATE;")
+                try:
+                    await self._conn.execute("""
+                        CREATE TABLE IF NOT EXISTS swarm_tasks (
+                            id TEXT PRIMARY KEY,
+                            target_path TEXT NOT NULL,
+                            focus_node TEXT NOT NULL,
+                            base_file_hash TEXT NOT NULL,
+                            test_target TEXT NOT NULL,
+                            bench_command TEXT NOT NULL,
+                            status TEXT NOT NULL DEFAULT 'queued',
+                            budget_usd REAL NOT NULL DEFAULT 0.0,
+                            spent_usd REAL NOT NULL DEFAULT 0.0,
+                            generation INTEGER NOT NULL DEFAULT 0,
+                            baseline_json TEXT,
+                            oracle_json TEXT,
+                            folded_state TEXT,
+                            seed INTEGER NOT NULL DEFAULT 0,
+                            caller TEXT,
+                            request_id TEXT,
+                            created_at TEXT,
+                            updated_at TEXT
+                        )
+                    """)
+                    await self._conn.execute("""
+                        CREATE TABLE IF NOT EXISTS swarm_candidates (
+                            id TEXT PRIMARY KEY,
+                            task_id TEXT NOT NULL,
+                            parent_id TEXT,
+                            generation INTEGER NOT NULL,
+                            mutator TEXT NOT NULL,
+                            plane TEXT NOT NULL DEFAULT 'CLI',
+                            byte_start INTEGER NOT NULL,
+                            byte_end INTEGER NOT NULL,
+                            code TEXT NOT NULL,
+                            code_hash TEXT NOT NULL,
+                            stage_reached TEXT NOT NULL DEFAULT 'generated',
+                            feasible INTEGER NOT NULL DEFAULT 0,
+                            side_effects INTEGER NOT NULL DEFAULT 0,
+                            latency_ms REAL,
+                            peak_mem_bytes INTEGER,
+                            diff_bytes INTEGER,
+                            readability REAL,
+                            pareto_rank INTEGER,
+                            crowding REAL,
+                            reward REAL,
+                            gen_cost_usd REAL NOT NULL DEFAULT 0.0,
+                            arm_receipt TEXT,
+                            created_at TEXT,
+                            UNIQUE(task_id, code_hash)
+                        )
+                    """)
+                    await self._conn.execute(
+                        "CREATE INDEX IF NOT EXISTS idx_swarm_candidates_task "
+                        "ON swarm_candidates(task_id, generation);"
+                    )
+                    await self._conn.execute(
+                        "CREATE INDEX IF NOT EXISTS idx_swarm_tasks_status "
+                        "ON swarm_tasks(status, updated_at DESC);"
+                    )
+                    await self._conn.execute("PRAGMA user_version = 12;")
+                    await self._conn.commit()
+                except Exception:
+                    await self._conn.rollback()
+                    raise
+
             # knowledge_fts is (re)checked on EVERY init, not just inside the
             # v7 gate: FTS5 is a compile-time SQLite option, so a db created
             # on a build WITH it can be reopened by one WITHOUT it (and vice
@@ -3905,6 +3980,214 @@ class GrokSessionStore:
             async with conn.execute(
                 "SELECT * FROM jobs ORDER BY created_at DESC, id DESC LIMIT ?", (bounded,)
             ) as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
+
+    # ── Swarm optimizer state (v12, src/swarm/) ─────────────────────────────
+
+    @_with_write_retry_async
+    async def create_swarm_task(
+        self,
+        task_id: str,
+        target_path: str,
+        focus_node: str,
+        base_file_hash: str,
+        test_target: str,
+        bench_command: str,
+        budget_usd: float,
+        seed: int,
+        caller: Optional[str] = None,
+        request_id: Optional[str] = None,
+    ) -> None:
+        """Insert a 'queued' swarm task row. caller/request_id fall back to
+        the identities bound to the current async context (the src/storage.py
+        contract), matching create_job."""
+        await self._ensure_initialized()
+        now_str = datetime.now().isoformat()
+        async with self._lock:
+            await self._conn.execute("BEGIN IMMEDIATE;")
+            try:
+                await self._conn.execute(
+                    "INSERT INTO swarm_tasks (id, target_path, focus_node, base_file_hash, "
+                    "test_target, bench_command, status, budget_usd, seed, caller, request_id, "
+                    "created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?)",
+                    (
+                        str(task_id),
+                        str(target_path),
+                        str(focus_node),
+                        str(base_file_hash),
+                        str(test_target),
+                        str(bench_command),
+                        max(0.0, float(budget_usd or 0.0)),
+                        int(seed),
+                        normalize_caller(caller) or get_active_caller(),
+                        normalize_request_id(request_id) or get_request_id() or None,
+                        now_str,
+                        now_str,
+                    ),
+                )
+                await self._conn.commit()
+            except Exception:
+                await self._conn.rollback()
+                raise
+            await self._on_write_completed()
+
+    @_with_write_retry_async
+    async def update_swarm_task(
+        self,
+        task_id: str,
+        status: Optional[str] = None,
+        spent_usd: Optional[float] = None,
+        generation: Optional[int] = None,
+        baseline_json: Optional[str] = None,
+        oracle_json: Optional[str] = None,
+        folded_state: Optional[str] = None,
+    ) -> None:
+        """Update a swarm task row. updated_at ALWAYS bumps — the runner calls
+        this after every candidate as its heartbeat, and staleness detection
+        measures the time since the owning task last touched the row."""
+        await self._ensure_initialized()
+        fields = ["updated_at = ?"]
+        params: List[Any] = [datetime.now().isoformat()]
+        if status is not None:
+            fields.append("status = ?")
+            params.append(str(status))
+        if spent_usd is not None:
+            fields.append("spent_usd = ?")
+            params.append(max(0.0, float(spent_usd)))
+        if generation is not None:
+            fields.append("generation = ?")
+            params.append(int(generation))
+        if baseline_json is not None:
+            fields.append("baseline_json = ?")
+            params.append(str(baseline_json))
+        if oracle_json is not None:
+            fields.append("oracle_json = ?")
+            params.append(str(oracle_json))
+        if folded_state is not None:
+            fields.append("folded_state = ?")
+            params.append(str(folded_state))
+        params.append(str(task_id))
+        async with self._lock:
+            await self._conn.execute("BEGIN IMMEDIATE;")
+            try:
+                await self._conn.execute(
+                    f"UPDATE swarm_tasks SET {', '.join(fields)} WHERE id = ?", params
+                )
+                await self._conn.commit()
+            except Exception:
+                await self._conn.rollback()
+                raise
+            await self._on_write_completed()
+
+    @_with_read_retry_async
+    async def get_swarm_task(self, task_id: str) -> Optional[Dict[str, Any]]:
+        await self._ensure_initialized()
+        async with self._read_conn() as conn:
+            async with conn.execute(
+                "SELECT * FROM swarm_tasks WHERE id = ?", (str(task_id),)
+            ) as cursor:
+                row = await cursor.fetchone()
+                return dict(row) if row else None
+
+    @_with_read_retry_async
+    async def list_swarm_tasks(self, limit: int = 20) -> List[Dict[str, Any]]:
+        await self._ensure_initialized()
+        bounded = max(1, min(int(limit or 20), 100))
+        async with self._read_conn() as conn:
+            async with conn.execute(
+                "SELECT * FROM swarm_tasks ORDER BY created_at DESC, id DESC LIMIT ?",
+                (bounded,),
+            ) as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
+
+    @_with_write_retry_async
+    async def insert_swarm_candidate(self, candidate: Dict[str, Any]) -> bool:
+        """Insert one evaluated candidate row; False on a duplicate
+        (task_id, code_hash) — the engine treats duplicates as free discards.
+
+        The stored code is the exact replacement slice apply_swarm_winner
+        would splice, so it is NEVER silently truncated or rewritten: an
+        oversized slice or one whose bytes redact_secrets would alter is
+        rejected here with ValueError (a mutant carrying secret-shaped
+        literals is suspect, and splicing a redacted variant would corrupt
+        the file)."""
+        await self._ensure_initialized()
+        code = str(candidate.get("code") or "")
+        if not code:
+            raise ValueError("swarm candidate requires non-empty code")
+        if len(code.encode("utf-8", errors="ignore")) > 65536:
+            raise ValueError("swarm candidate code exceeds the 64KB cap")
+        if redact_secrets(code) != code:
+            raise ValueError("swarm candidate code contains secret-like content")
+        now_str = datetime.now().isoformat()
+        async with self._lock:
+            await self._conn.execute("BEGIN IMMEDIATE;")
+            try:
+                await self._conn.execute(
+                    "INSERT INTO swarm_candidates (id, task_id, parent_id, generation, "
+                    "mutator, plane, byte_start, byte_end, code, code_hash, stage_reached, "
+                    "feasible, side_effects, latency_ms, peak_mem_bytes, diff_bytes, "
+                    "readability, pareto_rank, crowding, reward, gen_cost_usd, arm_receipt, "
+                    "created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        str(candidate["id"]),
+                        str(candidate["task_id"]),
+                        candidate.get("parent_id"),
+                        int(candidate.get("generation") or 0),
+                        str(candidate.get("mutator") or "unknown"),
+                        str(candidate.get("plane") or "CLI"),
+                        int(candidate["byte_start"]),
+                        int(candidate["byte_end"]),
+                        code,
+                        str(candidate["code_hash"]),
+                        str(candidate.get("stage_reached") or "generated"),
+                        1 if candidate.get("feasible") else 0,
+                        1 if candidate.get("side_effects") else 0,
+                        candidate.get("latency_ms"),
+                        candidate.get("peak_mem_bytes"),
+                        candidate.get("diff_bytes"),
+                        candidate.get("readability"),
+                        candidate.get("pareto_rank"),
+                        candidate.get("crowding"),
+                        candidate.get("reward"),
+                        max(0.0, float(candidate.get("gen_cost_usd") or 0.0)),
+                        candidate.get("arm_receipt"),
+                        now_str,
+                    ),
+                )
+                await self._conn.commit()
+            except sqlite3.IntegrityError:
+                await self._conn.rollback()
+                return False
+            except Exception:
+                await self._conn.rollback()
+                raise
+            await self._on_write_completed()
+        return True
+
+    @_with_read_retry_async
+    async def list_swarm_candidates(
+        self,
+        task_id: str,
+        feasible_only: bool = False,
+        generation: Optional[int] = None,
+        limit: int = 500,
+    ) -> List[Dict[str, Any]]:
+        await self._ensure_initialized()
+        bounded = max(1, min(int(limit or 500), 2000))
+        query = "SELECT * FROM swarm_candidates WHERE task_id = ?"
+        params: List[Any] = [str(task_id)]
+        if feasible_only:
+            query += " AND feasible = 1"
+        if generation is not None:
+            query += " AND generation = ?"
+            params.append(int(generation))
+        query += " ORDER BY generation ASC, created_at ASC, id ASC LIMIT ?"
+        params.append(bounded)
+        async with self._read_conn() as conn:
+            async with conn.execute(query, params) as cursor:
                 rows = await cursor.fetchall()
                 return [dict(row) for row in rows]
 

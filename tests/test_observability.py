@@ -605,6 +605,8 @@ _PROTOCOL_MEMBERS = (
     "get_session", "save_session", "delete_session", "list_sessions",
     "save_message", "replace_messages", "load_messages",
     "create_job", "update_job", "get_job", "list_jobs",
+    "create_swarm_task", "update_swarm_task", "get_swarm_task",
+    "list_swarm_tasks", "insert_swarm_candidate", "list_swarm_candidates",
 )
 
 
