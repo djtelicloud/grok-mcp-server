@@ -14,6 +14,7 @@ export default function Home() {
         <nav aria-label="Public navigation">
           <a href="#how-it-works">How it works</a>
           <a href="#start">Get started</a>
+          <a href="/contribute">Contribute</a>
           <a href={PUBLIC_PROJECT.repository.url}>GitHub</a>
         </nav>
         <a className="public-nav-action" href="/control">Contributor control</a>
@@ -59,8 +60,8 @@ export default function Home() {
       <p className="public-contract-note">Published route contract · not a live runtime probe</p>
       <section className="public-status" aria-label="Published route contract, not live runtime status">
         <article><span className="public-status-dot ready" /><div><small>PUBLIC PROJECT INFO</small><strong>Static metadata available</strong></div></article>
-        <article><span className="public-status-dot gated" /><div><small>CONTROL CENTER</small><strong>Route is authorization-gated</strong></div></article>
-        <article><span className="public-status-dot planned" /><div><small>REMOTE MCP</small><strong>Not deployed · OAuth pending</strong></div></article>
+        <article><span className="public-status-dot gated" /><div><small>CONTROL CENTER</small><strong>GitHub role-gated</strong></div></article>
+        <article><span className="public-status-dot planned" /><div><small>REMOTE MCP</small><strong>Private review pending · public MCP deferred</strong></div></article>
       </section>
 
       <section className="public-section" id="how-it-works">
@@ -108,11 +109,11 @@ export default function Home() {
       </section>
 
       <section className="public-contribute">
-        <div><p className="public-kicker"><span /> Help build the gateway</p><h2>Contributors get a control plane.<br />Visitors get a clear front door.</h2><p>ChatGPT sign-in establishes viewer identity. Control access currently uses a separate server-configured GitHub identity bootstrap binding; live GitHub collaborator verification is pending.</p></div>
-        <div className="public-actions"><a className="public-primary" href="/control">Open contributor control <span aria-hidden="true">→</span></a><a className="public-secondary" href={`${PUBLIC_PROJECT.repository.url}/issues`}>View open issues</a></div>
+        <div><p className="public-kicker"><span /> Help build the gateway</p><h2>Contributors get a control plane.<br />Visitors get a clear front door.</h2><p>GitHub login establishes contributor identity. Every protected request performs a fresh server-side role check against this repository before returning project data.</p></div>
+        <div className="public-actions"><a className="public-primary" href="/contribute">Become a contributor <span aria-hidden="true">→</span></a><a className="public-secondary" href={`${PUBLIC_PROJECT.repository.url}/issues`}>View open issues</a></div>
       </section>
 
-      <footer className="public-footer"><Link className="public-brand" href="/"><span className="public-brand-mark" aria-hidden="true">UG</span><span><strong>UniGrok</strong><small>Universal Grok MCP</small></span></Link><p>Open-source infrastructure for supervised, multi-agent development.</p><div><a href={PUBLIC_PROJECT.repository.url}>GitHub</a><a href="/llms.txt">llms.txt</a><a href="/control">Control</a></div></footer>
+      <footer className="public-footer"><Link className="public-brand" href="/"><span className="public-brand-mark" aria-hidden="true">UG</span><span><strong>UniGrok</strong><small>Universal Grok MCP</small></span></Link><p>Open-source infrastructure for supervised, multi-agent development.</p><div><a href={PUBLIC_PROJECT.repository.url}>GitHub</a><a href="/contribute">Contribute</a><a href="/llms.txt">llms.txt</a><a href="/control">Control</a></div></footer>
     </main>
   );
 }

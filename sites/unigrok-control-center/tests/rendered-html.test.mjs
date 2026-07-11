@@ -89,7 +89,7 @@ test("renders the public root without authentication or live-status claims", asy
   assert.match(html, /Public project context/);
   assert.match(html, /example · local command session/);
   assert.match(html, /Published route contract · not a live runtime probe/);
-  assert.match(html, /Not deployed · OAuth pending/);
+  assert.match(html, /Private review pending · public MCP deferred/);
   assert.match(html, /uv run python main\.py init/);
   assert.match(html, /status.*healthy/);
   assert.match(html, /https:\/\/grokmcp\.org\/og\.png/);
@@ -234,20 +234,20 @@ test("serves public project, discovery, and llms documents anonymously", async (
   assert.equal(projectResponse.status, 200);
   const project = await projectResponse.json();
   assert.equal(project.name, "UniGrok");
-  assert.equal(project.mcp.remote_status, "not-deployed-oauth-pending");
-  assert.equal(project.control.authorization_status, "live-github-collaborator-verification-pending");
+  assert.equal(project.mcp.remote_status, "private-api-review-pending");
+  assert.equal(project.control.authorization, "fresh-server-side-github-repository-role-check");
 
   const discoveryResponse = await request(worker, "/.well-known/unigrok.json");
   assert.equal(discoveryResponse.status, 200);
   const discovery = await discoveryResponse.json();
-  assert.equal(discovery.service, "unigrok");
-  assert.equal(discovery.mcp.remote_status, "not-deployed-oauth-pending");
+  assert.equal(discovery.name, "UniGrok");
+  assert.equal(discovery.control, "https://control.grokmcp.org");
 
   const llmsResponse = await request(worker, "/llms.txt");
   assert.equal(llmsResponse.status, 200);
   assert.match(llmsResponse.headers.get("content-type") ?? "", /^text\/plain\b/i);
   const llms = await llmsResponse.text();
   assert.match(llms, /# UniGrok/);
-  assert.match(llms, /Live GitHub collaborator verification is pending/);
+  assert.match(llms, /fresh server-side repository role check/);
   assert.doesNotMatch(llms, /xai-[A-Za-z0-9_-]+/i);
 });

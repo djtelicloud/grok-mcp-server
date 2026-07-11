@@ -52,8 +52,8 @@ type CommandItem = {
 const secureTunnelGuide = "https://developers.openai.com/api/docs/guides/secure-mcp-tunnels";
 const sitesGuide = "https://learn.chatgpt.com/docs/sites";
 const guardrails = [
-  "ChatGPT authentication and project authorization stay separate",
-  "Missing or invalid GitHub role bindings deny access",
+  "Identity and fresh project authorization stay separate",
+  "Missing, revoked, or public-read-only GitHub access denies control access",
   "No credential entry or browser-side secret storage",
   "Localhost is never presented as publicly reachable",
 ];
@@ -158,6 +158,25 @@ function GrokReviewSurface({ snapshot }: { snapshot: ControlCenterSnapshot }) {
         )}
       </div>
     </div>
+  );
+}
+
+function GitHubEvidenceSurface({ snapshot }: { snapshot: ControlCenterSnapshot }) {
+  const { ci, deployments, observedAt, repository, rulesets } = snapshot.github;
+  return (
+    <article className="panel setup-panel" aria-label="Fresh GitHub project evidence">
+      <div className="panel-heading compact">
+        <div><span className="section-kicker">Live GitHub evidence</span><h2>{repository.state === "ready" ? `${repository.defaultBranch} · ${shortSha(repository.headSha)}` : integrationStateLabel(repository.state)}</h2></div>
+        <StatusPill tone={integrationStateTone(repository.state)}>{repository.state === "ready" ? "Fresh" : integrationStateLabel(repository.state)}</StatusPill>
+      </div>
+      <div className="runtime-signals">
+        <div><span>Latest CI</span><strong className={ci.run?.conclusion === "success" ? "positive" : ""}>{workflowRunLabel(snapshot)}</strong></div>
+        <div><span>Deployments</span><strong>{deployments.state === "ready" ? deployments.items.length : integrationStateLabel(deployments.state)}</strong></div>
+        <div><span>Rulesets</span><strong>{rulesets.state === "ready" ? rulesets.items.filter((item) => item.enforcement === "active").length : integrationStateLabel(rulesets.state)}</strong></div>
+        <div><span>Observed</span><strong>{observedAt ? formatObservationTime(observedAt) : "No evidence"}</strong></div>
+      </div>
+      <div className="pr-insight"><span className="insight-icon"><Icon name="shield" size={18} /></span><p><strong>Read-only snapshot:</strong> a short-lived installation token fetched this evidence server-side. No token, private key, raw API response, or write action reaches the browser.</p></div>
+    </article>
   );
 }
 
@@ -273,6 +292,7 @@ export default function ControlCenter({ authorization, connection, previewMode =
     { id: "deployments", label: "Deployment", icon: "deploy", panel: "deployments" },
   ];
   const initials = displayInitials(user.displayName);
+  const liveGitHubAuthorization = authorization.source === "live-github-collaborator";
   const modeLabel = !connection.configured ? "Setup needed" : connection.connectionMode === "local" ? "Local development" : "Secure tunnel";
   const pullRequestMetric = snapshot.pullRequests.state === "ready" ? `${snapshot.pullRequests.items.length} open` : integrationStateLabel(snapshot.pullRequests.state);
   const grokReviewMetric = snapshot.grokReview.state === "ready" ? snapshot.grokReview.verdict ?? scoreLabel(snapshot.grokReview.score) : integrationStateLabel(snapshot.grokReview.state);
@@ -303,7 +323,7 @@ export default function ControlCenter({ authorization, connection, previewMode =
         </nav>
         <div className="sidebar-security">
           <Icon name="lock" size={18} />
-          <div><strong>Two checks passed</strong><span>ChatGPT + project role</span></div>
+          <div><strong>Two checks passed</strong><span>{liveGitHubAuthorization ? "GitHub identity + fresh role" : "ChatGPT + project role"}</span></div>
         </div>
       </aside>
 
@@ -327,9 +347,9 @@ export default function ControlCenter({ authorization, connection, previewMode =
         <div className="content-wrap">
           <section className="hero-section">
             <div className="hero-copy">
-              <div className="eyebrow"><span className="eyebrow-dot" /> ChatGPT identity + server-side project binding</div>
-              <h1>{connection.configured ? "Your control-center shell is configured." : "Connect your UniGrok control plane."}</h1>
-              <p>This protected surface uses a server-configured GitHub identity bootstrap binding; live GitHub collaborator verification is pending. Secrets stay outside the browser and local services stay local.</p>
+              <div className="eyebrow"><span className="eyebrow-dot" /> {liveGitHubAuthorization ? "GitHub identity + fresh collaborator authorization" : "ChatGPT identity + server-side project binding"}</div>
+              <h1>{liveGitHubAuthorization ? "Your live project control snapshot." : connection.configured ? "Your control-center shell is configured." : "Connect your UniGrok control plane."}</h1>
+              <p>{liveGitHubAuthorization ? "GitHub identity and repository permission were checked for this request. Installation credentials stay server-side and every repository field below is sanitized before display." : "This protected surface uses a server-configured GitHub identity bootstrap binding; live GitHub collaborator verification is pending. Secrets stay outside the browser and local services stay local."}</p>
             </div>
             <button className="icon-button mobile-menu" onClick={() => setCommandOpen(true)} aria-label="Open command center"><Icon name="menu" /></button>
           </section>
@@ -347,15 +367,17 @@ export default function ControlCenter({ authorization, connection, previewMode =
               <span className="metric-icon"><Icon name="review" size={25} /></span>
               <span className="metric-copy"><small>Grok review</small><strong className="metric-word">{grokReviewMetric}</strong><em>{snapshot.grokReview.state === "ready" ? scoreLabel(snapshot.grokReview.score) : "No review result claimed"}</em></span><Icon name="chevron" size={17} />
             </button>
-            <button className={connection.configured ? "metric-card cyan" : "metric-card amber"} onClick={() => openPanel("runtime", "runtime")}>
-              <span className="metric-icon"><Icon name="activity" size={25} /></span>
-              <span className="metric-copy"><small>Runtime health</small><strong className="metric-word">Unverified</strong><em>{modeLabel}</em></span><Icon name="chevron" size={17} />
+            <button className={liveGitHubAuthorization ? "metric-card cyan" : connection.configured ? "metric-card cyan" : "metric-card amber"} onClick={() => openPanel(liveGitHubAuthorization ? "deployments" : "runtime", liveGitHubAuthorization ? "deployments" : "runtime")}>
+              <span className="metric-icon"><Icon name={liveGitHubAuthorization ? "check" : "activity"} size={25} /></span>
+              <span className="metric-copy"><small>{liveGitHubAuthorization ? "Latest CI" : "Runtime health"}</small><strong className="metric-word">{liveGitHubAuthorization ? workflowRunLabel(snapshot) : "Unverified"}</strong><em>{liveGitHubAuthorization ? workflowRunDetail(snapshot) : modeLabel}</em></span><Icon name="chevron" size={17} />
             </button>
             <button className="metric-card neutral" onClick={() => openPanel("settings", "settings")}>
               <span className="metric-icon"><Icon name="shield" size={25} /></span>
               <span className="metric-copy"><small>Access</small><strong className="metric-word">Authorized</strong><em>@{authorization.githubLogin} · {authorization.role}</em></span><Icon name="chevron" size={17} />
             </button>
           </section>
+
+          {liveGitHubAuthorization && <GitHubEvidenceSurface snapshot={snapshot} />}
 
           <section className="dashboard-grid">
             <article className="panel pull-panel">
@@ -425,8 +447,8 @@ export default function ControlCenter({ authorization, connection, previewMode =
             </button>
             {expertOpen && (
               <div className="engineering-grid">
-                <div><span>Authentication</span><strong>Dispatch-owned SIWC</strong><small>Viewer identity arrives through trusted Sites request headers.</small></div>
-                <div><span>Authorization</span><strong>@{authorization.githubLogin} · {authorization.role}</strong><small>Bootstrap binding; live GitHub verification pending.</small></div>
+                <div><span>Authentication</span><strong>{liveGitHubAuthorization ? "GitHub App OAuth + PKCE" : "Dispatch-owned SIWC"}</strong><small>{liveGitHubAuthorization ? "The browser retains only a signed HttpOnly session." : "Viewer identity arrives through trusted Sites request headers."}</small></div>
+                <div><span>Authorization</span><strong>@{authorization.githubLogin} · {authorization.role}</strong><small>{liveGitHubAuthorization ? "Fresh collaborator permission checked for this request." : "Bootstrap binding; live GitHub verification pending."}</small></div>
                 <div><span>Health contract</span><strong><code>GET /healthz</code></strong><small>Run from the UniGrok host or tunnel-client trust boundary.</small></div>
                 <div><span>MCP transport</span><strong><code>POST /mcp</code></strong><small>Streamable HTTP; no browser credential is collected here.</small></div>
                 <div><span>Site identity</span><strong>Canonical project</strong><small>The repository is bound to the existing UniGrok Site.</small></div>
@@ -457,7 +479,7 @@ export default function ControlCenter({ authorization, connection, previewMode =
             {panel === "grok-review" && <GrokReviewDetail snapshot={snapshot} />}
             {panel === "review" && <ReviewDetail />}
             {panel === "runtime" && <RuntimeDetail connection={connection} />}
-            {panel === "deployments" && <DeploymentDetail siteProvisioned={siteProvisioned} />}
+            {panel === "deployments" && <DeploymentDetail siteProvisioned={siteProvisioned} snapshot={snapshot} />}
             {panel === "settings" && <SettingsDetail authorization={authorization} displayName={user.displayName} previewMode={previewMode} signOutPath={signOutPath} />}
           </aside>
         </div>
@@ -540,8 +562,8 @@ function GrokReviewDetail({ snapshot }: { snapshot: ControlCenterSnapshot }) {
 function RepositoryDetail({ connection }: { connection: PublicConnectionConfig }) {
   return (
     <div className="drawer-content">
-      <DrawerHeader icon="github" eyebrow="Repository metadata" title={connection.repository ?? "Repository not configured"} description="The Site accepts a public owner/repository label for links. It does not contain a GitHub credential or make authenticated GitHub requests." />
-      <section className="drawer-section data-list"><h3>Configuration</h3><div><span>Environment key</span><strong><code>GITHUB_REPOSITORY</code></strong></div><div><span>Expected shape</span><strong><code>owner/repository</code></strong></div><div><span>GitHub token</span><strong className="green-text">Not used</strong></div><div><span>Current state</span><strong>{connection.repository ? "Configured" : "Missing"}</strong></div></section>
+      <DrawerHeader icon="github" eyebrow="Repository metadata" title={connection.repository ?? "Repository not configured"} description="Repository links are public metadata. In standalone control mode, authenticated GitHub requests use a short-lived installation token exclusively on the server." />
+      <section className="drawer-section data-list"><h3>Configuration</h3><div><span>Environment key</span><strong><code>GITHUB_REPOSITORY</code></strong></div><div><span>Expected shape</span><strong><code>owner/repository</code></strong></div><div><span>GitHub token in browser</span><strong className="green-text">None</strong></div><div><span>Current state</span><strong>{connection.repository ? "Configured" : "Missing"}</strong></div></section>
       <div className="runtime-callout"><Icon name="shield" size={21} /><p><strong>Keep GitHub authorization separate</strong><span>Add repository integrations only through a reviewed, server-side authorization flow. Never paste a personal access token into this Site.</span></p></div>
       {connection.repositoryUrl && <a className="external-doc-link" href={connection.repositoryUrl} target="_blank" rel="noreferrer">Open configured repository <Icon name="external" size={16} /></a>}
     </div>
@@ -568,10 +590,12 @@ function RuntimeDetail({ connection }: { connection: PublicConnectionConfig }) {
   );
 }
 
-function DeploymentDetail({ siteProvisioned }: { siteProvisioned: boolean }) {
+function DeploymentDetail({ siteProvisioned, snapshot }: { siteProvisioned: boolean; snapshot: ControlCenterSnapshot }) {
+  const liveEvidence = snapshot.github.repository.state !== "unconfigured";
   return (
     <div className="drawer-content">
-      <DrawerHeader icon="deploy" eyebrow="Canonical Site deployment" title={siteProvisioned ? "Review this Site’s deployment gate" : "Site identity missing"} description={siteProvisioned ? "The canonical project identity is present. Complete verification and save a version only after review." : "The canonical project identity is required before this source can be deployed."} />
+      <DrawerHeader icon="deploy" eyebrow={liveEvidence ? "Read-only GitHub evidence" : "Canonical Site deployment"} title={liveEvidence ? `${snapshot.github.deployments.items.length} recent deployment records` : siteProvisioned ? "Review this Site’s deployment gate" : "Site identity missing"} description={liveEvidence ? snapshot.github.deployments.message : siteProvisioned ? "The canonical project identity is present. Complete verification and save a version only after review." : "The canonical project identity is required before this source can be deployed."} />
+      {liveEvidence && <section className="drawer-section data-list"><h3>Repository evidence</h3><div><span>Latest CI</span><strong>{workflowRunLabel(snapshot)}</strong></div><div><span>Default branch</span><strong>{snapshot.github.repository.defaultBranch ?? "Unavailable"}</strong></div><div><span>Head SHA</span><strong><code>{shortSha(snapshot.github.repository.headSha)}</code></strong></div><div><span>Active rulesets</span><strong>{snapshot.github.rulesets.items.filter((item) => item.enforcement === "active").length}</strong></div><div><span>Installation token in browser</span><strong className="green-text">None</strong></div></section>}
       <section className="pipeline"><div className="complete"><span><Icon name="check" size={16} /></span><p><strong>Review the repository changes</strong><small>Keep credentials out of source and browser state</small></p></div><div className={siteProvisioned ? "complete" : "blocked"}><span>{siteProvisioned ? <Icon name="check" size={16} /> : <Icon name="clock" size={16} />}</span><p><strong>{siteProvisioned ? "Canonical Site identity present" : "Restore the canonical Site binding"}</strong><small>{siteProvisioned ? "Deployment is bound to the existing UniGrok project" : "Do not deploy an unbound checkout"}</small></p></div><div><span>3</span><p><strong>Configure hosted authorization bindings</strong><small>Missing or malformed bindings deny control access</small></p></div><div><span>4</span><p><strong>Preview and request Codex review</strong><small>Do not deploy until the review is clean</small></p></div><div><span>5</span><p><strong>Approve a production deployment</strong><small>Verify public and protected routes separately</small></p></div></section>
       <a className="external-doc-link" href={sitesGuide} target="_blank" rel="noreferrer">Open ChatGPT Sites documentation <Icon name="external" size={16} /></a>
     </div>
@@ -579,12 +603,13 @@ function DeploymentDetail({ siteProvisioned }: { siteProvisioned: boolean }) {
 }
 
 function SettingsDetail({ authorization, displayName, previewMode, signOutPath }: { authorization: Extract<GitHubProjectAuthorization, { authorized: true }>; displayName: string; previewMode: boolean; signOutPath: string }) {
+  const liveGitHubAuthorization = authorization.source === "live-github-collaborator";
   return (
     <div className="drawer-content">
-      <DrawerHeader icon="shield" eyebrow="Identity and authorization" title="Two independent checks passed" description="The Sites dispatcher authenticates the current viewer. A server-configured GitHub identity bootstrap binding authorizes this control surface; live collaborator verification is pending." />
-      <section className="drawer-section data-list"><h3>Current request</h3><div><span>ChatGPT display</span><strong>{displayName}</strong></div><div><span>GitHub identity</span><strong>@{authorization.githubLogin}</strong></div><div><span>Project role</span><strong>{authorization.role}</strong></div><div><span>Browser credential storage</span><strong className="green-text">None</strong></div></section>
-      <div className="runtime-callout"><Icon name="shield" size={21} /><p><strong>Privacy disclosure</strong><span>Sites supplies the authenticated email and may supply a full name to the server for each request. Email is compared to the server-held project-role bindings and is never sent to the browser. Only a normalized full name or generic label reaches this browser. Neither value is retained or sent to UniGrok.</span></p></div>
-      <a className="secondary-action drawer-wide-action" href={signOutPath}>{previewMode ? "Exit local preview" : "Sign out with ChatGPT"}</a>
+      <DrawerHeader icon="shield" eyebrow="Identity and authorization" title="Two independent checks passed" description={liveGitHubAuthorization ? "GitHub OAuth established identity. A fresh installation-token permission lookup separately confirmed a contributor role for this repository." : "The Sites dispatcher authenticates the current viewer. A server-configured GitHub identity bootstrap binding authorizes this control surface; live collaborator verification is pending."} />
+      <section className="drawer-section data-list"><h3>Current request</h3><div><span>{liveGitHubAuthorization ? "GitHub display" : "ChatGPT display"}</span><strong>{displayName}</strong></div><div><span>GitHub identity</span><strong>@{authorization.githubLogin}</strong></div><div><span>Project role</span><strong>{authorization.role}</strong></div><div><span>Browser credential storage</span><strong className="green-text">Signed session only</strong></div></section>
+      <div className="runtime-callout"><Icon name="shield" size={21} /><p><strong>Privacy disclosure</strong><span>{liveGitHubAuthorization ? "The GitHub user token is used only during the callback to establish identity and is then discarded. Installation tokens and App credentials remain server-side. The browser retains a signed, HttpOnly identity session without GitHub credentials." : "Sites supplies the authenticated email and may supply a full name to the server for each request. Email is compared to the server-held project-role bindings and is never sent to the browser. Only a normalized full name or generic label reaches this browser. Neither value is retained or sent to UniGrok."}</span></p></div>
+      {liveGitHubAuthorization ? <form action={signOutPath} method="post"><button className="secondary-action drawer-wide-action" type="submit">Sign out with GitHub</button></form> : <a className="secondary-action drawer-wide-action" href={signOutPath}>{previewMode ? "Exit local preview" : "Sign out with ChatGPT"}</a>}
     </div>
   );
 }
@@ -600,7 +625,7 @@ function boundedInteger(value: number): number {
 }
 
 function integrationStateLabel(state: IntegrationState): string {
-  return state === "ready" ? "Ready" : state === "loading" ? "Loading" : state === "error" ? "Error" : "Unconfigured";
+  return state === "ready" ? "Ready" : state === "loading" ? "Loading" : state === "error" ? "Unavailable" : "Not connected";
 }
 
 function integrationStateTone(state: IntegrationState): "green" | "amber" | "blue" | "muted" {
@@ -626,4 +651,25 @@ function safePullRequestUrl(value: string): string | null {
 
 function scoreLabel(score: number | null): string {
   return score === null ? "No score" : `${Math.min(100, Math.max(0, boundedInteger(score)))}/100`;
+}
+
+function workflowRunLabel(snapshot: ControlCenterSnapshot): string {
+  const { run, state } = snapshot.github.ci;
+  if (state !== "ready") return integrationStateLabel(state);
+  if (!run) return "No runs";
+  return run.status === "completed" ? run.conclusion ?? "Completed" : run.status.replaceAll("_", " ");
+}
+
+function workflowRunDetail(snapshot: ControlCenterSnapshot): string {
+  const run = snapshot.github.ci.run;
+  return run ? `${run.name} · ${shortSha(run.headSha)}` : snapshot.github.ci.message;
+}
+
+function shortSha(value: string | null): string {
+  return value && /^[0-9a-f]{40}$/i.test(value) ? value.slice(0, 8) : "Unavailable";
+}
+
+function formatObservationTime(value: string): string {
+  const date = new Date(value);
+  return Number.isFinite(date.valueOf()) ? date.toISOString().replace("T", " ").slice(0, 16) + " UTC" : "Unavailable";
 }

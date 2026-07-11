@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { realpathSync } from "node:fs";
-import { readFile, readdir } from "node:fs/promises";
+import { readFile, readdir, stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -110,6 +110,12 @@ export async function runSafetyCheck({ allowProvisionedManifest = false, directo
   const manifestPath = path.join(directory, ".openai", "hosting.json");
 
   for (const file of files) {
+    try {
+      await stat(file);
+    } catch (error) {
+      if (error?.code === "ENOENT") continue;
+      throw error;
+    }
     const relative = path.relative(directory, file);
     const fileReason = forbiddenFileReason(relative);
     if (fileReason) failures.push(`${relative}: ${fileReason}`);

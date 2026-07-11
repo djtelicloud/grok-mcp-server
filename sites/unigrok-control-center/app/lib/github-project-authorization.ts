@@ -5,7 +5,7 @@ export type GitHubProjectAuthorization =
       authorized: true;
       githubLogin: string;
       role: GitHubProjectRole;
-      source: "server-configured-bootstrap-binding";
+      source: "live-github-collaborator" | "server-configured-bootstrap-binding";
     }
   | {
       authorized: false;

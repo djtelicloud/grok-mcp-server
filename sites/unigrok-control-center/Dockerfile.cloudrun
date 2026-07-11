@@ -1,0 +1,40 @@
+# syntax=docker/dockerfile:1
+
+ARG NODE_IMAGE=node:22.22.0-bookworm-slim@sha256:dd9d21971ec4395903fa6143c2b9267d048ae01ca6d3ea96f16cb30df6187d94
+
+FROM ${NODE_IMAGE} AS dependencies
+WORKDIR /workspace
+ENV NEXT_TELEMETRY_DISABLED=1
+COPY package.json package-lock.json .npmrc ./
+RUN npm ci --ignore-scripts
+
+FROM ${NODE_IMAGE} AS builder
+WORKDIR /workspace
+ENV NEXT_TELEMETRY_DISABLED=1
+COPY --from=dependencies /workspace/node_modules ./node_modules
+COPY . .
+RUN npm run build:standalone
+
+FROM ${NODE_IMAGE} AS runtime
+WORKDIR /app
+
+ENV HOSTNAME=0.0.0.0 \
+    NEXT_TELEMETRY_DISABLED=1 \
+    NODE_ENV=production \
+    PORT=8080
+
+RUN groupadd --system --gid 10001 unigrok \
+    && useradd --system --uid 10001 --gid unigrok --home-dir /nonexistent --shell /usr/sbin/nologin unigrok
+
+COPY --from=builder --chown=10001:10001 /workspace/public ./public
+COPY --from=builder --chown=10001:10001 /workspace/.next/standalone ./
+COPY --from=builder --chown=10001:10001 /workspace/.next/static ./.next/static
+COPY --from=builder --chown=10001:10001 --chmod=0555 /workspace/scripts/cloudrun-entrypoint.sh ./cloudrun-entrypoint.sh
+
+USER 10001:10001
+EXPOSE 8080
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD ["node", "-e", "fetch(`http://127.0.0.1:${process.env.PORT}/api/public/v1/project`).then((response)=>{if(!response.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+
+CMD ["/app/cloudrun-entrypoint.sh"]

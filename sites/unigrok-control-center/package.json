@@ -9,9 +9,11 @@
     "install:ci": "bash scripts/install-ci.sh",
     "dev": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vite",
     "build": "bash scripts/build-verified.sh",
+    "build:standalone": "bash scripts/build-standalone.sh",
     "start": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext start",
-    "test": "npm run check:deployment && npm run typecheck && npm run build && node --test tests/*.test.mjs",
-    "test:deployment": "npm run check:deployment && npm run typecheck && npm run build && node --test tests/*.test.mjs",
+    "test": "npm run check:deployment && npm run typecheck && npm run build && npm run test:unit",
+    "test:deployment": "npm run check:deployment && npm run typecheck && npm run build && npm run test:unit",
+    "test:unit": "node --import tsx --test tests/*.test.mjs tests/*.test.ts",
     "check:source": "node scripts/check-template-safety.mjs --allow-provisioned-manifest",
     "check:deployment": "node scripts/check-template-safety.mjs --allow-provisioned-manifest",
     "typecheck": "tsc --noEmit",
@@ -19,6 +21,7 @@
     "lint": "bash scripts/sites-env.sh -- eslint . --ignore-pattern dist --ignore-pattern .next"
   },
   "dependencies": {
+    "@octokit/auth-app": "8.1.2",
     "next": "16.2.10",
     "react": "19.2.6",
     "react-dom": "19.2.6"
@@ -35,6 +38,7 @@
     "eslint-config-next": "16.2.10",
     "react-server-dom-webpack": "19.2.6",
     "tailwindcss": "4.2.1",
+    "tsx": "4.20.6",
     "typescript": "5.9.3",
     "vinext": "0.0.50",
     "vite": "8.1.4",

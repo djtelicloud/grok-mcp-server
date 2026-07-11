@@ -39,14 +39,14 @@ test("authorization bindings fail closed and never claim live GitHub verificatio
 
 test("publishes three public-safe machine-readable routes", async () => {
   const projectRoute = await readFile(new URL("../app/api/public/v1/project/route.ts", import.meta.url), "utf8");
-  const discoveryDocument = await readFile(new URL("../public/.well-known/unigrok.json", import.meta.url), "utf8");
+  const discoveryRoute = await readFile(new URL("../app/.well-known/unigrok.json/route.ts", import.meta.url), "utf8");
   const llmsRoute = await readFile(new URL("../app/llms.txt/route.ts", import.meta.url), "utf8");
   const publicProject = await readFile(new URL("../app/lib/public-project.ts", import.meta.url), "utf8");
 
   assert.match(projectRoute, /publicProjectDocument/);
-  assert.equal(JSON.parse(discoveryDocument).mcp.remote_status, "not-deployed-oauth-pending");
+  assert.match(discoveryRoute, /publicDiscoveryDocument/);
   assert.match(llmsRoute, /publicLlmsText/);
-  assert.match(publicProject, /not-deployed-oauth-pending/);
+  assert.match(publicProject, /private-api-review-pending/);
   assert.doesNotMatch(publicProject, /runtime ready|UNIGROK_GITHUB_IDENTITY_BINDINGS/);
 });
 
@@ -75,6 +75,8 @@ test("requires adapters to separate PR review state from release impact", async 
 test("defines no browser-exposed or committed credential value", async () => {
   const envExample = await readFile(new URL("../.env.example", import.meta.url), "utf8");
   assert.match(envExample, /^UNIGROK_GITHUB_IDENTITY_BINDINGS=$/m);
-  assert.doesNotMatch(envExample, /(?:TOKEN|SECRET|PASSWORD|API_KEY)=/);
+  for (const line of envExample.split(/\r?\n/)) {
+    if (/(?:TOKEN|SECRET|PASSWORD|API_KEY|PRIVATE_KEY)=/.test(line)) assert.match(line, /=$/);
+  }
   assert.doesNotMatch(envExample, /NEXT_PUBLIC_/);
 });

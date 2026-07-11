@@ -1,18 +1,10 @@
 {
-  "schema_version": "1.0",
-  "service": "unigrok",
+  "schema_version": "1.1",
+  "name": "UniGrok",
   "homepage": "https://grokmcp.org",
-  "project_metadata": "https://grokmcp.org/api/public/v1/project",
-  "llms_txt": "https://grokmcp.org/llms.txt",
   "repository": "https://github.com/djtelicloud/grok-mcp-server",
-  "control": {
-    "path": "/control",
-    "authentication": "chatgpt-siwc",
-    "authorization": "server-side-github-identity-bootstrap-binding",
-    "authorization_status": "live-github-collaborator-verification-pending"
-  },
-  "mcp": {
-    "local_default": "http://localhost:4765/mcp",
-    "remote_status": "not-deployed-oauth-pending"
-  }
+  "project": "https://grokmcp.org/api/public/v1/project",
+  "llms": "https://grokmcp.org/llms.txt",
+  "contribute": "https://grokmcp.org/contribute",
+  "control": "https://control.grokmcp.org"
 }
