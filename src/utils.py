@@ -4071,8 +4071,11 @@ class GrokSessionStore:
         async with self._lock:
             await self._conn.execute("BEGIN IMMEDIATE;")
             try:
+                # ``fields`` contains only fixed column assignments selected
+                # above; all caller-controlled values remain bound params.
                 await self._conn.execute(
-                    f"UPDATE swarm_tasks SET {', '.join(fields)} WHERE id = ?", params
+                    f"UPDATE swarm_tasks SET {', '.join(fields)} WHERE id = ?",  # nosec B608
+                    params,
                 )
                 await self._conn.commit()
             except Exception:
