@@ -153,7 +153,16 @@ def test_runtimez_reports_no_secret_runtime_status(monkeypatch):
     monkeypatch.delenv("UNIGROK_RUNTIME", raising=False)
     monkeypatch.delenv("UNIGROK_API_KEYS", raising=False)
     monkeypatch.setenv("XAI_API_KEY", "secret-value")
-    monkeypatch.setattr("src.http_server.grok_cli_available", lambda: True)
+    monkeypatch.setattr(
+        "src.http_server.grok_cli_plane_status",
+        lambda **_: {
+            "state": "ready",
+            "ready": True,
+            "binary": True,
+            "auth": "oauth_verified",
+            "setup_command": "grok login",
+        },
+    )
 
     with TestClient(create_app()) as client:
         res = client.get("/runtimez")
@@ -199,7 +208,16 @@ def test_readyz_accepts_cli_auth_without_xai_api_key(monkeypatch, tmp_path):
     monkeypatch.delenv("XAI_API_KEY", raising=False)
     monkeypatch.delenv("UNIGROK_RUNTIME", raising=False)
     monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setattr("src.http_server.grok_cli_available", lambda: True)
+    monkeypatch.setattr(
+        "src.http_server.grok_cli_plane_status",
+        lambda **_: {
+            "state": "ready",
+            "ready": True,
+            "binary": True,
+            "auth": "oauth_verified",
+            "setup_command": "grok login",
+        },
+    )
     (tmp_path / ".grok").mkdir()
     (tmp_path / ".grok" / "auth.json").write_text("{}", encoding="utf-8")
 
