@@ -19,6 +19,15 @@ All notable changes to UniGrok MCP will be documented in this file.
   baseline stage budget, focus-span coverage, benchmark stability) plus the
   opt-in `scripts/swarm_bench.py` helper. Still no engine — inert unless a
   future commit drives it.
+- **Swarm optimizer engine**: baseline-parent batch generation loop with a
+  discounted-UCB mutator router whose 4-level reward is aligned with Pareto
+  selection (front member > feasible-dominated > tests-failed > syntax-failed,
+  so the router can never favor a policy the front rejects), round-robin cold
+  start, constrained non-dominated sort + crowding, in-code deterministic
+  state folding, prompt-injection-framed mutator prompts with a raw-code output
+  contract + one heal retry, and a JobManager-style runner with heartbeat
+  staleness and cooperative cancel. Generation prefers the $0 CLI plane;
+  API-plane fallback is budget-reserved. Still not surfaced as an MCP tool.
 - **Shadow semantic evals** (`UNIGROK_SEMANTIC_EVALS`, off by default): a
   deterministic sample of live turns is graded by a cheap LLM judge
   (correctness / tool efficiency / safety, 1–5) and the scores ride the
