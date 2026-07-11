@@ -55,6 +55,12 @@ merge, tag, and release decisions. See
 [ADR 0001](docs/adr/0001-cloud-control-plane-governance.md) for the current
 local landing contract and the explicitly not-yet-live remote broker design.
 
+Codex approval is enforced as a required commit status bound to the exact PR
+head. Only the repository owner may dispatch `.github/workflows/codex-approval.yml`;
+the workflow re-reads the open PR and refuses a stale SHA or non-`main` target.
+This deterministic check uses no model credits. Any new commit requires a new
+Codex review and approval dispatch.
+
 Security vulnerabilities should be reported privately as described in
 [SECURITY.md](SECURITY.md), not opened as public issues.
 

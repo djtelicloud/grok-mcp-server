@@ -48,4 +48,5 @@ each claim you make against the actual source:
 
 - [ ] Required CI and CODEOWNER review pass on the current head
 - [ ] Codex disposition applies to the current head
+- [ ] Required `Codex Approval` status is present on the current head
 - [ ] Landing/merge receipt is captured by the currently operative integration path

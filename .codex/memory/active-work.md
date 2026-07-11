@@ -16,10 +16,11 @@ drift-prone values live before acting. Do not copy secrets or OAuth codes here.
 - PR #4 preserves Gemini as the originating agent, Codex as repair/integration
   authority, and Grok 4.5 CLI-plane review evidence. All six required CI jobs
   passed on the reviewed head.
-- Branch protection now requires all six CI jobs, strict up-to-date checks,
-  stale-review dismissal, CODEOWNER review, linear history, and conversation
-  resolution. Admin enforcement remains temporarily off until the independent
-  project-admin bot can approve owner-authored PRs.
+- Branch protection now requires all six CI jobs plus the exact-head
+  `Codex Approval` status, strict up-to-date checks, linear history, and
+  conversation resolution, with administrator enforcement enabled. The
+  owner-only approval dispatch validates the live PR head and uses no model
+  credits; a dedicated project-admin App identity remains a future refinement.
 - Automatic Grok PR review is disabled. Approved collaborators request the
   advisory review explicitly with `@grok review`, preventing surprise model
   usage and permanently queued self-hosted jobs.

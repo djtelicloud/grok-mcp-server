@@ -1,0 +1,50 @@
+name: Codex Approval
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Pull request number
+        required: true
+        type: string
+      head_sha:
+        description: Exact 40-character PR head approved by Codex
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  pull-requests: read
+  statuses: write
+
+jobs:
+  approve:
+    if: ${{ github.actor == github.repository_owner }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify current PR head and publish approval
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          REVIEWED_HEAD: ${{ inputs.head_sha }}
+          REPOSITORY: ${{ github.repository }}
+          SERVER_URL: ${{ github.server_url }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "${PR_NUMBER}" =~ ^[1-9][0-9]*$ ]]
+          [[ "${REVIEWED_HEAD}" =~ ^[0-9a-f]{40}$ ]]
+
+          actual_head="$(gh api "repos/${REPOSITORY}/pulls/${PR_NUMBER}" --jq '.head.sha')"
+          base_branch="$(gh api "repos/${REPOSITORY}/pulls/${PR_NUMBER}" --jq '.base.ref')"
+          state="$(gh api "repos/${REPOSITORY}/pulls/${PR_NUMBER}" --jq '.state')"
+
+          test "${state}" = "open"
+          test "${base_branch}" = "main"
+          test "${actual_head}" = "${REVIEWED_HEAD}"
+
+          gh api --method POST "repos/${REPOSITORY}/statuses/${REVIEWED_HEAD}" \
+            -f state=success \
+            -f context='Codex Approval' \
+            -f description='Codex approved this exact PR head' \
+            -f target_url="${SERVER_URL}/${REPOSITORY}/pull/${PR_NUMBER}"

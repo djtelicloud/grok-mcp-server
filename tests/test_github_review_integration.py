@@ -359,6 +359,22 @@ def test_chatgpt_github_operator_guide_keeps_credentials_separate():
     assert "not live GitHub OAuth" in guide
 
 
+def test_codex_approval_workflow_is_owner_only_and_exact_head_bound():
+    workflow = (ROOT / ".github" / "workflows" / "codex-approval.yml").read_text(encoding="utf-8")
+
+    assert "workflow_dispatch:" in workflow
+    assert "github.actor == github.repository_owner" in workflow
+    assert "statuses: write" in workflow
+    assert "pull-requests: read" in workflow
+    assert "test \"${actual_head}\" = \"${REVIEWED_HEAD}\"" in workflow
+    assert "test \"${base_branch}\" = \"main\"" in workflow
+    assert "context='Codex Approval'" in workflow
+    assert "state=success" in workflow
+    assert "actions/checkout" not in workflow
+    assert "XAI_API_KEY" not in workflow
+    assert "UNIGROK_MCP_URL" not in workflow
+
+
 def test_cloud_governance_contract_marks_target_features_not_live():
     adr = (
         ROOT / "docs" / "adr" / "0001-cloud-control-plane-governance.md"
