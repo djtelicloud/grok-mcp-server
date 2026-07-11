@@ -72,7 +72,9 @@ class SwarmEngine:
     # Injected so the runner can persist rows / heartbeat / check cancel.
     on_candidate: Optional[Callable[[Dict[str, Any]], Any]] = None
     cancelled: Optional[Callable[[], bool]] = None
-    generator: Callable = generate_mutation
+    # None => the module-level generate_mutation, resolved at call time so
+    # tests can monkeypatch src.swarm.engine.generate_mutation.
+    generator: Optional[Callable] = None
 
     router: DiscountedUCBRouter = field(init=False)
     _seen_hashes: set = field(default_factory=set, init=False)
@@ -193,14 +195,15 @@ class SwarmEngine:
             folded_state=self._current_fold,
         )
         system = build_system_prompt()
+        generator = self.generator or generate_mutation
         remaining = max(0.0, self.config.budget_usd - self._spent)
-        result = await self.generator(prompt, system, remaining_budget_usd=remaining)
+        result = await generator(prompt, system, remaining_budget_usd=remaining)
         self._spent += float(getattr(result, "cost_usd", 0.0) or 0.0)
         text = parse_mutation_output(getattr(result, "text", ""))
         if text is None:
             # One heal retry, restating the contract.
             remaining = max(0.0, self.config.budget_usd - self._spent)
-            healed = await self.generator(
+            healed = await generator(
                 prompt + HEAL_SUFFIX, system, remaining_budget_usd=remaining
             )
             self._spent += float(getattr(healed, "cost_usd", 0.0) or 0.0)

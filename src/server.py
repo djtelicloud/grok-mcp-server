@@ -137,6 +137,7 @@ from .tools.workspace_memory import (
     register_workspace_memory_tools,
 )
 from .tools.resources import register_resource_primitives
+from .tools.swarm import register_swarm_tools
 
 # Register all modules
 register_chat_tools(mcp)
@@ -146,6 +147,7 @@ register_git_tools(mcp)
 register_research_tools(mcp)
 register_knowledge_tools(mcp)
 register_workspace_memory_tools(mcp)
+register_swarm_tools(mcp)
 register_resource_primitives(mcp)
 
 def main(argv: Optional[Iterable[str]] = None):
