@@ -911,6 +911,105 @@ def reset_swarm_state() -> None
 
 Test isolation for module-level flags.
 
+## swarm/fold.py {#swarm-fold}
+
+### Function: `build_folded_state` {#swarm-fold-build_folded_state}
+
+```python
+def build_folded_state(*, goal: str, target_path: str, test_target: str, bench_command: str, candidates: List[Dict[str, Any]], front_size: int, best_delta_pct: Optional[float], generation: int) -> str
+```
+
+**Keywords:** build, folded, state
+
+Render the swarm's working state for the next mutator prompt.
+
+## swarm/generate.py {#swarm-generate}
+
+### Class: `BudgetExceeded` {#swarm-generate-budgetexceeded}
+
+```python
+class BudgetExceeded
+```
+
+**Keywords:** budget, exceeded
+
+Raised when a metered (API-plane) generation would exceed the task's
+remaining budget. CLI-plane generation is $0 and never raises.
+
+### Function: `generate_mutation` {#swarm-generate-generate_mutation}
+
+```python
+async def generate_mutation(prompt: str, system_prompt: str, *, remaining_budget_usd: float, per_call_reserve_usd: float=0.02, session: Optional[str]=None) -> GenerationResult
+```
+
+**Keywords:** generate, mutation
+
+One toolless completion. Rides cli_first routing; if it lands on the
+metered API plane it must fit the remaining budget.
+
+## swarm/mutators.py {#swarm-mutators}
+
+### Function: `parse_mutation_output` {#swarm-mutators-parse_mutation_output}
+
+```python
+def parse_mutation_output(raw: str) -> Optional[str]
+```
+
+**Keywords:** parse, mutation, output
+
+Extract the raw replacement source from a model response, or None when
+the contract is violated (empty, or clearly prose rather than code).
+
+Strips a single accidental markdown fence; does NOT attempt to salvage
+multi-block or explanatory output — that routes to the one heal retry.
+
+## swarm/pareto.py {#swarm-pareto}
+
+### Function: `dominates` {#swarm-pareto-dominates}
+
+```python
+def dominates(a: Tuple[float, ...], b: Tuple[float, ...]) -> bool
+```
+
+**Keywords:** dominates
+
+a dominates b (minimization): no worse on all objectives, strictly
+better on at least one.
+
+### Function: `fast_non_dominated_sort` {#swarm-pareto-fast_non_dominated_sort}
+
+```python
+def fast_non_dominated_sort(points: Sequence[Tuple[float, ...]]) -> List[List[int]]
+```
+
+**Keywords:** fast, non, dominated, sort
+
+Return fronts as lists of indices; front 0 is the Pareto-optimal set.
+O(MN^2) — fine for the tens-of-candidates scale here.
+
+### Function: `crowding_distance` {#swarm-pareto-crowding_distance}
+
+```python
+def crowding_distance(points: Sequence[Tuple[float, ...]], indices: Sequence[int]) -> Dict[int, float]
+```
+
+**Keywords:** crowding, distance
+
+NSGA-II crowding distance within one front. Boundary points get
+infinity; interior points get the summed normalized neighbor gap.
+
+### Function: `rank_candidates` {#swarm-pareto-rank_candidates}
+
+```python
+def rank_candidates(candidates: List[Dict[str, Any]], objectives: Sequence[str]=OBJECTIVES) -> List[Dict[str, Any]]
+```
+
+**Keywords:** rank, candidates
+
+Annotate FEASIBLE candidates in place with pareto_rank (0 = optimal
+front) and crowding, and return them ordered (rank asc, crowding desc).
+Infeasible candidates are dropped — they are not selectable.
+
 ## swarm/preflight.py {#swarm-preflight}
 
 ### Class: `PreflightError` {#swarm-preflight-preflighterror}
@@ -946,6 +1045,73 @@ def noise_floor_pct(latency_samples: List[float]) -> float
 
 max(5%, 3σ relative to the median) — improvements below this are
 treated as zero everywhere (bench numbers, rewards, deltas).
+
+## swarm/router.py {#swarm-router}
+
+### Class: `DiscountedUCBRouter` {#swarm-router-discounteducbrouter}
+
+```python
+class DiscountedUCBRouter
+```
+
+**Keywords:** discounted, ucb, router
+
+Per-task bandit over the four mutator arms.
+
+### Method: `DiscountedUCBRouter.select` {#swarm-router-discounteducbrouter-select}
+
+```python
+def DiscountedUCBRouter.select(self, generation: int) -> Dict[str, object]
+```
+
+**Keywords:** discounted, ucb, router, select
+
+Return {'arm', 'receipt'} for the next mutant slot.
+
+### Method: `DiscountedUCBRouter.update` {#swarm-router-discounteducbrouter-update}
+
+```python
+def DiscountedUCBRouter.update(self, arm: str, reward: float) -> None
+```
+
+**Keywords:** discounted, ucb, router, update
+
+Discount every arm, then credit the pulled arm's reward — standard
+discounted UCB bookkeeping (non-stationary: the folded prompt context
+shifts each generation, so recent evidence should dominate).
+
+## swarm/runner.py {#swarm-runner}
+
+### Function: `is_stale` {#swarm-runner-is_stale}
+
+```python
+def is_stale(row: Dict[str, Any], stale_after_sec: float) -> bool
+```
+
+**Keywords:** is, stale
+
+A running/queued task whose heartbeat is older than the horizon — the
+process that owned its asyncio task almost certainly died.
+
+### Function: `effective_status` {#swarm-runner-effective_status}
+
+```python
+def effective_status(row: Dict[str, Any]) -> str
+```
+
+**Keywords:** effective, status
+
+Status a reader should see: failed_stale overrides a stuck row.
+
+### Method: `SwarmRunner.cancel` {#swarm-runner-swarmrunner-cancel}
+
+```python
+def SwarmRunner.cancel(self, task_id: str) -> None
+```
+
+**Keywords:** swarm, runner, cancel
+
+Cooperative cancel — the engine checks between candidates.
 
 ## swarm/sandbox.py {#swarm-sandbox}
 
