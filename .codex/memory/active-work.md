@@ -2,7 +2,7 @@
 
 Last updated: 2026-07-11
 Owner: Codex
-Status: PR-first contributor governance and dynamic OKF wiki rollout complete
+Status: Claude intelligence rollout complete and live
 
 This is the required project-scoped handoff for new Codex chats. Verify all
 drift-prone values live before acting. Do not copy secrets or OAuth codes here.
@@ -15,6 +15,9 @@ drift-prone values live before acting. Do not copy secrets or OAuth codes here.
   state. Structured history folding preserves constraints and dead ends, with
   bounded output, legacy fallback, and a consecutive-failure latch that
   prevents repeated double-paid parse failures.
+- PR #8 merged the Codex-normalized Claude handoff after all seven required
+  checks passed. Grok approved the repaired mechanisms on the CLI subscription
+  plane with no API charge; the final landing suite passed 889 tests.
 
 - Protected `origin/main`, visible local `main`, and the contributor runtime
   marker were synchronized before this rollout. Resolve the exact current
@@ -53,18 +56,19 @@ drift-prone values live before acting. Do not copy secrets or OAuth codes here.
 
 ## Cloud control deployment
 
-- Cloud Run revision `unigrok-control-center-a4ebcb3` serves 100% of traffic
+- Cloud Run revision `unigrok-control-center-eb46a0d` serves 100% of traffic
   from immutable image digest
-  `sha256:299b95b453884ad729d2756dc69a97e8e241e9af6333913cf4bfdce0cf00cc7e`.
-- Sites version 4 is deployed from site-only commit
-  `bde70c90d6cac26bb4d0b92c91454092734e195f`.
+  `sha256:d6d5ef2f6094b8495d3af8fb0a72259d821bb1337395315c1b7eae99163c0f97`.
+- Sites version 5 is deployed from site-only commit
+  `7167c65029be73c22e92431bdd72a5f40585ef66`.
 - `grokmcp.org` and `control.grokmcp.org` both return the canonical OKF manifest
   and generated API reference. The raw Cloud Run URL remains disabled.
 
 - GCP project: `agentixai-inc`; region: `us-east1`.
 - Cloud Run service: `unigrok-control-center`.
-- Candidate revision uses the immutable image digest
-  `sha256:0f12663e2c1083fd2ebd78aa55042fb2af66aea6f10b48c8986eae7bdeb05dff`.
+- The previous healthy revision `unigrok-control-center-a4ebcb3` and digest
+  `sha256:299b95b453884ad729d2756dc69a97e8e241e9af6333913cf4bfdce0cf00cc7e`
+  remain the immediate rollback target.
 - Runtime service account:
   `unigrok-control-center@agentixai-inc.iam.gserviceaccount.com`.
 - Cloud Run ingress was last verified as `internal-and-cloud-load-balancing`.
@@ -100,17 +104,19 @@ drift-prone values live before acting. Do not copy secrets or OAuth codes here.
 
 ## Remaining gates
 
-The v0.6.0 production and release gates are complete:
+The v0.6.0 release and Claude intelligence production gates are complete:
 
 1. Sites production environment revision `5` includes the non-secret
    `CONTROL_CENTER_ORIGIN=https://control.grokmcp.org`.
-2. Sites version `3`, sourced from site-only commit `668f56b`, is deployed.
+2. Sites version `5`, sourced from site-only commit `7167c650`, is deployed.
 3. `https://grokmcp.org/control` redirects to the production control origin;
    the public home, `llms.txt`, and discovery manifest remain healthy.
 4. Package, runtime, plugin, UI, FAQ, lockfile, changelog, and release metadata
    are aligned at `0.6.0`.
 5. The GitHub tag and release are public. No package-registry publication was
    performed because none was requested or configured as a release gate.
+6. The shared local service reports semantic evaluations `off` with zero
+   sampled, graded, pending, or charged judge calls; CLI OAuth remains ready.
 
 Future follow-up is operational rather than a release blocker: review Cloud
 Armor preview logs and promote only rules with demonstrated safe thresholds.
