@@ -18,23 +18,25 @@ from src.http_server import (
     create_app,
 )
 from src.jobs import JobManager
-from src.utils import (
-    CallerBudgetExceeded,
-    GrokSessionStore,
-    MetaLayer,
+from src.identity import (
     caller_from_mcp_context,
-    enforce_caller_budget,
     get_active_caller,
     get_active_principal,
     normalize_caller,
     normalize_principal,
-    orchestrate,
     reset_active_caller,
     reset_active_principal,
-    run_agent_turn,
     set_active_caller,
     set_active_principal,
     telemetry_row_caller,
+)
+from src.utils import (
+    CallerBudgetExceeded,
+    GrokSessionStore,
+    MetaLayer,
+    enforce_caller_budget,
+    orchestrate,
+    run_agent_turn,
 )
 
 
@@ -100,6 +102,15 @@ class TestCallerFromContext:
 
 
 class TestActiveCallerContext:
+    def test_utils_compatibility_exports_share_identity_contextvars(self):
+        import src.identity as identity_module
+        import src.utils as utils_module
+
+        assert utils_module._ACTIVE_CALLER is identity_module._ACTIVE_CALLER
+        assert utils_module._ACTIVE_PRINCIPAL is identity_module._ACTIVE_PRINCIPAL
+        assert utils_module._ACTIVE_CLIENT_ID is identity_module._ACTIVE_CLIENT_ID
+        assert utils_module._ACTIVE_SESSION_ID is identity_module._ACTIVE_SESSION_ID
+
     def test_set_get_reset_roundtrip(self):
         token = set_active_caller("claude-code")
         try:

@@ -12,10 +12,10 @@ from typing import Any, Dict, Optional
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import ToolAnnotations
 
+from ..identity import caller_from_mcp_context
 from ..jobs import get_job_manager
 from ..utils import (
     _normalize_fact_scope,
-    caller_from_mcp_context,
     search_knowledge_collection,
     store,
     sync_fact_to_collection,

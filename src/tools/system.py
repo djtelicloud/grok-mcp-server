@@ -39,12 +39,13 @@ from ..utils import (
     get_routing_advisor,
     grok_cli_plane_status,
     credential_plane_contract,
-    scoped_session,
     input_limit,
     validate_local_input,
 )
 from xai_sdk.chat import user
 from xai_sdk.tools import code_execution, web_search as xai_web_search, x_search as xai_x_search
+
+from ..identity import scoped_session
 
 logger = logging.getLogger("GrokMCP")
 

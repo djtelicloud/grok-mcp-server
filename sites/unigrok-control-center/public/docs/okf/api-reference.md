@@ -307,6 +307,100 @@ Use this when ChatGPT or a GitHub workflow has already fetched a PR's
 metadata and needs a security-conscious Grok review for Codex to triage.
 The diff and comments are untrusted evidence and never grant tool authority.
 
+## identity.py {#identity}
+
+### Function: `scoped_session` {#identity-scoped_session}
+
+```python
+def scoped_session(session: Optional[str]) -> Optional[str]
+```
+
+**Keywords:** scoped, session
+
+Namespace a session by authenticated principal and client label.
+
+HTTP middleware always binds a principal (OAuth subject, static-key alias,
+or the loopback anonymous principal). ``X-Client-ID`` remains an untrusted
+subordinate label that separates one principal's IDEs; it never provides
+the security boundary by itself. Non-HTTP callers preserve the historical
+unscoped behavior unless their transport binds one of these context vars.
+
+### Function: `normalize_caller` {#identity-normalize_caller}
+
+```python
+def normalize_caller(value: Any) -> Optional[str]
+```
+
+**Keywords:** normalize, caller
+
+Sanitize a caller label and bound it for database/metrics use.
+
+### Function: `normalize_principal` {#identity-normalize_principal}
+
+```python
+def normalize_principal(value: Any) -> Optional[str]
+```
+
+**Keywords:** normalize, principal
+
+Normalize a principal without collision-prone prefix truncation.
+
+### Function: `set_active_caller` {#identity-set_active_caller}
+
+```python
+def set_active_caller(caller: Optional[str])
+```
+
+**Keywords:** set, active, caller
+
+Bind the request's reporting identity and return its reset token.
+
+### Function: `set_active_principal` {#identity-set_active_principal}
+
+```python
+def set_active_principal(principal: Optional[str])
+```
+
+**Keywords:** set, active, principal
+
+Bind the authenticated security principal for the current request.
+
+### Function: `resolve_request_caller` {#identity-resolve_request_caller}
+
+```python
+def resolve_request_caller(caller: Optional[str]) -> Optional[str]
+```
+
+**Keywords:** resolve, request, caller
+
+Resolve attribution without letting HTTP metadata replace principal.
+
+FastMCP handlers often pass ``clientInfo.name`` explicitly. On HTTP that
+value remains only a client label; the middleware's combined
+``principal|label`` attribution wins so budget accounting stays anchored
+to the principal. Stdio has no HTTP principal and preserves explicit
+caller behavior.
+
+### Function: `caller_from_mcp_context` {#identity-caller_from_mcp_context}
+
+```python
+def caller_from_mcp_context(ctx: Any) -> Optional[str]
+```
+
+**Keywords:** caller, from, mcp, context
+
+Read the MCP ``clientInfo.name`` label from a FastMCP context.
+
+### Function: `telemetry_row_caller` {#identity-telemetry_row_caller}
+
+```python
+def telemetry_row_caller(row: Dict[str, Any]) -> Optional[str]
+```
+
+**Keywords:** telemetry, row, caller
+
+Return the normalized caller from a telemetry metadata envelope.
+
 ## intelligence_capsule.py {#intelligence_capsule}
 
 ### Class: `CapsuleValidationError` {#intelligence_capsule-capsulevalidationerror}
@@ -2632,114 +2726,6 @@ Communicate with a subprocess and always reap it on timeout.
 ``None`` deliberately means no gateway deadline.  The caller can still
 cancel the coroutine, and operators can configure a real deadline when
 their deployment requires one.
-
-### Function: `scoped_session` {#utils-scoped_session}
-
-```python
-def scoped_session(session: Optional[str]) -> Optional[str]
-```
-
-**Keywords:** scoped, session
-
-Namespace a session by authenticated principal and client label.
-
-HTTP middleware always binds a principal (OAuth subject, static-key alias,
-or the loopback anonymous principal). ``X-Client-ID`` remains an untrusted
-subordinate label that separates one principal's IDEs; it never provides
-the security boundary by itself. Non-HTTP callers preserve the historical
-unscoped behavior unless their transport binds one of these context vars.
-
-### Function: `normalize_caller` {#utils-normalize_caller}
-
-```python
-def normalize_caller(value: Any) -> Optional[str]
-```
-
-**Keywords:** normalize, caller
-
-Sanitize a caller identity: strip control characters, trim, and bound
-to 80 chars (it lands in db rows and metrics keys). None/blank -> None.
-
-### Function: `normalize_principal` {#utils-normalize_principal}
-
-```python
-def normalize_principal(value: Any) -> Optional[str]
-```
-
-**Keywords:** normalize, principal
-
-Normalize an authenticated principal without collision-prone truncation.
-
-Provider subjects can exceed the short telemetry-label bound. Preserve
-ordinary subjects verbatim, but suffix oversized values with a digest so
-two subjects sharing a long prefix cannot collapse into one namespace.
-
-### Function: `set_active_caller` {#utils-set_active_caller}
-
-```python
-def set_active_caller(caller: Optional[str])
-```
-
-**Keywords:** set, active, caller
-
-Bind the caller identity to the current async context (the HTTP
-gateway middleware does this per request). Returns the reset token.
-
-### Function: `set_active_principal` {#utils-set_active_principal}
-
-```python
-def set_active_principal(principal: Optional[str])
-```
-
-**Keywords:** set, active, principal
-
-Bind the authenticated security principal for the current request.
-
-### Function: `resolve_request_caller` {#utils-resolve_request_caller}
-
-```python
-def resolve_request_caller(caller: Optional[str]) -> Optional[str]
-```
-
-**Keywords:** resolve, request, caller
-
-Resolve attribution without letting HTTP tool metadata replace the
-gateway-bound identity.
-
-FastMCP handlers often pass ``clientInfo.name`` explicitly. On HTTP that
-value remains only a client label; the middleware's combined
-``principal|label`` attribution wins so budget accounting stays anchored
-to the principal. Stdio has no HTTP principal and preserves explicit
-caller behavior.
-
-### Function: `caller_from_mcp_context` {#utils-caller_from_mcp_context}
-
-```python
-def caller_from_mcp_context(ctx: Any) -> Optional[str]
-```
-
-**Keywords:** caller, from, mcp, context
-
-Caller identity from an injected FastMCP Context.
-
-Introspected against the installed mcp 1.26: ctx.session (the
-ServerSession) exposes client_params — the InitializeRequestParams the
-client sent — whose clientInfo (mcp.types.Implementation) carries
-name/version. Degrades to None for clients that never completed
-initialize, contexts used outside a request (both raise), or SDK layouts
-without client_params.
-
-### Function: `telemetry_row_caller` {#utils-telemetry_row_caller}
-
-```python
-def telemetry_row_caller(row: Dict[str, Any]) -> Optional[str]
-```
-
-**Keywords:** telemetry, row, caller
-
-Caller name from a telemetry row's metadata column (raw JSON text from
-the db, or an already-parsed dict from mocks). None for pre-v8 rows,
-unattributed traffic, and malformed metadata.
 
 ### Class: `CallerBudgetExceeded` {#utils-callerbudgetexceeded}
 
