@@ -1,190 +1,71 @@
 # Codex Active Work
 
-Last updated: 2026-07-11
+Last updated: 2026-07-12
 Owner: Codex
-Status: Swarm optimizer rollout complete and live
+Status: Cloud control, private remote MCP, and guided Swarm UI rollout complete
 
-This is the required project-scoped handoff for new Codex chats. Verify all
-drift-prone values live before acting. Do not copy secrets or OAuth codes here.
+This is the project-scoped handoff for new Codex chats. Resolve drift-prone
+Git, CI, runtime, DNS, and cloud identifiers live before acting. Never record
+credentials, OAuth codes, tokens, or private keys here.
 
-## Current repository state
+## Completed repository state
 
-- Contributor Code Swarm documentation is integrated through the protected
-  Codex path; resolve the PR and rebased merge commit live. The durable setup
-  surfaces now consistently use the repository-mounted Forge on port `4766`,
-  `WORKSPACE_ROOT=/workspace`, server-side `.env` credentials, CLI-only swarm
-  generation, and the `off`/`dry_run`/`active` ladder. The docs include the
-  golden task, JSON/Pareto Playground flow, exact test-target honesty boundary,
-  terminal/current-front Apply gates, and source-disclosure warning for static
-  exports. An unsafe parallel stdio example, wrong workspace variable, and IDE
-  API-key placeholder from the original handoff were removed.
+- Protected `origin/main` and visible local `main` were synchronized after PR
+  #19. Use `scripts/land-status` for the current merge commit; this tracked file
+  cannot name the merge commit that contains its own update.
+- Open GitHub issues and pull requests were zero at closeout. Completed agent
+  branches and worktrees were removed after their patches were integrated or
+  proven superseded.
+- The full landing suite passed 1,027 tests. Offline evals passed 12/12 and the
+  deterministic OKF bundle was clean.
 
-- The Claude-originated Pareto Playground and
-  `get_swarm_status(task_id, view="json")` contract are integrated through the
-  protected Codex path; resolve the PR and rebased merge commit live. Codex
-  review made the JSON-export picker CSP-safe, prohibited Apply for static
-  exports and non-terminal runs, preserved empty generations in replay, and
-  kept JSON oracle failures secret-redacted. The reviewed head passed 1,021
-  tests, 12/12 offline evals, deterministic OKF verification, JavaScript syntax
-  checking, and a real browser run against persisted engine data with two
-  Pareto elites, honest latency/memory trade-offs, full receipts/diff, and no
-  browser console errors.
+## Local runtime state
 
-- The Claude-originated swarm static fast-gate is integrated through the
-  protected Codex path; resolve its PR and rebased merge commit live. Codex
-  review hardened Ruff execution with isolated configuration and ignored
-  suppression comments, and changed baseline comparison from a total count to
-  a diagnostic multiset so mutants cannot trade one existing undefined name
-  for a different new one. The reviewed head passed 1,018 tests, 12/12 offline
-  evals, and deterministic OKF verification. The gate remains correctness-only,
-  fail-open when Ruff is unavailable, configurable with
-  `UNIGROK_SWARM_RUFF_FILTER=0`, and additive to the existing test oracle.
+- The workspace-neutral stable service was rebuilt from protected main and is
+  healthy at `http://127.0.0.1:4765`; its Swarm page auto-loads the recorded
+  verified tour and routes live work to contributor Forge.
+- The attached contributor service was rebuilt from protected main and is
+  healthy at `http://127.0.0.1:4766`; `UNIGROK_SWARM=dry_run` remains the local
+  setting, so search and scoring are enabled while Apply remains disabled.
+- A real browser-launched golden demo completed three generations with 100%
+  focus coverage, a stable benchmark, 100% candidate feasibility, one verified
+  Pareto elite, a 97.9% latency improvement, an explicit 1229.9% peak-memory
+  increase, and $0.0000 model cost.
+- The guided Playground opens with useful data, selects the front-ranked elite,
+  explains speed/memory trade-offs, distinguishes stable from contributor mode,
+  keeps manual task IDs/tokens under Advanced, and exposes keyboard-operable
+  candidate receipts.
 
-- PR #10 merged the Claude-originated swarm optimizer through the protected
-  Codex path after landing review repaired strict CLI billing, candidate
-  identity, Pareto/apply selection, callable-signature preservation, path and
-  subprocess boundaries, contributor HTTP registration, Docker/host venv
-  compatibility, runtime pytest packaging, error visibility, and generated
-  docs/schema alignment. Resolve the exact rebased merge commit live.
-- The final exact-head gate passed 1,001 tests, 12/12 offline evals, Bandit,
-  pip-audit, Python 3.11/3.12, Docker, Project Site, Control Cloud Run Image,
-  and owner-dispatched Codex Approval. A contributor-mode live dry run used
-  four real Grok CLI arms over two generations, measured 100% focus-span
-  coverage with a stable benchmark, produced two verified Pareto candidates,
-  and spent $0.0000.
-- `UNIGROK_SWARM` remains `off` by default. Generation is strict CLI
-  same-plane, the stable service stays workspace-neutral, and dry-run/active
-  use requires contributor mode, an attached workspace, and non-Cloud-Run
-  runtime. Apply accepts only signature-preserving candidates on the current
-  test-verified Pareto front and never commits.
-- The exact `scripts/land` receipt commit was
-  `7a1e78b880cf8d6d527d6e258eeea78e841a1744`; GitHub rebased that identical
-  tree into protected `origin/main`. Workspace evidence
-  `ev-c5e6e8aeb8f4bfd629b72ad8` records the durable swarm invariant.
+## Production state
 
-- Claude-originated intelligence upgrades are integrated through the protected
-  Codex path: shadow semantic evaluations remain off by default, use a durable
-  reservation-based spend cap, and never mutate production circuit-breaker
-  state. Structured history folding preserves constraints and dead ends, with
-  bounded output, legacy fallback, and a consecutive-failure latch that
-  prevents repeated double-paid parse failures.
-- PR #8 merged the Codex-normalized Claude handoff after all seven required
-  checks passed. Grok approved the repaired mechanisms on the CLI subscription
-  plane with no API charge; the final landing suite passed 889 tests.
-
-- Protected `origin/main`, visible local `main`, and the contributor runtime
-  marker were synchronized before this rollout. Resolve the exact current
-  commit with `scripts/land-status`; this tracked file cannot name the rebased
-  merge commit that contains its own latest update.
-- PR #4 preserves Gemini as the originating agent, Codex as repair/integration
-  authority, and Grok 4.5 CLI-plane review evidence. All six required CI jobs
-  passed on the reviewed head.
-- Branch protection now requires all six CI jobs plus the exact-head
-  `Codex Approval` status, strict up-to-date checks, linear history, and
-  conversation resolution. Existing CODEOWNER and approving-review safeguards
-  remain intact. Administrator enforcement stays off because the repository
-  owner cannot approve their own PR; enable it only after a separate
-  project-admin App identity is live. The owner-only approval dispatch validates
-  the live PR head and uses no model credits.
-- Automatic Grok PR review is disabled. Approved collaborators request the
-  advisory review explicitly with `@grok review`, preventing surprise model
-  usage and permanently queued self-hosted jobs.
-
-- The deployment implementation base was verified and pushed as
-  `3ed02c21b8b0d4b84f2dbbdbbe89edba64c4255f`. Always resolve the current full
-  `HEAD` and `origin/main` live; this tracked file cannot safely name the commit
-  that contains its own latest update.
-- `3182677` added the standalone Control Cloud Run image CI gate.
-- `3ed02c2` made `Dockerfile.cloudrun` compatible with the Google Cloud Build
-  Docker builder.
-- GitHub Actions run `29161522243` completed successfully with all six jobs
-  green, including `Control Cloud Run Image`.
-- Project-continuity commit `6f24deb` is on `origin/main`; GitHub Actions run
-  `29162512551` completed successfully.
-- The shared checkout contains unrelated untracked user files. Preserve them.
-- Release `v0.6.0` is tagged at
-  `a44e6587c0fcf4c269fe9ba20e1bbb2795c5b1fb` and published on GitHub.
-- The exact tag commit passed all six CI jobs, including Python 3.11/3.12,
-  Docker, offline evals, Project Site, and `Control Cloud Run Image`.
-
-## Cloud control deployment
-
-- Cloud Run revision `unigrok-control-center-eb46a0d` serves 100% of traffic
-  from immutable image digest
-  `sha256:d6d5ef2f6094b8495d3af8fb0a72259d821bb1337395315c1b7eae99163c0f97`.
-- Sites version 5 is deployed from site-only commit
-  `7167c65029be73c22e92431bdd72a5f40585ef66`.
-- `grokmcp.org` and `control.grokmcp.org` both return the canonical OKF manifest
-  and generated API reference. The raw Cloud Run URL remains disabled.
-
-- GCP project: `agentixai-inc`; region: `us-east1`.
-- Cloud Run service: `unigrok-control-center`.
-- The previous healthy revision `unigrok-control-center-a4ebcb3` and digest
-  `sha256:299b95b453884ad729d2756dc69a97e8e241e9af6333913cf4bfdce0cf00cc7e`
-  remain the immediate rollback target.
-- Runtime service account:
-  `unigrok-control-center@agentixai-inc.iam.gserviceaccount.com`.
-- Cloud Run ingress was last verified as `internal-and-cloud-load-balancing`.
-- `allUsers` has `roles/run.invoker`; ingress remains restricted to
-  `internal-and-cloud-load-balancing`.
-- The Cloud Run default URL is disabled. Both known raw `run.app` hostnames
-  return `404` while the custom-domain public API returns `200`.
-- The GitHub App is installed only for `djtelicloud/grok-mcp-server`. Required
-  application secrets exist in Secret Manager as version-pinned references;
-  never read or print their values.
-
-## Edge state
-
-- Production hostname: `control.grokmcp.org`.
-- GoDaddy authoritative DNS and Google/Cloudflare public resolvers were last
-  verified returning `136.69.127.81`.
-- Global load-balancer resources use the `unigrok-control-center-*` prefix.
-- Google-managed certificate `unigrok-control-center-cert` is active and was
-  externally verified for `control.grokmcp.org`, issued by Google Trust
-  Services and valid from 2026-07-11 through 2026-10-09.
-- The production HTTPS edge is live. Anonymous `/control` redirects to GitHub,
-  invalid OAuth state returns `400`, and protected responses are private and
-  `no-store`.
-- The approved owner completed GitHub authorization at the production custom
-  domain and received fresh sanitized repository evidence as
-  `@djtelicloud · admin`.
-- Cloud Armor policy `unigrok-control-center-edge` is attached to backend
-  `unigrok-control-center-backend`.
-- Cloud Armor priorities `100`, `200`, and `210` cover exact-host enforcement,
-  GitHub auth throttling, and `/control` throttling. All three are preview-only;
-  the default allow rule remains enforced.
-- Cloud CDN must remain disabled.
-
-## Remaining gates
-
-The v0.6.0 release, Claude intelligence, swarm optimizer, static fast-gate, and
-Pareto Playground gates are complete:
-
-1. Sites production environment revision `5` includes the non-secret
-   `CONTROL_CENTER_ORIGIN=https://control.grokmcp.org`.
-2. Sites version `5`, sourced from site-only commit `7167c650`, is deployed.
-3. `https://grokmcp.org/control` redirects to the production control origin;
-   the public home, `llms.txt`, and discovery manifest remain healthy.
-4. Package, runtime, plugin, UI, FAQ, lockfile, changelog, and release metadata
-   are aligned at `0.6.0`.
-5. The GitHub tag and release are public. No package-registry publication was
-   performed because none was requested or configured as a release gate.
-6. The shared local service reports semantic evaluations `off` with zero
-   sampled, graded, pending, or charged judge calls; CLI OAuth remains ready.
-7. The swarm optimizer is shipped off by default; no production activation or
-   API-plane spend is pending.
-
-Future follow-up is operational rather than a release blocker: review Cloud
-Armor preview logs and promote only rules with demonstrated safe thresholds.
+- `https://grokmcp.org` is published with Sites version 6. Public project JSON
+  now reports `https://mcp.grokmcp.org/mcp` as a private OAuth API-plane MCP.
+- `https://control.grokmcp.org` serves the GitHub role-gated control plane and
+  OAuth authorization server. Its RFC 8414 metadata is live.
+- `https://mcp.grokmcp.org` has active Google-managed TLS. `/healthz` returns
+  healthy, RFC 9728 protected-resource metadata is live, and unauthenticated
+  `/mcp` returns the required OAuth bearer challenge.
+- The remote MCP remains API-plane-only with live GitHub membership
+  introspection, scoped short-lived tokens, per-caller budgets, Cloud Run
+  ingress restricted to the load balancer, Cloud Armor attached, CDN disabled,
+  and raw service URLs disabled.
+- The hosted review broker remains read-only and immutable-head-bound. The
+  landing receipt broker verifies completed landing evidence and signs receipts
+  with Ed25519; neither broker has cloud merge or release mutation authority.
 
 ## Safety posture
 
-- Do not expose the raw Cloud Run URL, add permissive CORS, enable Cloud CDN, or
-  broaden the GitHub App installation.
-- Keep Cloud Armor custom rules in preview until real edge logs have been
-  reviewed and thresholds are demonstrated safe.
-- Preserve the previous healthy revision, image digest, and numeric secret
-  versions for rollback.
-- Keep swarm generation pinned to CLI with same-plane failure, keep the stable
-  service workspace-neutral, and do not weaken the contributor/workspace/
-  non-Cloud-Run gates or current-front apply verification.
+- Keep the stable service workspace-neutral and keep Swarm execution limited to
+  contributor mode, an attached workspace, and non-Cloud-Run runtime.
+- Keep `UNIGROK_SWARM` off by default in product configuration. Local dry-run
+  enables search and scoring only; active mode and Apply require an explicit
+  operator decision plus post-apply verification.
+- Do not expose xAI, GitHub, OAuth, receipt-signing, or tunnel credentials to a
+  browser or IDE configuration.
+- Preserve the public documentation plane while protected control and MCP
+  routes fail closed. Do not enable Cloud CDN or raw Cloud Run URLs.
+
+## Remaining work
+
+No release, deployment, integration, issue-tracker, or runtime gate remains for
+this rollout. Future work should start from a new scoped issue or handoff.
