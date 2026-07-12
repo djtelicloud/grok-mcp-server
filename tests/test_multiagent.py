@@ -3,7 +3,6 @@
 # X-Caller/auth-key alias), schema v8 telemetry attribution, per-caller daily
 # budgets, the grok://workspace resource, and per-caller metrics segmentation.
 
-import hashlib
 import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -465,10 +464,12 @@ class TestHttpCallerDerivation:
     def test_auth_key_alias_when_no_header(self, monkeypatch):
         monkeypatch.setenv("UNIGROK_API_KEYS", "sekret-key")
         scope = {"type": "http", "headers": [(b"authorization", b"Bearer sekret-key")]}
-        expected = "http:key-" + hashlib.blake2s(
-            b"sekret-key", digest_size=4, person=b"unigrok"
-        ).hexdigest()
-        assert _derive_http_caller(scope) == expected
+        assert _derive_http_caller(scope) == "http:key-1"
+
+    def test_auth_key_alias_tracks_configured_key_order(self, monkeypatch):
+        monkeypatch.setenv("UNIGROK_API_KEYS", "first-key,second-key")
+        scope = {"type": "http", "headers": [(b"authorization", b"Bearer second-key")]}
+        assert _derive_http_caller(scope) == "http:key-2"
 
     def test_anonymous_fallback(self, monkeypatch):
         monkeypatch.delenv("UNIGROK_API_KEYS", raising=False)
@@ -535,9 +536,7 @@ class TestGatewayCallerPropagation:
         caller = self._run_request(
             monkeypatch, {"Authorization": "Bearer sekret-key"}
         )
-        assert caller == "http:key-" + hashlib.blake2s(
-            b"sekret-key", digest_size=4, person=b"unigrok"
-        ).hexdigest()
+        assert caller == "http:key-1"
 
     def test_anonymous_request_reads_http_anon(self, monkeypatch):
         monkeypatch.delenv("UNIGROK_RUNTIME", raising=False)
