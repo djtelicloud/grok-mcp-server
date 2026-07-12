@@ -1,5 +1,6 @@
 import os
 import json
+import copy
 import base64
 import sys
 import inspect
@@ -2734,7 +2735,7 @@ class GrokSessionStore:
                 # A receipt contains only bounded features, model slugs, and
                 # evidence counts; never a prompt.  Round-trip through JSON to
                 # prevent custom mapping objects from escaping that contract.
-                clean_routing = json.loads(json.dumps(routing, separators=(",", ":")))
+                clean_routing = copy.deepcopy(routing)
                 if isinstance(clean_routing, dict) and len(json.dumps(clean_routing)) <= 6000:
                     meta["routing"] = clean_routing
             except (TypeError, ValueError):
@@ -2783,7 +2784,7 @@ class GrokSessionStore:
         if not clean_id or not isinstance(semantic, dict):
             return False
         try:
-            clean_semantic = json.loads(json.dumps(semantic, separators=(",", ":")))
+            clean_semantic = copy.deepcopy(semantic)
         except (TypeError, ValueError):
             return False
         if not isinstance(clean_semantic, dict):
@@ -8397,7 +8398,7 @@ async def run_agent_turn(
         or has_image
     )
     if request_requires_api and not credentials["api"]["available"]:
-        request_credentials = json.loads(json.dumps(credentials))
+        request_credentials = copy.deepcopy(credentials)
         for notice in request_credentials["notices"]:
             if notice.get("plane") == "API":
                 notice.update({
