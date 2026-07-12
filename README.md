@@ -618,6 +618,10 @@ run with:
 uv run python -m evals run --check-baseline
 ```
 
+The multi-file and Swarm fixtures are a
+[CursorBench-aligned capability foundation](docs/cursorbench-readiness.md), not
+an official CursorBench reproduction or score.
+
 See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution workflow and PR
 expectations. The staged public site, protected contributor control plane,
 GitHub authorization, private OAuth MCP, hosted review, and landing governance are defined in

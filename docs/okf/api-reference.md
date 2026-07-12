@@ -1521,6 +1521,30 @@ def SwarmRunner.cancel(self, task_id: str) -> None
 
 Cooperative cancel — the engine checks between candidates.
 
+### Method: `SwarmRunner.wait` {#swarm-runner-swarmrunner-wait}
+
+```python
+async def SwarmRunner.wait(self, task_id: str, timeout: float=30.0) -> bool
+```
+
+**Keywords:** swarm, runner, wait
+
+Wait for an in-process task and report whether it completed.
+
+Returning a boolean keeps timeout distinct from completion. A missing
+task is already outside this runner's active set; callers must still
+read the durable row for its terminal status.
+
+### Method: `SwarmRunner.shutdown` {#swarm-runner-swarmrunner-shutdown}
+
+```python
+async def SwarmRunner.shutdown(self) -> None
+```
+
+**Keywords:** swarm, runner, shutdown
+
+Hard-cancel and drain every in-process task during CLI shutdown.
+
 ## swarm/sandbox.py {#swarm-sandbox}
 
 ### Class: `SandboxError` {#swarm-sandbox-sandboxerror}
@@ -3765,7 +3789,7 @@ An unavailable reviewer accepts the answer as-is.
 ### Function: `orchestrate` {#utils-orchestrate}
 
 ```python
-async def orchestrate(prompt: str, session: Optional[str]=None, mode: Literal['auto', 'reasoning', 'research', 'composer']='auto', thinking_mode: bool=False, store: Any=None, dynamic_sys_prompt: str='', requested_model: Optional[str]=None, mcp_instance: Any=None, enable_agentic: bool=True, context_id: Optional[str]=None, agent_count: Optional[int]=None, input_messages: Optional[List[Dict[str, Any]]]=None, on_event: Optional[Callable]=None, include: Optional[List[str]]=None, caller: Optional[str]=None, require_reasoning_level: Optional[Literal['low', 'medium', 'high']]=None, requested_plane: Literal['auto', 'cli', 'api']='auto', fallback_policy: Literal['same_plane', 'cross_plane']='cross_plane') -> MetaLayer
+async def orchestrate(prompt: str, session: Optional[str]=None, mode: Literal['auto', 'reasoning', 'research', 'composer']='auto', thinking_mode: bool=False, store: Any=None, dynamic_sys_prompt: str='', requested_model: Optional[str]=None, mcp_instance: Any=None, enable_agentic: bool=True, context_id: Optional[str]=None, agent_count: Optional[int]=None, input_messages: Optional[List[Dict[str, Any]]]=None, on_event: Optional[Callable]=None, include: Optional[List[str]]=None, caller: Optional[str]=None, require_reasoning_level: Optional[Literal['low', 'medium', 'high']]=None, requested_plane: Literal['auto', 'cli', 'api']='auto', fallback_policy: Literal['same_plane', 'cross_plane']='cross_plane', cli_no_plan: bool=False, cli_verbatim: bool=False, cli_allowed_tools: Optional[str]=None, cli_isolated: bool=False) -> MetaLayer
 ```
 
 **Keywords:** orchestrate
@@ -3787,7 +3811,7 @@ Route a prompt through the layered execution planes:
 ### Function: `run_agent_turn` {#utils-run_agent_turn}
 
 ```python
-async def run_agent_turn(prompt: Optional[str]=None, session: Optional[str]=None, system_prompt: Optional[str]=None, messages: Optional[List[Dict[str, Any]]]=None, model: Optional[str]=None, mode: str='auto', thinking_mode: bool=False, enable_agentic: bool=True, on_event: Optional[Callable]=None, agent_count: Optional[int]=None, include: Optional[List[str]]=None, caller: Optional[str]=None, require_reasoning_level: Optional[Literal['low', 'medium', 'high']]=None, plane: Literal['auto', 'cli', 'api']='auto', fallback_policy: Literal['same_plane', 'cross_plane']='cross_plane') -> MetaLayer
+async def run_agent_turn(prompt: Optional[str]=None, session: Optional[str]=None, system_prompt: Optional[str]=None, messages: Optional[List[Dict[str, Any]]]=None, model: Optional[str]=None, mode: str='auto', thinking_mode: bool=False, enable_agentic: bool=True, on_event: Optional[Callable]=None, agent_count: Optional[int]=None, include: Optional[List[str]]=None, caller: Optional[str]=None, require_reasoning_level: Optional[Literal['low', 'medium', 'high']]=None, plane: Literal['auto', 'cli', 'api']='auto', fallback_policy: Literal['same_plane', 'cross_plane']='cross_plane', cli_no_plan: bool=False, cli_verbatim: bool=False, cli_allowed_tools: Optional[str]=None, cli_isolated: bool=False) -> MetaLayer
 ```
 
 **Keywords:** run, agent, turn
@@ -3807,6 +3831,12 @@ caller is the calling agent's identity (MCP clientInfo name or the HTTP
 gateway's X-Caller/auth-key alias); None falls back to whatever the
 transport bound to the current async context, and it flows into telemetry
 attribution, per-caller budgets, and session message metadata.
+cli_no_plan/cli_verbatim are narrow headless controls for deterministic
+internal generation workflows; cli_allowed_tools can additionally set the
+CLI's exact built-in tool allowlist (an empty string disables all tools).
+cli_isolated additionally removes inherited project/task context and runs
+with an OAuth-only temporary home, empty workspace, disabled memory,
+subagents, web search, and interactive prompts. Public calls keep defaults.
 
 ## workspace_memory.py {#workspace_memory}
 

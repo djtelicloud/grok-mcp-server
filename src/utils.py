@@ -232,6 +232,79 @@ def grok_cli_oauth_env(base: Optional[Dict[str, str]] = None) -> Dict[str, str]:
     return env
 
 
+@contextlib.contextmanager
+def _isolated_grok_cli_runtime():
+    """Yield an empty CLI workspace and minimal OAuth-only environment.
+
+    Grok discovers project instructions, MCP servers, plugins, and permissions
+    independently of its built-in ``--tools`` allowlist.  Internal transformer
+    calls therefore run outside both the contributor workspace and the user's
+    normal CLI home. ``GROK_AUTH_PATH`` deliberately points at the durable
+    OAuth document so the CLI's native refresh and sibling-token coordination
+    remain authoritative; ``GROK_HOME`` stays temporary and config-free.
+    """
+    source_auth = Path.home() / ".grok" / "auth.json"
+    if not source_auth.is_file():
+        raise RuntimeError(
+            "Isolated Grok CLI execution requires the persisted OAuth file "
+            "at ~/.grok/auth.json."
+        )
+
+    with tempfile.TemporaryDirectory(prefix="unigrok-cli-isolated-") as raw_root:
+        root = Path(raw_root)
+        home = root / "home"
+        work = root / "work"
+        grok_home = root / "grok-home"
+        xdg_config = root / "xdg-config"
+        xdg_data = root / "xdg-data"
+        xdg_cache = root / "xdg-cache"
+        tmp_dir = root / "tmp"
+        for directory in (
+            home,
+            work,
+            grok_home,
+            xdg_config,
+            xdg_data,
+            xdg_cache,
+            tmp_dir,
+        ):
+            directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+
+        inherited = grok_cli_oauth_env()
+        allowed_env = {
+            "PATH",
+            "LANG",
+            "LANGUAGE",
+            "LC_ALL",
+            "SSL_CERT_FILE",
+            "SSL_CERT_DIR",
+            "REQUESTS_CA_BUNDLE",
+            "NODE_EXTRA_CA_CERTS",
+            "HTTP_PROXY",
+            "HTTPS_PROXY",
+            "ALL_PROXY",
+            "NO_PROXY",
+            "http_proxy",
+            "https_proxy",
+            "all_proxy",
+            "no_proxy",
+        }
+        env = {key: value for key, value in inherited.items() if key in allowed_env}
+        env.update(
+            {
+                "HOME": str(home),
+                "PWD": str(work),
+                "TMPDIR": str(tmp_dir),
+                "GROK_HOME": str(grok_home),
+                "GROK_AUTH_PATH": str(source_auth),
+                "XDG_CONFIG_HOME": str(xdg_config),
+                "XDG_DATA_HOME": str(xdg_data),
+                "XDG_CACHE_HOME": str(xdg_cache),
+            }
+        )
+        yield work, env
+
+
 def grok_cli_plane_status(
     timeout_sec: float = 5.0,
     *,
@@ -749,6 +822,10 @@ def _build_grok_cli_args(
     profile: Optional[Dict[str, Any]] = None,
     max_turns: Optional[int] = None,
     json_schema: Any = None,
+    no_plan: bool = False,
+    verbatim: bool = False,
+    allowed_tools: Optional[str] = None,
+    isolated: bool = False,
 ) -> List[str]:
     args: List[str] = []
     if cli_session_id:
@@ -769,6 +846,23 @@ def _build_grok_cli_args(
     schema_arg = _json_schema_for_cli(json_schema)
     if schema_arg:
         args.extend(["--json-schema", schema_arg])
+
+    if no_plan:
+        args.append("--no-plan")
+    if verbatim:
+        args.append("--verbatim")
+    if allowed_tools is not None:
+        args.extend(["--tools", allowed_tools])
+    if isolated:
+        args.extend(
+            [
+                "--no-memory",
+                "--no-subagents",
+                "--disable-web-search",
+                "--permission-mode",
+                "dontAsk",
+            ]
+        )
 
     args.extend(["-p", cli_prompt, "-m", model_name, "--output-format", output_format])
     return args
@@ -7353,6 +7447,10 @@ async def _call_plane(
     include: Optional[List[str]] = None,
     max_turns: Optional[int] = None,
     json_schema: Any = None,
+    cli_no_plan: bool = False,
+    cli_verbatim: bool = False,
+    cli_allowed_tools: Optional[str] = None,
+    cli_isolated: bool = False,
 ) -> tuple[str, int, float, bool]:
     # Returns (content, tokens, cost, is_cli). When on_event is provided the
     # API branch streams for real via chat.stream(), forwarding each chunk as
@@ -7394,51 +7492,69 @@ async def _call_plane(
                 profile=profile or load_grok_profile(model_name),
                 max_turns=max_turns,
                 json_schema=json_schema,
+                no_plan=cli_no_plan,
+                verbatim=cli_verbatim,
+                allowed_tools=cli_allowed_tools,
+                isolated=cli_isolated,
             )
 
-            proc = await asyncio.create_subprocess_exec(
-                grok_path, *args,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=str(PathResolver.get_workspace_root() or PathResolver.get_service_root()),
-                env=grok_cli_oauth_env(),
-            )
-            # Native coding work can legitimately run for many minutes.  Do
-            # not turn "slow" into a fabricated failure; deployments that
-            # require a wall-clock deadline can opt in explicitly.
-            cli_timeout = _optional_env_timeout("UNIGROK_CLI_TIMEOUT")
-            try:
-                if on_event is not None:
-                    consume = _consume_cli_stream(proc, on_event)
-                    if cli_timeout is None:
-                        text, returned_id, stderr = await consume
-                    else:
-                        text, returned_id, stderr = await asyncio.wait_for(
-                            consume, timeout=cli_timeout
-                        )
+            @contextlib.contextmanager
+            def _runtime():
+                if cli_isolated:
+                    with _isolated_grok_cli_runtime() as isolated_runtime:
+                        yield isolated_runtime
                 else:
-                    stdout, stderr = await communicate_with_timeout(proc, cli_timeout)
-                    text, returned_id = _parse_cli_json_output(
-                        stdout.decode("utf-8", errors="ignore")
+                    yield (
+                        PathResolver.get_workspace_root() or PathResolver.get_service_root(),
+                        grok_cli_oauth_env(),
                     )
-            except asyncio.CancelledError:
-                with contextlib.suppress(ProcessLookupError):
-                    proc.terminate()
-                with contextlib.suppress(Exception):
-                    await proc.wait()
-                raise
-            except asyncio.TimeoutError:
-                try:
-                    proc.kill()
-                except ProcessLookupError:
-                    pass
-                await proc.wait()
-                raise RuntimeError(f"Grok CLI execution timed out after {cli_timeout:.1f} seconds")
 
-            if proc.returncode != 0:
-                err_msg = stderr.decode("utf-8", errors="ignore").strip()
-                raise RuntimeError(f"Grok CLI error: {err_msg}")
-            return text, returned_id
+            with _runtime() as (cli_cwd, cli_env):
+                proc = await asyncio.create_subprocess_exec(
+                    grok_path, *args,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    cwd=str(cli_cwd),
+                    env=cli_env,
+                )
+                # Native coding work can legitimately run for many minutes.  Do
+                # not turn "slow" into a fabricated failure; deployments that
+                # require a wall-clock deadline can opt in explicitly.
+                cli_timeout = _optional_env_timeout("UNIGROK_CLI_TIMEOUT")
+                try:
+                    if on_event is not None:
+                        consume = _consume_cli_stream(proc, on_event)
+                        if cli_timeout is None:
+                            text, returned_id, stderr = await consume
+                        else:
+                            text, returned_id, stderr = await asyncio.wait_for(
+                                consume, timeout=cli_timeout
+                            )
+                    else:
+                        stdout, stderr = await communicate_with_timeout(proc, cli_timeout)
+                        text, returned_id = _parse_cli_json_output(
+                            stdout.decode("utf-8", errors="ignore")
+                        )
+                except asyncio.CancelledError:
+                    with contextlib.suppress(ProcessLookupError):
+                        proc.terminate()
+                    with contextlib.suppress(Exception):
+                        await proc.wait()
+                    raise
+                except asyncio.TimeoutError:
+                    try:
+                        proc.kill()
+                    except ProcessLookupError:
+                        pass
+                    await proc.wait()
+                    raise RuntimeError(
+                        f"Grok CLI execution timed out after {cli_timeout:.1f} seconds"
+                    )
+
+                if proc.returncode != 0:
+                    err_msg = stderr.decode("utf-8", errors="ignore").strip()
+                    raise RuntimeError(f"Grok CLI error: {err_msg}")
+                return text, returned_id
 
         async def _run_cli_mapped_session() -> tuple[str, Optional[str], Optional[str], Optional[str]]:
             stored_cli_id = None
@@ -7852,6 +7968,10 @@ async def orchestrate(
     require_reasoning_level: Optional[Literal["low", "medium", "high"]] = None,
     requested_plane: Literal["auto", "cli", "api"] = "auto",
     fallback_policy: Literal["same_plane", "cross_plane"] = "cross_plane",
+    cli_no_plan: bool = False,
+    cli_verbatim: bool = False,
+    cli_allowed_tools: Optional[str] = None,
+    cli_isolated: bool = False,
 ) -> MetaLayer:
     """
     Route a prompt through the layered execution planes:
@@ -7932,15 +8052,16 @@ async def orchestrate(
                 f"Model '{profile_model}' reasoning effort '{chosen_effort}' "
                 f"does not satisfy required reasoning level '{require_reasoning_level}'."
             )
-    memory_notes = await _build_task_memory_context(store, prompt, context_id)
-    adapter_prompt = load_grok_prompt(str(active_profile.get("system_prompt_ref") or ""))
-    workspace_context, caller_instructions = _split_caller_instructions(dynamic_sys_prompt)
-    dynamic_sys_prompt = compose_system_prompt(
-        workspace_context,
-        adapter_prompt=adapter_prompt,
-        memory_notes=memory_notes,
-        caller_instructions=caller_instructions,
-    )
+    if not cli_isolated:
+        memory_notes = await _build_task_memory_context(store, prompt, context_id)
+        adapter_prompt = load_grok_prompt(str(active_profile.get("system_prompt_ref") or ""))
+        workspace_context, caller_instructions = _split_caller_instructions(dynamic_sys_prompt)
+        dynamic_sys_prompt = compose_system_prompt(
+            workspace_context,
+            adapter_prompt=adapter_prompt,
+            memory_notes=memory_notes,
+            caller_instructions=caller_instructions,
+        )
 
     # ── AGENTIC PATH: True ReAct loop (default) ───────────────────────────────
     # AgentLoop is the default execution path — the model gets its full tool
@@ -8062,6 +8183,10 @@ async def orchestrate(
             on_event=on_event,
             include=include,
             max_turns=cli_max_turns,
+            cli_no_plan=cli_no_plan,
+            cli_verbatim=cli_verbatim,
+            cli_allowed_tools=cli_allowed_tools,
+            cli_isolated=cli_isolated,
         )
         layer.generation = gen_res
         layer.tokens = g_tok
@@ -8179,6 +8304,10 @@ async def orchestrate(
                 requested_model="grok-composer-2.5-fast",
                 profile=fallback_profile,
                 max_turns=cli_max_turns,
+                cli_no_plan=cli_no_plan,
+                cli_verbatim=cli_verbatim,
+                cli_allowed_tools=cli_allowed_tools,
+                cli_isolated=cli_isolated,
             )
             layer.generation = gen_res
             layer.tokens = g_tok
@@ -8274,6 +8403,10 @@ async def run_agent_turn(
     require_reasoning_level: Optional[Literal["low", "medium", "high"]] = None,
     plane: Literal["auto", "cli", "api"] = "auto",
     fallback_policy: Literal["same_plane", "cross_plane"] = "cross_plane",
+    cli_no_plan: bool = False,
+    cli_verbatim: bool = False,
+    cli_allowed_tools: Optional[str] = None,
+    cli_isolated: bool = False,
 ) -> MetaLayer:
     """Shared single-agent gateway boundary used by HTTP and remote MCP.
 
@@ -8290,6 +8423,12 @@ async def run_agent_turn(
     gateway's X-Caller/auth-key alias); None falls back to whatever the
     transport bound to the current async context, and it flows into telemetry
     attribution, per-caller budgets, and session message metadata.
+    cli_no_plan/cli_verbatim are narrow headless controls for deterministic
+    internal generation workflows; cli_allowed_tools can additionally set the
+    CLI's exact built-in tool allowlist (an empty string disables all tools).
+    cli_isolated additionally removes inherited project/task context and runs
+    with an OAuth-only temporary home, empty workspace, disabled memory,
+    subagents, web search, and interactive prompts. Public calls keep defaults.
     """
     caller = resolve_request_caller(caller)
     session = scoped_session(session)
@@ -8325,7 +8464,10 @@ async def run_agent_turn(
     if not final_prompt:
         raise ValueError("A prompt or at least one user message is required.")
 
-    dynamic_sys_prompt, _, context_id = await get_dynamic_context(prompt=final_prompt)
+    if cli_isolated:
+        dynamic_sys_prompt, context_id = "", None
+    else:
+        dynamic_sys_prompt, _, context_id = await get_dynamic_context(prompt=final_prompt)
     if system_parts:
         dynamic_sys_prompt += "\nAdditional Instructions:\n" + "\n\n".join(system_parts)
 
@@ -8451,6 +8593,10 @@ async def run_agent_turn(
         require_reasoning_level=require_reasoning_level,
         requested_plane=plane,
         fallback_policy=fallback_policy,
+        cli_no_plan=cli_no_plan,
+        cli_verbatim=cli_verbatim,
+        cli_allowed_tools=cli_allowed_tools,
+        cli_isolated=cli_isolated,
     )
     layer.credentials = credentials
 

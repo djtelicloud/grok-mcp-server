@@ -8,6 +8,7 @@ mock — the engine never imports run_agent_turn directly.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Optional
 
@@ -44,10 +45,14 @@ async def generate_mutation(
         fallback_policy="same_plane",
         session=session,
         caller="swarm",
+        cli_no_plan=True,
+        cli_verbatim=True,
+        cli_allowed_tools="",
+        cli_isolated=True,
     )
     plane = str(getattr(layer, "plane", "") or "unknown")
     cost = float(getattr(layer, "cost_usd", 0.0) or 0.0)
-    if plane not in {"CLI", "CLI-Fallback"} or cost > 0:
+    if plane not in {"CLI", "CLI-Fallback"} or not math.isfinite(cost) or cost != 0.0:
         raise BudgetExceeded(
             "swarm generation refused a non-CLI or charged result "
             f"(plane={plane!r}, cost=${cost:.4f})"

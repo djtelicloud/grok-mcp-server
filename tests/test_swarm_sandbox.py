@@ -4,7 +4,6 @@
 # driven against the tests/fixtures/swarm_target mini-project via real
 # subprocesses. These are the C2 ship-blockers Grok flagged.
 
-import asyncio
 import shutil
 import sys
 from pathlib import Path
@@ -88,7 +87,9 @@ class TestSandbox:
     def test_copy_excludes_git_and_caches(self, workspace, tmp_path):
         (workspace / ".git").mkdir()
         (workspace / ".git" / "HEAD").write_text("ref: refs/heads/main")
-        (workspace / "__pycache__").mkdir()
+        # The source fixture may already contain an ignored cache from a
+        # contributor's explicit fixture run; the copy contract is the same.
+        (workspace / "__pycache__").mkdir(exist_ok=True)
         (workspace / "__pycache__" / "x.pyc").write_bytes(b"\x00")
         sb = SwarmSandbox(workspace, tmp_path / "wr", "slow_mod.py")
         sb.create()
