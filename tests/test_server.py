@@ -903,6 +903,17 @@ async def test_upload_blocks_ignored_private_file(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_read_local_file_reports_unavailable_without_workspace(monkeypatch):
+    from src.server import read_local_file
+
+    monkeypatch.setattr("src.tools.system.PathResolver.get_workspace_root", lambda: None)
+
+    res = await read_local_file("notes.txt")
+
+    assert "[UNAVAILABLE] No workspace is attached" in res
+
+
+@pytest.mark.asyncio
 async def test_media_input_bounds_are_checked(tmp_path, monkeypatch):
     from src.server import generate_image, generate_video
 

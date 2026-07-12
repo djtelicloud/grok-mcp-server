@@ -98,10 +98,10 @@ def _resolve_workspace_file(
     *,
     enforce_ignore_policy: bool,
 ) -> Path:
-    resolved = PathResolver.validate_path(file_path)
     proj_root = PathResolver.get_workspace_root()
     if proj_root is None:
         raise RuntimeError("No workspace is attached to this UniGrok service.")
+    resolved = PathResolver.validate_path(file_path)
     if enforce_ignore_policy:
         patterns = load_gitignore_patterns(proj_root)
         if is_path_ignored(resolved, proj_root, patterns):
