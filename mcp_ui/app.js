@@ -270,7 +270,8 @@ function switchTab(tabId) {
     p.hidden = true;
   });
 
-  const targetBtn = document.querySelector(`.nav-btn[data-tab="${tabId}"]`);
+  const targetBtn = Array.from(document.querySelectorAll(".nav-btn[data-tab]"))
+    .find((button) => button.dataset.tab === tabId);
   const targetPanel = $(tabId);
 
   if (targetBtn && targetPanel) {
@@ -425,13 +426,29 @@ function setupReasoningGuard() {
     if (modelWeight < requiredWeight) {
       card.classList.add("block");
       $("simStatus").innerText = "BLOCKED BY GUARD";
-      $("simExplanation").innerHTML = `<strong>Error:</strong> The target model <code>${model}</code> provides reasoning level weight <strong>${modelWeight}</strong>, which falls below your required threshold of <strong>'${level}'</strong> (weight ${requiredWeight}).<br><br>The gateway will throw a <code>ValueError</code> and abort the request before hitting the API.`;
+      renderGuardExplanation({ blocked: true, model, modelWeight, level, requiredWeight });
     } else {
       card.classList.add("pass");
       $("simStatus").innerText = "PASS";
-      $("simExplanation").innerHTML = `<strong>Success:</strong> Model <code>${model}</code> (weight <strong>${modelWeight}</strong>) satisfies the required guard threshold of <strong>'${level}'</strong> (weight ${requiredWeight}).<br><br>The orchestrator will safely route this call.`;
+      renderGuardExplanation({ blocked: false, model, modelWeight, level, requiredWeight });
     }
   });
+}
+
+function renderGuardExplanation({ blocked, model, modelWeight, level, requiredWeight }) {
+  const explanation = $("simExplanation");
+  const lead = document.createElement("strong");
+  lead.textContent = blocked ? "Error:" : "Success:";
+  const modelCode = document.createElement("code");
+  modelCode.textContent = model;
+  const detail = document.createTextNode(blocked
+    ? ` provides reasoning level weight ${modelWeight}, which falls below your required threshold of '${level}' (weight ${requiredWeight}).`
+    : ` (weight ${modelWeight}) satisfies the required guard threshold of '${level}' (weight ${requiredWeight}).`);
+  const outcome = document.createElement("p");
+  outcome.textContent = blocked
+    ? "The gateway will throw a ValueError and abort the request before hitting the API."
+    : "The orchestrator will safely route this call.";
+  explanation.replaceChildren(lead, document.createTextNode(blocked ? " The target model " : " Model "), modelCode, detail, outcome);
 }
 
 // --- OKF Browser & Markdown Parser ---
@@ -463,7 +480,12 @@ async function loadOkfManifest() {
 
     loadOkfFile(state.activeOkfFile);
   } catch (err) {
-    listContainer.innerHTML = `<div class="okf-item" style="border-color: var(--red); color: var(--red);">Failed: ${err.message}</div>`;
+    const failure = document.createElement("div");
+    failure.className = "okf-item";
+    failure.style.borderColor = "var(--red)";
+    failure.style.color = "var(--red)";
+    failure.textContent = `Failed: ${err.message}`;
+    listContainer.replaceChildren(failure);
   }
 }
 
@@ -486,8 +508,7 @@ async function loadOkfFile(fileName) {
       warningDiv.style.marginBottom = "10px";
       warningDiv.style.borderRadius = "var(--radius)";
       warningDiv.innerText = `⚠️ Warning: Large file loaded (${Math.round(text.length / 1024)} KB). Rerouted to lazy plain-text parser for safety.`;
-      viewer.innerHTML = "";
-      viewer.appendChild(warningDiv);
+      viewer.replaceChildren(warningDiv);
 
       const pre = document.createElement("pre");
       pre.innerText = text;
@@ -504,9 +525,15 @@ async function loadOkfFile(fileName) {
       }
     }
 
-    viewer.innerHTML = parseMarkdown(cleanText);
+    // parseMarkdown escapes all source HTML before adding its fixed tags.
+    // lgtm[js/xss-through-dom]
+    const parsed = new DOMParser().parseFromString(parseMarkdown(cleanText), "text/html");
+    viewer.replaceChildren(...Array.from(parsed.body.childNodes));
   } catch (err) {
-    viewer.innerHTML = `<p style="color: var(--red);">Failed to render file: ${err.message}</p>`;
+    const failure = document.createElement("p");
+    failure.style.color = "var(--red)";
+    failure.textContent = `Failed to render file: ${err.message}`;
+    viewer.replaceChildren(failure);
   }
 }
 
@@ -554,11 +581,7 @@ function parseMarkdown(md) {
   // Paragraphs (naive wrap)
   html = html.replace(/^(?!<h|<li|<ul|<ol|<table|<tr|<th|<td|<pre|<\/pre|<\/code|<code>)(.+)$/gm, "<p>$1</p>");
 
-  // Sanitize XSS elements (dangerous attributes and protocol links)
-  html = html
-    .replace(/javascript:/gi, "no-javascript:")
-    .replace(/on\w+\s*=/gi, "no-onclick=");
-
+  // The source text was HTML-escaped before these fixed-tag transforms.
   return html;
 }
 

@@ -56,8 +56,10 @@ def main() -> int:
                 f"api={runtime.get('api_plane', {}).get('xai_api_key')}, "
                 f"cli={runtime.get('cli_plane', {}).get('auth_state')})"
             )
-        except (OSError, URLError, ValueError) as exc:
-            print(f"{label}: unavailable ({exc})")
+        except (OSError, URLError, ValueError):
+            # The fixed endpoint is enough context; exception text may include
+            # response details that should not be copied into shared logs.
+            print(f"{label}: unavailable")
     return 0
 
 
