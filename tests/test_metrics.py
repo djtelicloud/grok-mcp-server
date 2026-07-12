@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timedelta
 
 import pytest
@@ -158,5 +159,26 @@ async def test_save_telemetry_persists_usage_provenance(tmp_path):
         assert metadata["token_kind"] == "local_estimate"
         assert metadata["billing_source"] == "subscription_unmetered"
         assert metadata["routing"]["why_detail"] == "keyless_cli"
+    finally:
+        await store.close()
+
+
+@pytest.mark.asyncio
+async def test_save_telemetry_bounds_routing_by_persisted_compact_json(tmp_path):
+    store = GrokSessionStore(db_path=tmp_path / "routing-bound.db")
+    try:
+        empty_size = len(json.dumps({"payload": ""}, separators=(",", ":")))
+        bounded = {"payload": "x" * (6000 - empty_size)}
+        oversized = {"payload": bounded["payload"] + "x"}
+
+        assert len(json.dumps(bounded, separators=(",", ":"))) == 6000
+        assert len(json.dumps(bounded)) > 6000
+
+        await store.save_telemetry("bounded", "API", 1, 0.1, 0.0, routing=bounded)
+        await store.save_telemetry("oversized", "API", 1, 0.1, 0.0, routing=oversized)
+
+        rows = {row["intent"]: telemetry_metadata(row) for row in await store.get_telemetry_stats()}
+        assert rows["bounded"]["routing"] == bounded
+        assert "routing" not in rows["oversized"]
     finally:
         await store.close()
