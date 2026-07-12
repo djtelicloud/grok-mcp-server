@@ -2,6 +2,11 @@
   "permissions": {
     "allow": [
       "mcp__unigrok__agent",
+      "mcp__unigrok__grok_mcp_status",
+      "mcp__unigrok__grok_mcp_discover_self",
+      "mcp__grok__agent",
+      "mcp__grok__grok_mcp_status",
+      "mcp__grok__grok_mcp_discover_self",
       "Bash(git status:*)",
       "Bash(git fetch:*)",
       "Bash(git log:*)",
@@ -9,7 +14,8 @@
       "Bash(git branch:*)",
       "Bash(git show:*)",
       "Bash(uv run pytest:*)",
-      "Bash(curl -s http://localhost:8080/healthz:*)",
+      "Bash(curl -s http://localhost:4765/healthz:*)",
+      "Bash(./scripts/land-status)",
       "Bash(ls:*)",
       "Bash(cat:*)"
     ]
