@@ -1084,7 +1084,21 @@ def load_grok_prompt(prompt_ref: str) -> str:
 
 
 def redact_secrets(text: str) -> str:
-    redacted = str(text or "")
+    if not text:
+        return ""
+        
+    # Fast path: skip regex entirely for safe logs (99% of cases).
+    if (
+        "xai-" not in text 
+        and "sk-" not in text 
+        and "Bearer " not in text 
+        and "bearer " not in text 
+        and "API_KEY" not in text 
+        and "api_key" not in text
+    ):
+        return text
+        
+    redacted = text
     for pattern, replacement in _SECRET_PATTERNS:
         redacted = pattern.sub(replacement, redacted)
     return redacted
