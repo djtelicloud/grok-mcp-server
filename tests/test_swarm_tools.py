@@ -10,22 +10,65 @@ from pathlib import Path
 import pytest
 
 import src.tools.swarm as swarm_tools
-from src.swarm.generate import GenerationResult
+from src.swarm.generate import BudgetExceeded, GenerationResult
 from src.utils import GrokSessionStore
 
 GOLDEN = Path(__file__).parent.parent / "evals" / "tasks" / "swarm_targets" / "nsquared_dedup"
+GOLDEN_ROOT = GOLDEN.parent
 
 _FAST_DEDUP = (
     "def dedup(items):\n"
-    "    seen = set()\n"
+    "    seen_hashable = set()\n"
+    "    seen_unhashable = []\n"
     "    result = []\n"
     "    for item in items:\n"
-    "        if item not in seen:\n"
-    "            seen.add(item)\n"
-    "            result.append(item)\n"
+    "        try:\n"
+    "            if item in seen_hashable or item in seen_unhashable:\n"
+    "                continue\n"
+    "            seen_hashable.add(item)\n"
+    "        except TypeError:\n"
+    "            if item in result:\n"
+    "                continue\n"
+    "            seen_unhashable.append(item)\n"
+    "        result.append(item)\n"
     "    return result"
 )
 _WRONG_DEDUP = "def dedup(items):\n    return list(items)"  # keeps duplicates → tests fail
+
+_GOLDEN_CASES = (
+    {
+        "name": "nsquared_dedup",
+        "target": "dedup.py",
+        "focus_node": "function:dedup",
+        "test": "test_dedup.py",
+        "bench": "bench_dedup.py",
+        "optimized": _FAST_DEDUP,
+    },
+    {
+        "name": "slow_loop_optimize",
+        "target": "loop_opt.py",
+        "focus_node": "function:slow_accumulate",
+        "test": "test_loop_opt.py",
+        "bench": "bench_loop_opt.py",
+        "optimized": (
+            "def slow_accumulate(records):\n"
+            "    return \"\".join(record + \"\\n\" for record in records)"
+        ),
+    },
+)
+
+
+@pytest.fixture(params=_GOLDEN_CASES, ids=lambda case: case["name"])
+def golden_target(request, tmp_path):
+    case = request.param
+    workspace = tmp_path / "golden-workspace"
+    package = workspace / "pkg"
+    package.mkdir(parents=True)
+    source = GOLDEN_ROOT / case["name"]
+    for path in source.iterdir():
+        if path.is_file():
+            shutil.copyfile(path, package / path.name)
+    return case, workspace
 
 
 @pytest.fixture
@@ -57,6 +100,66 @@ async def wired(workspace, tmp_path, monkeypatch):
     monkeypatch.setattr("src.swarm.engine.generate_mutation", fake_gen)
     yield store, workspace
     await store.close()
+
+
+class TestGoldenTargets:
+    @pytest.mark.asyncio
+    async def test_focus_oracle_and_benchmark_contract(
+        self, golden_target, tmp_path, monkeypatch
+    ):
+        """Every registered target reaches the real preflight and funnel."""
+        import json as jsonlib
+
+        case, workspace = golden_target
+        store = GrokSessionStore(db_path=tmp_path / f"{case['name']}.db")
+        monkeypatch.setattr(swarm_tools, "store", store)
+        monkeypatch.setattr(
+            swarm_tools.PathResolver, "contributor_mode", staticmethod(lambda: True)
+        )
+        monkeypatch.setattr(
+            swarm_tools.PathResolver,
+            "get_workspace_root",
+            classmethod(lambda cls: workspace),
+        )
+        monkeypatch.setattr(
+            swarm_tools.PathResolver,
+            "get_state_base_dir",
+            classmethod(lambda cls: tmp_path / f"state-{case['name']}"),
+        )
+        monkeypatch.setattr(swarm_tools, "is_cloudrun_runtime", lambda: False)
+        swarm_tools._RUNNER = None
+
+        async def fake_gen(prompt, system, *, remaining_budget_usd, **kwargs):
+            return GenerationResult(case["optimized"], "CLI", 0.0, "final_answer")
+
+        monkeypatch.setattr("src.swarm.engine.generate_mutation", fake_gen)
+        monkeypatch.setenv("UNIGROK_SWARM", "dry_run")
+        monkeypatch.setenv("UNIGROK_SWARM_MAX_GENERATIONS", "1")
+        monkeypatch.setenv("UNIGROK_SWARM_POPULATION", "1")
+        monkeypatch.setenv("UNIGROK_SWARM_BENCH_REPEATS", "3")
+        try:
+            out = await swarm_tools.start_code_swarm(
+                f"pkg/{case['target']}",
+                case["focus_node"],
+                f"pkg/{case['test']}",
+                f"python pkg/{case['bench']}",
+                allow_unstable_bench=True,
+            )
+            task_id = out.split("`")[1]
+            completed = await swarm_tools._get_runner().wait(task_id, timeout=60.0)
+            assert completed is True
+            payload = jsonlib.loads(
+                await swarm_tools.get_swarm_status(task_id, view="json")
+            )
+            assert payload["format"] == "unigrok-swarm-status-v2"
+            assert payload["status"] == "completed"
+            assert payload["target"]["focus_node"] == case["focus_node"]
+            assert payload["oracle"]["focus_coverage_pct"] > 0
+            assert payload["baseline"]["latency_ms"] > 0
+            assert payload["aggregates"]["candidates_total"] >= 1
+        finally:
+            await store.close()
+            swarm_tools._RUNNER = None
 
 
 class TestGates:
@@ -128,6 +231,32 @@ class TestGates:
 
 
 class TestEndToEnd:
+    @pytest.mark.asyncio
+    async def test_cli_cost_contract_violation_is_a_failed_task(self, wired, monkeypatch):
+        import json as jsonlib
+
+        monkeypatch.setenv("UNIGROK_SWARM", "dry_run")
+
+        async def charged_gen(prompt, system, *, remaining_budget_usd, **kwargs):
+            raise BudgetExceeded("API result cost $1.00")
+
+        monkeypatch.setattr("src.swarm.engine.generate_mutation", charged_gen)
+        out = await swarm_tools.start_code_swarm(
+            "pkg/dedup.py",
+            "function:dedup",
+            "pkg/test_dedup.py",
+            "python pkg/bench_dedup.py",
+            allow_unstable_bench=True,
+        )
+        task_id = out.split("`")[1]
+        assert await swarm_tools._get_runner().wait(task_id, timeout=60.0) is True
+        payload = jsonlib.loads(
+            await swarm_tools.get_swarm_status(task_id, view="json")
+        )
+        assert payload["status"] == "failed"
+        assert "CLI-only zero-cost contract" in payload["oracle"]["error"]
+        assert payload["aggregates"]["cost_to_optimize_usd"] == pytest.approx(0.0)
+
     @pytest.mark.asyncio
     async def test_paste_to_verified_champion_is_copy_only(self, wired, monkeypatch):
         import json as jsonlib

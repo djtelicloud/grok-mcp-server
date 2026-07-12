@@ -43,6 +43,7 @@ DEFAULT_BASELINE_PATH = EVALS_DIR / "baseline.json"
 
 VALID_CATEGORIES = {"coding", "reasoning", "research", "memory"}
 VALID_MODES = {"auto", "fast", "reasoning", "thinking", "research"}
+VALID_PLANES = {"auto", "api", "cli"}
 
 
 # ─── Golden tasks ─────────────────────────────────────────────────────────────
@@ -55,6 +56,7 @@ class EvalTask:
     prompt: str
     mode: str = "auto"
     model: Optional[str] = None
+    plane: str = "auto"
     session_setup: Optional[List[Dict[str, str]]] = None
     graders: List[Dict[str, Any]] = field(default_factory=list)
     max_cost_usd: Optional[float] = None
@@ -66,6 +68,7 @@ class EvalTask:
         category = str(data.get("category") or "").strip().lower()
         prompt = str(data.get("prompt") or "")
         mode = str(data.get("mode") or "auto").strip().lower()
+        plane = str(data.get("plane") or "auto").strip().lower()
         if not task_id:
             raise ValueError(f"{source}: task is missing 'id'")
         if category not in VALID_CATEGORIES:
@@ -74,6 +77,10 @@ class EvalTask:
             raise ValueError(f"{source}: task '{task_id}' is missing 'prompt'")
         if mode not in VALID_MODES:
             raise ValueError(f"{source}: task '{task_id}' mode {mode!r} not in {sorted(VALID_MODES)}")
+        if plane not in VALID_PLANES:
+            raise ValueError(
+                f"{source}: task '{task_id}' plane {plane!r} not in {sorted(VALID_PLANES)}"
+            )
         graders = data.get("graders") or []
         if not isinstance(graders, list) or not graders:
             raise ValueError(f"{source}: task '{task_id}' needs at least one grader")
@@ -87,6 +94,7 @@ class EvalTask:
             prompt=prompt,
             mode=mode,
             model=(str(data["model"]) if data.get("model") else None),
+            plane=plane,
             session_setup=session_setup,
             graders=graders,
             max_cost_usd=(float(max_cost) if max_cost is not None else None),
@@ -123,7 +131,11 @@ def load_tasks(tasks_dir: Optional[Path] = None,
 def _turn_kwargs(task: EvalTask) -> Dict[str, Any]:
     """Map a task's mode onto run_agent_turn kwargs, mirroring the MCP agent
     tool's mode mapping (src/tools/chats.py::agent)."""
-    kwargs: Dict[str, Any] = {"prompt": task.prompt, "model": task.model}
+    kwargs: Dict[str, Any] = {
+        "prompt": task.prompt,
+        "model": task.model,
+        "plane": task.plane,
+    }
     if task.mode == "fast":
         kwargs["enable_agentic"] = False
     elif task.mode == "reasoning":
@@ -170,6 +182,13 @@ def _base_result(task: EvalTask) -> Dict[str, Any]:
         "latency_sec": 0.0,
         "citations_count": 0,
         "tool_calls_count": 0,
+        "tool_failures_count": 0,
+        "project_file_lists_count": 0,
+        "project_file_list_succeeded": None,
+        "local_reads_count": 0,
+        "local_reads_succeeded": 0,
+        "local_test_runs_count": 0,
+        "local_tests_passed": None,
         "appends_before_first_sample": None,
         "planning_model": None,
         "coding_model": None,
@@ -178,6 +197,64 @@ def _base_result(task: EvalTask) -> Dict[str, Any]:
         "passed": False,
         "error": None,
     }
+
+
+def _apply_tool_trace_result(result: Dict[str, Any], trace: List[Any]) -> None:
+    """Project bounded tool outcomes into safe structural grader fields.
+
+    Full observations can contain source text, so reports retain counts and
+    booleans only. A successful dispatch is necessary but not sufficient:
+    read/list tools may return explicit refusal markers, and run_local_tests
+    reports pytest's exit status in its standardized text.
+    """
+    tool_trace = [entry for entry in (trace or []) if isinstance(entry, dict)]
+    result["tool_calls_count"] = len(tool_trace)
+
+    def observation_succeeded(entry: Dict[str, Any]) -> bool:
+        content = str(entry.get("content") or "").lstrip()
+        return bool(entry.get("success")) and not content.startswith(
+            ("[BLOCKED]", "[UNAVAILABLE]")
+        )
+
+    result["tool_failures_count"] = sum(
+        1 for entry in tool_trace if not observation_succeeded(entry)
+    )
+
+    file_lists = [
+        entry for entry in tool_trace if entry.get("tool_name") == "list_project_files"
+    ]
+    result["project_file_lists_count"] = len(file_lists)
+    if file_lists:
+        result["project_file_list_succeeded"] = all(
+            observation_succeeded(entry) for entry in file_lists
+        )
+
+    local_reads = [
+        entry for entry in tool_trace if entry.get("tool_name") == "read_local_file"
+    ]
+    result["local_reads_count"] = len(local_reads)
+    result["local_reads_succeeded"] = sum(
+        1 for entry in local_reads if observation_succeeded(entry)
+    )
+
+    local_test_runs = [
+        entry for entry in tool_trace if entry.get("tool_name") == "run_local_tests"
+    ]
+    result["local_test_runs_count"] = len(local_test_runs)
+    if local_test_runs:
+        def local_test_passed(entry: Dict[str, Any]) -> bool:
+            content = str(entry.get("content") or "")
+            first_line = content.splitlines()[0].strip() if content.splitlines() else ""
+            return (
+                observation_succeeded(entry)
+                and first_line.startswith("Local tests passed for `")
+                and "` (exit code 0, timeout " in first_line
+                and first_line.endswith("s).")
+            )
+
+        result["local_tests_passed"] = all(
+            local_test_passed(entry) for entry in local_test_runs
+        )
 
 
 def _grade(task: EvalTask, answer: str, result: Dict[str, Any]) -> None:
@@ -230,7 +307,7 @@ async def _run_one_offline(task: EvalTask, script: Dict[str, Any]) -> Dict[str, 
     result["cost_usd"] = round(float(layer.cost_usd or 0.0), 6)
     result["tokens"] = int(layer.tokens or 0)
     result["citations_count"] = len(layer.citations or [])
-    result["tool_calls_count"] = len(layer.tool_trace or [])
+    _apply_tool_trace_result(result, layer.tool_trace or [])
     # Routed model: MetaLayer.model (set by orchestrate) with the fake's
     # first chat.create kwargs as the fallback witness.
     first_model = fake.create_calls[0].get("model") if fake.create_calls else None
@@ -299,6 +376,20 @@ def batch_mode_decision(tasks: List[EvalTask], usable: bool, reason: str) -> Tup
         return False, (
             "batch available but not used: non-fast tasks need the agent loop "
             f"({', '.join(non_fast[:4])}{'…' if len(non_fast) > 4 else ''})"
+        )
+    cli_tasks = [t.id for t in tasks if t.plane == "cli"]
+    if cli_tasks:
+        return False, (
+            "batch available but not used: explicit CLI-plane tasks cannot be "
+            "submitted through the API batch service "
+            f"({', '.join(cli_tasks[:4])}{'…' if len(cli_tasks) > 4 else ''})"
+        )
+    auto_tasks = [t.id for t in tasks if t.plane != "api"]
+    if auto_tasks:
+        return False, (
+            "batch available but not used: batch execution requires explicit "
+            "plane='api' so queue size cannot change credential planes "
+            f"({', '.join(auto_tasks[:4])}{'…' if len(auto_tasks) > 4 else ''})"
         )
     return True, "batch mode engaged (all-fast task set, batch_request_id correlation)"
 
@@ -429,7 +520,7 @@ async def _run_live_sequential(tasks: List[EvalTask]) -> List[Dict[str, Any]]:
         result["cost_usd"] = round(float(layer.cost_usd or 0.0), 6)
         result["tokens"] = int(layer.tokens or 0)
         result["citations_count"] = len(layer.citations or [])
-        result["tool_calls_count"] = len(layer.tool_trace or [])
+        _apply_tool_trace_result(result, layer.tool_trace or [])
         result["answer_excerpt"] = (layer.generation or "")[:400]
         _grade(task, layer.generation or "", result)
         results.append(result)

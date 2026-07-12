@@ -19,6 +19,7 @@ from typing import Any, Dict, Set
 from . import config as swarm_config
 from .ast_utils import extract_node_span, span_line_range
 from .engine import EngineConfig, SwarmEngine
+from .generate import BudgetExceeded
 from .preflight import PreflightError, run_preflight
 from .pareto import select_champion
 from .sandbox import SandboxError, SwarmSandbox
@@ -61,10 +62,26 @@ class SwarmRunner:
         """Cooperative cancel — the engine checks between candidates."""
         self._cancelled.add(str(task_id))
 
-    async def wait(self, task_id: str, timeout: float = 30.0) -> None:
+    async def wait(self, task_id: str, timeout: float = 30.0) -> bool:
+        """Wait for an in-process task and report whether it completed.
+
+        Returning a boolean keeps timeout distinct from completion. A missing
+        task is already outside this runner's active set; callers must still
+        read the durable row for its terminal status.
+        """
         task = self._tasks.get(str(task_id))
-        if task is not None:
-            await asyncio.wait({task}, timeout=timeout)
+        if task is None:
+            return True
+        done, _pending = await asyncio.wait({task}, timeout=timeout)
+        return bool(done)
+
+    async def shutdown(self) -> None:
+        """Hard-cancel and drain every in-process task during CLI shutdown."""
+        tasks = list(self._tasks.values())
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     def launch(self, task_id: str, spec: Dict[str, Any]) -> asyncio.Task:
         task = asyncio.create_task(self._run(task_id, spec))
@@ -165,6 +182,18 @@ class SwarmRunner:
                 task_id,
                 status="failed",
                 oracle_json=json.dumps({"error": str(exc)[:400]}, separators=(",", ":")),
+            )
+        except BudgetExceeded:
+            # A non-CLI or charged generation is a policy failure, never a
+            # valid zero-candidate completion. Keep provider/request material
+            # out of durable state while making the terminal cause explicit.
+            await self._store.update_swarm_task(
+                task_id,
+                status="failed",
+                oracle_json=json.dumps(
+                    {"error": "swarm generation violated the CLI-only zero-cost contract"},
+                    separators=(",", ":"),
+                ),
             )
         except asyncio.CancelledError:
             await self._store.update_swarm_task(task_id, status="cancelled")

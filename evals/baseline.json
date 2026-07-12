@@ -1,6 +1,7 @@
 {
   "_comment": "Expected-pass list for `python -m evals run --check-baseline` (the CI evals-offline gate). Any task listed here that fails or goes missing is a regression. Add new golden tasks here once they pass offline.",
   "expected_pass": [
+    "agent_multifile",
     "borderline_product_summary",
     "coding_fix_typo",
     "coding_regex_semver",
