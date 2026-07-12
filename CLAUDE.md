@@ -45,11 +45,13 @@ Still-unintegrated CLI surfaces include `grok agent stdio|serve|leader` and
 
 Per AGENTS.md: whenever the user says **"@grok"**, "grok", asks to query Grok,
 or asks for a peer review / architectural audit **of this repo**, call the
-shared UniGrok MCP `agent` tool (`mcp__unigrok__agent`) rather than answering
+shared UniGrok MCP `agent` tool (`mcp__unigrok__agent`, or `mcp__grok__agent`
+when the gateway is registered under the name `grok`) rather than answering
 from your own weights — provided the MCP service is up. The tool is the only
 public entry point; it self-routes and returns `response` plus route/plane/
 model/cost metadata. Modes: `auto` (default), `fast`, `reasoning`, `thinking`,
-`research`.
+`research`. Claude-Code-specific usage patterns live in
+`.claude/skills/using-unigrok/SKILL.md`.
 
 ## Source layout
 
