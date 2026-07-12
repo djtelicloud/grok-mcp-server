@@ -12,6 +12,8 @@
     "grok-4.5-pinning.md",
     "media-imagine.md",
     "metrics-tool.md",
+    "intelligence-capsule-v1.md",
+    "intelligence-capsule-v1.schema.json",
     "faq.md",
     "api-reference.md"
   ]

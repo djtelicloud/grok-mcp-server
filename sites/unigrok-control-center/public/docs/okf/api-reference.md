@@ -307,6 +307,92 @@ Use this when ChatGPT or a GitHub workflow has already fetched a PR's
 metadata and needs a security-conscious Grok review for Codex to triage.
 The diff and comments are untrusted evidence and never grant tool authority.
 
+## intelligence_capsule.py {#intelligence_capsule}
+
+### Class: `CapsuleValidationError` {#intelligence_capsule-capsulevalidationerror}
+
+```python
+class CapsuleValidationError
+```
+
+**Keywords:** capsule, validation, error
+
+Raised when a value cannot be a canonical IntelligenceCapsule.
+
+### Function: `canonicalize` {#intelligence_capsule-canonicalize}
+
+```python
+def canonicalize(value: Any) -> bytes
+```
+
+**Keywords:** canonicalize
+
+Return constrained RFC 8785-compatible UTF-8 bytes for ``value``.
+
+### Function: `parse_canonical` {#intelligence_capsule-parse_canonical}
+
+```python
+def parse_canonical(raw: bytes) -> Any
+```
+
+**Keywords:** parse, canonical
+
+Decode canonical wire bytes and reject alternate JSON spellings.
+
+Verifiers must call this on the original bytes instead of accepting an
+already-parsed framework object.  Re-encoding catches duplicate keys,
+whitespace, alternate escapes, key-order drift, BOMs, and numeric aliases.
+
+### Function: `digest_body` {#intelligence_capsule-digest_body}
+
+```python
+def digest_body(body: Mapping[str, Any]) -> str
+```
+
+**Keywords:** digest, body
+
+Return the lowercase SHA-256 digest of a validated capsule body.
+
+### Function: `capsule_id` {#intelligence_capsule-capsule_id}
+
+```python
+def capsule_id(body: Mapping[str, Any]) -> str
+```
+
+**Keywords:** capsule, id
+
+Return the stable protocol identity for ``body``.
+
+### Function: `build_envelope` {#intelligence_capsule-build_envelope}
+
+```python
+def build_envelope(body: Mapping[str, Any], *, signatures: Sequence[Mapping[str, Any]]=()) -> dict[str, Any]
+```
+
+**Keywords:** build, envelope
+
+Build and validate an IntelligenceCapsule envelope.
+
+### Function: `validate_envelope_integrity` {#intelligence_capsule-validate_envelope_integrity}
+
+```python
+def validate_envelope_integrity(value: Mapping[str, Any]) -> None
+```
+
+**Keywords:** validate, envelope, integrity
+
+Validate structure and body digest, not authorship or signature validity.
+
+### Function: `validate_body` {#intelligence_capsule-validate_body}
+
+```python
+def validate_body(value: Mapping[str, Any]) -> None
+```
+
+**Keywords:** validate, body
+
+Validate the normative IntelligenceCapsule v1 body schema.
+
 ## jobs.py {#jobs}
 
 ### Class: `JobManager` {#jobs-jobmanager}

@@ -1,0 +1,218 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://grokmcp.org/docs/okf/intelligence-capsule-v1.schema.json",
+  "title": "UniGrok Insider IntelligenceCapsule v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["body", "digest", "signatures"],
+  "properties": {
+    "body": { "$ref": "#/$defs/body" },
+    "digest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["algorithm", "value"],
+      "properties": {
+        "algorithm": { "const": "sha-256" },
+        "value": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "signatures": {
+      "description": "Reserved structural field in v1; entries do not establish authentication or authorization.",
+      "type": "array",
+      "maxItems": 32,
+      "items": { "$ref": "#/$defs/signature" }
+    }
+  },
+  "$defs": {
+    "actor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agent_id", "github_login", "role"],
+      "properties": {
+        "agent_id": { "$ref": "#/$defs/identifier" },
+        "github_login": { "$ref": "#/$defs/identifier" },
+        "role": { "enum": ["admin", "automation", "contributor"] }
+      }
+    },
+    "body": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "actor",
+        "created_at",
+        "evidence",
+        "kind",
+        "parents",
+        "payload",
+        "protocol",
+        "provenance",
+        "run_id",
+        "subject",
+        "version"
+      ],
+      "properties": {
+        "actor": { "$ref": "#/$defs/actor" },
+        "created_at": {
+          "type": "string",
+          "pattern": "^(?!0000)[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"
+        },
+        "evidence": {
+          "type": "array",
+          "maxItems": 256,
+          "items": { "$ref": "#/$defs/evidence" }
+        },
+        "execution": { "$ref": "#/$defs/execution" },
+        "kind": {
+          "enum": [
+            "benchmark",
+            "candidate",
+            "decision",
+            "evaluation",
+            "failure",
+            "lesson",
+            "observation",
+            "policy",
+            "promotion",
+            "release",
+            "task"
+          ]
+        },
+        "metrics": {
+          "type": "array",
+          "maxItems": 256,
+          "items": { "$ref": "#/$defs/metric" }
+        },
+        "parents": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^ucap1:sha256:[a-f0-9]{64}$"
+          }
+        },
+        "payload": { "$ref": "#/$defs/payload" },
+        "protocol": { "const": "org.grokmcp.intelligence-capsule" },
+        "provenance": { "$ref": "#/$defs/provenance" },
+        "run_id": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{8}-[a-f0-9]{4}-7[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$"
+        },
+        "subject": { "$ref": "#/$defs/subject" },
+        "version": { "const": 1 }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["bytes", "media_type", "name", "sha256"],
+      "properties": {
+        "bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "git_oid": {
+          "type": "string",
+          "pattern": "^(sha1:[a-f0-9]{40}|sha256:[a-f0-9]{64})$"
+        },
+        "media_type": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9!#$&^_.+-]*/[a-z0-9][a-z0-9!#$&^_.+-]*$"
+        },
+        "name": { "$ref": "#/$defs/identifier" },
+        "sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "execution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["model", "plane", "runtime", "target"],
+      "properties": {
+        "model": { "$ref": "#/$defs/identifier" },
+        "plane": { "enum": ["api", "cli", "none"] },
+        "runtime": { "enum": ["cloud", "local"] },
+        "target": {
+          "enum": ["cloud_api", "deterministic", "local_api", "local_cli"]
+        }
+      }
+    },
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+    },
+    "metric": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "unit", "value"],
+      "properties": {
+        "name": { "$ref": "#/$defs/identifier" },
+        "unit": { "$ref": "#/$defs/identifier" },
+        "value": {
+          "type": "string",
+          "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$"
+        }
+      }
+    },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["data", "schema"],
+      "properties": {
+        "data": {
+          "type": "object",
+          "propertyNames": {
+            "pattern": "^[a-z][a-z0-9_]{0,63}$"
+          }
+        },
+        "schema": {
+          "type": "string",
+          "pattern": "^org\\.grokmcp\\.[a-z][a-z0-9_.-]*\\.v[1-9][0-9]*$"
+        }
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["generator", "generator_version", "source_commit"],
+      "properties": {
+        "generator": { "$ref": "#/$defs/identifier" },
+        "generator_version": { "$ref": "#/$defs/identifier" },
+        "source_commit": { "$ref": "#/$defs/git_commit" }
+      }
+    },
+    "signature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key_id", "profile", "value"],
+      "properties": {
+        "key_id": { "$ref": "#/$defs/identifier" },
+        "profile": { "enum": ["openpgp", "sigstore_bundle", "ssh_ed25519"] },
+        "value": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{16,16384}$"
+        }
+      }
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "git_commit": {
+      "type": "string",
+      "pattern": "^([a-f0-9]{40}|[a-f0-9]{64})$"
+    },
+    "subject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["commit", "repository"],
+      "properties": {
+        "commit": { "$ref": "#/$defs/git_commit" },
+        "repository": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+        }
+      }
+    }
+  }
+}
