@@ -218,6 +218,39 @@ class TestEndToEnd:
         assert "error" in payload
 
     @pytest.mark.asyncio
+    async def test_list_swarm_tasks_newest_first_with_effective_status(self, wired):
+        """The Playground's task picker: JSON array, newest first, staleness
+        override applied, empty array on a fresh gateway."""
+        import asyncio as aio
+        import json as jsonlib
+
+        store, _ws = wired
+        assert jsonlib.loads(await swarm_tools.list_swarm_tasks()) == []
+
+        await store.create_swarm_task(
+            "task-old", target_path="a.py", focus_node="function:f",
+            base_file_hash="h", test_target="t", bench_command="b",
+            budget_usd=1.0, seed=1,
+        )
+        await aio.sleep(0.02)
+        await store.create_swarm_task(
+            "task-new", target_path="b.py", focus_node="function:g",
+            base_file_hash="h", test_target="t", bench_command="b",
+            budget_usd=1.0, seed=2,
+        )
+        await store.update_swarm_task("task-new", status="completed", generation=3)
+
+        items = jsonlib.loads(await swarm_tools.list_swarm_tasks())
+        assert [i["task_id"] for i in items] == ["task-new", "task-old"]
+        newest = items[0]
+        assert newest["status"] == "completed"
+        assert newest["focus_node"] == "function:g"
+        assert newest["generations"] == 3
+        assert newest["spent_usd"] == pytest.approx(0.0)
+        # A queued row with a fresh heartbeat reads as queued, not stale.
+        assert items[1]["status"] == "queued"
+
+    @pytest.mark.asyncio
     async def test_active_apply_lands_and_reverifies(self, wired, monkeypatch):
         store, workspace = wired
         monkeypatch.setenv("UNIGROK_SWARM", "active")

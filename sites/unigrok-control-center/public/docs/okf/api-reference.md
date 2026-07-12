@@ -1826,6 +1826,19 @@ async def cancel_swarm(task_id: str) -> str
 
 Cooperatively cancel a running swarm; the partial Pareto front is kept.
 
+### Function: `list_swarm_tasks` {#tools-swarm-list_swarm_tasks}
+
+```python
+async def list_swarm_tasks(limit: int=10) -> str
+```
+
+**Keywords:** list, swarm, tasks
+
+List recent swarm tasks newest-first as a JSON array (id, effective
+status incl. staleness override, target, focus node, generations run,
+spend). The Playground's task picker consumes this — read-only, no gate:
+on a service that never ran a swarm it simply returns [].
+
 ## tools/system.py {#tools-system}
 
 ### Function: `grok_mcp_status` {#tools-system-grok_mcp_status}
