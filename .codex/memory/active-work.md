@@ -2,7 +2,7 @@
 
 Last updated: 2026-07-12
 Owner: Codex
-Status: Insider intelligence payload protocols landed; no active landing gate
+Status: Insider intelligence payload protocols landed and public OKF deployed; no active gate
 
 This is the project-scoped handoff for new Codex chats. Resolve drift-prone
 Git, CI, runtime, DNS, and cloud identifiers live before acting. Never record
@@ -14,6 +14,10 @@ credentials, OAuth codes, tokens, or private keys here.
   `18798c0cb0b85a22e9e15d5cbd6e300999c1a737`. The exact reviewed,
   CI-green, Codex-approved, and locally landed head was
   `a966ef8c138c6864242c862793aa35c714608339`.
+- PR #46 merged the stale-artifact deployment guard to protected `origin/main`
+  as `8965a46da70340e37ea3d3e7d52f1d35a709bf1b`. Its exact reviewed,
+  CI-green, Codex-approved, and locally landed head was
+  `5c03076a7d20ff7b7fd60d89060c1cbd9eba7abb`.
 - IntelligenceCapsule v1 remains byte-for-byte unchanged. Its schema SHA-256
   is `10c2ec4638bd6c4e303b3e2c4c7d91ae582554f48aaa01fac2d9370062b98d4c`
   and its deterministic SHA-1-format Git genesis remains
@@ -60,6 +64,14 @@ credentials, OAuth codes, tokens, or private keys here.
 - The direct Grok MCP review attempt returned only a zero-token planning stub,
   and the optional hosted review runner remained unavailable; no Grok approval
   is claimed.
+- The control-center site passed 58 tests and now rejects packaging unless all
+  25 `public/**` assets exist byte-for-byte under `dist/client/**`. This guard
+  caught a stale ignored build in Sites version 8; that version was superseded.
+- Sites version 9 was built from protected merge `8965a46d`, contained all 19
+  OKF documents, and deployed successfully. Both the Sites production URL and
+  `https://grokmcp.org/docs/okf/intelligence-payload-semantics-v1.json` return
+  HTTP 200 with SHA-256
+  `7464c2343c3edaadc21a14a880e689ef8e4b4ac0fa3fc07b2b6f37b08733545a`.
 
 ## Trust boundary
 
@@ -89,4 +101,6 @@ credentials, OAuth codes, tokens, or private keys here.
 - Build the single adaptive contributor/admin UI on these contracts; keep
   public visitors read-only and public MCP consumers headless in their IDE.
 
-No release or production deployment is attached to the payload-contract landing.
+The public OKF bundle is deployed. No MCP package release, consumer-runtime
+deployment, SQLite migration, or Insider producer/promotion activation is
+attached to this landing.
