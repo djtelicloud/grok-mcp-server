@@ -16,7 +16,14 @@ const COLORS = {
   pareto_elite: "var(--green)",
 };
 
-const state = { payload: null, source: null, maxGen: 1, shownGen: 1, playing: null };
+const state = {
+  payload: null,
+  source: null,
+  maxGen: 1,
+  shownGen: 1,
+  playing: null,
+  runtimeMode: "unknown",
+};
 
 // ── MCP plumbing (same JSON-RPC shape the Control Center uses) ──────────────
 
@@ -48,6 +55,7 @@ async function mcpCall(toolName, args) {
   const rpc = JSON.parse(jsonText);
   if (rpc.error) throw new Error(rpc.error.message || "MCP error");
   const content = rpc.result?.content?.[0]?.text ?? "";
+  if (rpc.result?.isError) throw new Error(content || "MCP tool failed");
   return content;
 }
 
@@ -98,15 +106,34 @@ function setPayload(payload, sourceLabel, source) {
   $("genSlider").max = String(state.maxGen);
   $("genSlider").value = String(state.maxGen);
   setMsg(`loaded (${sourceLabel})`);
+  const badge = $("sourceBadge");
+  badge.textContent = source === "live" ? "live gateway data" : sourceLabel;
+  badge.className = source === "live" ? "source-badge live" : "source-badge";
   renderScorecard();
+  renderTradeoffSummary();
   renderChart();
-  $("detail").innerHTML = '<div class="muted">Click a dot for its full receipt.</div>';
+  const candidates = (payload.generations || []).flatMap((generation) => generation.candidates || []);
+  const leadingFrontId = payload.pareto_front?.[0];
+  const firstUseful = candidates.find((candidate) => candidate.candidate_id === leadingFrontId && candidate.code)
+    || candidates.find((candidate) => candidate.outcome === "pareto_elite" && candidate.code)
+    || candidates.find((candidate) => candidate.code)
+    || candidates[0];
+  if (firstUseful) renderDetail(firstUseful);
+  else $("detail").innerHTML = '<div class="muted">No candidates have landed yet.</div>';
 }
 
 // ── Scorecard ────────────────────────────────────────────────────────────────
 
-function fmtPct(v) { return v == null ? "n/a" : `${v.toFixed(1)}%`; }
+function fmtPct(v) { return v == null ? "n/a" : `${Number(v).toFixed(1)}%`; }
 function fmtUsd(v) { return v == null ? "n/a" : `$${Number(v).toFixed(4)}`; }
+function fmtLatencyImprovement(v) {
+  if (v == null) return "n/a";
+  return v >= 0 ? `${fmtPct(v)} faster` : `${fmtPct(Math.abs(v))} slower`;
+}
+function fmtMemoryImprovement(v) {
+  if (v == null) return "n/a";
+  return v >= 0 ? `${fmtPct(v)} less` : `${fmtPct(Math.abs(v))} more`;
+}
 
 function renderScorecard() {
   const p = state.payload;
@@ -117,8 +144,8 @@ function renderScorecard() {
     ["status", `${p.status} (${p.mode})`],
     ["feasibility rate", agg.feasibility_rate == null ? "n/a"
       : `${(agg.feasibility_rate * 100).toFixed(0)}% of ${agg.candidates_total}`],
-    ["best Δlatency", fmtPct(agg.best_latency_improvement_pct)],
-    ["best Δmemory", fmtPct(agg.best_memory_improvement_pct)],
+    ["best latency", fmtLatencyImprovement(agg.best_latency_improvement_pct)],
+    ["memory impact", fmtMemoryImprovement(agg.best_memory_improvement_pct)],
     ["cost to optimize", `${fmtUsd(agg.cost_to_optimize_usd)} / $${(p.budget?.budget_usd ?? 0).toFixed(2)}`],
     ["focus coverage", oracle.focus_coverage_pct == null ? "n/a" : `${oracle.focus_coverage_pct}%`],
     ["bench", `${bench.stability || "n/a"} (floor ${bench.noise_floor_pct ?? "?"}%)`],
@@ -127,6 +154,15 @@ function renderScorecard() {
   $("scorecard").innerHTML = cards
     .map(([k, v]) => `<div class="stat"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div></div>`)
     .join("");
+}
+
+function renderTradeoffSummary() {
+  const agg = state.payload?.aggregates || {};
+  const latency = fmtLatencyImprovement(agg.best_latency_improvement_pct);
+  const memory = fmtMemoryImprovement(agg.best_memory_improvement_pct);
+  $("tradeoffSummary").textContent = latency === "n/a"
+    ? "No benchmark-qualified candidate is available yet."
+    : `Pareto readout: the fastest verified candidate is ${latency} and uses ${memory} peak memory. Neither axis is hidden.`;
 }
 
 function esc(value) {
@@ -207,14 +243,16 @@ function renderChart() {
           COLORS[c.outcome] || "var(--gray)", c, c.outcome === "pareto_elite");
     });
 
-  $("genLabel").textContent = `generation ${state.shownGen}/${state.maxGen}`;
+  const newCandidates = (p.generations || [])
+    .find((generation) => generation.generation === state.shownGen)?.candidates?.length || 0;
+  $("genLabel").textContent = `generation ${state.shownGen}/${state.maxGen} · ${newCandidates ? `${newCandidates} new` : "no new candidates"}`;
 }
 
 function pad(lo, hi) {
   if (!isFinite(lo) || !isFinite(hi)) return [0, 1];
-  if (lo === hi) return [lo * 0.95 - 1, hi * 1.05 + 1];
+  if (lo === hi) return [Math.max(0, lo * 0.95), Math.max(1, hi * 1.05)];
   const span = hi - lo;
-  return [lo - span * 0.08, hi + span * 0.08];
+  return [Math.max(0, lo - span * 0.08), hi + span * 0.08];
 }
 
 function drawAxes(svg, x0, x1, y0, y1, sx, sy) {
@@ -265,7 +303,18 @@ function dot(svg, x, y, r, color, candidate, elite) {
   c.setAttribute("fill", color);
   c.setAttribute("fill-opacity", elite ? "0.95" : "0.75");
   c.setAttribute("class", elite ? "dot elite" : "dot");
-  c.addEventListener("click", () => renderDetail(candidate));
+  c.setAttribute("tabindex", "0");
+  c.setAttribute("role", "button");
+  const accessibleName = `${candidate.arm} candidate, ${candidate.outcome}`;
+  c.setAttribute("aria-label", accessibleName);
+  const openReceipt = () => renderDetail(candidate);
+  c.addEventListener("click", openReceipt);
+  c.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      openReceipt();
+    }
+  });
   const title = document.createElementNS(SVG_NS, "title");
   title.textContent = `${candidate.candidate_id} — ${candidate.arm} — ${candidate.outcome}`;
   c.appendChild(title);
@@ -281,25 +330,26 @@ function renderDetail(candidate) {
     ["arm", candidate.arm],
     ["outcome", candidate.outcome],
     ["stage reached", candidate.stage],
-    ["latency_ms", candidate.latency_ms ?? "not measured"],
-    ["peak_mem_bytes", candidate.peak_mem_bytes ?? "not measured"],
+    ["latency", candidate.latency_ms == null ? "not measured" : `${Number(candidate.latency_ms).toFixed(6)} ms`],
+    ["peak memory", candidate.peak_mem_bytes == null ? "not measured" : `${humanBytes(candidate.peak_mem_bytes)} bytes`],
     ["diff_bytes", candidate.diff_bytes ?? "n/a"],
     ["reward", candidate.reward ?? "n/a"],
     ["token cost", fmtUsd(candidate.token_cost_usd)],
   ];
-  let html = rows
-    .map(([k, v]) => `<div><span class="muted">${esc(k)}:</span> ${esc(v)}</div>`)
-    .join("");
+  let html = `<h2>Candidate receipt</h2><span class="outcome-pill">${esc(candidate.outcome)}</span><div class="receipt-grid">` + rows
+    .map(([k, v]) => `<span class="muted">${esc(k)}</span><span class="receipt-value">${esc(v)}</span>`)
+    .join("") + "</div>";
   if (candidate.arm_receipt) {
-    html += `<div class="muted" style="margin-top:8px">arm receipt</div>
-             <pre>${esc(JSON.stringify(candidate.arm_receipt, null, 2))}</pre>`;
+    html += `<details class="receipt-json"><summary>Bandit selection receipt</summary>
+             <pre>${esc(JSON.stringify(candidate.arm_receipt, null, 2))}</pre></details>`;
   }
   if (candidate.code) {
     const original = p.original_span_stale
       ? "(file changed since the swarm ran — original span unavailable)"
       : (p.original_span || "(unavailable)");
-    html += `<div class="muted" style="margin-top:8px">original vs candidate</div>
-             <div class="diff-grid"><pre>${esc(original)}</pre><pre>${esc(candidate.code)}</pre></div>`;
+    html += `<div class="muted" style="margin-top:10px">verified code comparison</div>
+             <div class="diff-grid"><div><div class="code-label">original span</div><pre>${esc(original)}</pre></div>
+             <div><div class="code-label">candidate rewrite</div><pre>${esc(candidate.code)}</pre></div></div>`;
     const terminal = p.status === "completed" || p.status === "cancelled";
     const applyDisabled = state.source !== "live" || p.mode !== "active"
       || !terminal || p.original_span_stale;
@@ -402,6 +452,12 @@ async function loadSample() {
 
 async function refreshTaskPicker() {
   const picker = $("taskPicker");
+  if (state.runtimeMode !== "contributor") {
+    picker.replaceChildren(new Option("live runs are available in contributor Forge", ""));
+    picker.disabled = true;
+    return;
+  }
+  picker.disabled = false;
   try {
     const raw = await mcpCall("list_swarm_tasks", { limit: 15 });
     const tasks = JSON.parse(raw);
@@ -409,11 +465,49 @@ async function refreshTaskPicker() {
       tasks.length ? "recent swarms…" : "no swarms on this gateway yet", ""
     ));
     for (const task of tasks) {
-      const label = `${task.status} · ${task.focus_node} · ${task.task_id.slice(0, 8)}…`;
+      const created = task.created_at ? new Date(task.created_at).toLocaleString([], {
+        month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
+      }) : "time unknown";
+      const label = `${task.status} · ${task.focus_node} · ${created} · ${task.task_id.slice(0, 8)}…`;
       picker.appendChild(new Option(label, task.task_id));
     }
   } catch (err) {
-    picker.replaceChildren(new Option("recent swarms unavailable (offline?)", ""));
+    picker.replaceChildren(new Option("could not read recent swarms — refresh to retry", ""));
+  }
+}
+
+async function discoverRuntime() {
+  const banner = $("runtimeBanner");
+  try {
+    const response = await fetch("/runtimez", { headers: { Accept: "application/json" } });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const runtime = await response.json();
+    state.runtimeMode = runtime.service?.mode || "unknown";
+    banner.classList.add("ready");
+    if (state.runtimeMode === "contributor" && runtime.service?.workspace_attached) {
+      $("runtimeTitle").textContent = "Contributor Forge connected";
+      $("runtimeCopy").textContent = "Live task history and real demo runs are available from the attached workspace.";
+      $("forgeLink").hidden = true;
+      $("demoBtn").disabled = false;
+      $("refreshTasksBtn").disabled = false;
+      $("demoHint").innerHTML = "Runs against the attached golden target. If Swarm is off, the exact gate instruction appears below.";
+    } else {
+      $("runtimeTitle").textContent = "Stable gateway connected — exploration mode";
+      $("runtimeCopy").textContent = "The recorded tour works here. Live Swarm tools stay isolated in contributor Forge on port 4766.";
+      $("demoBtn").disabled = true;
+      $("refreshTasksBtn").disabled = true;
+      $("demoHint").textContent = "Live execution is intentionally unavailable on the workspace-neutral stable service.";
+      if (["127.0.0.1", "localhost"].includes(window.location.hostname)) {
+        $("forgeLink").href = `${window.location.protocol}//${window.location.hostname}:4766/ui/swarm.html`;
+        $("forgeLink").hidden = false;
+      }
+    }
+  } catch (err) {
+    state.runtimeMode = "unknown";
+    $("runtimeTitle").textContent = "Gateway capability check unavailable";
+    $("runtimeCopy").textContent = "The recorded tour still works; live controls may not.";
+    $("demoBtn").disabled = true;
+    $("refreshTasksBtn").disabled = true;
   }
 }
 
@@ -465,4 +559,11 @@ $("taskPicker").addEventListener("change", (event) => {
   $("taskId").value = event.target.value;
   loadLive();
 });
-refreshTaskPicker();
+
+async function bootstrap() {
+  await loadSample();
+  await discoverRuntime();
+  await refreshTaskPicker();
+}
+
+bootstrap();

@@ -6,14 +6,18 @@ All notable changes to UniGrok MCP will be documented in this file.
 
 ### Added
 - **Swarm Playground on-ramp**: the Pareto Playground no longer assumes a
-  pasted task id. It gains a one-click sample (a bundled RECORDED run of the
-  golden dedup target whose payload carries its own provenance: scripted
-  candidates, real measurements), a recent-swarms picker backed by the new
-  read-only `list_swarm_tasks` MCP tool (newest first, staleness-aware
+  pasted task id. It opens with a guided, already-rendered sample (a bundled
+  RECORDED run of the golden dedup target whose payload carries its own
+  provenance: scripted candidates, real measurements), a recent-swarms picker
+  backed by the new read-only `list_swarm_tasks` MCP tool (newest first, staleness-aware
   status), and a "Run demo swarm" button that launches `start_code_swarm` on
   the golden O(N²) target and live-polls the run to completion — surfacing
   the tool's own refusal verbatim when the swarm mode or contributor gates
-  say no.
+  say no. The page now detects stable versus contributor runtime, routes live
+  work toward the port-4766 Forge instead of reporting a false offline state,
+  translates signed memory deltas into plain-language trade-offs, selects a
+  useful elite receipt automatically, hides manual IDs/tokens under Advanced,
+  and makes SVG candidates keyboard-operable.
 - **Private cloud control plane completion**: RFC 8414/9728 OAuth discovery,
   dynamic public-client registration, authorization-code PKCE, ten-minute
   scoped tokens, live GitHub membership introspection/revocation, and
