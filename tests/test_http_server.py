@@ -341,7 +341,7 @@ def test_oauth_subject_cannot_evade_budget_attribution_with_client_headers():
         "unigrok.oauth": {"sub": "github:42"},
     }
 
-    assert _derive_http_caller(scope) == "oauth:github:42"
+    assert _derive_http_caller(scope) == "oauth:github:42|rotating-client"
 
 
 def test_cloudrun_forbids_unauthenticated_override(monkeypatch):

@@ -150,6 +150,10 @@ For a guided local bootstrap:
 It checks for `uv`, `git`, and Docker, syncs the Python environment, runs
 `init`, and validates Docker Compose when Docker is available.
 
+The stable gateway's base package excludes test/lint tooling. Contributor
+Forge/Swarm installations need `uv sync --extra forge`; the repository's
+default development group and Docker image already include that extra's tools.
+
 ## IDE Setup
 
 The default architecture is one shared Docker service:
@@ -158,8 +162,10 @@ The default architecture is one shared Docker service:
 http://localhost:4765/mcp
 ```
 
-Each IDE should send a stable `X-Client-ID` header so telemetry, sessions, and
-budgets stay separated by caller.
+Each IDE should send a stable `X-Client-ID` header for attribution and to keep
+that authenticated principal's IDE sessions separate. The header is an
+untrusted label, not an authentication credential; remote budgets and session
+isolation bind to the OAuth subject or configured gateway-key alias.
 
 ### Cursor
 
@@ -234,6 +240,9 @@ If `UNIGROK_API_KEYS` is set in `.env`, also add
 
 More detail, including Antigravity/Gemini notes, lives in
 [docs/ide-setup.md](docs/ide-setup.md).
+
+The deployment and identity assumptions are explicit in the
+[threat model](docs/threat-model.md).
 
 ### ChatGPT and GitHub `@grok` reviews
 

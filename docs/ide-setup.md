@@ -89,11 +89,15 @@ registration on `4765` unless a particular IDE should always begin in one mode.
 
 ## Per-IDE identity: `X-Client-ID`
 
-Every config below sends `X-Client-ID`. It (a) attributes telemetry,
-budgets, and `/metrics` per IDE, and (b) namespaces sessions — `vscode`
-and `claude-desktop` conversations named `main` stay separate
-(`vscode:main` vs `claude-desktop:main`). Omit the header and you share
-the plain namespace.
+Every config below sends `X-Client-ID`. It attributes telemetry and separates
+one authenticated principal's IDE sessions. It is a caller-controlled label,
+not a security principal: the stored namespace is derived from the OAuth
+subject or gateway-key alias first, then the client label. For example, two
+IDEs under the same local principal keep distinct `vscode:main` and
+`claude-desktop:main` logical sessions, while two OAuth subjects cannot collide
+even if both assert `X-Client-ID: vscode`. Budgets bind to the authenticated
+principal. Omitting the header shares that principal's client-neutral
+namespace.
 
 If `UNIGROK_API_KEYS` is set, also add
 `"Authorization": "Bearer <one-of-those-keys>"` to each config's headers.
