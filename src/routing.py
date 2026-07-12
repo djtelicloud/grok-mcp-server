@@ -44,17 +44,23 @@ def _term_score(text: str, terms: Iterable[str], cap: int = 3) -> int:
 
 
 def _messages_have_image(messages: Optional[Sequence[Dict[str, Any]]]) -> bool:
-    def contains(value: Any) -> bool:
-        if isinstance(value, dict):
-            kind = str(value.get("type") or "").lower()
-            if kind in {"image", "image_url", "input_image"} or "image_url" in value:
-                return True
-            return any(contains(item) for item in value.values())
-        if isinstance(value, list):
-            return any(contains(item) for item in value)
+    if not messages:
         return False
-
-    return contains(list(messages or []))
+    stack = list(messages)
+    while stack:
+        current = stack.pop()
+        if isinstance(current, dict):
+            kind = current.get("type")
+            if kind:
+                kind = str(kind).lower()
+                if kind in {"image", "image_url", "input_image"}:
+                    return True
+            if "image_url" in current:
+                return True
+            stack.extend(current.values())
+        elif isinstance(current, list):
+            stack.extend(current)
+    return False
 
 
 def extract_routing_features(
