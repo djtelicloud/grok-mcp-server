@@ -9,20 +9,48 @@
       --bg: #0e1013; --panel: #16191d; --panel2: #1c2026; --border: #2a2f36;
       --text: #e7e9ec; --muted: #8b8d98;
       --red: #e5484d; --orange: #f5a623; --gray: #8b8d98; --green: #30a46c;
-      --accent: #4f8cff;
+      --accent: #6e9dff; --accent-soft: rgba(79, 140, 255, .13);
+      --cyan: #63d6c5; --shadow: 0 18px 55px rgba(0, 0, 0, .22);
     }
     * { box-sizing: border-box; }
     body { margin: 0; background: var(--bg); color: var(--text);
            font: 14px/1.5 -apple-system, "Segoe UI", Roboto, sans-serif; }
-    header { display: flex; align-items: baseline; gap: 12px; padding: 14px 20px;
-             border-bottom: 1px solid var(--border); }
-    header h1 { font-size: 16px; margin: 0; }
-    header a { color: var(--accent); text-decoration: none; font-size: 12px; }
+    header { display: flex; align-items: center; justify-content: space-between; gap: 24px;
+             padding: 24px 20px 18px; border-bottom: 1px solid var(--border);
+             background: radial-gradient(circle at 16% -40%, rgba(79, 140, 255, .24), transparent 42%); }
+    header h1 { font-size: clamp(21px, 3vw, 30px); line-height: 1.15; margin: 3px 0 5px; letter-spacing: -.03em; }
+    header p { color: var(--muted); margin: 0; max-width: 700px; }
+    header a { color: var(--text); text-decoration: none; font-size: 12px; border: 1px solid var(--border);
+               background: var(--panel); border-radius: 999px; padding: 7px 12px; white-space: nowrap; }
+    header a:hover { border-color: var(--accent); }
+    .eyebrow { color: var(--cyan); font-size: 10px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase; }
+    .runtime-banner { display: flex; align-items: center; gap: 11px; margin: 14px 20px 0; padding: 11px 14px;
+                      max-width: 1240px; background: var(--panel); border: 1px solid var(--border); border-radius: 9px; }
+    .runtime-banner .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); flex: 0 0 auto; }
+    .runtime-banner.ready .dot { background: var(--green); box-shadow: 0 0 10px var(--green); }
+    .runtime-banner strong { display: block; font-size: 12px; }
+    .runtime-banner span { color: var(--muted); font-size: 11px; }
+    .runtime-banner a { color: var(--accent); font-size: 11px; margin-left: auto; text-decoration: none; white-space: nowrap; }
     .wrap { display: grid; grid-template-columns: 1fr 340px; gap: 14px;
             padding: 14px 20px; max-width: 1280px; }
     .panel { background: var(--panel); border: 1px solid var(--border);
-             border-radius: 8px; padding: 12px; }
+             border-radius: 10px; padding: 14px; box-shadow: var(--shadow); }
+    .section-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+    .section-head h2 { font-size: 17px; margin: 2px 0 0; }
+    .source-badge { color: var(--muted); border: 1px solid var(--border); border-radius: 999px;
+                    padding: 3px 8px; font-size: 10px; letter-spacing: .06em; text-transform: uppercase; }
+    .source-badge.live { color: var(--green); border-color: rgba(48, 164, 108, .45); }
+    .journeys { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; }
+    .journey { display: flex; flex-direction: column; min-height: 144px; background: var(--panel2);
+               border: 1px solid var(--border); border-radius: 9px; padding: 11px; }
+    .journey.primary { border-color: rgba(79, 140, 255, .52); background: linear-gradient(145deg, var(--accent-soft), var(--panel2) 65%); }
+    .journey .step { color: var(--muted); font-size: 10px; letter-spacing: .12em; }
+    .journey h3 { font-size: 13px; margin: 5px 0 3px; }
+    .journey p { color: var(--muted); font-size: 11px; margin: 0 0 10px; flex: 1; }
+    .journey .controls { gap: 6px; }
+    .journey select { min-width: 0; width: 100%; }
     .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    button, input, select { font: inherit; }
     input[type=text], input[type=password] { background: var(--panel2); color: var(--text);
       border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; min-width: 230px; }
     select { background: var(--panel2); color: var(--text); border: 1px solid var(--border);
@@ -30,9 +58,16 @@
     button { background: var(--panel2); color: var(--text); border: 1px solid var(--border);
              border-radius: 6px; padding: 6px 12px; cursor: pointer; }
     button:hover { border-color: var(--accent); }
+    button.primary { background: var(--accent); border-color: var(--accent); color: #08101f; font-weight: 700; }
     button:disabled { opacity: .45; cursor: not-allowed; }
     .scorecard { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
                  gap: 8px; margin-top: 12px; }
+    .advanced { margin-top: 10px; border-top: 1px solid var(--border); padding-top: 9px; }
+    .advanced summary { color: var(--muted); cursor: pointer; font-size: 11px; user-select: none; }
+    .advanced .controls { margin-top: 9px; }
+    #loadMsg { display: block; min-height: 20px; margin-top: 9px; font-size: 11px; }
+    .insight { margin: 10px 0 2px; padding: 9px 11px; background: var(--accent-soft);
+               border-left: 3px solid var(--accent); border-radius: 6px; font-size: 12px; }
     .stat { background: var(--panel2); border: 1px solid var(--border); border-radius: 8px;
             padding: 8px 10px; }
     .stat .k { color: var(--muted); font-size: 11px; text-transform: uppercase;
@@ -50,41 +85,86 @@
     #detail pre { background: var(--panel2); border: 1px solid var(--border);
                   border-radius: 6px; padding: 8px; overflow: auto; max-height: 220px;
                   font-size: 12px; white-space: pre-wrap; }
-    .diff-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .diff-grid { display: grid; grid-template-columns: 1fr; gap: 8px; }
     .muted { color: var(--muted); }
     .honesty { color: var(--muted); font-size: 11px; padding: 10px 20px 20px; max-width: 1280px; }
     .err { color: var(--red); }
-    circle.dot { cursor: pointer; }
+    circle.dot { cursor: pointer; outline: none; }
+    circle.dot:focus { stroke: #fff; stroke-width: 2px; }
     circle.elite { filter: drop-shadow(0 0 4px var(--green)); }
+    #detail { min-width: 0; align-self: start; }
+    #detail h2 { font-size: 15px; margin: 0 0 10px; }
+    .outcome-pill { display: inline-block; border: 1px solid var(--border); border-radius: 999px;
+                    padding: 2px 7px; font-size: 10px; margin-bottom: 9px; }
+    .receipt-grid { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 5px 8px; }
+    .receipt-value { overflow-wrap: anywhere; }
+    .receipt-json { margin-top: 10px; }
+    .receipt-json summary { color: var(--muted); cursor: pointer; font-size: 11px; }
+    .code-label { color: var(--muted); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; margin-bottom: -3px; }
+    @media (max-width: 900px) {
+      .wrap { grid-template-columns: 1fr; }
+      .journeys { grid-template-columns: 1fr; }
+      .journey { min-height: 0; }
+      .runtime-banner { align-items: flex-start; }
+    }
   </style>
 </head>
 <body>
   <header>
-    <h1>Swarm Optimizer — Pareto Playground</h1>
+    <div>
+      <div class="eyebrow">Contributor lab · verified optimization</div>
+      <h1>Swarm Optimizer</h1>
+      <p>Watch candidate rewrites hit static, test, and performance gates—then inspect the verified Pareto trade-offs.</p>
+    </div>
     <a href="./index.html">← Control Center</a>
   </header>
+
+  <div id="runtimeBanner" class="runtime-banner" role="status" aria-live="polite">
+    <span class="dot" aria-hidden="true"></span>
+    <div><strong id="runtimeTitle">Checking this gateway…</strong><span id="runtimeCopy">Finding live Swarm capabilities.</span></div>
+    <a id="forgeLink" href="http://127.0.0.1:4766/ui/swarm.html" hidden>Open contributor Forge →</a>
+  </div>
 
   <div class="wrap">
     <div>
       <div class="panel">
-        <div class="controls">
-          <button id="sampleBtn" type="button" title="Recorded run of the golden dedup target — scripted candidates, real measurements">▶ Load sample run</button>
-          <button id="demoBtn" type="button" title="Runs start_code_swarm on the golden O(N²) dedup target (contributor mode + UNIGROK_SWARM=dry_run required)">🐝 Run demo swarm</button>
-          <select id="taskPicker" title="Recent swarms on this gateway">
-            <option value="">recent swarms…</option>
-          </select>
-          <button id="refreshTasksBtn" type="button" title="Refresh the recent-swarm list">⟳</button>
+        <div class="section-head">
+          <div><div class="eyebrow">Start here</div><h2>Choose how you want to explore</h2></div>
+          <span id="sourceBadge" class="source-badge">loading</span>
         </div>
-        <div class="controls" style="margin-top:8px">
-          <input id="taskId" type="text" placeholder="swarm task id" />
-          <input id="token" type="password" placeholder="bearer token (optional)" />
-          <button id="loadBtn">Load</button>
-          <label>
-            <button id="fileBtn" type="button">Load JSON export…</button>
-            <input id="fileInput" type="file" accept=".json" style="display:none" />
-          </label>
-          <span id="loadMsg" class="muted"></span>
+        <div class="journeys">
+          <article class="journey primary">
+            <span class="step">01 · instant tour</span>
+            <h3>Explore a verified run</h3>
+            <p>Already loaded: two real Pareto elites, one test-wall candidate, and the honest speed-versus-memory trade-off.</p>
+            <button id="sampleBtn" class="primary" type="button" title="Recorded run of the golden dedup target — scripted candidates, real measurements">Replay recorded run</button>
+          </article>
+          <article class="journey">
+            <span class="step">02 · your history</span>
+            <h3>Open a recent swarm</h3>
+            <p>Choose a persisted live run from this contributor gateway.</p>
+            <div class="controls">
+              <select id="taskPicker" title="Recent swarms on this gateway"><option value="">checking gateway…</option></select>
+              <button id="refreshTasksBtn" type="button" title="Refresh recent swarms" aria-label="Refresh recent swarms">⟳</button>
+            </div>
+          </article>
+          <article class="journey">
+            <span class="step">03 · live experiment</span>
+            <h3>Run the golden demo</h3>
+            <p id="demoHint">Requires contributor mode and <code>UNIGROK_SWARM=dry_run</code>. Gate refusals stay visible.</p>
+            <button id="demoBtn" type="button" title="Runs start_code_swarm on the golden O(N²) dedup target">🐝 Run demo swarm</button>
+          </article>
         </div>
+        <details class="advanced">
+          <summary>Advanced: task ID, bearer token, or JSON export</summary>
+          <div class="controls">
+            <input id="taskId" type="text" placeholder="swarm task id" />
+            <input id="token" type="password" placeholder="bearer token (optional)" />
+            <button id="loadBtn">Load task</button>
+            <label><button id="fileBtn" type="button">Load JSON export…</button><input id="fileInput" type="file" accept=".json" style="display:none" /></label>
+          </div>
+        </details>
+        <span id="loadMsg" class="muted" role="status" aria-live="polite"></span>
         <div id="scorecard" class="scorecard"></div>
       </div>
 
@@ -96,6 +176,7 @@
           <span class="lg-green">Pareto elite</span>
           <span>★ baseline</span>
         </div>
+        <div id="tradeoffSummary" class="insight">Loading the recorded golden run…</div>
         <svg id="chart" viewBox="0 0 860 420" role="img"
              aria-label="Latency versus peak memory scatter of swarm candidates"></svg>
         <div class="timeline">
@@ -111,7 +192,7 @@
     </div>
 
     <div class="panel" id="detail">
-      <div class="muted">Click a dot for its full receipt.</div>
+      <div class="muted">Loading the best verified candidate…</div>
     </div>
   </div>
 

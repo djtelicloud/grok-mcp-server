@@ -133,9 +133,24 @@ def test_mcp_ui_swarm_playground_is_served_and_honest(monkeypatch):
     assert 'id="demoBtn"' in page.text
     assert 'id="taskPicker"' in page.text
     assert 'id="refreshTasksBtn"' in page.text
+    assert 'id="runtimeBanner"' in page.text
+    assert 'id="sourceBadge"' in page.text
+    assert 'id="tradeoffSummary"' in page.text
+    assert "Already loaded" in page.text
+    assert "Advanced: task ID" in page.text
     assert "list_swarm_tasks" in script.text
     assert "./swarm-sample.json" in script.text
     assert "nsquared_dedup" in script.text  # the golden demo target
+    assert 'fetch("/runtimez"' in script.text
+    assert "Stable gateway connected" in script.text
+    assert ":4766/ui/swarm.html" in script.text
+    assert "await loadSample()" in script.text  # useful content, not empty boxes, on arrival
+    assert "rpc.result?.isError" in script.text
+    assert 'c.setAttribute("tabindex", "0")' in script.text
+    assert "leadingFrontId" in script.text
+    assert "no new candidates" in script.text
+    assert "Math.max(0, lo - span * 0.08)" in script.text
+    assert "Bandit selection receipt" in script.text
     # The bundled sample is a REAL recorded run and says so inside itself.
     with TestClient(create_app(), base_url="http://localhost:8080") as client:
         sample = client.get("/ui/swarm-sample.json")
