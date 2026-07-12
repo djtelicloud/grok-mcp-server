@@ -17,13 +17,16 @@ credentials, OAuth codes, tokens, or private keys here.
   function-aware search setup, goal-specific champion selection, strict status
   v2 receipts, elite-offspring lineage, deterministic AST transforms, and the
   copy-only paste workflow all ship from protected main.
-- The full landing suite passed 1,063 tests. Offline evals passed 12/12 and the
+- The full landing suite passed 1,069 tests. Offline evals passed 12/12 and the
   deterministic OKF bundle was clean.
 - The maintainer sweep repaired and merged PR #22's secret-redaction fast path,
   PR #23's plain-text message-size fast path, and PR #28's SQLite scalar-count
   refactor with focused contract tests. PR #24 was closed without merge because
   replacing JSON validation boundaries with `deepcopy` introduced correctness
   regressions and left no safe optimization after repair.
+- PR #30's routing image detector was repaired and merged with container-only
+  iterative traversal, marker-equivalence tests, and recursion-depth coverage;
+  its verified representative speedup was 2.9%, not the submitted 39% claim.
 - The contribution contract is interface-independent: authorized IDE agents
   may test, commit, push only their own agent-prefixed branch, and open or
   update its draft PR. Any explicitly acting Codex/project-admin surface may
