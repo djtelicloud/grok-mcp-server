@@ -2641,9 +2641,13 @@ def scoped_session(session: Optional[str]) -> Optional[str]
 
 **Keywords:** scoped, session
 
-Prefix an explicit session name with the requesting client id so each
-IDE keeps its own history ('vscode:main'). No client id, or no session,
-leaves the name untouched.
+Namespace a session by authenticated principal and client label.
+
+HTTP middleware always binds a principal (OAuth subject, static-key alias,
+or the loopback anonymous principal). ``X-Client-ID`` remains an untrusted
+subordinate label that separates one principal's IDEs; it never provides
+the security boundary by itself. Non-HTTP callers preserve the historical
+unscoped behavior unless their transport binds one of these context vars.
 
 ### Function: `normalize_caller` {#utils-normalize_caller}
 
@@ -2656,6 +2660,20 @@ def normalize_caller(value: Any) -> Optional[str]
 Sanitize a caller identity: strip control characters, trim, and bound
 to 80 chars (it lands in db rows and metrics keys). None/blank -> None.
 
+### Function: `normalize_principal` {#utils-normalize_principal}
+
+```python
+def normalize_principal(value: Any) -> Optional[str]
+```
+
+**Keywords:** normalize, principal
+
+Normalize an authenticated principal without collision-prone truncation.
+
+Provider subjects can exceed the short telemetry-label bound. Preserve
+ordinary subjects verbatim, but suffix oversized values with a digest so
+two subjects sharing a long prefix cannot collapse into one namespace.
+
 ### Function: `set_active_caller` {#utils-set_active_caller}
 
 ```python
@@ -2666,6 +2684,33 @@ def set_active_caller(caller: Optional[str])
 
 Bind the caller identity to the current async context (the HTTP
 gateway middleware does this per request). Returns the reset token.
+
+### Function: `set_active_principal` {#utils-set_active_principal}
+
+```python
+def set_active_principal(principal: Optional[str])
+```
+
+**Keywords:** set, active, principal
+
+Bind the authenticated security principal for the current request.
+
+### Function: `resolve_request_caller` {#utils-resolve_request_caller}
+
+```python
+def resolve_request_caller(caller: Optional[str]) -> Optional[str]
+```
+
+**Keywords:** resolve, request, caller
+
+Resolve attribution without letting HTTP tool metadata replace the
+gateway-bound identity.
+
+FastMCP handlers often pass ``clientInfo.name`` explicitly. On HTTP that
+value remains only a client label; the middleware's combined
+``principal|label`` attribution wins so budget accounting stays anchored
+to the principal. Stdio has no HTTP principal and preserves explicit
+caller behavior.
 
 ### Function: `caller_from_mcp_context` {#utils-caller_from_mcp_context}
 
@@ -3012,17 +3057,17 @@ created_at scan + Python-side JSON match as get_caller_cost_today
 ### Method: `GrokSessionStore.get_caller_cost_today` {#utils-groksessionstore-get_caller_cost_today}
 
 ```python
-async def GrokSessionStore.get_caller_cost_today(self, caller_substring: str) -> float
+async def GrokSessionStore.get_caller_cost_today(self, caller_principal: str) -> float
 ```
 
 **Keywords:** grok, session, store, get, caller, cost, today
 
-Today's total telemetry cost attributed to callers matching the
-(case-insensitive) substring — the per-caller budget pot.
+Today's total telemetry cost attributed to one exact principal.
 
 One indexed read: idx_telemetry_created_at bounds the scan to today's
-rows; the caller match runs in Python over that bounded slice so the
-query never depends on the optional json1 extension.
+rows; telemetry may append an encoded client label after ``|``, but
+labels cannot match or poison another principal's pot. The match runs
+in Python so the query never depends on optional json1.
 
 ### Method: `GrokSessionStore.get_caller_stats_today` {#utils-groksessionstore-get_caller_stats_today}
 
