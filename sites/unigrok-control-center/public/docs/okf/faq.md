@@ -135,11 +135,13 @@ omits `mode`; an explicit `agent.mode` always wins.
 
 **Keywords:** x-client-id, session, telemetry, cursor, vscode, claude code
 
-UniGrok uses the stable `X-Client-ID` header to namespace session names and
-attribute telemetry. For example, a session named `main` from Cursor and VS
-Code is stored independently as `cursor:main` and `vscode:main`. Keep the
-recommended per-client IDs for isolation; use the same explicit client ID only
-when you intentionally want clients to share the same session namespace.
+UniGrok uses the stable `X-Client-ID` header as an untrusted client label for
+session separation and telemetry attribution. The authenticated OAuth subject
+or gateway-key alias owns the namespace and budget; the client label is nested
+below it. Thus Cursor and VS Code sessions named `main` remain distinct for one
+principal, while separate principals cannot collide by asserting the same
+client ID. Use the same explicit client ID only when clients authenticated as
+the same principal should share a logical session namespace.
 
 ## Why did a request use the API plane instead of the CLI plane? {#api-vs-cli-plane}
 

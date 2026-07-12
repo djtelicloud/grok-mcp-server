@@ -2,105 +2,71 @@
 
 Last updated: 2026-07-12
 Owner: Codex
-Status: Insider intelligence payload protocols landed and public OKF deployed; no active gate
+Status: Principal-bound identity hardening and first modular extraction landed; no active gate
 
 This is the project-scoped handoff for new Codex chats. Resolve drift-prone
 Git, CI, runtime, DNS, and cloud identifiers live before acting. Never record
 credentials, OAuth codes, tokens, or private keys here.
 
-## Completed repository state
+## Completed state
 
-- PR #44 merged to protected `origin/main` as
-  `18798c0cb0b85a22e9e15d5cbd6e300999c1a737`. The exact reviewed,
+- PR #48 merged to protected `origin/main` as
+  `e854b6a4b1f35c5aeb8eab224589e692c5dab2e2`. Its exact reviewed,
   CI-green, Codex-approved, and locally landed head was
-  `a966ef8c138c6864242c862793aa35c714608339`.
-- PR #46 merged the stale-artifact deployment guard to protected `origin/main`
-  as `8965a46da70340e37ea3d3e7d52f1d35a709bf1b`. Its exact reviewed,
+  `d5af1e12c4904383b9fb68e2f2530514cd16f177`.
+- HTTP session namespaces now compose the authenticated OAuth subject or
+  gateway-key alias with an encoded subordinate client label. `X-Client-ID`
+  and `X-Caller` remain reporting labels and cannot become security
+  principals.
+- HTTP budgets use exact authenticated-principal keys. Telemetry preserves
+  client attribution as `principal|encoded-label`, while cost aggregation
+  accepts only the exact principal or its label suffix. Crafted labels cannot
+  evade or poison another principal's budget.
+- Long provider subjects receive collision-resistant normalization. Existing
+  HTTP sessions move to a principal-prefixed namespace on first post-upgrade
+  use; stdio behavior is unchanged. A shared static gateway key intentionally
+  remains one shared principal.
+- `SECURITY.md` now supports `0.6.x`, and `docs/threat-model.md` defines the
+  stable Core, remote Core, contributor Forge, and public-site trust zones.
+- Test/lint tools are no longer Core runtime dependencies. `pytest`,
+  `coverage`, and `ruff` live in the explicit `forge` extra and development
+  group; the contributor Docker image continues to install them because Swarm
+  executes those tools at runtime.
+- PR #49 merged to protected `origin/main` as
+  `03be09a5f86ed146c0207e720f6f65d20988929f`. Its exact reviewed,
   CI-green, Codex-approved, and locally landed head was
-  `5c03076a7d20ff7b7fd60d89060c1cbd9eba7abb`.
-- IntelligenceCapsule v1 remains byte-for-byte unchanged. Its schema SHA-256
-  is `10c2ec4638bd6c4e303b3e2c4c7d91ae582554f48aaa01fac2d9370062b98d4c`
-  and its deterministic SHA-1-format Git genesis remains
-  `6dadda28ac4174bf227f36b45917e15c663987ce`.
-- The existing `body.payload = {schema,data}` seam now has three separately
-  versioned Insider profiles:
-  - GNO envelope: `4c7fb150b3f82738ae43d52669c8c663283807d42add1f4532f01527a4d70665`
-  - OptiBench result: `dfc216d1855eb36e54829c3aca00434f0dc9845a6efc205c2c49016531accf81`
-  - Agentic DPO pair: `7db601ccc11aaa94409383f88c7305a46b63a705176897aaa313f835b24bed84`
-- The separate Needle tools-context projection schema is pinned to
-  `ac92a88b87e35254a7eef4a151d8743418ef102402022b228609743cbcbf7496`.
-  It carries verified examples through Needle's real nested tools-JSON input;
-  it is inference-time context, not parameter training or an authority gate.
-- Normative evidence/graph algorithms are pinned by semantic contract
-  `7464c2343c3edaadc21a14a880e689ef8e4b4ac0fa3fc07b2b6f37b08733545a`
-  and public conformance vectors
-  `6a0df82c82cd3bfbadc6ff1febf1e43b2d2a6446acd1b977ae7d3262de8d98f4`.
-- Python is the executable evidence/complete-graph promotion verifier;
-  TypeScript performs matching structural profile validation. Generic Capsule
-  validation remains an independent gate.
-- GNO receipts are manifest-closed and role-bound. OptiBench recomputes raw
-  medians, shared baselines, final Pareto ranks, and exact rational crowding
-  over a closed population. DPO requires registered GNO task/candidate parents,
-  complete acyclic closure, exact task/output semantic roles, and a digest-bound
-  mapping for every cohort benchmark before JSONL or Needle projection.
-- Public MCP consumer SQLite is unchanged. No profile opens, migrates, exports,
-  or synchronizes `grok_sessions.db`; the Insider DAG remains a separate layer.
-- The source distribution now excludes local site dependencies and caches, and
-  CI rejects an sdist above 10 MiB, 2,000 entries, or containing forbidden
-  dependency/build trees.
+  `18b43c420832dc9b5b8960846a120a4597622287`.
+- `src/identity.py` is now the sole definition site for request identity,
+  principal context, session composition, and telemetry caller parsing.
+  Production consumers import it directly; `src.utils` re-exports the same
+  objects for compatibility. Tests pin all four ContextVar objects by identity.
 
-## Verification receipt
+## Verification
 
-- The repository landing gate printed
-  `LANDED TO MAIN: a966ef8c138c6864242c862793aa35c714608339` after 1,151 tests
-  and a rebuilt, smoke-tested contributor container.
-- Python 3.11/3.12 CI, Project Site, standalone control image, Docker health,
-  offline evals, CodeQL, and exact-head `Codex Approval` all passed on that
-  head. Local offline evals passed 12/12; the site passed 54 tests with zero npm
-  vulnerabilities and no lint errors.
-- Three independent adversarial audits found no remaining payload, graph,
-  schema, secret-boundary, cross-runtime, or packaging blocker. A three-candidate
-  alternate-benchmark replay was rejected by the immutable cohort proof.
-- The direct Grok MCP review attempt returned only a zero-token planning stub,
-  and the optional hosted review runner remained unavailable; no Grok approval
-  is claimed.
-- The control-center site passed 58 tests and now rejects packaging unless all
-  25 `public/**` assets exist byte-for-byte under `dist/client/**`. This guard
-  caught a stale ignored build in Sites version 8; that version was superseded.
-- Sites version 9 was built from protected merge `8965a46d`, contained all 19
-  OKF documents, and deployed successfully. Both the Sites production URL and
-  `https://grokmcp.org/docs/okf/intelligence-payload-semantics-v1.json` return
-  HTTP 200 with SHA-256
-  `7464c2343c3edaadc21a14a880e689ef8e4b4ac0fa3fc07b2b6f37b08733545a`.
+- The PR #48 landing gate printed
+  `LANDED TO MAIN: d5af1e12c4904383b9fb68e2f2530514cd16f177`
+  after 1,162 tests plus a rebuilt and smoke-tested contributor container.
+- The PR #49 landing gate printed
+  `LANDED TO MAIN: 18b43c420832dc9b5b8960846a120a4597622287`
+  after 1,163 tests plus a restarted and smoke-tested contributor service.
+- Python 3.11/3.12 CI, Project Site, standalone control image, Docker, offline
+  evals, CodeQL, and exact-head `Codex Approval` passed on both PR heads.
+- Wheel metadata confirms Core excludes `pytest`, `coverage`, and `ruff`; the
+  `forge` extra contains all three. OKF generation and package builds passed.
+- The initial exact-diff Grok security review returned only a planning stub, so
+  no Grok approval is claimed for PR #48. Grok's exact-diff review of PR #49
+  found no import-cycle, duplicate-context, or compatibility regression.
 
-## Trust boundary
+## Deliberately separate work
 
-- Canonical envelope validity, known-profile semantics, evidence bytes,
-  complete graph closure, publication authentication, and promotion policy are
-  separate gates. The envelope `signatures` array still authorizes nothing.
-- Shared-text secret detection is pinned and fail-closed but remains defense in
-  depth; Git push protection and publication policy are still required.
-- Git is shared Insider truth. Any Insider SQLite is only a disposable,
-  reconstructible materialized view. Public consumer SQLite remains private
-  runtime truth.
-- No tunnel, cloud callback into localhost, shared database, or browser-held
-  xAI credential is part of this architecture.
-
-## Deliberately separate next phases
-
-- Wire the current contributor Swarm to emit GNO capsules without relabeling
-  its discounted-UCB routing or wall-clock/`tracemalloc` results as stronger
-  evidence.
-- Build pinned `perf`/Callgrind OptiBench producers, signed local/cloud
-  publishers, quarantine fetch, publication authentication, and promotion
-  policy.
-- Add the disposable Insider materializer and prove delete-and-rebuild recovery
-  solely from trusted Git refs.
-- Benchmark Needle nested-example conditioning against simpler retrieval before
-  allowing it to remain even a non-authoritative shadow ranker.
-- Build the single adaptive contributor/admin UI on these contracts; keep
-  public visitors read-only and public MCP consumers headless in their IDE.
-
-The public OKF bundle is deployed. No MCP package release, consumer-runtime
-deployment, SQLite migration, or Insider producer/promotion activation is
-attached to this landing.
+- Continue splitting `src/utils.py` and `src/http_server.py` by bounded context
+  in small behavior-preserving PRs. Do not combine provider, storage, routing,
+  and HTTP decomposition into a single high-blast-radius change.
+- A top-level package migration from generic `src` to `unigrok` remains a
+  release-planned compatibility change, not part of the identity security fix.
+- Signed route receipts, routing counterfactual experiments, and an external
+  penetration test remain product/security milestones rather than blockers for
+  the local single-operator default.
+- The previously landed public OKF intelligence payload bundle remains valid;
+  this work did not release a new MCP package, deploy the consumer runtime,
+  migrate SQLite, or activate Insider producers/promotions.

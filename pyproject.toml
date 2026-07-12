@@ -26,6 +26,13 @@ dependencies = [
     "tiktoken>=0.7.0",
     "tree-sitter>=0.25,<0.26",
     "tree-sitter-python>=0.25,<0.26",
+]
+
+[project.optional-dependencies]
+# Contributor Forge executes user-selected pytest targets and coverage-based
+# Swarm preflight checks. Ruff is its optional cheapest-first correctness gate.
+# These are not required by the stable inference gateway.
+forge = [
     "coverage>=7.6",
     "pytest>=9.1.1",
     "ruff>=0.9",
@@ -81,6 +88,9 @@ exclude = [
 
 [dependency-groups]
 dev = [
+    "coverage>=7.6",
+    "pytest>=9.1.1",
     "httpx2>=2.5.0",
     "pytest-asyncio>=1.4.0",
+    "ruff>=0.9",
 ]

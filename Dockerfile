@@ -30,7 +30,7 @@ COPY pyproject.toml uv.lock ./
 
 # Install dependencies with sync (project itself is copied and run from source)
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --no-install-project
+    uv sync --frozen --no-dev --extra forge --no-install-project
 
 # Install the grok CLI (Linux build) so the local CLI plane works inside
 # the container. Version-pinned for reproducible builds. The installer drops

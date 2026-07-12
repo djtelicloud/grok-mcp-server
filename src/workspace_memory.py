@@ -21,11 +21,11 @@ from datetime import datetime
 from pathlib import Path, PurePosixPath
 from typing import Any, Dict, List, Optional, TextIO
 
+from .identity import get_active_caller
 from .utils import (
     PathResolver,
     _bounded_redacted,
     _task_terms,
-    get_active_caller,
     get_unigrok_runtime,
     run_blocking,
 )

@@ -38,6 +38,24 @@ from .credentials import (
     build_credential_plane_contract,
     credential_plane_policy,
 )
+from .identity import (
+    _ACTIVE_CALLER,
+    _ACTIVE_CLIENT_ID,
+    _ACTIVE_PRINCIPAL,
+    _ACTIVE_SESSION_ID,
+    caller_from_mcp_context,
+    get_active_caller,
+    get_active_principal,
+    normalize_caller,
+    normalize_principal,
+    reset_active_caller,
+    reset_active_principal,
+    resolve_request_caller,
+    scoped_session,
+    set_active_caller,
+    set_active_principal,
+    telemetry_row_caller,
+)
 
 # Path Resolver for zero-config portability
 class PathResolver:
@@ -502,96 +520,6 @@ async def communicate_with_timeout(
             await proc.wait()
         raise
 
-# ─── Caller identity (multi-agent workspace) ─────────────────────────────────
-# This MCP is shared by several coding agents (Claude/Codex/Gemini — see
-# .agents/AGENTS.md). The caller identity is a short free-text name derived
-# from the MCP clientInfo sent at initialize (stdio) or from the gateway's
-# X-Caller header / auth-key alias (HTTP). It is attributed to telemetry
-# rows, session message metadata, and research-job rows, and drives the
-# optional per-caller daily budgets. Everything degrades to caller=None.
-
-_ACTIVE_CALLER: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
-    "unigrok_active_caller", default=None
-)
-
-_ACTIVE_CLIENT_ID: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
-    "unigrok_http_client_id", default=None
-)
-
-_ACTIVE_SESSION_ID: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
-    "unigrok_http_session_id", default=None
-)
-
-
-def scoped_session(session: Optional[str]) -> Optional[str]:
-    """Prefix an explicit session name with the requesting client id so each
-    IDE keeps its own history ('vscode:main'). No client id, or no session,
-    leaves the name untouched."""
-    client_id = _ACTIVE_CLIENT_ID.get()
-    if not session:
-        session = _ACTIVE_SESSION_ID.get()
-    if client_id and session and not session.startswith(f"{client_id}:"):
-        return f"{client_id}:{session}"
-    return session
-
-
-def normalize_caller(value: Any) -> Optional[str]:
-    """Sanitize a caller identity: strip control characters, trim, and bound
-    to 80 chars (it lands in db rows and metrics keys). None/blank -> None."""
-    if value is None:
-        return None
-    text = re.sub(r"[\x00-\x1f\x7f]", "", str(value)).strip()
-    return text[:80] or None
-
-
-def set_active_caller(caller: Optional[str]):
-    """Bind the caller identity to the current async context (the HTTP
-    gateway middleware does this per request). Returns the reset token."""
-    return _ACTIVE_CALLER.set(normalize_caller(caller))
-
-
-def reset_active_caller(token) -> None:
-    with contextlib.suppress(Exception):
-        _ACTIVE_CALLER.reset(token)
-
-
-def get_active_caller() -> Optional[str]:
-    return _ACTIVE_CALLER.get()
-
-
-def caller_from_mcp_context(ctx: Any) -> Optional[str]:
-    """Caller identity from an injected FastMCP Context.
-
-    Introspected against the installed mcp 1.26: ctx.session (the
-    ServerSession) exposes client_params — the InitializeRequestParams the
-    client sent — whose clientInfo (mcp.types.Implementation) carries
-    name/version. Degrades to None for clients that never completed
-    initialize, contexts used outside a request (both raise), or SDK layouts
-    without client_params.
-    """
-    try:
-        params = getattr(getattr(ctx, "session", None), "client_params", None)
-        info = getattr(params, "clientInfo", None)
-        return normalize_caller(getattr(info, "name", None))
-    except Exception:
-        return None
-
-
-def telemetry_row_caller(row: Dict[str, Any]) -> Optional[str]:
-    """Caller name from a telemetry row's metadata column (raw JSON text from
-    the db, or an already-parsed dict from mocks). None for pre-v8 rows,
-    unattributed traffic, and malformed metadata."""
-    meta = row.get("metadata")
-    if isinstance(meta, str):
-        try:
-            meta = json.loads(meta)
-        except Exception:
-            return None
-    if not isinstance(meta, dict):
-        return None
-    return normalize_caller(meta.get("caller"))
-
-
 class CallerBudgetExceeded(RuntimeError):
     """A caller's UNIGROK_CALLER_BUDGETS daily spend is at/over its limit.
 
@@ -599,7 +527,7 @@ class CallerBudgetExceeded(RuntimeError):
     client as a tool error (isError), never a server crash."""
 
 
-# Per-budget-entry spend cache: entry substring -> (spent_usd, fetched_at).
+# Per-principal budget-entry spend cache: configured key -> (spent_usd, fetched_at).
 # ~60s of staleness is the accepted trade for a zero-read hot path between
 # refreshes (also bounds how far past midnight yesterday's total lingers).
 _CALLER_SPEND_CACHE: Dict[str, tuple] = {}
@@ -607,7 +535,7 @@ _CALLER_SPEND_TTL_SEC = 60.0
 
 
 def _caller_budgets() -> Dict[str, float]:
-    """UNIGROK_CALLER_BUDGETS parsed as a JSON dict {caller_substring:
+    """UNIGROK_CALLER_BUDGETS parsed as a JSON dict {principal:
     daily_usd}. Unset/blank/malformed -> {} (malformed warns, never raises)."""
     raw = os.environ.get("UNIGROK_CALLER_BUDGETS", "").strip()
     if not raw:
@@ -615,7 +543,7 @@ def _caller_budgets() -> Dict[str, float]:
     try:
         data = json.loads(raw)
         if not isinstance(data, dict):
-            raise ValueError("must be a JSON object of {caller_substring: daily_usd}")
+                raise ValueError("must be a JSON object of {principal: daily_usd}")
         budgets: Dict[str, float] = {}
         for key, value in data.items():
             name = str(key).strip()
@@ -630,14 +558,12 @@ def _caller_budgets() -> Dict[str, float]:
 
 
 def _match_caller_budget(caller: str, budgets: Dict[str, float]) -> Optional[tuple]:
-    """The budget entry governing this caller: case-insensitive substring
-    match against the caller name; the LONGEST matching substring wins so a
-    specific entry ('claude-code') beats a broad one ('claude')."""
-    lowered = caller.lower()
-    matches = [(key, limit) for key, limit in budgets.items() if key.lower() in lowered]
-    if not matches:
-        return None
-    return max(matches, key=lambda item: len(item[0]))
+    """The exact, case-insensitive budget entry governing this principal."""
+    lowered = caller.casefold()
+    return next(
+        ((key, limit) for key, limit in budgets.items() if key.casefold() == lowered),
+        None,
+    )
 
 
 async def enforce_caller_budget(store_param: Any, caller: Optional[str]) -> None:
@@ -2911,15 +2837,15 @@ class GrokSessionStore:
         return total
 
     @_with_read_retry_async
-    async def get_caller_cost_today(self, caller_substring: str) -> float:
-        """Today's total telemetry cost attributed to callers matching the
-        (case-insensitive) substring — the per-caller budget pot.
+    async def get_caller_cost_today(self, caller_principal: str) -> float:
+        """Today's total telemetry cost attributed to one exact principal.
 
         One indexed read: idx_telemetry_created_at bounds the scan to today's
-        rows; the caller match runs in Python over that bounded slice so the
-        query never depends on the optional json1 extension."""
+        rows; telemetry may append an encoded client label after ``|``, but
+        labels cannot match or poison another principal's pot. The match runs
+        in Python so the query never depends on optional json1."""
         await self._ensure_initialized()
-        needle = str(caller_substring or "").strip().lower()
+        needle = str(caller_principal or "").strip().casefold()
         if not needle:
             return 0.0
         # ISO timestamps compare lexicographically: '2026-07-02T...' sorts
@@ -2934,7 +2860,11 @@ class GrokSessionStore:
         total = 0.0
         for row in rows:
             caller = telemetry_row_caller(dict(row))
-            if caller and needle in caller.lower() and row["cost"] is not None:
+            normalized = caller.casefold() if caller else ""
+            if (
+                (normalized == needle or normalized.startswith(f"{needle}|"))
+                and row["cost"] is not None
+            ):
                 total += float(row["cost"])
         return total
 
@@ -7944,12 +7874,16 @@ async def orchestrate(
     # Caller identity: explicit param wins, else whatever the transport bound
     # to the current async context (HTTP gateway middleware / MCP clientInfo
     # capture in the tool layer). May legitimately stay None.
-    caller = normalize_caller(caller) or get_active_caller()
-    # Pre-execution budget gate — raises CallerBudgetExceeded (surfaced as a
-    # clean tool error) BEFORE any model work when the caller's daily
+    caller = resolve_request_caller(caller)
+    # Pre-execution budget gate — HTTP budgets belong to the authenticated
+    # principal, never to caller-controlled X-Client-ID/X-Caller labels. Stdio
+    # has no gateway principal, so its MCP client identity remains the fallback.
+    # Raises CallerBudgetExceeded (surfaced as a clean tool error) BEFORE any
+    # model work when the principal's daily
     # UNIGROK_CALLER_BUDGETS spend is at/over its limit; a no-op when the env
-    # is unset or the caller matches no entry.
-    await enforce_caller_budget(store, caller)
+    # is unset or the principal matches no entry.
+    budget_principal = get_active_principal() or caller
+    await enforce_caller_budget(store, budget_principal)
 
     # Inject tool manifest into system prompt if MCP instance available
     if mcp_instance:
@@ -8357,7 +8291,7 @@ async def run_agent_turn(
     transport bound to the current async context, and it flows into telemetry
     attribution, per-caller budgets, and session message metadata.
     """
-    caller = normalize_caller(caller) or get_active_caller()
+    caller = resolve_request_caller(caller)
     session = scoped_session(session)
     final_prompt = prompt or ""
     system_parts = []
