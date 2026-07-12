@@ -115,6 +115,26 @@ def test_redact_secrets_strips_keys_and_bearer_tokens():
     assert "[REDACTED" in redacted
 
 
+@pytest.mark.parametrize(
+    ("text", "secret"),
+    [
+        ("Authorization: BEARER abc.defghi123456", "abc.defghi123456"),
+        ("Authorization: Bearer\tabc.defghi123456", "abc.defghi123456"),
+        ("OpenAI_Api_Key = secretvalue123", "secretvalue123"),
+    ],
+)
+def test_redact_secrets_fast_path_preserves_case_and_whitespace_coverage(text, secret):
+    redacted = redact_secrets(text)
+
+    assert secret not in redacted
+    assert "[REDACTED" in redacted
+
+
+def test_redact_secrets_fast_path_preserves_benign_text_and_input_coercion():
+    assert redact_secrets("ordinary telemetry") == "ordinary telemetry"
+    assert redact_secrets(123) == "123"
+
+
 @pytest.mark.asyncio
 async def test_dispatch_internal_tool_redacts_and_bounds_output(monkeypatch):
     async def noisy_tool() -> str:

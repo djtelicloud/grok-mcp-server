@@ -1085,6 +1085,13 @@ def load_grok_prompt(prompt_ref: str) -> str:
 
 def redact_secrets(text: str) -> str:
     redacted = str(text or "")
+    if "xai-" not in redacted and "sk-" not in redacted:
+        # This guard must remain a conservative superset of the two
+        # case-insensitive regexes below. False positives only cost a regex
+        # pass; a false negative could leak a credential.
+        folded = redacted.lower()
+        if "bearer" not in folded and "api_key" not in folded:
+            return redacted
     for pattern, replacement in _SECRET_PATTERNS:
         redacted = pattern.sub(replacement, redacted)
     return redacted
