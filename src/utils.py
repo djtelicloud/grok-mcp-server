@@ -1116,6 +1116,18 @@ def _bounded_redacted(text: str, limit: int) -> str:
     return value[:limit] + f"\n[...truncated {len(value) - limit} chars]"
 
 
+def _json_sanitize(
+    value: Any, *, separators: tuple[str, str] = (",", ":")
+) -> tuple[Any, str]:
+    """Round-trip through JSON for plain, contract-safe data.
+
+    Returns ``(plain_obj, text)`` where ``text`` is the serialization used for
+    the round-trip so callers can apply size bounds without a second dumps().
+    """
+    text = json.dumps(value, separators=separators)
+    return json.loads(text), text
+
+
 def _normalize_fact_scope(scope: Any) -> str:
     """Knowledge scope normalized for storage AND lookup: 'global' or a short
     session name. Client-controlled via remember_fact, so it gets the same
@@ -2768,8 +2780,8 @@ class GrokSessionStore:
                 # A receipt contains only bounded features, model slugs, and
                 # evidence counts; never a prompt.  Round-trip through JSON to
                 # prevent custom mapping objects from escaping that contract.
-                clean_routing = json.loads(json.dumps(routing, separators=(",", ":")))
-                if isinstance(clean_routing, dict) and len(json.dumps(clean_routing)) <= 6000:
+                clean_routing, routing_text = _json_sanitize(routing)
+                if isinstance(clean_routing, dict) and len(routing_text) <= 6000:
                     meta["routing"] = clean_routing
             except (TypeError, ValueError):
                 pass
@@ -2817,12 +2829,12 @@ class GrokSessionStore:
         if not clean_id or not isinstance(semantic, dict):
             return False
         try:
-            clean_semantic = json.loads(json.dumps(semantic, separators=(",", ":")))
+            clean_semantic, semantic_text = _json_sanitize(semantic)
         except (TypeError, ValueError):
             return False
         if not isinstance(clean_semantic, dict):
             return False
-        if len(json.dumps(clean_semantic, separators=(",", ":"))) > 1500:
+        if len(semantic_text) > 1500:
             clean_semantic.pop("rationale", None)
             if len(json.dumps(clean_semantic, separators=(",", ":"))) > 1500:
                 return False
@@ -8457,7 +8469,7 @@ async def run_agent_turn(
         or has_image
     )
     if request_requires_api and not credentials["api"]["available"]:
-        request_credentials = json.loads(json.dumps(credentials))
+        request_credentials, _ = _json_sanitize(credentials)
         for notice in request_credentials["notices"]:
             if notice.get("plane") == "API":
                 notice.update({
