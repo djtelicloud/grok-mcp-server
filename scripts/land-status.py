@@ -49,13 +49,8 @@ def main() -> int:
     ):
         try:
             with urlopen(url, timeout=2) as response:  # noqa: S310
-                runtime = json.load(response)
-            print(
-                f"{label}: ready "
-                f"(transport={runtime.get('transport')}, "
-                f"api={runtime.get('api_plane', {}).get('xai_api_key')}, "
-                f"cli={runtime.get('cli_plane', {}).get('auth_state')})"
-            )
+                json.load(response)
+            print(f"{label}: ready")
         except (OSError, URLError, ValueError):
             # The fixed endpoint is enough context; exception text may include
             # response details that should not be copied into shared logs.

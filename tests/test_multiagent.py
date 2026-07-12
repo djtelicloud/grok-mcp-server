@@ -465,7 +465,9 @@ class TestHttpCallerDerivation:
     def test_auth_key_alias_when_no_header(self, monkeypatch):
         monkeypatch.setenv("UNIGROK_API_KEYS", "sekret-key")
         scope = {"type": "http", "headers": [(b"authorization", b"Bearer sekret-key")]}
-        expected = "http:key-" + hashlib.sha256(b"sekret-key").hexdigest()[:8]
+        expected = "http:key-" + hashlib.blake2s(
+            b"sekret-key", digest_size=4, person=b"unigrok"
+        ).hexdigest()
         assert _derive_http_caller(scope) == expected
 
     def test_anonymous_fallback(self, monkeypatch):
@@ -533,7 +535,9 @@ class TestGatewayCallerPropagation:
         caller = self._run_request(
             monkeypatch, {"Authorization": "Bearer sekret-key"}
         )
-        assert caller == "http:key-" + hashlib.sha256(b"sekret-key").hexdigest()[:8]
+        assert caller == "http:key-" + hashlib.blake2s(
+            b"sekret-key", digest_size=4, person=b"unigrok"
+        ).hexdigest()
 
     def test_anonymous_request_reads_http_anon(self, monkeypatch):
         monkeypatch.delenv("UNIGROK_RUNTIME", raising=False)

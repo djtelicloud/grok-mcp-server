@@ -17,6 +17,17 @@ const defaultLayout = {
   density: "auto",
 };
 
+const TAB_IDS = new Set([
+  "tab-console",
+  "tab-guard",
+  "tab-metrics",
+  "tab-models",
+  "tab-okf",
+  "tab-onboarding",
+  "tab-schemas",
+  "tab-webmcp",
+]);
+
 function readLayout() {
   try {
     const current = localStorage.getItem(LAYOUT_KEY);
@@ -260,6 +271,7 @@ function setupTabRouter() {
 }
 
 function switchTab(tabId) {
+  if (!TAB_IDS.has(tabId)) return;
   document.querySelectorAll(".nav-btn").forEach((b) => {
     b.classList.remove("active");
     b.setAttribute("aria-selected", "false");
