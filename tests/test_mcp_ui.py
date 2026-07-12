@@ -115,10 +115,15 @@ def test_mcp_ui_swarm_playground_is_served_and_honest(monkeypatch):
     assert script.status_code == 200
     assert "unigrok-swarm-status-v1" in script.text
     assert "get_swarm_status" in script.text
+    assert 'id="fileBtn"' in page.text
+    assert "onclick=" not in page.text  # blocked by the server's script-src CSP
+    assert 'state.source !== "live"' in script.text
+    assert "apply is disabled for static exports" in script.text
     # Walls are never plotted at invented coordinates.
     assert "gutter" in script.text
     # Apply stays gated by mode in the UI exactly like the tool.
     assert "apply is disabled outside UNIGROK_SWARM=active" in script.text
+    assert "apply is disabled while the swarm is still running" in script.text
 
 
 def test_mcp_ui_layout_engine_is_local_and_ide_first():

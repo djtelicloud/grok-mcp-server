@@ -166,6 +166,7 @@ class TestEndToEnd:
         assert payload["target"]["focus_node"] == "function:dedup"
         assert payload["oracle"]["focus_coverage_pct"] > 0
         assert payload["baseline"]["latency_ms"] > 0
+        assert [g["generation"] for g in payload["generations"]] == [1, 2]
 
         candidates = [c for g in payload["generations"] for c in g["candidates"]]
         assert candidates
@@ -196,6 +197,19 @@ class TestEndToEnd:
         assert payload["original_span_stale"] is False
         assert "def dedup" in payload["original_span"]
 
+        # The text view already redacts oracle failures; the JSON view must
+        # not reopen that secret-bearing output channel.
+        await store.update_swarm_task(
+            task_id,
+            oracle_json=jsonlib.dumps(
+                {"error": "failed with XAI_API_KEY=xai-supersecret123456"}
+            ),
+        )
+        redacted = jsonlib.loads(
+            await swarm_tools.get_swarm_status(task_id, view="json")
+        )
+        assert "xai-supersecret123456" not in redacted["oracle"]["error"]
+
     @pytest.mark.asyncio
     async def test_json_view_unknown_task(self, wired):
         import json as jsonlib
@@ -219,6 +233,14 @@ class TestEndToEnd:
         candidates = await store.list_swarm_candidates(task_id, feasible_only=True)
         assert candidates
         winner = candidates[0]
+
+        # A current front is provisional while later candidates can still
+        # arrive. Applying it mid-run would mutate the workspace underneath
+        # the active search.
+        monkeypatch.setattr(swarm_tools, "effective_status", lambda _task: "running")
+        early = await swarm_tools.apply_swarm_winner(winner["id"])
+        assert "still running" in early
+        monkeypatch.setattr(swarm_tools, "effective_status", lambda _task: "completed")
 
         before = (workspace / "pkg" / "dedup.py").read_text()
         apply_out = await swarm_tools.apply_swarm_winner(winner["id"])
