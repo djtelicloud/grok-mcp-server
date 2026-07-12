@@ -46,6 +46,7 @@ credentials, OAuth codes, tokens, or private keys here.
 - Stable `127.0.0.1:4765` and contributor `127.0.0.1:4766` health checks pass.
 - No real `refs/unigrok/*` were created before the protocol landed. Bootstrap
   remains an explicit local contributor action after pulling public main.
+- Draft PR #42 (`gemini/share-using-unigrok-skill`) is open at `cb80faa73a5a54cfef815259c63266fe2fb6b880`, copying the `using-unigrok` skill to `.agents/skills` to share it with all team members' IDE agents. Fully verified locally (all 1118 tests passed).
 
 ## Trust boundary
 
