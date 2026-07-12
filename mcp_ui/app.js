@@ -1,4 +1,5 @@
-const STORAGE_KEY = "unigrok.mcp.console.settings.v4";
+import { parseMarkdown, sanitizeHref } from "./markdown.js?v=grok-v0.6.0-r2";
+
 const LAYOUT_KEY = "unigrok.mcp.console.layout.v2";
 const LAYOUT_LIMITS = {
   nav: [148, 340],
@@ -478,16 +479,24 @@ async function loadOkfManifest() {
     data.files.forEach((file) => {
       // Get filename without path
       const baseName = file.split("/").pop();
-      const div = document.createElement("div");
-      div.className = "okf-item" + (baseName === state.activeOkfFile ? " active" : "");
-      div.innerText = baseName;
-      div.addEventListener("click", () => {
-        document.querySelectorAll(".okf-item").forEach((i) => i.classList.remove("active"));
-        div.classList.add("active");
+      // A real button so the list is keyboard-operable, not click-only.
+      const item = document.createElement("button");
+      item.type = "button";
+      const active = baseName === state.activeOkfFile;
+      item.className = "okf-item" + (active ? " active" : "");
+      item.setAttribute("aria-current", active ? "true" : "false");
+      item.innerText = baseName;
+      item.addEventListener("click", () => {
+        document.querySelectorAll(".okf-item").forEach((i) => {
+          i.classList.remove("active");
+          i.setAttribute("aria-current", "false");
+        });
+        item.classList.add("active");
+        item.setAttribute("aria-current", "true");
         state.activeOkfFile = baseName;
         loadOkfFile(baseName);
       });
-      listContainer.appendChild(div);
+      listContainer.appendChild(item);
     });
 
     loadOkfFile(state.activeOkfFile);
@@ -537,10 +546,7 @@ async function loadOkfFile(fileName) {
       }
     }
 
-    // parseMarkdown escapes all source HTML before adding its fixed tags.
-    // lgtm[js/xss-through-dom]
-    const parsed = new DOMParser().parseFromString(parseMarkdown(cleanText), "text/html");
-    viewer.replaceChildren(...Array.from(parsed.body.childNodes));
+    renderMarkdownInto(viewer, cleanText);
   } catch (err) {
     const failure = document.createElement("p");
     failure.style.color = "var(--red)";
@@ -549,52 +555,12 @@ async function loadOkfFile(fileName) {
   }
 }
 
-// Simple, zero-dependency Markdown Formatter with XSS sanitization
-function parseMarkdown(md) {
-  let html = md
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-
-  // Headers
-  html = html.replace(/^# (.*?)$/gm, "<h1>$1</h1>");
-  html = html.replace(/^## (.*?)$/gm, "<h2>$1</h2>");
-  html = html.replace(/^### (.*?)$/gm, "<h3>$1</h3>");
-
-  // Bold / Code
-  html = html.replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>");
-  html = html.replace(/`(.*?)`/g, "<code>$1</code>");
-
-  // Code Blocks
-  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, "<pre><code class='$1'>$2</code></pre>");
-
-  // Tables
-  html = html.replace(/^\|(.*?)\|$/gm, (match, content) => {
-    const cells = content.split("|").map(c => c.trim());
-    const isHeader = html.indexOf("<table>") === -1;
-    let row = "<tr>";
-    cells.forEach(c => {
-      if (c === "---" || c === ":---" || c === "---:") return;
-      row += isHeader ? `<th>${c}</th>` : `<td>${c}</td>`;
-    });
-    row += "</tr>";
-    return row;
-  });
-
-  // Wrap table rows in tables
-  html = html.replace(/(<tr>[\s\S]*?<\/tr>)/g, "<table>$1</table>");
-  html = html.replace(/<\/table>\s*<table>/g, "");
-
-  // Unordered lists
-  html = html.replace(/^\- (.*?)$/gm, "<li>$1</li>");
-  html = html.replace(/(<li>[\s\S]*?<\/li>)/g, "<ul>$1</ul>");
-  html = html.replace(/<\/ul>\s*<ul>/g, "");
-
-  // Paragraphs (naive wrap)
-  html = html.replace(/^(?!<h|<li|<ul|<ol|<table|<tr|<th|<td|<pre|<\/pre|<\/code|<code>)(.+)$/gm, "<p>$1</p>");
-
-  // The source text was HTML-escaped before these fixed-tag transforms.
-  return html;
+// Shared injection point for the escape-first renderer in markdown.js.
+function renderMarkdownInto(element, markdown) {
+  // parseMarkdown escapes all source HTML before adding its fixed tags.
+  // lgtm[js/xss-through-dom]
+  const parsed = new DOMParser().parseFromString(parseMarkdown(markdown), "text/html");
+  element.replaceChildren(...Array.from(parsed.body.childNodes));
 }
 
 function setupOkfClipboard() {
@@ -870,22 +836,51 @@ async function runDiscoverSelfOnboarding() {
 }
 
 // --- Quick Test Console / JSON-RPC Core ---
-async function runStartupCheck() {
+
+// Authoritative readiness, owned by /readyz probes (runStartupCheck, pollReadyz).
+// fetchRuntimeStatus reads /runtimez, which returns 200 even when the gateway is
+// not ready, so it must defer to this rather than unconditionally claiming "live".
+const gatewayReadiness = { ready: true, detail: null };
+
+// A 503 from /readyz means the gateway is reachable but a named check failed;
+// only a fetch failure means no connection. The banner must not conflate them.
+async function describeNotReady(res) {
   try {
-    const res = await fetch("/readyz");
-    if (res.ok) {
-      setStatus("active", "Live");
-      return true;
-    } else {
-      throw new Error();
+    const body = await res.json();
+    const failing = Object.entries(body.checks || {})
+      .filter(([, ok]) => !ok)
+      .map(([name]) => name);
+    if (failing.length) {
+      return `Gateway reachable but not ready — failing checks: ${failing.join(", ")}.`;
     }
+    return `Gateway reachable but not ready (status: ${body.status || res.status}).`;
   } catch {
-    setStatus("error", "Offline");
-    return false;
+    return `Gateway reachable but not ready (HTTP ${res.status}).`;
   }
 }
 
-function renderSetupStatus(data, ready = true) {
+async function runStartupCheck() {
+  let notReadyDetail = null;
+  try {
+    const res = await fetch("/readyz");
+    if (res.ok) {
+      gatewayReadiness.ready = true;
+      gatewayReadiness.detail = null;
+      setStatus("active", "Live");
+      return true;
+    }
+    notReadyDetail = await describeNotReady(res);
+  } catch {
+    // fall through: connection-level failure
+  }
+  gatewayReadiness.ready = false;
+  gatewayReadiness.detail = notReadyDetail;
+  setStatus("error", notReadyDetail ? "Not Ready" : "Offline");
+  renderSetupStatus(null, false, notReadyDetail);
+  return false;
+}
+
+function renderSetupStatus(data, ready = true, detailText = null) {
   const target = $("setupStatusSummary");
   if (!target) return;
   const contract = data?.credential_planes || {};
@@ -898,7 +893,7 @@ function renderSetupStatus(data, ready = true) {
   const detail = document.createElement("span");
   detail.textContent = ready
     ? `Runtime: ${runtime} · active credential plane: ${effective}.${attention ? ` ${attention}` : ""}`
-    : "The live readiness check failed. Restart or inspect the runtime before running a task.";
+    : detailText || "The live readiness check failed. Restart or inspect the runtime before running a task.";
   target.replaceChildren(title, document.createElement("br"), detail);
 }
 
@@ -910,7 +905,8 @@ async function fetchRuntimeStatus() {
     $("runtimeChip").innerText = `runtime: ${data.runtime || "unknown"}`;
     $("transportChip").innerText = `transport: ${data.transport || "unknown"}`;
     renderCredentialPlanes(data.credential_planes || null);
-    renderSetupStatus(data, true);
+    // /runtimez is 200 even when not ready, so honor the readiness probe.
+    renderSetupStatus(data, gatewayReadiness.ready, gatewayReadiness.detail);
     return data;
   } catch {
     $("runtimeChip").innerText = "runtime: unknown";
@@ -1214,15 +1210,6 @@ async function loadPlaneModelCatalog() {
   }
 }
 
-function updateActiveContext() {
-  const ac = $("activeClient");
-  const as = $("activeSession");
-  const am = $("activeMode");
-  if (ac) ac.innerText = `client: ${$("clientIdInput").value || "default"}`;
-  if (as) as.innerText = `session: ${$("sessionInput").value || "default"}`;
-  if (am) am.innerText = `mode: ${$("modeInput").value || "auto"}`;
-}
-
 function setStatus(kind, label) {
   const pill = $("connectionState");
   pill.className = `status-pill status-${kind}`;
@@ -1409,11 +1396,15 @@ async function fetchMcpCall(toolName, args) {
     const isError = Boolean(responsePayload.error || responsePayload.result?.isError);
     logRpcTransaction(requestPayload, responsePayload, elapsed, isError);
 
-    setStatus("active", "Done");
+    setStatus(isError ? "error" : "active", isError ? "Error" : "Done");
     state.busy = false;
 
-    // Render result details on right facts pane
-    renderFactsPane(toolName, responsePayload, elapsed);
+    // The facts pane holds the agent routing receipt; background tool calls
+    // (status, discovery, models, metrics) carry no such receipt and must not
+    // clobber it, so only the agent call updates the pane.
+    if (toolName === "agent") {
+      renderFactsPane(toolName, responsePayload, elapsed);
+    }
 
     return responsePayload;
   } catch (err) {
@@ -1439,13 +1430,6 @@ function extractToolPayload(jsonRpcResponse) {
     parsed = { response: textContent, text: textContent };
   }
 
-  // Legacy mode mapping
-  if ($("legacyModeToggle") && $("legacyModeToggle").checked) {
-    return {
-      response: parsed.response || parsed.text || textContent,
-      legacy: true
-    };
-  }
   return parsed;
 }
 
@@ -1459,8 +1443,15 @@ function renderFactsPane(method, response, elapsed) {
     return;
   }
 
-  $("factStatus").innerText = "SUCCESS";
-  $("factStatus").style.color = "var(--teal)";
+  // A FastMCP tool exception arrives as result.isError with the message in
+  // content[0].text — that is a failed run, never a SUCCESS receipt.
+  if (response.result?.isError) {
+    $("factStatus").innerText = "TOOL ERROR";
+    $("factStatus").style.color = "var(--red)";
+  } else {
+    $("factStatus").innerText = "SUCCESS";
+    $("factStatus").style.color = "var(--teal)";
+  }
 
   const payload = extractToolPayload(response);
   $("factTokens").innerText = payload.tokens || "-";
@@ -1471,6 +1462,15 @@ function renderFactsPane(method, response, elapsed) {
   $("factRequestedPlane").innerText = payload.requested_plane || payload.routing?.requested_plane || "-";
   $("factModel").innerText = payload.model || "-";
   $("factSelection").innerText = routingLabel(payload.routing?.why_detail || payload.why || "-");
+  const finishReason = payload.finish_reason || "-";
+  $("factFinishReason").innerText = finishReason;
+  $("factFinishReason").style.color = finishReason !== "-" && finishReason !== "final_answer" ? "var(--red)" : "";
+  $("factDegraded").innerText = payload.degraded === undefined ? "-" : String(payload.degraded);
+  $("factDegraded").style.color = payload.degraded === true ? "var(--red)" : "";
+  // Mode provenance: confirms a phoneword port dial actually changed the mode.
+  $("factRequestedMode").innerText = payload.requested_mode || "-";
+  $("factModeSource").innerText = payload.mode_source || "-";
+  $("factDialedPort").innerText = payload.dialed_port || "-";
 }
 
 async function callAgent(prompt) {
@@ -1488,33 +1488,118 @@ async function callAgent(prompt) {
   const sysPrompt = $("systemPromptInput").value.trim();
   if (sysPrompt) args.system_prompt = sysPrompt;
 
+  const workspaceContext = $("workspaceContextInput")?.value.trim();
+  if (workspaceContext) {
+    args.workspace_context = workspaceContext;
+    const label = $("workspaceLabelInput")?.value.trim();
+    if (label) args.workspace_label = label;
+  }
+
   // Add user bubble
   addMessageBubble("user", prompt);
 
   try {
     const rawResponse = await fetchMcpCall("agent", args);
+    if (rawResponse.error) {
+      const detail = rawResponse.error.message || JSON.stringify(rawResponse.error);
+      addMessageBubble("error", `Gateway rejected the call: ${detail}`);
+      return;
+    }
     const payload = extractToolPayload(rawResponse);
+    if (rawResponse.result?.isError) {
+      addMessageBubble("error", `Tool error: ${payload.response || payload.text || "unknown tool failure"}`);
+      return;
+    }
 
     const answer = payload.text || payload.response || "No response field returned.";
     addMessageBubble("agent", answer);
+    renderCitations(payload.citations);
   } catch (err) {
-    addMessageBubble("system", `Invocation failed: ${err.message}`);
+    addMessageBubble("error", `Invocation failed: ${err.message}`);
   }
+}
+
+// Research mode returns sources in AgentResult.citations, separate from the
+// answer text — render them as a footer so the grounding is verifiable.
+function renderCitations(citations) {
+  if (!Array.isArray(citations) || citations.length === 0) return;
+  const container = $("conversation");
+  const footer = document.createElement("div");
+  footer.className = "message-bubble msg-citations";
+  const heading = document.createElement("strong");
+  heading.textContent = `Sources (${citations.length})`;
+  footer.appendChild(heading);
+  const list = document.createElement("ol");
+  for (const citation of citations) {
+    const url = typeof citation === "string" ? citation : citation?.url || "";
+    if (!url) continue;
+    const item = document.createElement("li");
+    const safe = sanitizeHref(url);
+    if (safe) {
+      const link = document.createElement("a");
+      link.href = safe;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.textContent = url;
+      item.appendChild(link);
+    } else {
+      item.textContent = url;
+    }
+    list.appendChild(item);
+  }
+  footer.appendChild(list);
+  container.appendChild(footer);
+  container.scrollTop = container.scrollHeight;
 }
 
 function addMessageBubble(sender, text) {
   const container = $("conversation");
   const bubble = document.createElement("div");
   bubble.className = `message-bubble msg-${sender}`;
-  bubble.innerText = text;
+  if (sender === "agent") {
+    // Agent answers arrive as markdown (AgentResult.text); user, system, and
+    // error bubbles stay plain text.
+    renderMarkdownInto(bubble, text);
+  } else {
+    bubble.innerText = text;
+  }
 
   container.appendChild(bubble);
   container.scrollTop = container.scrollHeight;
 }
 
+// A per-load session id so two browsers do not silently share one server-side
+// conversation history under the old fixed "console-session-1" default.
+function genSessionId() {
+  let token;
+  try {
+    token = crypto.randomUUID().replace(/-/g, "").slice(0, 8);
+  } catch {
+    token = Math.random().toString(36).slice(2, 10);
+  }
+  return `console-${token}`;
+}
+
 function resetConversation() {
   $("conversation").innerHTML = "";
+  const sessionInput = $("sessionInput");
+  if (sessionInput && !sessionInput.value.trim()) sessionInput.value = genSessionId();
   addMessageBubble("system", "Session started. Ready to execute prompts.");
+}
+
+// Clear History rotates to a fresh session so the next turn starts clean; the
+// prior server-side session is retained under its own id, not deleted here.
+function clearConversation() {
+  const sessionInput = $("sessionInput");
+  const previous = sessionInput?.value.trim();
+  if (sessionInput) sessionInput.value = genSessionId();
+  $("conversation").innerHTML = "";
+  addMessageBubble(
+    "system",
+    previous
+      ? `Cleared the view and started session ${sessionInput.value}. The server still holds the prior session (${previous}) history.`
+      : "Session started. Ready to execute prompts."
+  );
 }
 
 async function verifyPlaygroundSetup() {
@@ -1563,7 +1648,7 @@ function setupConsoleActions() {
     await callAgent(prompt);
   });
 
-  $("clearBtn").addEventListener("click", resetConversation);
+  $("clearBtn").addEventListener("click", clearConversation);
 
   // Copy MCP JSON-RPC Payload
   $("copyConsoleCallBtn").addEventListener("click", function() {
@@ -1593,6 +1678,8 @@ function setupConsoleActions() {
     const facts = {
       method: $("factMethod").innerText,
       status: $("factStatus").innerText,
+      finish_reason: $("factFinishReason").innerText,
+      degraded: $("factDegraded").innerText,
       tokens: $("factTokens").innerText,
       cost: $("factCost").innerText,
       latency: $("factLatency").innerText,
@@ -1790,9 +1877,12 @@ async function pollReadyz() {
     renderFilePreviewNotice();
     return;
   }
+  let notReadyDetail = null;
   try {
     const res = await fetch("/readyz");
     if (res.ok) {
+      gatewayReadiness.ready = true;
+      gatewayReadiness.detail = null;
       if (isOffline) {
         isOffline = false;
         const alertBanner = $("dockerOfflineAlert");
@@ -1802,15 +1892,24 @@ async function pollReadyz() {
         await loadModelsList();
         await fetchMcpListTools();
       }
-    } else {
-      throw new Error();
+      return;
     }
+    notReadyDetail = await describeNotReady(res);
   } catch (err) {
-    isOffline = true;
-    const alertBanner = $("dockerOfflineAlert");
-    if (alertBanner) alertBanner.classList.remove("hidden");
-    setStatus("error", "Offline");
+    // fall through: connection-level failure
   }
+  isOffline = true;
+  gatewayReadiness.ready = false;
+  gatewayReadiness.detail = notReadyDetail;
+  const message = $("offlineAlertMessage");
+  if (message) {
+    message.textContent = notReadyDetail
+      ? `⚠️ ${notReadyDetail}`
+      : "⚠️ Local UniGrok Gateway Offline! No connection detected.";
+  }
+  const alertBanner = $("dockerOfflineAlert");
+  if (alertBanner) alertBanner.classList.remove("hidden");
+  setStatus("error", notReadyDetail ? "Not Ready" : "Offline");
 }
 
 function setupDockerRestart() {
@@ -1984,23 +2083,22 @@ function init() {
   $("setupRecheckBtn")?.addEventListener("click", async () => {
     const ready = await runStartupCheck();
     const runtime = await fetchRuntimeStatus();
-    renderSetupStatus(runtime, ready);
+    // runStartupCheck populated gatewayReadiness with the named failing checks;
+    // keep that detail rather than falling back to the generic message.
+    renderSetupStatus(runtime, ready, gatewayReadiness.detail);
   });
 
   // Telemetry refresh action
   $("refreshMetricsBtn").addEventListener("click", fetchLiveMetrics);
 
-  // Input listeners
-  const inputIds = ["clientIdInput", "callerInput", "sessionInput", "modeInput", "modelInput", "planeInput", "fallbackPolicyInput", "systemPromptInput"];
-  for (const id of inputIds) {
-    const el = $(id);
-    if (el) {
-      el.addEventListener("input", updateActiveContext);
-      el.addEventListener("change", updateActiveContext);
-    }
-  }
   $("planeInput")?.addEventListener("change", updatePlaneControls);
   updatePlaneControls();
+
+  // Re-probe the WebMCP bridge on demand instead of only on tab entry.
+  $("runWebMcpBridgeBtn")?.addEventListener("click", () => {
+    checkWebMcpBridge();
+    loadWebMcpManifest();
+  });
 
   resetConversation();
 
@@ -2010,7 +2108,7 @@ function init() {
   setTimeout(async () => {
     const ready = await runStartupCheck();
     const runtime = await fetchRuntimeStatus();
-    renderSetupStatus(runtime, ready);
+    renderSetupStatus(runtime, ready, gatewayReadiness.detail);
     if (!ready) switchTab("tab-onboarding");
     await loadModelsList();
     await loadPlaneModelCatalog();

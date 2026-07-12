@@ -549,8 +549,11 @@ function renderAnalysis(result, exact) {
     $("analysisResults").innerHTML = `<h3>Could not analyze</h3><div class="err">${esc(result.error)}</div>`;
     return;
   }
-  if (!result.parse_ok) {
-    const error = result.parse_error || {};
+  // Only a real parser failure is a parse error. The approximate browser
+  // scanner sets parse_ok=false when it merely finds no top-level defs; that
+  // must not be misreported as invalid Python.
+  if (!result.parse_ok && result.parse_error) {
+    const error = result.parse_error;
     $("analysisResults").innerHTML = `<h3>Fix the parse error first</h3><div class="err">Line ${esc(error.line ?? "?")}: ${esc(error.message || "invalid Python")}</div>`;
     return;
   }
@@ -567,7 +570,7 @@ function renderAnalysis(result, exact) {
     <h3>${(result.functions || []).length} function${(result.functions || []).length === 1 ? "" : "s"} found</h3>
     <div class="muted">${esc(result.loc ?? 0)} source lines · ${esc(result.bytes ?? 0)} bytes${exact ? ` · ${ruffCount} Ruff finding${ruffCount === 1 ? "" : "s"}` : " · approximate browser metrics"}</div>
     ${result.secret_warning ? '<div class="err" style="margin-top:7px">Secret-like text detected. Remove it before export or search.</div>' : ""}
-    <div class="function-list">${rows || '<div class="muted">No functions found.</div>'}</div>
+    <div class="function-list">${rows || `<div class="muted">${exact ? "No functions found." : "No top-level functions detected by the approximate browser scanner."}</div>`}</div>
     <div class="privacy-note">Search blockers: ${esc((result.searchability?.blockers || []).join(", ") || "none")}</div>`;
   const picker = $("focusPicker");
   picker.replaceChildren(new Option(
@@ -594,20 +597,34 @@ async function analyzePastedCode() {
   $("analysisMsg").textContent = "analyzing…";
   let result;
   let exact = false;
+  // "not uploaded" may only be claimed when no gateway call was attempted;
+  // and "browser metrics" only when the browser analyzer actually produced them.
+  let submittedToGateway = false;
+  let usedBrowserFallback = false;
   if (state.runtimeMode === "contributor") {
+    submittedToGateway = true;
     try {
       result = JSON.parse(await mcpCall("analyze_code_for_swarm", { code, language: "python" }));
       exact = !result.error;
     } catch (_error) {
       result = browserAnalyzePython(code);
+      usedBrowserFallback = true;
     }
   } else {
     result = browserAnalyzePython(code);
+    usedBrowserFallback = true;
   }
   renderAnalysis(result, exact);
-  $("analysisMsg").textContent = exact
-    ? "analyzed locally without a model call"
-    : "analyzed in this browser; source was not uploaded";
+  if (exact) {
+    $("analysisMsg").textContent = "analyzed locally without a model call";
+  } else if (usedBrowserFallback && submittedToGateway) {
+    $("analysisMsg").textContent = "gateway unreachable; showing approximate browser metrics (the paste was submitted to the local gateway)";
+  } else if (submittedToGateway) {
+    // Gateway returned an error object — the panel shows it; no browser metrics.
+    $("analysisMsg").textContent = "gateway analysis failed — see the error above (the paste was submitted to the local gateway)";
+  } else {
+    $("analysisMsg").textContent = "analyzed in this browser; source was not uploaded";
+  }
 }
 
 $("analyzeBtn").addEventListener("click", analyzePastedCode);
@@ -659,8 +676,14 @@ async function runPasteSwarm() {
     if (!match) { $("pasteRunMsg").textContent = output.replace(/\s+/g, " ").trim(); return; }
     $("taskId").value = match[1];
     $("pasteRunMsg").textContent = "verified swarm running…";
-    await pollUntilDone(match[1]);
-    $("pasteRunMsg").textContent = "Search complete. Copy Best Verified Code from the receipt.";
+    const final = await pollUntilDone(match[1]);
+    if (final && final.status === "completed") {
+      $("pasteRunMsg").textContent = "Search complete. Copy Best Verified Code from the receipt.";
+    } else if (final) {
+      $("pasteRunMsg").textContent = `Swarm ended with status ${final.status} — inspect the receipt before trusting any candidate.`;
+    } else {
+      $("pasteRunMsg").textContent = "Run did not complete — see the run status message for details.";
+    }
     refreshTaskPicker();
   } catch (error) {
     $("pasteRunMsg").textContent = String(error.message || error);
@@ -761,20 +784,26 @@ async function runGoldenDemo() {
   }
 }
 
+// Resolves with the terminal payload, or null when the run errored out or
+// polling stopped first — callers must not claim success on null.
 async function pollUntilDone(taskId, intervalMs = 3000, maxPolls = 200) {
   for (let i = 0; i < maxPolls; i++) {
     const raw = await mcpCall("get_swarm_status", { task_id: taskId, view: "json" });
     const payload = JSON.parse(raw);
-    if (payload.error) { setMsg(payload.error, true); return; }
+    if (payload.error) { setMsg(payload.error, true); return null; }
     setPayload(payload, "live", "live");
     if (TERMINAL_STATUSES.has(payload.status)) {
-      setMsg(`demo ${payload.status} — ${payload.pareto_front.length} elite(s) on the front`);
-      return;
+      setMsg(
+        `run ${payload.status} — ${payload.pareto_front.length} elite(s) on the front`,
+        payload.status !== "completed"
+      );
+      return payload;
     }
-    setMsg(`demo running… (${payload.status}, generation ${payload.budget?.generations_run ?? 0})`);
+    setMsg(`run in progress… (${payload.status}, generation ${payload.budget?.generations_run ?? 0})`);
     await new Promise((resolve) => setTimeout(resolve, intervalMs));
   }
   setMsg("stopped polling — the swarm is still running; reload manually.", true);
+  return null;
 }
 
 $("sampleBtn").addEventListener("click", loadSample);

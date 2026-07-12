@@ -5,6 +5,44 @@ All notable changes to UniGrok MCP will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- **Control Center markdown rendering**: agent answers in the Playground
+  transcript now render as formatted markdown instead of raw markup text.
+  A new shared escape-first renderer (`mcp_ui/markdown.js`) replaces the old
+  inline formatter, fixing the OKF viewer defects it shipped with: fenced
+  code blocks were destroyed by the inline-code pass, every table row
+  rendered as a header cell, and links/ordered lists/italics/h4+ never
+  rendered. Link destinations are scheme-allowlisted (http/https/mailto/
+  relative); everything else degrades to plain text. A node-backed fixture
+  suite (`tests/test_markdown_renderer.py`) pins each prior regression and
+  renders the whole small-OKF corpus.
+- **Control Center error truthfulness**: failed tool runs now show a red
+  `TOOL ERROR` receipt instead of a green SUCCESS, JSON-RPC rejections and
+  tool errors render as system-styled error bubbles carrying the server's
+  actual message (previously "Empty tool response result." in an agent
+  bubble with status "Done"), the facts pane gains `finish_reason` and
+  `degraded` rows, and a 503 from `/readyz` names its failing checks in the
+  offline banner instead of claiming "no connection detected". The swarm
+  bench stops reporting "Search complete" on failed or timed-out paste runs,
+  no longer claims "source was not uploaded" after an attempted gateway
+  analysis, and no longer misreports valid Python without top-level
+  functions as a parse error. The PR-review widget surfaces the server's
+  `degraded` flag as an amber chip and carries a marker naming it as the
+  live `ui://widget/unigrok-github-review-v1.html` template.
+- **Control Center receipts, sessions, and accessibility**: the inspector
+  facts pane now belongs to the agent routing receipt alone — background
+  status/discovery/metrics calls no longer reset it to dashes — and gains
+  requested-mode / mode-source / dialed-port rows so a phoneword port dial is
+  verifiable. Research-mode citations render as a sources footer under the
+  answer. The agent Playground can pass `workspace_context` / `workspace_label`
+  to ground the workspace-neutral service. Each browser session gets its own
+  generated session id instead of the shared `console-session-1`, and Clear
+  History rotates to a fresh session while stating that the server retains the
+  prior one. Accessibility: the transcript is a polite live region and the
+  offline banner an alert region, the OKF file list is keyboard-operable
+  buttons, the client-token field is a password input, and the low-contrast
+  `--ink-faint` token was raised to clear WCAG 4.5:1. Removed dead code (unused
+  settings key, no-op active-context updater, defunct legacy-mode branch, and
+  orphaned CSS) and wired the previously inert WebMCP bridge re-probe button.
 - **Swarm Playground on-ramp**: the Pareto Playground no longer assumes a
   pasted task id. It opens with a guided, already-rendered sample (a bundled
   RECORDED run of the golden dedup target whose payload carries its own
