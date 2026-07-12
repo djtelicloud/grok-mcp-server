@@ -622,6 +622,8 @@ def _caller_key_alias(token: Optional[str]) -> Optional[str]:
         return None
     for key in _api_keys():
         if _tokens_match(token, key):
+            # This is a non-reversible telemetry alias, not password storage.
+            # lgtm[py/weak-sensitive-data-hashing]
             digest = hashlib.sha256(key.encode("utf-8", "surrogateescape")).hexdigest()[:8]
             return f"key-{digest}"
     return None
