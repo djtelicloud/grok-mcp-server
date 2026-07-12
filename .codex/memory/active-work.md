@@ -2,7 +2,7 @@
 
 Last updated: 2026-07-12
 Owner: Codex
-Status: PR #33 integrated; PR #32 remains queued for maintainer review
+Status: GitHub maintainer queue clean
 
 This is the project-scoped handoff for new Codex chats. Resolve drift-prone
 Git, CI, runtime, DNS, and cloud identifiers live before acting. Never record
@@ -10,6 +10,11 @@ credentials, OAuth codes, tokens, or private keys here.
 
 ## Completed repository state
 
+- PR #32 is merged on protected `origin/main` at merge commit
+  `22405e770bea36508dd1998bc2115a3886e25774`. Its reviewed head
+  `3be4363e71d88b9df1788b35cf0af76d4d0ca255` deduplicated JSON
+  sanitization while preserving compact routing and semantic payload bounds;
+  the landing gate passed 1,072 tests.
 - PR #33 is merged on protected `origin/main` at merge commit
   `d503bf30a9b8d7f3708983b830eef13fd5e03568`. Its reviewed head
   `b8f615a153a8ce96509c0f1f501e68a5118335fe` hardened upload path policy,
@@ -22,7 +27,7 @@ credentials, OAuth codes, tokens, or private keys here.
   function-aware search setup, goal-specific champion selection, strict status
   v2 receipts, elite-offspring lineage, deterministic AST transforms, and the
   copy-only paste workflow all ship from protected main.
-- The full landing suite passed 1,069 tests. Offline evals passed 12/12 and the
+- The latest full landing suite passed 1,072 tests. Offline evals passed 12/12 and the
   deterministic OKF bundle was clean.
 - The maintainer sweep repaired and merged PR #22's secret-redaction fast path,
   PR #23's plain-text message-size fast path, and PR #28's SQLite scalar-count
@@ -90,7 +95,5 @@ credentials, OAuth codes, tokens, or private keys here.
 
 ## Remaining work
 
-- Draft PR #32 (`copilot/swarm-utils-analytics`, submitted head
-  `a2adc44969d3cec5dbf2c29524a4ad7d75382d25`) remains open and has not been
-  reviewed or landed in this handoff.
-- No release, deployment, or runtime gate remains for PR #33.
+- No pull request, release, deployment, or runtime gate remains. GitHub has no
+  open PRs, and its only remote branch is `main`.
