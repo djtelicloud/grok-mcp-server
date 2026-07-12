@@ -3251,7 +3251,7 @@ class GrokSessionStore:
         """Coerce a COUNT row or cursor.rowcount to int (0 if missing)."""
         if value is None:
             return 0
-        if not isinstance(value, (int, float)):
+        if not isinstance(value, int):
             try:
                 value = value[0]
             except (TypeError, IndexError, KeyError):
