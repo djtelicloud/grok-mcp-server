@@ -1,6 +1,6 @@
 // Swarm Optimizer — Pareto Playground.
-// Renders one unigrok-swarm-status-v1 payload (live via get_swarm_status
-// view="json", or a static JSON export of the same payload — identical
+// Renders unigrok-swarm-status-v2 plus recorded v1 exports (live via
+// get_swarm_status view="json", or a static JSON export — identical
 // rendering is the local/public symmetry). No frameworks, no CDN, no
 // simulated data: unmeasured candidates stack in a gutter instead of being
 // plotted at invented coordinates.
@@ -15,6 +15,7 @@ const COLORS = {
   dominated: "var(--gray)",
   pareto_elite: "var(--green)",
 };
+const STATUS_FORMATS = new Set(["unigrok-swarm-status-v1", "unigrok-swarm-status-v2"]);
 
 const state = {
   payload: null,
@@ -80,8 +81,8 @@ function loadFile(file) {
   reader.onload = () => {
     try {
       const payload = JSON.parse(String(reader.result));
-      if (payload.format !== "unigrok-swarm-status-v1") {
-        setMsg("not a unigrok-swarm-status-v1 export", true);
+      if (!STATUS_FORMATS.has(payload.format)) {
+        setMsg("not a supported UniGrok swarm export", true);
         return;
       }
       setPayload(payload, `export: ${file.name}`, "export");
@@ -99,6 +100,7 @@ function setMsg(text, isError) {
 }
 
 function setPayload(payload, sourceLabel, source) {
+  payload = normalizePayload(payload);
   state.payload = payload;
   state.source = source;
   state.maxGen = Math.max(1, ...(payload.generations || []).map((g) => g.generation));
@@ -122,6 +124,23 @@ function setPayload(payload, sourceLabel, source) {
   else $("detail").innerHTML = '<div class="muted">No candidates have landed yet.</div>';
 }
 
+function normalizePayload(payload) {
+  if (!STATUS_FORMATS.has(payload?.format)) {
+    throw new Error("unsupported UniGrok swarm status format");
+  }
+  if (payload.format === "unigrok-swarm-status-v1") {
+    return {
+      ...payload,
+      input_kind: payload.input_kind || "workspace",
+      search_strategy: payload.search_strategy || "baseline_batch",
+      primary_goal: payload.primary_goal || "balanced",
+      champion_id: payload.champion_id || payload.pareto_front?.[0] || null,
+      analytics: payload.analytics || null,
+    };
+  }
+  return payload;
+}
+
 // ── Scorecard ────────────────────────────────────────────────────────────────
 
 function fmtPct(v) { return v == null ? "n/a" : `${Number(v).toFixed(1)}%`; }
@@ -142,6 +161,8 @@ function renderScorecard() {
   const bench = (oracle.bench || {});
   const cards = [
     ["status", `${p.status} (${p.mode})`],
+    ["strategy", p.search_strategy || "baseline_batch"],
+    ["primary goal", p.primary_goal || "balanced"],
     ["feasibility rate", agg.feasibility_rate == null ? "n/a"
       : `${(agg.feasibility_rate * 100).toFixed(0)}% of ${agg.candidates_total}`],
     ["best latency", fmtLatencyImprovement(agg.best_latency_improvement_pct)],
@@ -328,6 +349,9 @@ function renderDetail(candidate) {
   const rows = [
     ["candidate", candidate.candidate_id],
     ["arm", candidate.arm],
+    ["origin", candidate.origin || "llm"],
+    ["parent", candidate.parent_id || "baseline"],
+    ["transform", candidate.transform || "n/a"],
     ["outcome", candidate.outcome],
     ["stage reached", candidate.stage],
     ["latency", candidate.latency_ms == null ? "not measured" : `${Number(candidate.latency_ms).toFixed(6)} ms`],
@@ -351,21 +375,38 @@ function renderDetail(candidate) {
              <div class="diff-grid"><div><div class="code-label">original span</div><pre>${esc(original)}</pre></div>
              <div><div class="code-label">candidate rewrite</div><pre>${esc(candidate.code)}</pre></div></div>`;
     const terminal = p.status === "completed" || p.status === "cancelled";
-    const applyDisabled = state.source !== "live" || p.mode !== "active"
+    const isPaste = p.input_kind === "paste";
+    const applyDisabled = isPaste || state.source !== "live" || p.mode !== "active"
       || !terminal || p.original_span_stale;
-    const reason = state.source !== "live"
+    const reason = isPaste
+      ? "paste swarms are copy-only"
+      : (state.source !== "live"
       ? "apply is disabled for static exports; load the live task"
       : (p.mode !== "active"
         ? "apply is disabled outside UNIGROK_SWARM=active"
         : (!terminal
           ? "apply is disabled while the swarm is still running"
-          : (p.original_span_stale ? "file changed since the swarm ran" : "")));
+          : (p.original_span_stale ? "file changed since the swarm ran" : ""))));
+    const copyLabel = candidate.candidate_id === p.champion_id
+      ? "Copy Best Verified Code" : "Copy candidate code";
     html += `<div style="margin-top:8px">
+               <button id="copyBtn" class="primary">${esc(copyLabel)}</button>
                <button id="applyBtn" ${applyDisabled ? "disabled" : ""}>Apply optimization</button>
                <span class="muted" style="font-size:11px"> ${esc(reason)}</span>
              </div><div id="applyOut" class="muted" style="margin-top:6px;font-size:12px"></div>`;
   }
   $("detail").innerHTML = html;
+  const copyBtn = $("copyBtn");
+  if (copyBtn) {
+    copyBtn.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(candidate.code);
+        $("applyOut").textContent = "Best verified code copied exactly.";
+      } catch (_error) {
+        $("applyOut").textContent = "Clipboard access was blocked; select the code above and copy it.";
+      }
+    });
+  }
   const applyBtn = $("applyBtn");
   if (applyBtn && !applyBtn.disabled) {
     applyBtn.addEventListener("click", async () => {
@@ -440,8 +481,8 @@ async function loadSample() {
     const res = await fetch("./swarm-sample.json");
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const payload = await res.json();
-    if (payload.format !== "unigrok-swarm-status-v1") {
-      throw new Error("sample is not a unigrok-swarm-status-v1 export");
+    if (!STATUS_FORMATS.has(payload.format)) {
+      throw new Error("sample is not a supported swarm export");
     }
     setPayload(payload, "sample: recorded golden-dedup run", "export");
     if (payload.provenance) setMsg(payload.provenance);
@@ -449,6 +490,186 @@ async function loadSample() {
     setMsg(`sample unavailable: ${err.message || err}`, true);
   }
 }
+
+// ── Paste analysis ──────────────────────────────────────────────────────────
+
+const SLOW_EXAMPLE = `def deduplicate(items):
+    result = []
+    for item in items:
+        if item not in result:
+            result.append(item)
+    return result
+`;
+
+function browserAnalyzePython(code) {
+  const lines = code.replace(/\r\n?/g, "\n").split("\n");
+  const functions = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const match = lines[index].match(/^(\s*)(?:async\s+)?def\s+([A-Za-z_]\w*)\s*\(([^)]*)\)\s*:/);
+    if (!match) continue;
+    const indent = match[1].replace(/\t/g, "    ").length;
+    let end = index + 1;
+    let complexity = 1;
+    let maxNesting = 0;
+    for (; end < lines.length; end += 1) {
+      const line = lines[end];
+      if (!line.trim()) continue;
+      const currentIndent = (line.match(/^\s*/) || [""])[0].replace(/\t/g, "    ").length;
+      if (currentIndent <= indent) break;
+      if (/^\s*(if|elif|for|while|except|case)\b/.test(line)) complexity += 1;
+      complexity += (line.match(/\b(and|or)\b/g) || []).length;
+      maxNesting = Math.max(maxNesting, Math.max(0, Math.floor((currentIndent - indent) / 4)));
+    }
+    functions.push({
+      focus_node: `function:${match[2]}`,
+      name: match[2],
+      loc: Math.max(1, end - index),
+      parameters: match[3].trim() ? match[3].split(",").length : 0,
+      cyclomatic_complexity: complexity,
+      max_nesting: maxNesting,
+      line_start: index + 1,
+      line_end: end,
+    });
+  }
+  return {
+    format: "unigrok-swarm-analytics-v1",
+    parse_ok: functions.length > 0 || code.trim().length === 0,
+    bytes: new TextEncoder().encode(code).length,
+    loc: lines.filter((line) => line.trim()).length,
+    functions,
+    searchability: { ready: false, blockers: ["missing_tests", "missing_benchmark"] },
+  };
+}
+
+function renderAnalysis(result, exact) {
+  const badge = $("analysisBadge");
+  badge.textContent = exact ? "exact local AST" : "client-side preview";
+  badge.className = exact ? "source-badge live" : "source-badge";
+  if (result.error) {
+    $("analysisResults").innerHTML = `<h3>Could not analyze</h3><div class="err">${esc(result.error)}</div>`;
+    return;
+  }
+  if (!result.parse_ok) {
+    const error = result.parse_error || {};
+    $("analysisResults").innerHTML = `<h3>Fix the parse error first</h3><div class="err">Line ${esc(error.line ?? "?")}: ${esc(error.message || "invalid Python")}</div>`;
+    return;
+  }
+  const rows = (result.functions || []).map((fn) => `
+    <div class="function-row">
+      <code>${esc(fn.focus_node)}</code>
+      <span class="metric-chip">${esc(fn.loc)} LOC</span>
+      <span class="metric-chip">CC ${esc(fn.cyclomatic_complexity)}</span>
+      <span class="metric-chip">nest ${esc(fn.max_nesting)}</span>
+    </div>`).join("");
+  const ruffCount = Object.values(result.ruff?.counts_by_code || {})
+    .reduce((sum, value) => sum + Number(value || 0), 0);
+  $("analysisResults").innerHTML = `
+    <h3>${(result.functions || []).length} function${(result.functions || []).length === 1 ? "" : "s"} found</h3>
+    <div class="muted">${esc(result.loc ?? 0)} source lines · ${esc(result.bytes ?? 0)} bytes${exact ? ` · ${ruffCount} Ruff finding${ruffCount === 1 ? "" : "s"}` : " · approximate browser metrics"}</div>
+    ${result.secret_warning ? '<div class="err" style="margin-top:7px">Secret-like text detected. Remove it before export or search.</div>' : ""}
+    <div class="function-list">${rows || '<div class="muted">No functions found.</div>'}</div>
+    <div class="privacy-note">Search blockers: ${esc((result.searchability?.blockers || []).join(", ") || "none")}</div>`;
+  const picker = $("focusPicker");
+  picker.replaceChildren(new Option(
+    (result.functions || []).length ? "choose a function…" : "no functions found", ""
+  ));
+  for (const fn of result.functions || []) {
+    picker.appendChild(new Option(
+      `${fn.focus_node} · CC ${fn.cyclomatic_complexity} · ${fn.loc} LOC`, fn.focus_node
+    ));
+  }
+  if ((result.functions || []).length) picker.value = result.functions[0].focus_node;
+  const canSearch = exact && state.runtimeMode === "contributor" && (result.functions || []).length > 0;
+  $("runPasteBtn").disabled = !canSearch;
+  $("pasteRunMsg").textContent = canSearch
+    ? "Tests and benchmark are required; every winner is re-measured."
+    : "Verified execution is available only in contributor Forge after exact analysis.";
+}
+
+async function analyzePastedCode() {
+  const code = $("codeInput").value;
+  const size = new TextEncoder().encode(code).length;
+  if (!code.trim()) { $("analysisMsg").textContent = "paste Python first"; return; }
+  if (size > 256 * 1024) { $("analysisMsg").textContent = "code exceeds 256 KiB"; return; }
+  $("analysisMsg").textContent = "analyzing…";
+  let result;
+  let exact = false;
+  if (state.runtimeMode === "contributor") {
+    try {
+      result = JSON.parse(await mcpCall("analyze_code_for_swarm", { code, language: "python" }));
+      exact = !result.error;
+    } catch (_error) {
+      result = browserAnalyzePython(code);
+    }
+  } else {
+    result = browserAnalyzePython(code);
+  }
+  renderAnalysis(result, exact);
+  $("analysisMsg").textContent = exact
+    ? "analyzed locally without a model call"
+    : "analyzed in this browser; source was not uploaded";
+}
+
+$("analyzeBtn").addEventListener("click", analyzePastedCode);
+$("pasteExampleBtn").addEventListener("click", () => {
+  $("codeInput").value = SLOW_EXAMPLE;
+  $("testInput").value = `from module_under_test import deduplicate
+
+def test_order_and_duplicates():
+    assert deduplicate([3, 1, 3, 2, 1]) == [3, 1, 2]
+`;
+  $("benchInput").value = `import json
+import time
+import tracemalloc
+from module_under_test import deduplicate
+
+values = list(range(400)) * 3
+deduplicate(values[:50])
+tracemalloc.start()
+started = time.perf_counter()
+for _ in range(20):
+    deduplicate(values)
+latency_ms = (time.perf_counter() - started) * 1000 / 20
+_current, peak = tracemalloc.get_traced_memory()
+tracemalloc.stop()
+print("SWARM_BENCH " + json.dumps({"latency_ms": latency_ms, "peak_mem_bytes": peak}))
+`;
+  analyzePastedCode();
+});
+
+async function runPasteSwarm() {
+  const button = $("runPasteBtn");
+  const args = {
+    code: $("codeInput").value,
+    test_code: $("testInput").value,
+    bench_code: $("benchInput").value,
+    focus_node: $("focusPicker").value,
+    search_strategy: $("strategyPicker").value,
+    primary_goal: $("goalPicker").value,
+  };
+  if (!args.focus_node || !args.test_code.trim() || !args.bench_code.trim()) {
+    $("pasteRunMsg").textContent = "Choose a function and provide both tests and benchmark.";
+    return;
+  }
+  button.disabled = true;
+  $("pasteRunMsg").textContent = "materializing a private local scratch task…";
+  try {
+    const output = await mcpCall("start_paste_swarm", args);
+    const match = output.match(/`([0-9a-f]{16,})`/);
+    if (!match) { $("pasteRunMsg").textContent = output.replace(/\s+/g, " ").trim(); return; }
+    $("taskId").value = match[1];
+    $("pasteRunMsg").textContent = "verified swarm running…";
+    await pollUntilDone(match[1]);
+    $("pasteRunMsg").textContent = "Search complete. Copy Best Verified Code from the receipt.";
+    refreshTaskPicker();
+  } catch (error) {
+    $("pasteRunMsg").textContent = String(error.message || error);
+  } finally {
+    button.disabled = state.runtimeMode !== "contributor";
+  }
+}
+
+$("runPasteBtn").addEventListener("click", runPasteSwarm);
 
 async function refreshTaskPicker() {
   const picker = $("taskPicker");
@@ -503,9 +724,14 @@ async function discoverRuntime() {
       }
     }
   } catch (err) {
-    state.runtimeMode = "unknown";
-    $("runtimeTitle").textContent = "Gateway capability check unavailable";
-    $("runtimeCopy").textContent = "The recorded tour still works; live controls may not.";
+    const isLocal = ["127.0.0.1", "localhost", "::1"].includes(window.location.hostname);
+    state.runtimeMode = isLocal ? "unknown" : "public";
+    $("runtimeTitle").textContent = isLocal
+      ? "Gateway capability check unavailable"
+      : "Public showcase — client-side analysis only";
+    $("runtimeCopy").textContent = isLocal
+      ? "The recorded tour still works; live controls may not."
+      : "Pasted source stays in this browser. Verified search and Apply require the local contributor Forge.";
     $("demoBtn").disabled = true;
     $("refreshTasksBtn").disabled = true;
   }

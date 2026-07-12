@@ -2810,7 +2810,7 @@ input:focus-visible {
 
 .public-capability-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   border: 1px solid var(--public-line);
   border-radius: 12px;
   overflow: hidden;
@@ -2829,6 +2829,7 @@ input:focus-visible {
 .public-capability-grid article > b { color: #55c7ff; font-family: var(--font-geist-mono), monospace; font-size: 10px; }
 .public-capability-grid h3 { margin: 56px 0 13px; font-size: 20px; letter-spacing: -0.035em; }
 .public-capability-grid p { margin: 0; color: #8796a9; font-size: 13px; line-height: 1.7; }
+.public-capability-grid article > a { margin-top: auto; }
 .public-capability-grid code { margin-top: auto; color: #72d2ff; font-size: 11px; }
 
 .public-flow {

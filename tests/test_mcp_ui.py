@@ -100,7 +100,7 @@ def test_mcp_ui_static_files_are_served(monkeypatch):
 
 def test_mcp_ui_swarm_playground_is_served_and_honest(monkeypatch):
     """The swarm Pareto Playground: served statically, consumes the
-    unigrok-swarm-status-v1 payload (live or static export — the local/public
+    unigrok-swarm-status-v2 payload plus v1 exports (the local/public
     symmetry), and keeps the no-simulated-data stance in its own copy."""
     monkeypatch.delenv("UNIGROK_RUNTIME", raising=False)
     monkeypatch.delenv("UNIGROK_API_KEYS", raising=False)
@@ -114,6 +114,7 @@ def test_mcp_ui_swarm_playground_is_served_and_honest(monkeypatch):
     assert "Nothing is simulated" in page.text
     assert script.status_code == 200
     assert "unigrok-swarm-status-v1" in script.text
+    assert "unigrok-swarm-status-v2" in script.text
     # Discoverable from the Control Center sidebar — as a page LINK, not a
     # .nav-btn, so the tab router and its keyboard traversal never bind it.
     with TestClient(create_app(), base_url="http://localhost:8080") as client:
@@ -151,6 +152,15 @@ def test_mcp_ui_swarm_playground_is_served_and_honest(monkeypatch):
     assert "no new candidates" in script.text
     assert "Math.max(0, lo - span * 0.08)" in script.text
     assert "Bandit selection receipt" in script.text
+    # Zero-user v2 on-ramp: a large paste surface gives deterministic metrics
+    # before any model call. Stable/cloud mode stays browser-only.
+    assert 'id="codeInput"' in page.text
+    assert 'maxlength="262144"' in page.text
+    assert 'id="analyzeBtn"' in page.text
+    assert 'id="analysisResults"' in page.text
+    assert "analyze_code_for_swarm" in script.text
+    assert 'state.runtimeMode === "contributor"' in script.text
+    assert "source was not uploaded" in script.text
     # The bundled sample is a REAL recorded run and says so inside itself.
     with TestClient(create_app(), base_url="http://localhost:8080") as client:
         sample = client.get("/ui/swarm-sample.json")

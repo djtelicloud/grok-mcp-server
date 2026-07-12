@@ -5,8 +5,6 @@
 
 import json
 
-import pytest
-
 from src.swarm.router import (
     ARMS,
     REWARD_FEASIBLE_DOMINATED,
@@ -46,6 +44,13 @@ class TestRouterSelection:
         assert receipt["reason"] == "round_robin_cold_start"
         assert set(receipt["scores"].keys()) == set(ARMS)
         assert "pulls" in receipt and "decay" in receipt
+
+    def test_unpulled_ucb_scores_are_strict_json_null_not_infinity(self):
+        router = DiscountedUCBRouter(seed=1)
+        receipt_text = router.select(generation=2)["receipt"]
+        assert "Infinity" not in receipt_text
+        receipt = json.loads(receipt_text)
+        assert set(receipt["scores"].values()) == {None}
 
     def test_converges_to_higher_reward_arm(self):
         """After enough evidence, the consistently-rewarded arm dominates."""

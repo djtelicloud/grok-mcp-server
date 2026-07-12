@@ -60,6 +60,25 @@
     button:hover { border-color: var(--accent); }
     button.primary { background: var(--accent); border-color: var(--accent); color: #08101f; font-weight: 700; }
     button:disabled { opacity: .45; cursor: not-allowed; }
+    .paste-grid { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(280px, .75fr);
+                  gap: 12px; }
+    textarea.code-input { width: 100%; min-height: 300px; resize: vertical; background: #0b0d10;
+      color: #dce6f3; border: 1px solid var(--border); border-radius: 8px; padding: 12px;
+      font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      tab-size: 4; }
+    textarea.code-input:focus { outline: 2px solid rgba(110, 157, 255, .45); border-color: var(--accent); }
+    textarea.oracle-input { min-height: 150px; }
+    .paste-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+    .privacy-note { color: var(--muted); font-size: 11px; margin-top: 7px; }
+    .analysis-results { min-height: 300px; background: var(--panel2); border: 1px solid var(--border);
+                        border-radius: 8px; padding: 11px; }
+    .analysis-results h3 { font-size: 13px; margin: 0 0 8px; }
+    .function-list { display: grid; gap: 6px; margin-top: 10px; }
+    .function-row { display: grid; grid-template-columns: minmax(0, 1fr) repeat(3, auto); gap: 8px;
+                    align-items: center; padding: 7px 8px; border: 1px solid var(--border);
+                    border-radius: 6px; font-size: 11px; }
+    .function-row code { overflow-wrap: anywhere; }
+    .metric-chip { color: var(--muted); white-space: nowrap; }
     .scorecard { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
                  gap: 8px; margin-top: 12px; }
     .advanced { margin-top: 10px; border-top: 1px solid var(--border); padding-top: 9px; }
@@ -106,6 +125,7 @@
       .journeys { grid-template-columns: 1fr; }
       .journey { min-height: 0; }
       .runtime-banner { align-items: flex-start; }
+      .paste-grid { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -128,6 +148,45 @@
   <div class="wrap">
     <div>
       <div class="panel">
+        <div class="section-head">
+          <div><div class="eyebrow">Your code · zero-cost analysis</div><h2>Paste Python and see where optimization is worth it</h2></div>
+          <span id="analysisBadge" class="source-badge">not analyzed</span>
+        </div>
+        <div class="paste-grid">
+          <div>
+            <textarea id="codeInput" class="code-input" spellcheck="false" maxlength="262144"
+              aria-label="Python code to analyze" placeholder="Paste a Python function or file here…"></textarea>
+            <div class="paste-actions">
+              <button id="analyzeBtn" class="primary" type="button">Analyze code</button>
+              <button id="pasteExampleBtn" type="button">Use slow example</button>
+              <span id="analysisMsg" class="muted" role="status" aria-live="polite"></span>
+            </div>
+            <div id="privacyNote" class="privacy-note">Analysis starts in this browser. Verified execution is local-only and requires tests plus a benchmark.</div>
+          </div>
+          <div id="analysisResults" class="analysis-results">
+            <h3>What you will get</h3>
+            <div class="muted">Function inventory, complexity, nesting, size, import hygiene, duplication signals, and explicit blockers before any model call.</div>
+          </div>
+        </div>
+        <details id="searchSetup" class="advanced">
+          <summary>Run verified local search: add tests and benchmark</summary>
+          <div class="paste-actions">
+            <label>Function <select id="focusPicker"><option value="">analyze code first</option></select></label>
+            <label>Goal <select id="goalPicker"><option value="balanced">balanced</option><option value="latency">latency</option><option value="memory">memory</option><option value="size">size</option></select></label>
+            <label>Strategy <select id="strategyPicker"><option value="elite_offspring">evolve from elites</option><option value="baseline_batch">baseline batch</option></select></label>
+          </div>
+          <div class="paste-grid" style="margin-top:10px">
+            <div><div class="code-label">pytest code · required</div><textarea id="testInput" class="code-input oracle-input" spellcheck="false" maxlength="131072" placeholder="from module_under_test import your_function\n\ndef test_behavior(): ..."></textarea></div>
+            <div><div class="code-label">benchmark script · required</div><textarea id="benchInput" class="code-input oracle-input" spellcheck="false" maxlength="65536" placeholder="Print one SWARM_BENCH JSON line with latency_ms and peak_mem_bytes"></textarea></div>
+          </div>
+          <div class="paste-actions">
+            <button id="runPasteBtn" class="primary" type="button" disabled>Run verified swarm</button>
+            <span id="pasteRunMsg" class="muted" role="status" aria-live="polite">Available in contributor Forge after exact analysis.</span>
+          </div>
+        </details>
+      </div>
+
+      <div class="panel" style="margin-top:14px">
         <div class="section-head">
           <div><div class="eyebrow">Start here</div><h2>Choose how you want to explore</h2></div>
           <span id="sourceBadge" class="source-badge">loading</span>
@@ -199,7 +258,8 @@
   <div class="honesty">
     Every value on this page is read from the swarm's SQLite rows via
     <code>get_swarm_status(view="json")</code> (format
-    <code>unigrok-swarm-status-v1</code>) or a static export of the same payload.
+    <code>unigrok-swarm-status-v2</code>, with v1 export compatibility) or a
+    static export of the same payload.
     Nothing is simulated. Fields this stack does not measure — hardware
     instruction counters, LLM semantic scores — are absent by design, not
     hidden. "Verified" means: the task's own <code>test_target</code> passed.

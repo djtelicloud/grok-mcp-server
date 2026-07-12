@@ -2542,6 +2542,33 @@ class GrokSessionStore:
                     await self._conn.rollback()
                     raise
 
+            if version < 13:
+                # Swarm v2 contracts are additive. Existing v12 tasks remain
+                # workspace/baseline/balanced without a data rewrite, and the
+                # candidate lineage reservation becomes fully descriptive.
+                await self._conn.execute("BEGIN IMMEDIATE;")
+                try:
+                    for statement in (
+                        "ALTER TABLE swarm_tasks ADD COLUMN search_strategy TEXT "
+                        "NOT NULL DEFAULT 'baseline_batch';",
+                        "ALTER TABLE swarm_tasks ADD COLUMN primary_goal TEXT "
+                        "NOT NULL DEFAULT 'balanced';",
+                        "ALTER TABLE swarm_tasks ADD COLUMN input_kind TEXT "
+                        "NOT NULL DEFAULT 'workspace';",
+                        "ALTER TABLE swarm_tasks ADD COLUMN analytics_json TEXT;",
+                        "ALTER TABLE swarm_tasks ADD COLUMN champion_id TEXT;",
+                        "ALTER TABLE swarm_candidates ADD COLUMN parent_code_hash TEXT;",
+                        "ALTER TABLE swarm_candidates ADD COLUMN origin TEXT "
+                        "NOT NULL DEFAULT 'llm';",
+                        "ALTER TABLE swarm_candidates ADD COLUMN transform TEXT;",
+                    ):
+                        await self._conn.execute(statement)
+                    await self._conn.execute("PRAGMA user_version = 13;")
+                    await self._conn.commit()
+                except Exception:
+                    await self._conn.rollback()
+                    raise
+
             # knowledge_fts is (re)checked on EVERY init, not just inside the
             # v7 gate: FTS5 is a compile-time SQLite option, so a db created
             # on a build WITH it can be reopened by one WITHOUT it (and vice
@@ -3983,7 +4010,7 @@ class GrokSessionStore:
                 rows = await cursor.fetchall()
                 return [dict(row) for row in rows]
 
-    # ── Swarm optimizer state (v12, src/swarm/) ─────────────────────────────
+    # ── Swarm optimizer state (v13, src/swarm/) ─────────────────────────────
 
     @_with_write_retry_async
     async def create_swarm_task(
@@ -3998,6 +4025,10 @@ class GrokSessionStore:
         seed: int,
         caller: Optional[str] = None,
         request_id: Optional[str] = None,
+        search_strategy: str = "baseline_batch",
+        primary_goal: str = "balanced",
+        input_kind: str = "workspace",
+        analytics_json: Optional[str] = None,
     ) -> None:
         """Insert a 'queued' swarm task row. caller/request_id fall back to
         the identities bound to the current async context (the src/storage.py
@@ -4010,7 +4041,8 @@ class GrokSessionStore:
                 await self._conn.execute(
                     "INSERT INTO swarm_tasks (id, target_path, focus_node, base_file_hash, "
                     "test_target, bench_command, status, budget_usd, seed, caller, request_id, "
-                    "created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?)",
+                    "search_strategy, primary_goal, input_kind, analytics_json, created_at, "
+                    "updated_at) VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         str(task_id),
                         str(target_path),
@@ -4022,6 +4054,10 @@ class GrokSessionStore:
                         int(seed),
                         normalize_caller(caller) or get_active_caller(),
                         normalize_request_id(request_id) or get_request_id() or None,
+                        str(search_strategy),
+                        str(primary_goal),
+                        str(input_kind),
+                        analytics_json,
                         now_str,
                         now_str,
                     ),
@@ -4042,6 +4078,8 @@ class GrokSessionStore:
         baseline_json: Optional[str] = None,
         oracle_json: Optional[str] = None,
         folded_state: Optional[str] = None,
+        analytics_json: Optional[str] = None,
+        champion_id: Optional[str] = None,
     ) -> None:
         """Update a swarm task row. updated_at ALWAYS bumps — the runner calls
         this after every candidate as its heartbeat, and staleness detection
@@ -4067,6 +4105,12 @@ class GrokSessionStore:
         if folded_state is not None:
             fields.append("folded_state = ?")
             params.append(str(folded_state))
+        if analytics_json is not None:
+            fields.append("analytics_json = ?")
+            params.append(str(analytics_json))
+        if champion_id is not None:
+            fields.append("champion_id = ?")
+            params.append(str(champion_id))
         params.append(str(task_id))
         async with self._lock:
             await self._conn.execute("BEGIN IMMEDIATE;")
@@ -4133,7 +4177,8 @@ class GrokSessionStore:
                     "mutator, plane, byte_start, byte_end, code, code_hash, stage_reached, "
                     "feasible, side_effects, latency_ms, peak_mem_bytes, diff_bytes, "
                     "readability, pareto_rank, crowding, reward, gen_cost_usd, arm_receipt, "
-                    "created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "parent_code_hash, origin, transform, created_at) VALUES "
+                    "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         str(candidate["id"]),
                         str(candidate["task_id"]),
@@ -4157,6 +4202,9 @@ class GrokSessionStore:
                         candidate.get("reward"),
                         max(0.0, float(candidate.get("gen_cost_usd") or 0.0)),
                         candidate.get("arm_receipt"),
+                        candidate.get("parent_code_hash"),
+                        str(candidate.get("origin") or "llm"),
+                        candidate.get("transform"),
                         now_str,
                     ),
                 )

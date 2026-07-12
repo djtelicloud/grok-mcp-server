@@ -16,7 +16,36 @@ import os
 _LOGGER = "GrokMCP"
 
 _VALID_MODES = ("off", "dry_run", "active")
+VALID_SEARCH_STRATEGIES = ("baseline_batch", "elite_offspring")
+VALID_PRIMARY_GOALS = ("latency", "memory", "size", "balanced")
 _MODE_WARNED = False
+
+
+def validate_search_strategy(value: str | None) -> str:
+    """Return a canonical strategy or reject an unknown caller value.
+
+    Unlike rollout mode, this is request data rather than process
+    configuration. Silently coercing a typo would make a run's lineage
+    receipt dishonest, so unknown values are errors.
+    """
+    normalized = str(value or "baseline_batch").strip().lower()
+    if normalized not in VALID_SEARCH_STRATEGIES:
+        raise ValueError(
+            f"unknown search_strategy {value!r}; expected one of "
+            f"{', '.join(VALID_SEARCH_STRATEGIES)}"
+        )
+    return normalized
+
+
+def validate_primary_goal(value: str | None) -> str:
+    """Return a canonical champion-selection goal or reject it."""
+    normalized = str(value or "balanced").strip().lower()
+    if normalized not in VALID_PRIMARY_GOALS:
+        raise ValueError(
+            f"unknown primary_goal {value!r}; expected one of "
+            f"{', '.join(VALID_PRIMARY_GOALS)}"
+        )
+    return normalized
 
 
 def _env_int(name: str, default: int, lo: int, hi: int) -> int:

@@ -13,6 +13,8 @@ if [[ ! -x "${vinext}" ]]; then
   exit 69
 fi
 
+node "${script_dir}/sync-swarm-playground.mjs"
+
 echo "Running bounded vinext build..."
 if command -v timeout >/dev/null; then
   timeout \

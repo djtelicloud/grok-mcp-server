@@ -61,6 +61,19 @@ test("keeps the connection wizard instructional", async () => {
   assert.doesNotMatch(controlCenter, /localStorage|sessionStorage|dangerouslySetInnerHTML/);
 });
 
+test("publishes Swarm as a client-only showcase", async () => {
+  const publicPage = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const swarmScript = await readFile(new URL("../../../mcp_ui/swarm.js", import.meta.url), "utf8");
+  const syncScript = await readFile(new URL("../scripts/sync-swarm-playground.mjs", import.meta.url), "utf8");
+
+  assert.match(publicPage, /href="\/swarm\/"/);
+  assert.match(swarmScript, /state\.runtimeMode === "contributor"/);
+  assert.match(swarmScript, /source was not uploaded/);
+  assert.match(swarmScript, /Public showcase — client-side analysis only/);
+  assert.doesNotMatch(swarmScript, /localStorage|sessionStorage/);
+  assert.match(syncScript, /mcp_ui/);
+});
+
 test("requires adapters to separate PR review state from release impact", async () => {
   const contract = await readFile(new URL("../app/lib/control-center-contract.ts", import.meta.url), "utf8");
   const controlCenter = await readFile(new URL("../app/control-center.tsx", import.meta.url), "utf8");

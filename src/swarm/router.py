@@ -15,7 +15,7 @@ from __future__ import annotations
 import json
 import math
 import random
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 
 ARMS = ("algorithmic", "allocation", "hot_loop", "simplify")
 
@@ -71,7 +71,10 @@ class DiscountedUCBRouter:
             "step": self._step,
             "generation": generation,
             "decay": self.decay,
-            "scores": {a: (round(s, 4) if s is not None else None) for a, s in scores.items()},
+            "scores": {
+                a: (round(s, 4) if s is not None and math.isfinite(s) else None)
+                for a, s in scores.items()
+            },
             "pulls": dict(self._pulls),
         }, separators=(",", ":"))
         return {

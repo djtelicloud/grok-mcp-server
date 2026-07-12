@@ -1,7 +1,7 @@
 """MCP tools for the swarm code optimizer (contributor-mode only).
 
-Public surface: start_code_swarm, get_swarm_status, list_swarm_tasks,
-apply_swarm_winner, cancel_swarm. Mutating tools are triple-gated (contributor mode + attached
+Public surface: analyze_code_for_swarm, start_code_swarm, start_paste_swarm,
+get_swarm_status, list_swarm_tasks, apply_swarm_winner, cancel_swarm. Mutating tools are triple-gated (contributor mode + attached
 workspace + not Cloud Run) — the stable public MCP is workspace-neutral and
 must never mutate a caller's files. apply_swarm_winner is additionally gated on
 UNIGROK_SWARM=active and guarded by the base_file_hash staleness check plus
@@ -12,13 +12,16 @@ or leave the tests broken.
 from __future__ import annotations
 
 import asyncio
+import difflib
 import hashlib
 import json
 import logging
+import math
 import os
 import shlex
 import signal
 import tempfile
+import textwrap
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
@@ -27,13 +30,14 @@ from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
 from ..swarm import config as swarm_config
+from ..swarm.analytics import analyze_python_source, analyze_python_source_full
 from ..swarm.ast_utils import (
     apply_byte_replacement,
     extract_node_span,
     parse_ok,
     signature_fingerprint,
 )
-from ..swarm.pareto import rank_candidates
+from ..swarm.pareto import rank_candidates, select_champion
 from ..swarm.runner import SwarmRunner, effective_status
 from ..utils import (
     GrokInvocationContext,
@@ -76,6 +80,20 @@ def _gate() -> Optional[str]:
         )
     if PathResolver.get_workspace_root() is None:
         return "The swarm optimizer needs an attached workspace."
+    return None
+
+
+def _paste_gate() -> Optional[str]:
+    """Paste execution needs local contributor authority, not a workspace."""
+    if swarm_config.swarm_mode() == "off":
+        return (
+            "The swarm optimizer is off. Set UNIGROK_SWARM=dry_run to search "
+            "without Apply or active to enable guarded workspace Apply."
+        )
+    if is_cloudrun_runtime():
+        return "Pasted code execution is unavailable in the Cloud Run runtime."
+    if not PathResolver.contributor_mode():
+        return "Verified paste search is available only in the local contributor Forge."
     return None
 
 
@@ -141,6 +159,31 @@ def _file_hash(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+async def analyze_code_for_swarm(code: str, language: str = "python") -> str:
+    """Analyze pasted Python without a model call, import, or user-code execution.
+
+    The source is capped at 256 KiB, read only from this request, and never
+    persisted. Cloud Run refuses this server-side tool because the public
+    page performs its preview entirely in the browser.
+    """
+    async with GrokInvocationContext("utility", logger, append_signature=False) as ctx:  # noqa: F841
+        if is_cloudrun_runtime():
+            return json.dumps(
+                {"error": "server-side paste analysis is unavailable in Cloud Run; use the client-side preview"},
+                separators=(",", ":"),
+            )
+        if str(language or "").strip().lower() != "python":
+            return json.dumps(
+                {"error": "Swarm analysis currently supports language='python' only"},
+                separators=(",", ":"),
+            )
+        try:
+            payload = await analyze_python_source_full(code)
+        except (TypeError, ValueError) as exc:
+            return json.dumps({"error": str(exc)}, separators=(",", ":"))
+        return json.dumps(payload, separators=(",", ":"))
+
+
 async def start_code_swarm(
     target_path: str,
     focus_node: str,
@@ -148,6 +191,8 @@ async def start_code_swarm(
     bench_command: str,
     budget_usd: Optional[float] = None,
     allow_unstable_bench: bool = False,
+    search_strategy: str = "baseline_batch",
+    primary_goal: str = "balanced",
 ) -> str:
     """Launch a swarm that searches rewrites of ONE focus function for
     latency/memory wins verified by your tests. Returns a task id to poll with
@@ -167,6 +212,10 @@ async def start_code_swarm(
             extract_node_span(source, focus_node)  # validate focus now, not mid-run
             _validate_test_target(test_target)
             bench_args = _parse_bench_command(bench_command)
+            strategy = swarm_config.validate_search_strategy(search_strategy)
+            goal = swarm_config.validate_primary_goal(primary_goal)
+            analytics = await analyze_python_source_full(source.decode("utf-8"))
+            analytics["source"] = "workspace"
         except (ValueError, FileNotFoundError) as exc:
             return ctx.format_output(f"cannot start swarm: {exc}")
 
@@ -189,6 +238,10 @@ async def start_code_swarm(
             bench_command=bench_command,
             budget_usd=budget,
             seed=seed,
+            search_strategy=strategy,
+            primary_goal=goal,
+            input_kind="workspace",
+            analytics_json=json.dumps(analytics, separators=(",", ":")),
         )
         _get_runner().launch(task_id, {
             "workspace_root": workspace,
@@ -199,11 +252,111 @@ async def start_code_swarm(
             "budget_usd": budget,
             "seed": seed,
             "allow_unstable_bench": bool(allow_unstable_bench),
-            "goal": f"optimize {focus_node} in {target_rel}",
+            "goal": f"optimize {focus_node} in {target_rel} for {goal}",
+            "search_strategy": strategy,
+            "primary_goal": goal,
         })
         return ctx.format_output(
             f"Swarm `{task_id}` started on `{focus_node}` in `{target_rel}` "
-            f"(mode={swarm_config.swarm_mode()}, budget=${budget:.2f}). "
+            f"(mode={swarm_config.swarm_mode()}, strategy={strategy}, goal={goal}, "
+            f"budget=${budget:.2f}). "
+            f"Poll with get_swarm_status('{task_id}')."
+        )
+
+
+async def start_paste_swarm(
+    code: str,
+    test_code: str,
+    bench_code: str,
+    focus_node: str,
+    budget_usd: Optional[float] = None,
+    allow_unstable_bench: bool = False,
+    search_strategy: str = "elite_offspring",
+    primary_goal: str = "balanced",
+) -> str:
+    """Run a verified local swarm over pasted Python, tests, and benchmark.
+
+    Source material is written only to a task-scoped local scratch directory.
+    Tests and a benchmark are mandatory; examples never count as proof. Paste
+    tasks return copyable champions but cannot use workspace Apply.
+    """
+    async with GrokInvocationContext("utility", logger, append_signature=False) as ctx:
+        refusal = _paste_gate()
+        if refusal:
+            return ctx.format_output(refusal)
+        try:
+            if not isinstance(code, str) or not code.strip():
+                raise ValueError("code is required")
+            if not isinstance(test_code, str) or not test_code.strip():
+                raise ValueError("test_code is required for verification")
+            if not isinstance(bench_code, str) or not bench_code.strip():
+                raise ValueError("bench_code is required for measurement")
+            if len(code.encode("utf-8")) > 256 * 1024:
+                raise ValueError("code exceeds the 256 KiB cap")
+            if len(test_code.encode("utf-8")) > 128 * 1024:
+                raise ValueError("test_code exceeds the 128 KiB cap")
+            if len(bench_code.encode("utf-8")) > 64 * 1024:
+                raise ValueError("bench_code exceeds the 64 KiB cap")
+            if any(redact_secrets(value) != value for value in (code, test_code, bench_code)):
+                raise ValueError("remove secret-like content before local search")
+            source = code.encode("utf-8")
+            if not parse_ok(source):
+                raise ValueError("pasted code does not parse")
+            extract_node_span(source, focus_node)
+            compile(test_code, "test_focus.py", "exec")
+            compile(bench_code, "bench_focus.py", "exec")
+            strategy = swarm_config.validate_search_strategy(search_strategy)
+            goal = swarm_config.validate_primary_goal(primary_goal)
+            analytics = await analyze_python_source_full(code)
+        except (SyntaxError, TypeError, UnicodeError, ValueError) as exc:
+            return ctx.format_output(f"cannot start paste swarm: {exc}")
+
+        task_id = uuid.uuid4().hex
+        seed = int(hashlib.sha256(task_id.encode()).hexdigest()[:8], 16)
+        state_base = PathResolver.get_state_base_dir() or PathResolver.get_service_root()
+        scratch = Path(state_base) / "swarm-paste" / task_id
+        scratch.mkdir(parents=True, exist_ok=False)
+        (scratch / "module_under_test.py").write_text(code, encoding="utf-8")
+        (scratch / "test_focus.py").write_text(test_code, encoding="utf-8")
+        (scratch / "bench_focus.py").write_text(bench_code, encoding="utf-8")
+        analytics["source"] = "paste"
+        analytics["searchability"] = {"ready": True, "blockers": []}
+        budget = swarm_config.swarm_default_budget_usd() if budget_usd is None else float(budget_usd)
+        budget = max(0.0, min(budget, swarm_config.swarm_max_budget_usd()))
+
+        await store.create_swarm_task(
+            task_id,
+            target_path=f"paste://{task_id}/module_under_test.py",
+            focus_node=focus_node,
+            base_file_hash=hashlib.sha256(source).hexdigest(),
+            test_target="test_focus.py",
+            bench_command="python bench_focus.py",
+            budget_usd=budget,
+            seed=seed,
+            search_strategy=strategy,
+            primary_goal=goal,
+            input_kind="paste",
+            analytics_json=json.dumps(analytics, separators=(",", ":")),
+        )
+        _get_runner().launch(
+            task_id,
+            {
+                "workspace_root": scratch,
+                "target_rel": "module_under_test.py",
+                "focus_node": focus_node,
+                "test_target": "test_focus.py",
+                "bench_args": ["bench_focus.py"],
+                "budget_usd": budget,
+                "seed": seed,
+                "allow_unstable_bench": bool(allow_unstable_bench),
+                "goal": f"optimize pasted {focus_node} for {goal}",
+                "search_strategy": strategy,
+                "primary_goal": goal,
+            },
+        )
+        return ctx.format_output(
+            f"Paste swarm `{task_id}` started for `{focus_node}` "
+            f"(strategy={strategy}, goal={goal}, mode={swarm_config.swarm_mode()}). "
             f"Poll with get_swarm_status('{task_id}')."
         )
 
@@ -212,7 +365,7 @@ async def get_swarm_status(task_id: str, view: Literal["text", "json"] = "text")
     """Report a swarm's status, the oracle-honesty facts (focus-span coverage,
     bench stability), the current Pareto front with relative deltas, and
     spend. ``view="json"`` returns the stable machine-readable payload
-    (format ``unigrok-swarm-status-v1``) that the local workbench and any
+    (format ``unigrok-swarm-status-v2``) that the local workbench and any
     static export consume — one call renders the whole run.
 
     The JSON schema is deliberately honest: it carries ONLY measured values.
@@ -237,6 +390,7 @@ async def get_swarm_status(task_id: str, view: Literal["text", "json"] = "text")
             return json.dumps(
                 await _status_payload(task, status, oracle, baseline, front),
                 separators=(",", ":"),
+                allow_nan=False,
             )
 
         lines = [
@@ -302,6 +456,11 @@ async def apply_swarm_winner(candidate_id: str) -> str:
         task = await store.get_swarm_task(candidate["task_id"])
         if not task:
             return ctx.format_output("owning swarm task not found.")
+        if (task.get("input_kind") or "workspace") == "paste":
+            return ctx.format_output(
+                "paste swarms are copy-only: copy the Best verified candidate or "
+                "start a workspace swarm to use guarded Apply."
+            )
         task_status = effective_status(task)
         if task_status not in ("completed", "cancelled"):
             return ctx.format_output(
@@ -400,6 +559,17 @@ def _load_json(raw: Any) -> Dict[str, Any]:
         return {}
 
 
+def _json_safe(value: Any) -> Any:
+    """Normalize legacy non-finite receipt numbers for strict browser JSON."""
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    if isinstance(value, dict):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_json_safe(item) for item in value]
+    return value
+
+
 async def _find_candidate(task_id: Optional[str], candidate_id: str) -> Optional[Dict[str, Any]]:
     if task_id:
         for c in await store.list_swarm_candidates(task_id):
@@ -441,7 +611,7 @@ async def _status_payload(
     baseline: Dict[str, Any],
     front: List[Dict[str, Any]],
 ) -> Dict[str, Any]:
-    """The unigrok-swarm-status-v1 payload: every measured fact of one run,
+    """The unigrok-swarm-status-v2 payload: every measured fact of one run,
     grouped generation-by-generation so a frontend can replay the swarm
     without further backend calls. Candidate ``code`` rides ONLY on Pareto
     elites (bounded payload; the detail view exists for winners), and the
@@ -450,6 +620,10 @@ async def _status_payload(
     all_candidates = await store.list_swarm_candidates(str(task["id"]))
     front_ids = {c["id"] for c in front}
     front_code = {c["id"]: c.get("code") for c in front}
+    champion = select_champion(front, str(task.get("primary_goal") or "balanced"))
+    champion_id = str(task.get("champion_id") or "") or (
+        str(champion["id"]) if champion else None
+    )
 
     generations: Dict[int, List[Dict[str, Any]]] = {}
     feasible_count = 0
@@ -465,7 +639,11 @@ async def _status_payload(
             "diff_bytes": row.get("diff_bytes"),
             "reward": row.get("reward"),
             "token_cost_usd": float(row.get("gen_cost_usd") or 0.0),
-            "arm_receipt": _load_json(row.get("arm_receipt")) or None,
+            "arm_receipt": _json_safe(_load_json(row.get("arm_receipt"))) or None,
+            "parent_id": row.get("parent_id"),
+            "parent_code_hash": row.get("parent_code_hash"),
+            "origin": row.get("origin") or "llm",
+            "transform": row.get("transform"),
         }
         if row["id"] in front_ids:
             entry["code"] = front_code.get(row["id"])
@@ -491,10 +669,13 @@ async def _status_payload(
     if safe_oracle and safe_oracle.get("error") is not None:
         safe_oracle["error"] = redact_secrets(str(safe_oracle["error"]))[:400]
     return {
-        "format": "unigrok-swarm-status-v1",
+        "format": "unigrok-swarm-status-v2",
         "task_id": task["id"],
         "status": status,
         "mode": swarm_config.swarm_mode(),
+        "input_kind": task.get("input_kind") or "workspace",
+        "search_strategy": task.get("search_strategy") or "baseline_batch",
+        "primary_goal": task.get("primary_goal") or "balanced",
         "target": {
             "path": task.get("target_path"),
             "focus_node": task.get("focus_node"),
@@ -502,6 +683,7 @@ async def _status_payload(
             "bench_command": task.get("bench_command"),
         },
         "oracle": safe_oracle,
+        "analytics": _load_json(task.get("analytics_json")) or None,
         "baseline": baseline or None,
         "budget": {
             "budget_usd": float(task.get("budget_usd") or 0.0),
@@ -517,6 +699,10 @@ async def _status_payload(
         "pareto_front": [
             c["id"] for c in sorted(front, key=lambda x: float(x.get("latency_ms") or 0.0))
         ],
+        "champion_id": champion_id,
+        "comparison": _comparison_payload(
+            task, all_candidates, champion, original_span
+        ),
         "aggregates": {
             "candidates_total": len(all_candidates),
             "feasibility_rate": (
@@ -530,12 +716,90 @@ async def _status_payload(
     }
 
 
+def _comparison_payload(
+    task: Dict[str, Any],
+    all_candidates: List[Dict[str, Any]],
+    champion: Optional[Dict[str, Any]],
+    original_span: Optional[str],
+) -> Optional[Dict[str, Any]]:
+    if not champion:
+        return None
+    by_id = {str(candidate["id"]): candidate for candidate in all_candidates}
+    parent = by_id.get(str(champion.get("parent_id") or ""))
+
+    def analytics_metrics(code: Optional[str]) -> Optional[Dict[str, Any]]:
+        if not code:
+            return None
+        measured = analyze_python_source(textwrap.dedent(code))
+        functions = measured.get("functions") or []
+        if not functions:
+            return None
+        item = functions[0]
+        return {
+            key: item.get(key)
+            for key in ("loc", "cyclomatic_complexity", "branch_points", "max_nesting")
+        }
+
+    def objective(candidate: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        if not candidate:
+            return None
+        return {
+            key: candidate.get(key)
+            for key in ("latency_ms", "peak_mem_bytes", "diff_bytes")
+        }
+
+    champion_code = str(champion.get("code") or "")
+    parent_code = str(parent.get("code") or "") if parent else None
+
+    def unified(before: Optional[str], after: str, before_name: str) -> Optional[str]:
+        if before is None:
+            return None
+        return "".join(
+            difflib.unified_diff(
+                before.splitlines(keepends=True),
+                after.splitlines(keepends=True),
+                fromfile=before_name,
+                tofile="champion",
+                n=3,
+            )
+        )
+
+    return {
+        "original": {
+            "code": original_span,
+            "analytics": analytics_metrics(original_span),
+            "objectives": {
+                key: _load_json(task.get("baseline_json")).get(key)
+                for key in ("latency_ms", "peak_mem_bytes")
+            },
+        },
+        "parent": (
+            {
+                "candidate_id": parent.get("id"),
+                "code": parent_code,
+                "analytics": analytics_metrics(parent_code),
+                "objectives": objective(parent),
+            }
+            if parent
+            else None
+        ),
+        "champion": {
+            "candidate_id": champion.get("id"),
+            "code": champion_code,
+            "analytics": analytics_metrics(champion_code),
+            "objectives": objective(champion),
+        },
+        "diff_from_original": unified(original_span, champion_code, "original"),
+        "diff_from_parent": unified(parent_code, champion_code, "parent") if parent else None,
+    }
+
+
 def _live_original_span(task: Dict[str, Any]) -> tuple:
     """(redacted original focus-span text, stale flag). None/True when the
     workspace is unavailable or the file changed since the swarm ran — the
     UI must show a staleness notice instead of a wrong diff."""
     try:
-        target = _resolve_target(str(task.get("target_path") or ""))
+        target = _task_target(task)
         live = target.read_bytes()
     except (ValueError, FileNotFoundError, PermissionError, OSError):
         return None, True
@@ -555,10 +819,25 @@ def _task_span(task: Dict[str, Any]) -> Optional[tuple]:
     from ..swarm.ast_utils import extract_node_span
 
     try:
-        target = _resolve_target(str(task.get("target_path") or ""))
+        target = _task_target(task)
         return extract_node_span(target.read_bytes(), str(task.get("focus_node") or ""))
     except (ValueError, FileNotFoundError, OSError):
         return None
+
+
+def _task_target(task: Dict[str, Any]) -> Path:
+    if (task.get("input_kind") or "workspace") == "paste":
+        task_id = str(task.get("id") or "")
+        if not task_id or any(character not in "0123456789abcdef" for character in task_id):
+            raise ValueError("invalid paste task id")
+        state_base = PathResolver.get_state_base_dir() or PathResolver.get_service_root()
+        candidate = (Path(state_base) / "swarm-paste" / task_id / "module_under_test.py").resolve()
+        root = (Path(state_base) / "swarm-paste" / task_id).resolve()
+        candidate.relative_to(root)
+        if not candidate.is_file():
+            raise FileNotFoundError("paste task source is unavailable")
+        return candidate
+    return _resolve_target(str(task.get("target_path") or ""))
 
 
 async def _reverify(task: Dict[str, Any], target: Path, original: bytes) -> tuple:
@@ -612,14 +891,18 @@ async def _reverify(task: Dict[str, Any], target: Path, original: bytes) -> tupl
 
 
 def register_swarm_tools(mcp: FastMCP) -> None:
+    mcp.add_tool(analyze_code_for_swarm, annotations=READONLY_TOOL)
     mcp.add_tool(start_code_swarm)
+    mcp.add_tool(start_paste_swarm)
     mcp.add_tool(get_swarm_status, annotations=READONLY_TOOL)
     mcp.add_tool(list_swarm_tasks, annotations=READONLY_TOOL)
     mcp.add_tool(apply_swarm_winner, annotations=DESTRUCTIVE_TOOL)
     mcp.add_tool(cancel_swarm)
 
 
+register_internal_tool("analyze_code_for_swarm", analyze_code_for_swarm)
 register_internal_tool("start_code_swarm", start_code_swarm)
+register_internal_tool("start_paste_swarm", start_paste_swarm)
 register_internal_tool("get_swarm_status", get_swarm_status)
 register_internal_tool("list_swarm_tasks", list_swarm_tasks)
 register_internal_tool("apply_swarm_winner", apply_swarm_winner)
