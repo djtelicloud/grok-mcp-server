@@ -10,6 +10,7 @@ topics:
   - "grok-4.5-pinning"
   - "media-imagine"
   - "metrics-tool"
+  - "intelligence-payload-profiles-v1"
   - "faq"
   - "api-reference"
 ---
@@ -29,5 +30,6 @@ Use this bundle to discover tool schemas, routing details, reasoning levels, med
 - [Model Pinning & Profiles](grok-4.5-pinning.md): API vs CLI paths, fallback parameters, and Grok 4.5 capabilities.
 - [Media Generation](media-imagine.md): Image and video generation schemas.
 - [Observability & Metrics](metrics-tool.md): Aggregated telemetry and status monitoring.
+- [Insider Intelligence Payload Profiles](intelligence-payload-profiles-v1.md): Manifest-closed GNO envelopes, evidenced OptiBench cohorts, direct-Pareto preference pairs, and bounded Needle projections carried beside the immutable Capsule v1 format.
 - [Verified FAQ](faq.md): Curated operational answers that Grok consults only when relevant.
 - [Generated API Reference](api-reference.md): Deterministic signatures and docstrings for documented public Python APIs.

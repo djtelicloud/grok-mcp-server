@@ -56,6 +56,29 @@ packages = ["src"]
 ".grok" = ".grok"
 "example.env" = "example.env"
 
+[tool.hatch.build.targets.sdist]
+exclude = [
+    "/.codex",
+    "/.pytest_cache",
+    "/.ruff_cache",
+    "/.venv",
+    "/build",
+    "/dist",
+    "/htmlcov",
+    "/node_modules",
+    "/sites/**/.next",
+    "/sites/**/.npm",
+    "/sites/**/.sites-runtime",
+    "/sites/**/.vinext",
+    "/sites/**/.wrangler",
+    "/sites/**/coverage",
+    "/sites/**/dist",
+    "/sites/**/node_modules",
+    "/sites/**/npm-cache",
+    "/**/.DS_Store",
+    "/**/__pycache__",
+]
+
 [dependency-groups]
 dev = [
     "httpx2>=2.5.0",

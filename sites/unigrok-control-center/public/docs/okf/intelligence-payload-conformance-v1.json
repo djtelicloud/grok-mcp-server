@@ -1,0 +1,173 @@
+{
+  "accepted_body_sha256": {
+    "org.grokmcp.agentic_dpo_pair.v1": "995484b8eac65ce2e77e296d43ba3b9ab9ae6d8cc8ffb88ed7049f465dc41f07",
+    "org.grokmcp.gno_envelope.v1": "c8fdb027a0382799ab19a8d032a559de1ca33f2a972377776ef2dc3866f47224",
+    "org.grokmcp.optibench_result.v1": "5005fc5ba7bd6d89da786bf9ffc8c287ec0fb331c271cbfe642583c230b346e8"
+  },
+  "reject_vectors": [
+    {
+      "error": "numerator",
+      "mutation": "crowding_numerator_digits",
+      "profile": "org.grokmcp.optibench_result.v1",
+      "value": 129
+    },
+    {
+      "error": "profile and tool disagree",
+      "mutation": "mixed_counter_tool",
+      "profile": "org.grokmcp.optibench_result.v1"
+    },
+    {
+      "error": "does not match",
+      "mutation": "substituted_evidence_digest",
+      "profile": "org.grokmcp.gno_envelope.v1"
+    },
+    {
+      "error": "parents must be",
+      "mutation": "missing_preference_parent",
+      "profile": "org.grokmcp.agentic_dpo_pair.v1"
+    },
+    {
+      "error": "secret-like",
+      "mutation": "secret_identifier",
+      "profile": "org.grokmcp.gno_envelope.v1",
+      "target": "extra_evidence_name",
+      "value_parts": ["ghp_", "abcdefghijklmnopqrstuvwxyz123456"]
+    },
+    {
+      "error": "origin is unsupported",
+      "mutation": "enum_type_confusion",
+      "profile": "org.grokmcp.gno_envelope.v1",
+      "target": "mutator.origin",
+      "value": ["agent"]
+    },
+    {
+      "error": "secret-like",
+      "mutation": "secret_mapping_text",
+      "profile": "org.grokmcp.gno_envelope.v1",
+      "target": "resolved_context_evidence",
+      "value_parts": ["\"client", "Secret\":\"verysecretvalue123\""]
+    }
+  ],
+  "semantic_vectors": {
+    "dpo_cohort_proof_v1": {
+      "expected_sha256": "02d294446a1dafdcd62057a573d6f7ea711c338c52d4602fb92ecf2152bad004",
+      "manifest": {
+        "benchmarks": [
+          {
+            "benchmark_capsule": "ucap1:sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "candidate_capsule": "ucap1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          {
+            "benchmark_capsule": "ucap1:sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "candidate_capsule": "ucap1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        ],
+        "cohort_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "population_manifest_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      }
+    },
+    "needle_tools_context_v1": {
+      "examples": [
+        {
+          "chosen": "fast",
+          "prompt": "optimize",
+          "rejected": "slow",
+          "source_capsule": "ucap1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+          "chosen": "small",
+          "prompt": "shrink",
+          "rejected": "large",
+          "source_capsule": "ucap1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      ],
+      "expected_encoder_tokens": 623,
+      "expected_projection_sha256": "e3b3e31e9258bc391e0fa5ae99cfb72da182a993225f464b722d4a6ff09a551c",
+      "expected_used_source_capsules": [
+        "ucap1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "ucap1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      ],
+      "max_encoder_tokens": 1024,
+      "query": " rank context　",
+      "token_counter": "utf8_byte_length",
+      "tokenizer": "utf8-bytes-v1"
+    },
+    "nsga2_exact_v1": {
+      "expected": [
+        {
+          "candidate_capsule": "ucap1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "crowding": {"kind": "boundary"},
+          "pareto_rank": 0
+        },
+        {
+          "candidate_capsule": "ucap1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "crowding": {"denominator": "1", "kind": "finite", "numerator": "2"},
+          "pareto_rank": 0
+        },
+        {
+          "candidate_capsule": "ucap1:sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "crowding": {"denominator": "1", "kind": "finite", "numerator": "2"},
+          "pareto_rank": 0
+        },
+        {
+          "candidate_capsule": "ucap1:sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "crowding": {"kind": "boundary"},
+          "pareto_rank": 0
+        }
+      ],
+      "objective_order": ["o1", "o2", "constant"],
+      "points": [
+        {
+          "candidate_capsule": "ucap1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "values": ["0", "10", "7"]
+        },
+        {
+          "candidate_capsule": "ucap1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "values": ["5", "5", "7"]
+        },
+        {
+          "candidate_capsule": "ucap1:sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "values": ["5", "5", "7"]
+        },
+        {
+          "candidate_capsule": "ucap1:sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "values": ["10", "0", "7"]
+        }
+      ]
+    },
+    "optibench_receipts_v1": {
+      "counter": {
+        "baseline": {
+          "cpu_instructions_retired": "1100",
+          "diff_tokens": "11",
+          "peak_memory_bytes": "105"
+        },
+        "counter_profile": "perf_stat_instructions_v1",
+        "samples": [
+          {"cpu_instructions_retired": "1002", "diff_tokens": "10", "peak_memory_bytes": "102"},
+          {"cpu_instructions_retired": "999", "diff_tokens": "11", "peak_memory_bytes": "101"},
+          {"cpu_instructions_retired": "1000", "diff_tokens": "10", "peak_memory_bytes": "100"},
+          {"cpu_instructions_retired": "1001", "diff_tokens": "9", "peak_memory_bytes": "99"},
+          {"cpu_instructions_retired": "998", "diff_tokens": "10", "peak_memory_bytes": "98"}
+        ]
+      },
+      "environment": {
+        "architecture": "x86_64",
+        "cpu_model": "zen4",
+        "kernel": "linux-6.8.0",
+        "operating_system": "ubuntu-24.04",
+        "runner": "linux-x86_64"
+      },
+      "expected_baseline_relation": "dominates_baseline",
+      "expected_medians": ["1000", "10", "100"],
+      "harness": {
+        "diff_metric": "token_count",
+        "peak_memory_method": "max_rss",
+        "source_commit": "aa1daa2de2a2bc1d1dab6c2e053022287aa63157",
+        "tokenizer": "pinned-v1",
+        "version": "1.0.0"
+      }
+    }
+  },
+  "version": 1
+}

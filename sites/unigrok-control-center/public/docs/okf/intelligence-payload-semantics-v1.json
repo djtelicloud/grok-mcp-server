@@ -1,0 +1,276 @@
+{
+  "protocol": "org.grokmcp.intelligence-payload-semantics",
+  "version": 1,
+  "normative_language": "MUST, MUST NOT, REQUIRED, and EXACT are normative. Any unrecognized field or receipt shape is rejected.",
+  "capsule_schema_sha256": "10c2ec4638bd6c4e303b3e2c4c7d91ae582554f48aaa01fac2d9370062b98d4c",
+  "conformance": {
+    "file": "intelligence-payload-conformance-v1.json",
+    "sha256": "6a0df82c82cd3bfbadc6ff1febf1e43b2d2a6446acd1b977ae7d3262de8d98f4"
+  },
+  "limits": {
+    "graph_bodies": 129,
+    "jsonl_artifact_bytes": 262144,
+    "jsonl_record_bytes": 786432,
+    "needle_encoder_tokens": 1024,
+    "needle_example_bytes": 65536,
+    "needle_input_examples": 64,
+    "needle_query_bytes": 16384,
+    "objective_decimal_digits": 32,
+    "population_candidates": 64,
+    "rational_decimal_digits": 128
+  },
+  "receipt_contracts": [
+    {
+      "id": "gno_input_manifest_v1",
+      "encoding": "IntelligenceCapsule restricted-JCS canonical bytes",
+      "exact_keys": ["declared_artifacts", "execution", "routing"],
+      "bindings": {
+        "declared_artifacts": "body.payload.data.artifacts in canonical array order excluding the sole input_manifest role",
+        "execution": "body.execution by deep JSON equality",
+        "routing": "body.payload.data.routing by deep JSON equality"
+      }
+    },
+    {
+      "id": "optibench_environment_v1",
+      "encoding": "IntelligenceCapsule restricted-JCS canonical bytes",
+      "exact_keys": ["architecture", "cpu_model", "kernel", "operating_system", "runner"],
+      "value_rule": "Every value matches ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$ and passes shared_secret_detector_v1."
+    },
+    {
+      "id": "optibench_harness_v1",
+      "encoding": "IntelligenceCapsule restricted-JCS canonical bytes",
+      "exact_keys": ["diff_metric", "peak_memory_method", "source_commit", "tokenizer", "version"],
+      "bindings": {
+        "source_commit": "lowercase hexadecimal Git object id matching ^(?:[a-f0-9]{40}|[a-f0-9]{64})$",
+        "other_values": "Each matches ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$ and passes shared_secret_detector_v1."
+      }
+    },
+    {
+      "id": "optibench_population_manifest_v1",
+      "encoding": "IntelligenceCapsule restricted-JCS canonical bytes",
+      "exact_keys": ["candidate_capsules", "closed", "cohort_sha256"],
+      "bindings": {
+        "candidate_capsules": "body.parents by exact ordered-array equality",
+        "closed": true,
+        "cohort_sha256": "lowercase SHA-256 hex of restricted-JCS canonical body.payload.data.cohort"
+      }
+    },
+    {
+      "id": "optibench_gate_receipt_v1",
+      "encoding": "IntelligenceCapsule restricted-JCS canonical bytes",
+      "exact_keys": ["gate", "passed"],
+      "bindings": {
+        "gate": "identifier matching ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$; unique across receipts; tests is REQUIRED",
+        "passed": true
+      }
+    },
+    {
+      "id": "optibench_counter_receipt_v1",
+      "encoding": "IntelligenceCapsule restricted-JCS canonical bytes",
+      "exact_keys": ["baseline", "counter_profile", "samples"],
+      "bindings": {
+        "baseline": "Object with exactly objective_metrics keys; values are nonnegative base-10 integer strings of at most 32 digits.",
+        "counter_profile": "Exact equality with body.payload.data.cohort.counter_profile.",
+        "samples": "Array length equals repetitions; each object has exactly objective_metrics keys and bounded nonnegative base-10 integer-string values."
+      }
+    },
+    {
+      "id": "dpo_cohort_proof_manifest_v1",
+      "encoding": "IntelligenceCapsule restricted-JCS canonical bytes",
+      "exact_keys": ["benchmarks", "cohort_sha256", "population_manifest_sha256"],
+      "bindings": {
+        "benchmarks": "Exactly one object with exact keys benchmark_capsule,candidate_capsule for every candidate in the closed population, ordered by candidate_capsule; each benchmark id is the unique evidence-verified OptiBench result selected for that candidate.",
+        "cohort_sha256": "lowercase SHA-256 hex of restricted-JCS canonical shared cohort object",
+        "population_manifest_sha256": "SHA-256 from the shared OptiBench population_manifest evidence reference"
+      }
+    },
+    {
+      "id": "dpo_dominance_receipt_v1",
+      "encoding": "IntelligenceCapsule restricted-JCS canonical bytes",
+      "exact_keys": ["chosen_benchmark", "metrics", "rejected_benchmark", "relation"],
+      "bindings": {
+        "chosen_benchmark": "body.payload.data.chosen.benchmark_capsule",
+        "metrics": "One object per objective in declared order with exact keys chosen,name,rejected,unit and values copied from verified benchmark tuples.",
+        "rejected_benchmark": "body.payload.data.rejected.benchmark_capsule",
+        "relation": "dominates"
+      }
+    }
+  ],
+  "algorithms": [
+    {
+      "id": "dominates_minimize_v1",
+      "input": "Two equal-length ordered tuples of nonnegative integers.",
+      "result": "left dominates right iff every left[i] <= right[i] and at least one left[i] < right[i]."
+    },
+    {
+      "id": "integer_median_v1",
+      "input": "An odd nonempty multiset of bounded nonnegative integers.",
+      "steps": [
+        "Sort integers in ascending numeric order.",
+        "Return element at zero-based index floor(length / 2).",
+        "The resulting tuple MUST exactly equal body.metrics in objective_metrics order."
+      ]
+    },
+    {
+      "id": "nsga2_exact_v1",
+      "input": "Exactly one verified benchmark per candidate in a nonempty closed population; all ordered objectives minimize.",
+      "rank_steps": [
+        "Set remaining to all candidate capsule ids and rank to 0.",
+        "The next front is every remaining candidate not dominated by any other remaining candidate under dominates_minimize_v1.",
+        "Sort the front by candidate capsule id for deterministic output, assign rank, remove it, increment rank, and repeat until remaining is empty."
+      ],
+      "crowding_steps": [
+        "Compute crowding separately inside each final Pareto front.",
+        "A singleton front publishes {kind:boundary}.",
+        "For a larger front initialize every exact rational distance to 0/1 and boundary=false.",
+        "For each objective in objective_metrics order, group candidates by exact integer value and sort the distinct values ascending.",
+        "If the objective is constant, it contributes zero and marks no boundary.",
+        "Otherwise mark every candidate tied at the minimum or maximum value as boundary.",
+        "For every interior distinct value v[j], add (v[j+1]-v[j-1])/(maximum-minimum) to every candidate tied at v[j].",
+        "A candidate marked by any objective publishes {kind:boundary}; every other candidate publishes the summed Fraction reduced by positive gcd as {denominator,kind:finite,numerator} using unsigned base-10 strings.",
+        "Zero MUST serialize as numerator 0 and denominator 1. Numerator and denominator MUST each fit the 128-digit bound."
+      ],
+      "tie_policy": "Candidate ids never break mathematical ties; all tied extrema share boundary status and all tied interior values receive the same nearest-distinct-neighbor contribution."
+    },
+    {
+      "id": "complete_parent_graph_v1",
+      "input": "At most 129 canonical capsule bodies keyed by their exact capsule ids.",
+      "steps": [
+        "Every parent id of every supplied body MUST resolve to another supplied body.",
+        "Depth-first traversal uses unseen,visiting,complete states; an edge to visiting rejects a cycle.",
+        "Traversal depth MUST NOT exceed 129.",
+        "For DPO, the reachable closure starts from the declared task, every population candidate, and every cohort-proof benchmark; unrelated supplied bodies reject.",
+        "Every reachable dependency MUST use a registered GNO or OptiBench profile and pass its profile plus evidence verifier."
+      ]
+    },
+    {
+      "id": "needle_tools_context_v1",
+      "input": "Strict-UTF-8 query, verified preference records, pinned tokenizer id, exact token counter, max_encoder_tokens=1024, and max_examples in [1,64].",
+      "steps": [
+        "Before encoding, regex, sorting, or tokenization, reject a raw query longer than 16384 code points, more than 64 input examples, or an example whose three text fields exceed 65536 aggregate code points.",
+        "Trim exactly Unicode code points U+0009..U+000D,U+001C..U+001F,U+0020,U+0085,U+00A0,U+1680,U+2000..U+200A,U+2028,U+2029,U+202F,U+205F,U+3000 from both query ends, matching the pinned upstream Python strip behavior; reject an empty result.",
+        "Require normalized query UTF-8 bytes <=16384 and each canonical example record <=65536 bytes; reject invalid Unicode scalars.",
+        "Reject secret-like query or example text with shared_secret_detector_v1.",
+        "Require exact example keys chosen,prompt,rejected,source_capsule; sort by source_capsule and reject duplicates.",
+        "Construct exactly one tool named select_unigrok_context using the field values and insertion order frozen by the conformance vector.",
+        "Serialize the tools array with Python json.dumps separators=(',',':') and ensure_ascii=true; no trailing LF.",
+        "Token cost is token_counter(query)+1+token_counter(serialized_tools), where 1 is the Needle tools separator.",
+        "Start with no examples. Inspect at most max_examples sorted records; append a whole record iff the resulting cost is <=1024, otherwise continue without slicing it.",
+        "Publish query_sha256 over normalized strict-UTF-8 query bytes and the final exact token count."
+      ]
+    }
+  ],
+  "secret_rejection": {
+    "id": "shared_secret_detector_v1",
+    "action": "For every known profile, recursively inspect every string in the capsule body plus every resolved shared text blob. Reject matches; never redact hash-bound bytes because redaction would change provenance.",
+    "patterns": [
+      {"expression": "github_pat_[A-Za-z0-9_]{10,}|gh[pousr]_[A-Za-z0-9]{10,}", "ignore_case": false},
+      {"expression": "glpat-[A-Za-z0-9_-]{10,}", "ignore_case": false},
+      {"expression": "\\bsk-(?:proj-|svcacct-)?[A-Za-z0-9_-]{12,}", "ignore_case": false},
+      {"expression": "\\bxai-[A-Za-z0-9_-]{12,}", "ignore_case": true},
+      {"expression": "\\bAIza[A-Za-z0-9_-]{25,}", "ignore_case": false},
+      {"expression": "\\b(?:AKIA|ASIA)[A-Z0-9]{16}\\b", "ignore_case": false},
+      {"expression": "\\bnpm_[A-Za-z0-9]{20,}", "ignore_case": false},
+      {"expression": "\\bpypi-[A-Za-z0-9_-]{20,}", "ignore_case": false},
+      {"expression": "\\bxox[baprs]-[A-Za-z0-9-]{12,}", "ignore_case": false},
+      {"expression": "\\bsk_live_[A-Za-z0-9]{16,}", "ignore_case": false},
+      {"expression": "-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----", "ignore_case": false},
+      {"expression": "\\beyJ[A-Za-z0-9_-]{20,}\\.[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\b", "ignore_case": false},
+      {"expression": "\\bBearer\\s+(?!<|\\$\\{|\\[)[A-Za-z0-9._~+/=-]{8,}", "ignore_case": true},
+      {"expression": "Authorization\\s*:\\s*Bearer\\s+(?!<|\\$\\{|\\[)[A-Za-z0-9._~+/-]{8,}", "ignore_case": true},
+      {"expression": "Authorization\\s*:\\s*Basic\\s+(?!<|\\$\\{|\\[)[A-Za-z0-9+/=]{8,}", "ignore_case": true},
+      {"expression": "(?:^|[^A-Za-z0-9_])[\"']?[A-Z0-9_-]*(?:API[_-]?KEY|SECRET[_-]?ACCESS[_-]?KEY|SESSION[_-]?TOKEN|ACCESS[_-]?TOKEN|AUTH[_-]?TOKEN|PASSWORD|PRIVATE[_-]?KEY|CLIENT[_-]?SECRET)[\"']?\\s*[:=]\\s*(?![\"']?(?:<|\\$\\{|\\[))(?:\"[^\"\\r\\n]{8,}\"|'[^'\\r\\n]{8,}'|[A-Za-z0-9._~+/=@!#$%^&*()-]{8,})", "ignore_case": true}
+    ]
+  },
+  "profiles": [
+    {
+      "schema": "org.grokmcp.agentic_dpo_pair.v1",
+      "schema_sha256": "7db601ccc11aaa94409383f88c7305a46b63a705176897aaa313f835b24bed84",
+      "rules": [
+        "dpo.artifacts_match_candidates",
+        "dpo.baseline_victory",
+        "dpo.candidates_link_declared_task",
+        "dpo.cohort_proof_binds_every_benchmark",
+        "dpo.closed_cohort",
+        "dpo.complete_parent_graph",
+        "dpo.direct_dominance",
+        "dpo.export_after_graph_verification",
+        "dpo.final_rank_and_crowding_recomputed",
+        "dpo.parents_exact",
+        "dpo.prompt_matches_task",
+        "dpo.requires_registered_gno_dependencies",
+        "dpo.receipt_recomputed",
+        "dpo.same_run_subject",
+        "dpo.shared_baseline",
+        "dpo.text_evidence_verified",
+        "dpo.text_sha_matches_gno_semantic_roles"
+      ]
+    },
+    {
+      "schema": "org.grokmcp.gno_envelope.v1",
+      "schema_sha256": "4c7fb150b3f82738ae43d52669c8c663283807d42add1f4532f01527a4d70665",
+      "rules": [
+        "gno.artifacts_hash_bound",
+        "gno.dispatch_execution_explicit",
+        "gno.input_manifest_recomputed",
+        "gno.kind_matches_phase",
+        "gno.no_secret_like_shared_text",
+        "gno.result_dispatch_fields_match",
+        "gno.result_execution_inherited_only",
+        "gno.result_opposite_role_forbidden",
+        "gno.result_parent_exact",
+        "gno.role_cardinality",
+        "gno.same_run_subject"
+      ]
+    },
+    {
+      "schema": "org.grokmcp.optibench_result.v1",
+      "schema_sha256": "dfc216d1855eb36e54829c3aca00434f0dc9845a6efc205c2c49016531accf81",
+      "rules": [
+        "optibench.baseline_relation_recomputed",
+        "optibench.cohort_metric_set_exact",
+        "optibench.counter_samples_recomputed",
+        "optibench.environment_manifest_exact",
+        "optibench.gates_passed",
+        "optibench.harness_manifest_exact",
+        "optibench.integer_median_odd_repetitions",
+        "optibench.population_manifest_recomputed",
+        "optibench.rank_and_crowding_recomputed_from_closed_population",
+        "optibench.rational_digits_bounded",
+        "optibench.rational_reduced",
+        "optibench.shared_baseline"
+      ]
+    }
+  ],
+  "projections": [
+    {
+      "profile": "org.grokmcp.needle_tools_context.v1",
+      "schema_sha256": "ac92a88b87e35254a7eef4a151d8743418ef102402022b228609743cbcbf7496",
+      "rules": [
+        "needle.pinned_secret_scan",
+        "needle.examples_whole_only",
+        "needle.nested_fields_are_neural_context",
+        "needle.non_authoritative",
+        "needle.not_parameter_training",
+        "needle.pinned_tokenizer_budget",
+        "needle.query_upstream_trimmed",
+        "needle.query_strict_utf8",
+        "needle.tools_array_valid"
+      ]
+    }
+  ],
+  "shared_rules": [
+    "known_profile.generic_capsule_validation_first",
+    "known_profile.recursive_body_secret_scan",
+    "known_profile.unknown_schema_quarantined"
+  ],
+  "trust_gates": [
+    "canonical_envelope",
+    "known_profile",
+    "evidence_bytes",
+    "semantic_receipts",
+    "complete_graph",
+    "publication_authentication",
+    "promotion_policy"
+  ]
+}

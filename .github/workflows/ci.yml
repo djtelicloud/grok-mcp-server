@@ -133,6 +133,18 @@ jobs:
           missing=required-names;
           assert not missing, f'missing wheel assets: {sorted(missing)}'"
 
+      - name: Verify bounded source distribution
+        if: matrix.python-version == '3.12'
+        run: >-
+          uv run python -c "import glob, os, tarfile;
+          archive=glob.glob('dist/*.tar.gz')[0];
+          names=tarfile.open(archive, 'r:gz').getnames();
+          forbidden=('node_modules/','/.sites-runtime/','/.next/','/.wrangler/','/__pycache__/');
+          leaked=[name for name in names if any(marker in name for marker in forbidden)];
+          assert not leaked, f'sdist contains generated/local files: {leaked[:20]}';
+          assert os.path.getsize(archive) < 10*1024*1024, 'sdist exceeds 10 MiB';
+          assert len(names) < 2000, f'sdist has suspicious entry count: {len(names)}'"
+
       - name: Static security scan
         if: matrix.python-version == '3.12'
         run: uvx bandit -r src -ll -q

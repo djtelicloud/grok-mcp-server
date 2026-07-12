@@ -393,6 +393,139 @@ def validate_body(value: Mapping[str, Any]) -> None
 
 Validate the normative IntelligenceCapsule v1 body schema.
 
+## intelligence_payloads.py {#intelligence_payloads}
+
+### Function: `validate_known_payload_profile` {#intelligence_payloads-validate_known_payload_profile}
+
+```python
+def validate_known_payload_profile(body: Mapping[str, Any]) -> bool
+```
+
+**Keywords:** validate, known, payload, profile
+
+Validate a registered payload profile and return whether it was known.
+
+The caller must first apply the generic IntelligenceCapsule v1 validator.
+Unknown versioned payloads remain structurally valid capsules, but this
+function returns ``False`` so a materializer can quarantine them instead
+of executing or promoting semantics it does not understand.
+
+### Function: `payload_profile_schema_sha256` {#intelligence_payloads-payload_profile_schema_sha256}
+
+```python
+def payload_profile_schema_sha256(schema: str) -> str
+```
+
+**Keywords:** payload, profile, schema, sha, 256
+
+Return the pinned raw-schema digest for a registered payload profile.
+
+### Function: `validate_optibench_evidence` {#intelligence_payloads-validate_optibench_evidence}
+
+```python
+def validate_optibench_evidence(body: Mapping[str, Any], evidence_blobs: Mapping[str, bytes]) -> dict[str, tuple[int, ...]]
+```
+
+**Keywords:** validate, optibench, evidence
+
+Verify OptiBench receipts and recompute every published objective.
+
+This consistency verifier does not prove that hardware executed; signed
+publication identifies the runner that made that claim.  It does prove
+that the closed population, passing gates, raw samples, aggregation, and
+canonical body metrics agree byte-for-byte.
+
+### Function: `validate_optibench_population` {#intelligence_payloads-validate_optibench_population}
+
+```python
+def validate_optibench_population(benchmark_bodies: Mapping[str, Mapping[str, Any]], evidence_blobs: Mapping[str, Mapping[str, bytes]]) -> dict[str, dict[str, Any]]
+```
+
+**Keywords:** validate, optibench, population
+
+Verify one complete cohort and recompute exact NSGA-II fields.
+
+Individual counter receipts can prove a candidate's objective tuple, but
+Pareto rank and crowding are properties of a closed population.  This gate
+therefore requires exactly one benchmark capsule for every candidate in
+the shared population, verifies every evidence set, and recomputes both
+rank and exact rational crowding before any result is promotable.
+
+### Function: `validate_gno_dispatch_evidence` {#intelligence_payloads-validate_gno_dispatch_evidence}
+
+```python
+def validate_gno_dispatch_evidence(body: Mapping[str, Any], evidence_blobs: Mapping[str, bytes]) -> None
+```
+
+**Keywords:** validate, gno, dispatch, evidence
+
+Verify the declared GNO input manifest and every referenced input blob.
+
+### Function: `validate_gno_result_graph` {#intelligence_payloads-validate_gno_result_graph}
+
+```python
+def validate_gno_result_graph(result: Mapping[str, Any], dispatch: Mapping[str, Any], *, result_evidence_blobs: Mapping[str, bytes], dispatch_evidence_blobs: Mapping[str, bytes]) -> None
+```
+
+**Keywords:** validate, gno, result, graph
+
+Bind a GNO result to the exact verified dispatch it answers.
+
+### Function: `validate_dpo_preference_graph` {#intelligence_payloads-validate_dpo_preference_graph}
+
+```python
+def validate_dpo_preference_graph(body: Mapping[str, Any], graph_bodies: Mapping[str, Mapping[str, Any]], evidence_blobs: Mapping[str, bytes], graph_evidence_blobs: Mapping[str, Mapping[str, bytes]]) -> None
+```
+
+**Keywords:** validate, dpo, preference, graph
+
+Resolve a closed OptiBench cohort and prove one direct preference.
+
+The supplied graph closure must contain the task, every candidate in the
+population, and exactly one verified OptiBench result for every candidate.
+Ranks are recomputed from the final metrics; stored online Swarm reward or
+provisional rank is never accepted as preference evidence.
+
+### Function: `build_preference_example` {#intelligence_payloads-build_preference_example}
+
+```python
+def build_preference_example(body: Mapping[str, Any], evidence_blobs: Mapping[str, bytes], *, graph_bodies: Mapping[str, Mapping[str, Any]], graph_evidence_blobs: Mapping[str, Mapping[str, bytes]]) -> dict[str, str]
+```
+
+**Keywords:** build, preference, example
+
+Build one verified preference example for nested inference context.
+
+Blob bytes are resolved by evidence name, checked against the capsule's
+byte count and SHA-256 descriptor, and decoded as strict UTF-8.  The
+returned record can be nested into an executor's JSON context.  This is
+in-context conditioning, not a parameter update.
+
+### Function: `render_preference_jsonl` {#intelligence_payloads-render_preference_jsonl}
+
+```python
+def render_preference_jsonl(body: Mapping[str, Any], evidence_blobs: Mapping[str, bytes], *, graph_bodies: Mapping[str, Mapping[str, Any]], graph_evidence_blobs: Mapping[str, Mapping[str, bytes]]) -> bytes
+```
+
+**Keywords:** render, preference, jsonl
+
+Render one verified preference example as canonical JSONL.
+
+### Function: `build_needle_tools_context` {#intelligence_payloads-build_needle_tools_context}
+
+```python
+def build_needle_tools_context(query: str, examples: Sequence[Mapping[str, str]], *, tokenizer: str, token_counter: Callable[[str], int], max_encoder_tokens: int=1024, max_examples: int=8) -> dict[str, Any]
+```
+
+**Keywords:** build, needle, tools, context
+
+Fit whole verified examples into Needle's actual tools-JSON channel.
+
+``token_counter`` must use the pinned Needle tokenizer.  Selection is
+deterministic: examples are deduplicated and sorted by source capsule,
+then whole records are admitted while they fit beside the query and the
+``<tools>`` separator.  Records are never string-sliced.
+
 ## jobs.py {#jobs}
 
 ### Class: `JobManager` {#jobs-jobmanager}
