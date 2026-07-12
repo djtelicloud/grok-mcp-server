@@ -1,0 +1,77 @@
+{
+  "body": {
+    "actor": {
+      "agent_id": "codex-desktop",
+      "github_login": "djtelicloud",
+      "role": "admin"
+    },
+    "created_at": "2026-07-12T13:45:12.123Z",
+    "evidence": [
+      {
+        "bytes": 1842,
+        "git_oid": "sha1:1111111111111111111111111111111111111111",
+        "media_type": "application/vnd.grokmcp.benchmark+json",
+        "name": "benchmark",
+        "sha256": "2222222222222222222222222222222222222222222222222222222222222222"
+      },
+      {
+        "bytes": 981,
+        "media_type": "application/vnd.grokmcp.pytest-result+json",
+        "name": "tests",
+        "sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+      }
+    ],
+    "execution": {
+      "model": "grok-4.5",
+      "plane": "cli",
+      "runtime": "local",
+      "target": "local_cli"
+    },
+    "kind": "benchmark",
+    "metrics": [
+      {
+        "name": "latency",
+        "unit": "ms",
+        "value": "0.013640"
+      },
+      {
+        "name": "peak_memory",
+        "unit": "byte",
+        "value": "29300"
+      }
+    ],
+    "parents": [
+      "ucap1:sha256:4444444444444444444444444444444444444444444444444444444444444444",
+      "ucap1:sha256:5555555555555555555555555555555555555555555555555555555555555555"
+    ],
+    "payload": {
+      "data": {
+        "bounds": [-9007199254740991, 9007199254740991],
+        "candidate_id": "candidate-01",
+        "decomposed_payload": "é",
+        "emoji": "😀",
+        "escapes": "\u0000\b\t\n\f\r\"\\/",
+        "line_separators": "  ",
+        "outcome": "pareto_elite"
+      },
+      "schema": "org.grokmcp.benchmark_result.v1"
+    },
+    "protocol": "org.grokmcp.intelligence-capsule",
+    "provenance": {
+      "generator": "unigrok-swarm",
+      "generator_version": "0.6.0",
+      "source_commit": "aa1daa2de2a2bc1d1dab6c2e053022287aa63157"
+    },
+    "run_id": "019f56f1-b6e7-7c85-a32f-e643b117de91",
+    "subject": {
+      "commit": "aa1daa2de2a2bc1d1dab6c2e053022287aa63157",
+      "repository": "djtelicloud/grok-mcp-server"
+    },
+    "version": 1
+  },
+  "digest": {
+    "algorithm": "sha-256",
+    "value": "ec0453a4ef10b49531c38ed38946cd3cfbb907125071eaf9664c4918385b097e"
+  },
+  "signatures": []
+}
