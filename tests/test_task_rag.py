@@ -72,6 +72,28 @@ async def _save_memory(store, prompt, **overrides):
     return await store.save_task_memory(prompt=prompt, **defaults)
 
 
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (None, 0),
+        (0, 0),
+        (5, 5),
+        (-1, -1),
+        (3.7, 3),
+        ("12", 12),
+    ],
+)
+def test_safe_db_int_preserves_scalar_count_and_rowcount_coercion(value, expected):
+    assert GrokSessionStore._safe_db_int(value) == expected
+
+
+@pytest.mark.parametrize("row", [None, (), (0,), (5,), (3.7,)])
+def test_safe_db_int_keeps_count_row_extraction_at_call_site(row):
+    cell = row[0] if row else 0
+
+    assert GrokSessionStore._safe_db_int(cell) == int(row[0] if row else 0)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # task_memory_fts: setup, dual-write, divergence repair
 # ─────────────────────────────────────────────────────────────────────────────

@@ -3232,7 +3232,7 @@ class GrokSessionStore:
         async with self._read_conn() as conn:
             async with conn.execute("SELECT COUNT(*) FROM task_memory") as cursor:
                 row = await cursor.fetchone()
-                return int(row[0] if row else 0)
+                return self._safe_db_int(row[0] if row else 0)
 
     @staticmethod
     def _decode_task_memory_row(row: Any) -> Dict[str, Any]:
@@ -3245,6 +3245,11 @@ class GrokSessionStore:
             except (TypeError, ValueError):
                 pass
         return item
+
+    @staticmethod
+    def _safe_db_int(value: Any) -> int:
+        """Coerce a scalar COUNT cell or cursor.rowcount (missing -> 0)."""
+        return int(value or 0)
 
     # ── Task-memory cloud-mirror outbox (UNIGROK_TASK_RAG, v10) ─────────────
     # `synced_at IS NULL` IS the outbox; there is no separate sync table.
@@ -3330,7 +3335,7 @@ class GrokSessionStore:
                 "SELECT COUNT(*) FROM task_memory WHERE synced_at IS NULL"
             ) as cursor:
                 row = await cursor.fetchone()
-                return int(row[0] if row else 0)
+                return self._safe_db_int(row[0] if row else 0)
 
     @_with_write_retry_async
     async def reset_task_memory_sync(self) -> int:
@@ -3344,7 +3349,7 @@ class GrokSessionStore:
                 cursor = await self._conn.execute(
                     "UPDATE task_memory SET synced_at = NULL, sync_attempts = 0, sync_error = NULL"
                 )
-                count = int(cursor.rowcount or 0)
+                count = self._safe_db_int(cursor.rowcount)
                 await self._conn.commit()
             except Exception:
                 await self._conn.rollback()
@@ -3523,7 +3528,7 @@ class GrokSessionStore:
         async with self._read_conn() as conn:
             async with conn.execute("SELECT COUNT(*) FROM workspace_evidence") as cursor:
                 row = await cursor.fetchone()
-        return int(row[0] if row else 0)
+        return self._safe_db_int(row[0] if row else 0)
 
     @_with_read_retry_async
     async def count_unsynced_workspace_evidence(self) -> int:
@@ -3533,7 +3538,7 @@ class GrokSessionStore:
                 "SELECT COUNT(*) FROM workspace_evidence WHERE note_synced_at IS NULL"
             ) as cursor:
                 row = await cursor.fetchone()
-        return int(row[0] if row else 0)
+        return self._safe_db_int(row[0] if row else 0)
 
     # pattern_cache (get_cached_pattern/save_cached_pattern) removed — the
     # table was write-only with zero callers. Task memory (task_memory table)
