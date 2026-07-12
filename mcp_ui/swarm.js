@@ -367,3 +367,102 @@ $("taskId").addEventListener("keydown", (e) => { if (e.key === "Enter") loadLive
 $("fileInput").addEventListener("change", (e) => {
   if (e.target.files && e.target.files[0]) loadFile(e.target.files[0]);
 });
+
+// ── On-ramp: sample run, recent-swarm picker, one-click golden demo ──────────
+// Three ways to see the instrument without pasting a task id. The sample is a
+// RECORDED run (its payload carries a `provenance` field: scripted candidates,
+// real measurements); it loads as source "export", so apply stays disabled.
+
+const GOLDEN_DEMO = {
+  target_path: "evals/tasks/swarm_targets/nsquared_dedup/dedup.py",
+  focus_node: "function:dedup",
+  test_target: "evals/tasks/swarm_targets/nsquared_dedup/test_dedup.py",
+  bench_command: "python evals/tasks/swarm_targets/nsquared_dedup/bench_dedup.py",
+  allow_unstable_bench: true,
+};
+const TERMINAL_STATUSES = new Set(
+  ["completed", "failed", "failed_stale", "cancelled", "stopped_budget"]
+);
+
+async function loadSample() {
+  setMsg("loading sample…");
+  try {
+    const res = await fetch("./swarm-sample.json");
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const payload = await res.json();
+    if (payload.format !== "unigrok-swarm-status-v1") {
+      throw new Error("sample is not a unigrok-swarm-status-v1 export");
+    }
+    setPayload(payload, "sample: recorded golden-dedup run", "export");
+    if (payload.provenance) setMsg(payload.provenance);
+  } catch (err) {
+    setMsg(`sample unavailable: ${err.message || err}`, true);
+  }
+}
+
+async function refreshTaskPicker() {
+  const picker = $("taskPicker");
+  try {
+    const raw = await mcpCall("list_swarm_tasks", { limit: 15 });
+    const tasks = JSON.parse(raw);
+    picker.replaceChildren(new Option(
+      tasks.length ? "recent swarms…" : "no swarms on this gateway yet", ""
+    ));
+    for (const task of tasks) {
+      const label = `${task.status} · ${task.focus_node} · ${task.task_id.slice(0, 8)}…`;
+      picker.appendChild(new Option(label, task.task_id));
+    }
+  } catch (err) {
+    picker.replaceChildren(new Option("recent swarms unavailable (offline?)", ""));
+  }
+}
+
+async function runGoldenDemo() {
+  const btn = $("demoBtn");
+  btn.disabled = true;
+  setMsg("starting demo swarm on the golden O(N²) dedup target…");
+  try {
+    const out = await mcpCall("start_code_swarm", GOLDEN_DEMO);
+    const match = out.match(/`([0-9a-f]{16,})`/);
+    if (!match) {
+      // Refusals (mode off, stable service, no workspace) are instructive —
+      // show the tool's own words verbatim.
+      setMsg(out.replace(/\s+/g, " ").trim(), true);
+      return;
+    }
+    const taskId = match[1];
+    $("taskId").value = taskId;
+    await pollUntilDone(taskId);
+    refreshTaskPicker();
+  } catch (err) {
+    setMsg(String(err.message || err), true);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function pollUntilDone(taskId, intervalMs = 3000, maxPolls = 200) {
+  for (let i = 0; i < maxPolls; i++) {
+    const raw = await mcpCall("get_swarm_status", { task_id: taskId, view: "json" });
+    const payload = JSON.parse(raw);
+    if (payload.error) { setMsg(payload.error, true); return; }
+    setPayload(payload, "live", "live");
+    if (TERMINAL_STATUSES.has(payload.status)) {
+      setMsg(`demo ${payload.status} — ${payload.pareto_front.length} elite(s) on the front`);
+      return;
+    }
+    setMsg(`demo running… (${payload.status}, generation ${payload.budget?.generations_run ?? 0})`);
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  setMsg("stopped polling — the swarm is still running; reload manually.", true);
+}
+
+$("sampleBtn").addEventListener("click", loadSample);
+$("demoBtn").addEventListener("click", runGoldenDemo);
+$("refreshTasksBtn").addEventListener("click", refreshTaskPicker);
+$("taskPicker").addEventListener("change", (event) => {
+  if (!event.target.value) return;
+  $("taskId").value = event.target.value;
+  loadLive();
+});
+refreshTaskPicker();

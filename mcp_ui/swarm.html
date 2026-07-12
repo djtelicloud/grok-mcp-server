@@ -25,6 +25,8 @@
     .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
     input[type=text], input[type=password] { background: var(--panel2); color: var(--text);
       border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; min-width: 230px; }
+    select { background: var(--panel2); color: var(--text); border: 1px solid var(--border);
+             border-radius: 6px; padding: 6px 8px; max-width: 340px; }
     button { background: var(--panel2); color: var(--text); border: 1px solid var(--border);
              border-radius: 6px; padding: 6px 12px; cursor: pointer; }
     button:hover { border-color: var(--accent); }
@@ -66,6 +68,14 @@
     <div>
       <div class="panel">
         <div class="controls">
+          <button id="sampleBtn" type="button" title="Recorded run of the golden dedup target — scripted candidates, real measurements">▶ Load sample run</button>
+          <button id="demoBtn" type="button" title="Runs start_code_swarm on the golden O(N²) dedup target (contributor mode + UNIGROK_SWARM=dry_run required)">🐝 Run demo swarm</button>
+          <select id="taskPicker" title="Recent swarms on this gateway">
+            <option value="">recent swarms…</option>
+          </select>
+          <button id="refreshTasksBtn" type="button" title="Refresh the recent-swarm list">⟳</button>
+        </div>
+        <div class="controls" style="margin-top:8px">
           <input id="taskId" type="text" placeholder="swarm task id" />
           <input id="token" type="password" placeholder="bearer token (optional)" />
           <button id="loadBtn">Load</button>

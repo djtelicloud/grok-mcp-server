@@ -119,6 +119,24 @@ def test_mcp_ui_swarm_playground_is_served_and_honest(monkeypatch):
     assert "onclick=" not in page.text  # blocked by the server's script-src CSP
     assert 'state.source !== "live"' in script.text
     assert "apply is disabled for static exports" in script.text
+    # On-ramp: sample run, recent-swarm picker, one-click golden demo — a
+    # human can test the instrument without pasting a task id.
+    assert 'id="sampleBtn"' in page.text
+    assert 'id="demoBtn"' in page.text
+    assert 'id="taskPicker"' in page.text
+    assert 'id="refreshTasksBtn"' in page.text
+    assert "list_swarm_tasks" in script.text
+    assert "./swarm-sample.json" in script.text
+    assert "nsquared_dedup" in script.text  # the golden demo target
+    # The bundled sample is a REAL recorded run and says so inside itself.
+    with TestClient(create_app(), base_url="http://localhost:8080") as client:
+        sample = client.get("/ui/swarm-sample.json")
+    assert sample.status_code == 200
+    payload = sample.json()
+    assert payload["format"] == "unigrok-swarm-status-v1"
+    assert "scripted for reproducibility" in payload["provenance"]
+    assert payload["pareto_front"]  # non-empty front to explore
+    assert payload["aggregates"]["best_latency_improvement_pct"] > 0
     # Walls are never plotted at invented coordinates.
     assert "gutter" in script.text
     # Apply stays gated by mode in the UI exactly like the tool.

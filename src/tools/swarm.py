@@ -368,6 +368,28 @@ async def cancel_swarm(task_id: str) -> str:
         )
 
 
+async def list_swarm_tasks(limit: int = 10) -> str:
+    """List recent swarm tasks newest-first as a JSON array (id, effective
+    status incl. staleness override, target, focus node, generations run,
+    spend). The Playground's task picker consumes this — read-only, no gate:
+    on a service that never ran a swarm it simply returns []."""
+    async with GrokInvocationContext("utility", logger, append_signature=False) as ctx:  # noqa: F841
+        rows = await store.list_swarm_tasks(limit=max(1, min(int(limit or 10), 50)))
+        items = [
+            {
+                "task_id": row["id"],
+                "status": effective_status(row),
+                "target": row.get("target_path"),
+                "focus_node": row.get("focus_node"),
+                "generations": int(row.get("generation") or 0),
+                "spent_usd": float(row.get("spent_usd") or 0.0),
+                "created_at": row.get("created_at"),
+            }
+            for row in rows
+        ]
+        return json.dumps(items, separators=(",", ":"))
+
+
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 def _load_json(raw: Any) -> Dict[str, Any]:
@@ -594,11 +616,13 @@ async def _reverify(task: Dict[str, Any], target: Path, original: bytes) -> tupl
 def register_swarm_tools(mcp: FastMCP) -> None:
     mcp.add_tool(start_code_swarm)
     mcp.add_tool(get_swarm_status, annotations=READONLY_TOOL)
+    mcp.add_tool(list_swarm_tasks, annotations=READONLY_TOOL)
     mcp.add_tool(apply_swarm_winner, annotations=DESTRUCTIVE_TOOL)
     mcp.add_tool(cancel_swarm)
 
 
 register_internal_tool("start_code_swarm", start_code_swarm)
 register_internal_tool("get_swarm_status", get_swarm_status)
+register_internal_tool("list_swarm_tasks", list_swarm_tasks)
 register_internal_tool("apply_swarm_winner", apply_swarm_winner)
 register_internal_tool("cancel_swarm", cancel_swarm)

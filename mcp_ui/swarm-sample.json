@@ -1,0 +1,162 @@
+{
+ "format": "unigrok-swarm-status-v1",
+ "task_id": "f6ebeacbd1e743d9a994e0d122d66119",
+ "status": "completed",
+ "mode": "dry_run",
+ "target": {
+  "path": "pkg/dedup.py",
+  "focus_node": "function:dedup",
+  "test_target": "pkg/test_dedup.py",
+  "bench_command": "python pkg/bench_dedup.py"
+ },
+ "oracle": {
+  "module": "pkg.dedup",
+  "import_provenance": "ok",
+  "baseline_test_seconds": 0.146,
+  "focus_coverage_pct": 100.0,
+  "bench": {
+   "latency_ms": 1.1251917007029988,
+   "peak_mem_bytes": 3200,
+   "noise_floor_pct": 5.0,
+   "drift_pct": 4.35,
+   "stability": "stable"
+  }
+ },
+ "baseline": {
+  "latency_ms": 1.1251917007029988,
+  "peak_mem_bytes": 3200,
+  "noise_floor_pct": 5.0,
+  "drift_pct": 4.35,
+  "stability": "stable"
+ },
+ "budget": {
+  "budget_usd": 2.0,
+  "spent_usd": 0.0,
+  "generations_run": 3
+ },
+ "original_span": "def dedup(items):\n    result = []\n    for item in items:\n        if item not in result:  # O(N) scan per element -> O(N^2) overall\n            result.append(item)\n    return result",
+ "original_span_stale": false,
+ "generations": [
+  {
+   "generation": 1,
+   "candidates": [
+    {
+     "candidate_id": "f6ebeacbd1e743d9a994e0d122d66119-g1-s1-algorithmic",
+     "arm": "algorithmic",
+     "stage": "bench",
+     "outcome": "pareto_elite",
+     "feasible": true,
+     "latency_ms": 0.020156250684522092,
+     "peak_mem_bytes": 43640,
+     "diff_bytes": 64,
+     "reward": 1.0,
+     "token_cost_usd": 0.0,
+     "arm_receipt": {
+      "arm": "algorithmic",
+      "reason": "round_robin_cold_start",
+      "step": 1,
+      "generation": 1,
+      "decay": 0.95,
+      "scores": {
+       "algorithmic": null,
+       "allocation": null,
+       "hot_loop": null,
+       "simplify": null
+      },
+      "pulls": {
+       "algorithmic": 1,
+       "allocation": 0,
+       "hot_loop": 0,
+       "simplify": 0
+      }
+     },
+     "code": "def dedup(items):\n    seen = set()\n    result = []\n    for item in items:\n        if item not in seen:\n            seen.add(item)\n            result.append(item)\n    return result"
+    },
+    {
+     "candidate_id": "f6ebeacbd1e743d9a994e0d122d66119-g1-s2-allocation",
+     "arm": "allocation",
+     "stage": "bench",
+     "outcome": "pareto_elite",
+     "feasible": true,
+     "latency_ms": 0.013639598910231143,
+     "peak_mem_bytes": 30032,
+     "diff_bytes": 164,
+     "reward": 1.0,
+     "token_cost_usd": 0.0,
+     "arm_receipt": {
+      "arm": "allocation",
+      "reason": "round_robin_cold_start",
+      "step": 2,
+      "generation": 1,
+      "decay": 0.95,
+      "scores": {
+       "algorithmic": null,
+       "allocation": null,
+       "hot_loop": null,
+       "simplify": null
+      },
+      "pulls": {
+       "algorithmic": 1,
+       "allocation": 1,
+       "hot_loop": 0,
+       "simplify": 0
+      }
+     },
+     "code": "def dedup(items):\n    return list(dict.fromkeys(items))"
+    },
+    {
+     "candidate_id": "f6ebeacbd1e743d9a994e0d122d66119-g1-s3-hot_loop",
+     "arm": "hot_loop",
+     "stage": "tests",
+     "outcome": "test_wall",
+     "feasible": false,
+     "latency_ms": null,
+     "peak_mem_bytes": null,
+     "diff_bytes": 151,
+     "reward": 0.15,
+     "token_cost_usd": 0.0,
+     "arm_receipt": {
+      "arm": "hot_loop",
+      "reason": "round_robin_cold_start",
+      "step": 3,
+      "generation": 1,
+      "decay": 0.95,
+      "scores": {
+       "algorithmic": null,
+       "allocation": null,
+       "hot_loop": null,
+       "simplify": null
+      },
+      "pulls": {
+       "algorithmic": 1,
+       "allocation": 1,
+       "hot_loop": 1,
+       "simplify": 0
+      }
+     }
+    }
+   ]
+  },
+  {
+   "generation": 2,
+   "candidates": []
+  },
+  {
+   "generation": 3,
+   "candidates": []
+  }
+ ],
+ "pareto_front": [
+  "f6ebeacbd1e743d9a994e0d122d66119-g1-s2-allocation",
+  "f6ebeacbd1e743d9a994e0d122d66119-g1-s1-algorithmic"
+ ],
+ "aggregates": {
+  "candidates_total": 3,
+  "feasibility_rate": 0.6667,
+  "best_latency_improvement_pct": 98.79,
+  "best_memory_improvement_pct": -838.5,
+  "cost_to_optimize_usd": 0.0
+ },
+ "folded_state": "[Compacted state fold of 2 earlier messages in this session]\nGOAL: optimize function:dedup in pkg/dedup.py\nCONSTRAINTS:\n- tests that must pass: pkg/test_dedup.py\n- benchmark: /Users/djtelicloud/Documents/agentixai/grok-mcp-server/.claude/worktrees/project-setup-af34d0/.venv/bin/python3 pkg/bench_dedup.py\n- improvements below the noise floor do not count\nACTIVE FILES:\n- pkg/dedup.py\nNARRATIVE: Generation 3. Pareto front holds 2 candidate(s); best latency improvement so far: 98.8% faster.",
+ "provenance": "Recorded demo run on the golden nsquared_dedup target. Candidate CODE was scripted for reproducibility; every measurement (tests, benchmarks, Pareto ranks, rewards) is real engine output."
+}
