@@ -2,7 +2,7 @@
 
 Last updated: 2026-07-12
 Owner: Codex
-Status: GitHub maintainer queue clean
+Status: IntelligenceCapsule v1 landed; maintainer queue clean
 
 This is the project-scoped handoff for new Codex chats. Resolve drift-prone
 Git, CI, runtime, DNS, and cloud identifiers live before acting. Never record
@@ -10,90 +10,62 @@ credentials, OAuth codes, tokens, or private keys here.
 
 ## Completed repository state
 
-- PR #32 is merged on protected `origin/main` at merge commit
-  `22405e770bea36508dd1998bc2115a3886e25774`. Its reviewed head
-  `3be4363e71d88b9df1788b35cf0af76d4d0ca255` deduplicated JSON
-  sanitization while preserving compact routing and semantic payload bounds;
-  the landing gate passed 1,072 tests.
-- PR #33 is merged on protected `origin/main` at merge commit
-  `d503bf30a9b8d7f3708983b830eef13fd5e03568`. Its reviewed head
-  `b8f615a153a8ce96509c0f1f501e68a5118335fe` hardened upload path policy,
-  deduplicated API tool result construction, and repaired workspace-unavailable
-  handling after review. The landing gate passed 1,071 tests.
-- Protected `origin/main` and visible local `main` were synchronized after PR
-  #33. Use `scripts/land-status` for the current merge commit; this tracked file
-  cannot name the merge commit that contains its own update.
-- The Swarm v2 implementation is integrated: bounded paste-code analysis,
-  function-aware search setup, goal-specific champion selection, strict status
-  v2 receipts, elite-offspring lineage, deterministic AST transforms, and the
-  copy-only paste workflow all ship from protected main.
-- The latest full landing suite passed 1,072 tests. Offline evals passed 12/12 and the
-  deterministic OKF bundle was clean.
-- The maintainer sweep repaired and merged PR #22's secret-redaction fast path,
-  PR #23's plain-text message-size fast path, and PR #28's SQLite scalar-count
-  refactor with focused contract tests. PR #24 was closed without merge because
-  replacing JSON validation boundaries with `deepcopy` introduced correctness
-  regressions and left no safe optimization after repair.
-- PR #30's routing image detector was repaired and merged with container-only
-  iterative traversal, marker-equivalence tests, and recursion-depth coverage;
-  its verified representative speedup was 2.9%, not the submitted 39% claim.
-- The contribution contract is interface-independent: authorized IDE agents
-  may test, commit, push only their own agent-prefixed branch, and open or
-  update its draft PR. Any explicitly acting Codex/project-admin surface may
-  perform the serialized exact-head landing and protected merge; shared `main`,
-  releases, and deployments remain integration-only authority.
+- PR #39 merged to protected `origin/main` as
+  `b52ed0f187a1969f522ce4bac75d6168afc75d7d`. The exact reviewed and locally
+  landed head was `5dbcac5078bdcfc75dba01f65e214baa17ff5848`.
+- IntelligenceCapsule v1 now has strict Python and TypeScript canonical byte
+  implementations, a shared cross-language golden vector, a published OKF
+  schema, and original-byte integrity verification.
+- The schema SHA-256 is pinned to
+  `10c2ec4638bd6c4e303b3e2c4c7d91ae582554f48aaa01fac2d9370062b98d4c`.
+  The deterministic SHA-1-format Git genesis is pinned to
+  `6dadda28ac4174bf227f36b45917e15c663987ce`.
+- The local-only bootstrap creates or repairs the five fixed
+  `refs/unigrok/*` heads transactionally. It reads the pinned schema from the
+  last-fetched public `origin/main`, rejects symbolic refs and invalid
+  ancestry, disables ref dereferencing and hooks, and never fetches or pushes.
+- Public MCP consumer SQLite remains unchanged and outside the Insider DAG.
+  Capsule code and bootstrap do not read, migrate, copy, export, or synchronize
+  `grok_sessions.db`.
+- The landing gate passed 1,118 tests. Python 3.11/3.12 CI, package checks,
+  CodeQL, Docker health, offline evals, Project Site, and the standalone control
+  image all passed on the exact reviewed head.
+- Two independent adversarial audits found no remaining capsule-protocol or
+  bootstrap security/concurrency blocker. Gemini returned no actionable review
+  thread. The repository's exact-head `Codex Approval` status passed.
 
-## Local runtime state
+## Runtime and Git state
 
-- The workspace-neutral stable service was rebuilt from protected main and is
-  healthy at `http://127.0.0.1:4765`; its Swarm page auto-loads the recorded
-  verified tour and routes live work to contributor Forge.
-- The attached contributor service was rebuilt from protected main and is
-  healthy at `http://127.0.0.1:4766`; `UNIGROK_SWARM=dry_run` remains the local
-  setting, so search and scoring are enabled while Apply remains disabled.
-- A real browser-launched paste run completed two elite-offspring generations
-  with 100% focus coverage, a stable benchmark, 75% candidate feasibility, two
-  verified Pareto elites, a 98.8% latency improvement, an explicit 838.5%
-  peak-memory increase, and $0.0000 model cost.
-- The guided Playground now accepts a large Python paste, computes exact local
-  analytics, lets the user select a function, goal, and search strategy, runs a
-  verified local search, explains code and runtime trade-offs, and copies the
-  best verified code. Paste tasks remain deliberately copy-only.
+- Visible local `main` and `origin/main` agree at
+  `b52ed0f187a1969f522ce4bac75d6168afc75d7d`.
+- The contributor runtime marker names that merge commit. The merge tree is
+  byte-identical to the certified task head.
+- Stable `127.0.0.1:4765` and contributor `127.0.0.1:4766` health checks pass.
+- No real `refs/unigrok/*` were created before the protocol landed. Bootstrap
+  remains an explicit local contributor action after pulling public main.
 
-## Production state
+## Trust boundary
 
-- `https://grokmcp.org` is published with Sites version 7. The public
-  `https://grokmcp.org/swarm/` route serves the same Playground UI with
-  browser-only analysis, an honest recorded run, and a clear path to verified
-  local execution; the homepage links it directly.
-- Public project JSON reports `https://mcp.grokmcp.org/mcp` as a private OAuth
-  API-plane MCP.
-- `https://control.grokmcp.org` serves the GitHub role-gated control plane and
-  OAuth authorization server. Its RFC 8414 metadata is live.
-- `https://mcp.grokmcp.org` has active Google-managed TLS. `/healthz` returns
-  healthy, RFC 9728 protected-resource metadata is live, and unauthenticated
-  `/mcp` returns the required OAuth bearer challenge.
-- The remote MCP remains API-plane-only with live GitHub membership
-  introspection, scoped short-lived tokens, per-caller budgets, Cloud Run
-  ingress restricted to the load balancer, Cloud Armor attached, CDN disabled,
-  and raw service URLs disabled.
-- The hosted review broker remains read-only and immutable-head-bound. The
-  landing receipt broker verifies completed landing evidence and signs receipts
-  with Ed25519; neither broker has cloud merge or release mutation authority.
+- Bootstrap `ready` means structural validity only. It does not authenticate,
+  evaluate, or promote descendant intelligence.
+- The envelope `signatures` array is structural and reserved in v1. It must not
+  authorize work. Verified signed Git descendants or approved cloud
+  attestations remain the publication-authentication boundary.
+- Git is shared Insider truth. Any future Insider SQLite is only a disposable
+  materialized view. Public consumer SQLite remains private runtime truth.
+- No tunnel, cloud callback into localhost, shared database, or browser-held
+  xAI credential is part of this architecture.
 
-## Safety posture
+## Deliberately separate next phases
 
-- Keep the stable service workspace-neutral and keep Swarm execution limited to
-  contributor mode, an attached workspace, and non-Cloud-Run runtime.
-- Keep `UNIGROK_SWARM` off by default in product configuration. Local dry-run
-  enables search and scoring only; active mode and Apply require an explicit
-  operator decision plus post-apply verification.
-- Do not expose xAI, GitHub, OAuth, receipt-signing, or tunnel credentials to a
-  browser or IDE configuration.
-- Preserve the public documentation plane while protected control and MCP
-  routes fail closed. Do not enable Cloud CDN or raw Cloud Run URLs.
+- Define protected remote projection, quarantine fetch, signature verification,
+  and promotion policy for descendant intelligence.
+- Add capsule object storage and signed local/cloud publishers that emit the
+  same bytes without cross-calling local and cloud executors.
+- Add the disposable Insider materializer and prove delete-and-rebuild recovery
+  solely from trusted refs.
+- Build the single adaptive contributor/admin UI on top of those contracts;
+  keep public visitors read-only and public MCP consumers headless in their IDE.
 
-## Remaining work
-
-- No pull request, release, deployment, or runtime gate remains. GitHub has no
-  open PRs, and its only remote branch is `main`.
+No release, production deployment, or remaining gate is attached to
+IntelligenceCapsule v1 itself.
