@@ -5,6 +5,15 @@ All notable changes to UniGrok MCP will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- **Swarm optimizer $0 static fast-gate**: mutants now pass a
+  baseline-relative ruff `F821`/`F823` check (undefined names — the
+  hallucination class `compile()` cannot catch) between compile and the
+  sandbox stages, killing doomed candidates in milliseconds instead of
+  seconds of sandbox time; correctness-only rules, so style never culls
+  mutant diversity, and the gate no-ops when ruff is unavailable
+  (`UNIGROK_SWARM_RUFF_FILTER=0` disables). Formatting/comment-only no-op
+  mutants (identical AST) are additionally discarded for free like duplicate
+  hashes — evaluating them would just re-measure the baseline.
 - **Swarm optimizer storage skeleton** (`UNIGROK_SWARM`, off by default):
   migration v12 adds `swarm_tasks` and `swarm_candidates` for the upcoming
   contributor-only swarm code optimizer (bounded Pareto search over rewrites

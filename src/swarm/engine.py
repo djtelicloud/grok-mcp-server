@@ -6,7 +6,8 @@ feed forward only through the folded prompt context, which is why early-stop on
 "no new Pareto point" is meaningful: it is the prompt context that evolves.
 
 The loop is: route arms -> generate mutants (CLI plane) -> funnel each
-(dedupe -> parse[+heal] -> compile -> tests -> bench -> restore+hygiene) ->
+(dedupe/ast-noop -> parse[+heal] -> signature -> compile -> lint -> tests ->
+bench -> restore+hygiene) ->
 Pareto-select -> reward the arms -> fold state -> stop check. Generation is the
 one mockable seam (generate.generate_mutation); everything else is real.
 """
@@ -22,6 +23,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from .ast_utils import (
     apply_byte_replacement,
+    is_ast_identical,
     parse_ok,
     signature_fingerprint,
     span_line_range,
@@ -38,6 +40,7 @@ from .pareto import rank_candidates
 from .preflight import noise_floor_pct
 from .router import DiscountedUCBRouter, reward_for
 from .sandbox import SandboxError, SwarmSandbox
+from .static_gate import count_violations
 
 
 @dataclass
@@ -50,6 +53,9 @@ class EngineConfig:
     budget_usd: float = 2.0
     seed: int = 0
     allow_unstable_bench: bool = False
+    # $0 ruff F821/F823 gate between compile() and the sandbox stages
+    # (baseline-relative; no-ops when ruff is unavailable).
+    ruff_filter: bool = True
 
 
 @dataclass
@@ -87,6 +93,9 @@ class SwarmEngine:
     _front: List[Dict[str, Any]] = field(default_factory=list, init=False)
     _spent: float = field(default=0.0, init=False)
     _noise_floor_pct: float = field(default=5.0, init=False)
+    # Baseline F821/F823 count, computed once on first use ("unset" sentinel;
+    # None = ruff unavailable, gate disabled for the task).
+    _baseline_lint: Any = field(default="unset", init=False)
 
     def __post_init__(self):
         self.router = DiscountedUCBRouter(seed=self.config.seed)
@@ -241,6 +250,11 @@ class SwarmEngine:
         if code_hash in self._seen_hashes:
             return None  # free discard, not persisted
         self._seen_hashes.add(code_hash)
+        if is_ast_identical(self.original_span, replacement_bytes):
+            # Formatting/comment-only no-op: evaluating it would re-measure
+            # the baseline. Discarded free like a duplicate (no row, no
+            # reward — symmetric with the hash dedupe above).
+            return None
         candidate["code"] = replacement
         candidate["code_hash"] = code_hash
         candidate["diff_bytes"] = _byte_diff_size(self.original_span, replacement_bytes)
@@ -261,6 +275,20 @@ class SwarmEngine:
         except SyntaxError:
             candidate["stage_reached"] = "compile"
             return candidate
+
+        # $0 static gate: compile() accepts undefined names (NameError is a
+        # runtime error), so ruff's F821/F823 catch that hallucination class
+        # in milliseconds before seconds of sandbox time. Baseline-relative:
+        # only NEW violations vs the original file kill a candidate, and an
+        # unavailable/erroring ruff makes the gate a no-op — the tests stage
+        # still catches everything this would have.
+        if self.config.ruff_filter:
+            baseline_lint = await self._baseline_lint_count()
+            if baseline_lint is not None:
+                mutant_lint = await count_violations(patched)
+                if mutant_lint is not None and mutant_lint > baseline_lint:
+                    candidate["stage_reached"] = "lint"
+                    return candidate
 
         # Sandbox stages: write -> tests -> bench -> restore + hygiene.
         try:
@@ -288,6 +316,14 @@ class SwarmEngine:
         return candidate
 
     # ── Helpers ──────────────────────────────────────────────────────────────
+
+    async def _baseline_lint_count(self) -> Optional[int]:
+        """The original file's F821/F823 count, computed once per task so the
+        gate stays baseline-relative (a pre-existing violation must not kill
+        every mutant)."""
+        if self._baseline_lint == "unset":
+            self._baseline_lint = await count_violations(self.file_source)
+        return self._baseline_lint
 
     def _apply_noise_floor(self, latency_ms: float) -> float:
         """Improvements below the noise floor are erased (snapped to baseline)
