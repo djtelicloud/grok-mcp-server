@@ -1,5 +1,5 @@
 # tests/test_swarm_static_gate.py
-# The $0 static fast-gate: ruff F821/F823 counting (baseline-relative,
+# The $0 static fast-gate: ruff F821/F823 diagnostics (baseline-relative,
 # degrade-to-no-op) and AST no-op mutant detection. Plus funnel wiring: a
 # compiling-but-undefined-name mutant must die at the "lint" stage without
 # ever booting the sandbox, and a formatting-only no-op must be a free
@@ -15,7 +15,7 @@ from src.swarm.engine import EngineConfig, SwarmEngine
 from src.swarm.generate import GenerationResult
 from src.swarm.preflight import run_preflight
 from src.swarm.sandbox import SwarmSandbox
-from src.swarm.static_gate import count_violations, ruff_bin
+from src.swarm.static_gate import count_violations, ruff_bin, violation_counts
 from src.swarm.ast_utils import span_line_range
 
 FIXTURE = Path(__file__).parent / "fixtures" / "swarm_target"
@@ -50,9 +50,22 @@ class TestCountViolations:
         assert await count_violations(ugly) == 0
 
     @pytest.mark.asyncio
+    async def test_noqa_cannot_suppress_correctness_gate(self):
+        source = b"def f():\n    return hallucinated  # noqa: F821\n"
+        assert await count_violations(source) == 1
+
+    @pytest.mark.asyncio
     async def test_missing_ruff_returns_none(self, monkeypatch):
         monkeypatch.setattr("src.swarm.static_gate.ruff_bin", lambda: None)
         assert await count_violations(b"def f(): pass\n") is None
+
+    @pytest.mark.asyncio
+    async def test_diagnostics_distinguish_equal_count_name_changes(self):
+        old = await violation_counts(b"def f():\n    return old_missing\n")
+        new = await violation_counts(b"def f():\n    return new_missing\n")
+        assert old is not None and new is not None
+        assert sum(old.values()) == sum(new.values()) == 1
+        assert new - old
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -190,6 +203,34 @@ class TestFunnelGate:
         outcomes = await engine.run()
         stages = [c["stage_reached"] for o in outcomes for c in o.candidates]
         assert stages and all(s != "lint" for s in stages)
+
+    @pytest.mark.asyncio
+    async def test_equal_count_different_violation_is_fatal(self, engine_env):
+        # A total-count comparison would let the mutant trade old_missing for
+        # new_missing. Diagnostic multiset comparison must reject the new name.
+        original = b"def slow_sort(items):\n    return sorted(old_missing)\n"
+        engine_env.write_target(original)
+        start, end = extract_node_span(original, "function:slow_sort")
+
+        async def gen(prompt, system, *, remaining_budget_usd, **kw):
+            return GenerationResult(
+                "def slow_sort(items):\n    return sorted(new_missing)\n",
+                "CLI", 0.0, "final_answer",
+            )
+
+        engine = SwarmEngine(
+            sandbox=engine_env, task_id="t-trade", focus_node="function:slow_sort",
+            target_rel="slow_mod.py", test_target="test_slow.py",
+            bench_argv=[engine_env.python_bin(), "bench_slow.py"],
+            baseline={"latency_ms": 5.0, "latency_samples": [5.0, 5.0, 5.0]},
+            span=(start, end), original_span=original[start:end], file_source=original,
+            config=EngineConfig(population=1, max_generations=1, seed=1,
+                                bench_repeats=3, eval_timeout=60.0),
+            generator=gen,
+        )
+        outcomes = await engine.run()
+        stages = [c["stage_reached"] for o in outcomes for c in o.candidates]
+        assert stages == ["lint"]
 
     @pytest.mark.asyncio
     async def test_formatting_noop_mutant_is_free_discard(self, engine_env):

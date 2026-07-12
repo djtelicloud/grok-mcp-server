@@ -18,6 +18,7 @@ alone.
 from __future__ import annotations
 
 import asyncio
+from collections import Counter
 import json
 import shutil
 import sys
@@ -36,8 +37,13 @@ def ruff_bin() -> Optional[str]:
     return shutil.which("ruff")
 
 
-async def count_violations(source: bytes, timeout: float = 10.0) -> Optional[int]:
-    """F821/F823 violation count for `source`, or None when the gate cannot
+ViolationCounts = Counter[tuple[str, str]]
+
+
+async def violation_counts(
+    source: bytes, timeout: float = 10.0
+) -> Optional[ViolationCounts]:
+    """F821/F823 diagnostics keyed by rule and message, or None when the gate cannot
     run (ruff missing, timeout, or internal error) — callers must treat None
     as gate-disabled, never as clean."""
     binary = ruff_bin()
@@ -47,6 +53,8 @@ async def count_violations(source: bytes, timeout: float = 10.0) -> Optional[int
         proc = await asyncio.create_subprocess_exec(
             binary, "check",
             "--select", _RUFF_RULES,
+            "--isolated",
+            "--ignore-noqa",
             "--output-format", "json",
             "--stdin-filename", "candidate.py",
             "-",
@@ -69,4 +77,21 @@ async def count_violations(source: bytes, timeout: float = 10.0) -> Optional[int
         findings = json.loads(out.decode("utf-8", errors="replace") or "[]")
     except ValueError:
         return None
-    return len(findings) if isinstance(findings, list) else None
+    if not isinstance(findings, list):
+        return None
+    counts: ViolationCounts = Counter()
+    for finding in findings:
+        if not isinstance(finding, dict):
+            return None
+        code = finding.get("code")
+        message = finding.get("message")
+        if not isinstance(code, str) or not isinstance(message, str):
+            return None
+        counts[(code, message)] += 1
+    return counts
+
+
+async def count_violations(source: bytes, timeout: float = 10.0) -> Optional[int]:
+    """Compatibility helper returning the total F821/F823 diagnostic count."""
+    counts = await violation_counts(source, timeout=timeout)
+    return sum(counts.values()) if counts is not None else None

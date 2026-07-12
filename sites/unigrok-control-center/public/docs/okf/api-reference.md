@@ -1237,6 +1237,18 @@ def ruff_bin() -> Optional[str]
 
 The venv's ruff first (a pinned project dependency), PATH second.
 
+### Function: `violation_counts` {#swarm-static_gate-violation_counts}
+
+```python
+async def violation_counts(source: bytes, timeout: float=10.0) -> Optional[ViolationCounts]
+```
+
+**Keywords:** violation, counts
+
+F821/F823 diagnostics keyed by rule and message, or None when the gate cannot
+run (ruff missing, timeout, or internal error) — callers must treat None
+as gate-disabled, never as clean.
+
 ### Function: `count_violations` {#swarm-static_gate-count_violations}
 
 ```python
@@ -1245,9 +1257,7 @@ async def count_violations(source: bytes, timeout: float=10.0) -> Optional[int]
 
 **Keywords:** count, violations
 
-F821/F823 violation count for `source`, or None when the gate cannot
-run (ruff missing, timeout, or internal error) — callers must treat None
-as gate-disabled, never as clean.
+Compatibility helper returning the total F821/F823 diagnostic count.
 
 ## tools/chats.py {#tools-chats}
 
