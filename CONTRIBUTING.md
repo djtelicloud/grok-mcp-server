@@ -50,8 +50,10 @@ identify the accountable GitHub user and assisting IDE/model, and disclose known
 risks or generated files. Use `Agent-Assisted-By:` for agent provenance; use
 `Co-authored-by:` only for a real GitHub account whose linked email should receive
 contribution credit. Grok review comments are advisory;
-they do not authorize a merge. Codex reviews the current head and owns landing,
-merge, tag, and release decisions. See
+they do not authorize a merge. The Codex/project-admin role reviews the current
+head and owns landing, merge, tag, release, and deployment decisions. That role
+may be performed from Codex Desktop, CLI, GitHub Copilot, or another authorized
+Codex surface. See
 [ADR 0001](docs/adr/0001-cloud-control-plane-governance.md) for the current
 local landing contract and the explicitly not-yet-live remote broker design.
 
@@ -73,7 +75,10 @@ worktree branch such as `codex/my-change`, `claude/my-change`, or
 
 An agent handoff must include its task branch or PR, full commit SHA, changed
 paths, test evidence, unresolved risks, human sponsor, and agent provenance.
-For a local IDE agent, Codex publishes the branch and draft PR; an outside human
-contributor may publish their own fork/branch and PR. Agents other than Codex
-must not run `scripts/land`, merge, push shared `main`, publish releases, delete
-shared worktrees, or treat an advisory model review as approval.
+After local verification, an authorized local IDE agent may push only its own
+agent-prefixed task branch and open or update a draft pull request. If GitHub
+credentials are unavailable, hand the exact commit to an authorized Codex
+session for publication. Contributor agents must not run `scripts/land`, merge,
+push shared `main`, publish releases or deployments, delete shared worktrees,
+or treat an advisory model review as approval unless explicitly acting as the
+Codex/project-admin integration session.

@@ -91,20 +91,24 @@ configs.
 
 ## Git completion contract
 
-Codex is the permanent Git and release-integration owner for this repository.
-Work in a `codex/*` task worktree and leave the shared checkout on `main`.
-Every contribution reaches protected `origin/main` through a pull request. Codex
-reviews all agent handoffs, publishes local agent branches and draft PRs, binds
-approval to the exact current head, and alone runs `./scripts/land` from a
-`codex/*` integration branch. Codex keeps local `main` synchronized after the
-protected merge and owns fetch, push, pull-request, tag, and release operations
-under the user's standing authorization. Other IDE agents may develop and commit
-in their own worktrees, but must hand off the full commit SHA, changed paths,
-tests, risks, human sponsor, and `Agent-Assisted-By:` provenance instead of
-landing, pushing the shared repository, merging shared `main`, or deleting
-worktrees. Passing tests or committing a task branch is not completion: do not
-call integrated work complete until the PR is merged, `origin/main` and local
-`main` agree, and the landing receipt names the reviewed commit.
+Codex is the permanent final Git and release-integration owner for this
+repository. That role is interface-independent: an authorized Codex Desktop,
+CLI, GitHub Copilot, or other Codex session may act as project admin. Work in a
+`codex/*` task or integration worktree and leave the shared checkout on `main`.
+Every contribution reaches protected `origin/main` through a pull request.
+After local verification, each authorized IDE agent may push only its own
+agent-prefixed task branch and open or update a draft PR. If it lacks GitHub
+credentials, it hands the exact commit to a Codex session for publication.
+Every draft PR or handoff must name the full commit SHA, changed paths, tests,
+risks, human sponsor, and `Agent-Assisted-By:` provenance. A Codex/project-admin
+session reviews the exact current head, binds approval to that head, alone runs
+`./scripts/land` from a `codex/*` integration branch, completes the protected
+merge, and synchronizes local `main`. Contributor agents must not push shared
+`main`, land, merge, release, deploy, or delete worktrees unless explicitly
+acting in that integration role. Passing tests, committing, pushing, or opening
+a PR is not completion: do not call integrated work complete until the PR is
+merged, `origin/main` and local `main` agree, and the landing receipt names the
+reviewed commit.
 
 For implementation, debugging, architecture, or review, use the tracked
 `.agents/skills/unigrok-workspace-memory/SKILL.md`. Recall against the Codex

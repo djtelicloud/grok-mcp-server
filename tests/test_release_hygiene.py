@@ -71,11 +71,18 @@ def test_agent_guidance_preserves_workspace_and_credential_boundaries():
     assert "workspace-neutral" in gemini
 
 
-def test_shared_agent_rules_assign_git_integration_to_codex():
+def test_agent_rules_allow_draft_pr_submission_but_reserve_final_integration():
     shared_rules = (ROOT / ".agents" / "AGENTS.md").read_text(encoding="utf-8")
     claude_rules = (ROOT / "CLAUDE.md").read_text(encoding="utf-8")
     gemini_rules = (ROOT / ".gemini" / "GEMINI.md").read_text(encoding="utf-8")
+    copilot_rules = (ROOT / ".github" / "copilot-instructions.md").read_text(encoding="utf-8")
 
-    assert "Codex Owns Integration" in shared_rules
-    assert "permanent Git and release-integration owner" in claude_rules
+    assert "Codex Owns Final Integration" in shared_rules
+    assert "open or update a draft pull request" in shared_rules
+    assert "open or update a draft pull request" in claude_rules
+    assert "open or update a draft pull request" in gemini_rules
+    assert "open or update a draft pull request" in copilot_rules
+    assert "GitHub Copilot" in shared_rules
+    assert "GitHub Copilot" in claude_rules
     assert "Codex Integration Owner" in gemini_rules
+    assert "scripts/land" in copilot_rules

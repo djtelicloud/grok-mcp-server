@@ -27,11 +27,11 @@ Select modular tools based on the nature of the request:
 ## 4. Multi-Agent Git Protocol
 * **No Main Branch Switch**: Do not switch the shared main folder branch. 
 * **Isolated Worktrees**: Work on task-specific sibling worktrees (`gemini/task-name`).
-* **Pull Requests Are Canonical**: Every contribution reaches `origin/main` through a pull request. Your local handoff is pre-PR evidence; Codex publishes the branch and draft PR for local IDE work.
-* **Codex Integration Owner**: Codex permanently owns landing, shared `main`, pushes, pull requests, approvals, tags, releases, and worktree cleanup for this repository.
-* **Handoff Instead of Landing**: Commit the intended work, run relevant tests, and give Codex the full commit SHA, changed paths, test results, known risks, human sponsor, and `Agent-Assisted-By: Gemini via Antigravity` provenance. Do not run `scripts/land`, push the shared repository, merge/rebase shared `main`, publish releases, or delete worktrees.
+* **Pull Requests Are Canonical**: Every contribution reaches `origin/main` through a pull request. After local verification, push only your own `gemini/*` task branch and open or update a draft pull request when GitHub credentials are available. Otherwise give an authorized Codex session the exact commit for publication.
+* **Codex Integration Owner**: The Codex/project-admin role is interface-independent; Codex Desktop, CLI, GitHub Copilot, or another authorized Codex session may perform final landing, protected-main mutation, approval, merge, tag, release, deployment, and synchronization.
+* **Submit, Then Hand Off**: Commit the intended work, run relevant tests, publish the task branch and draft PR when possible, and provide the full commit SHA, changed paths, test results, known risks, human sponsor, and `Agent-Assisted-By: Gemini via Antigravity` provenance. Do not run `scripts/land`, push shared `main`, merge/rebase shared `main`, publish releases/deployments, or delete worktrees unless explicitly acting as the Codex/project-admin integration session.
 * **Open IDE Safety**: Never remove a worktree after landing or overwrite a dirty tracked `main`; another IDE may still be using it.
 
 ## 5. Verification Requirements
-* Codex opens the draft PR, reviews its exact current head, and alone runs `scripts/land` from a `codex/*` integration branch before protected merge and local synchronization.
+* A Codex/project-admin session reviews the draft PR's exact current head and alone runs `scripts/land` from a `codex/*` integration branch before protected merge and local synchronization.
 * Use `.agents/skills/unigrok-workspace-memory/SKILL.md` for commit-anchored recall. Pass the Gemini worktree's own full HEAD; Codex records the verified outcome after landing.
