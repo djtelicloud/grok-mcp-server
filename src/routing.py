@@ -57,9 +57,11 @@ def _messages_have_image(messages: Optional[Sequence[Dict[str, Any]]]) -> bool:
                     return True
             if "image_url" in current:
                 return True
-            stack.extend(current.values())
+            stack.extend(
+                value for value in current.values() if isinstance(value, (dict, list))
+            )
         elif isinstance(current, list):
-            stack.extend(current)
+            stack.extend(value for value in current if isinstance(value, (dict, list)))
     return False
 
 
