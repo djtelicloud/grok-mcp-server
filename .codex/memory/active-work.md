@@ -19,6 +19,11 @@ credentials, OAuth codes, tokens, or private keys here.
   copy-only paste workflow all ship from protected main.
 - The full landing suite passed 1,045 tests. Offline evals passed 12/12 and the
   deterministic OKF bundle was clean.
+- The contribution contract is interface-independent: authorized IDE agents
+  may test, commit, push only their own agent-prefixed branch, and open or
+  update its draft PR. Any explicitly acting Codex/project-admin surface may
+  perform the serialized exact-head landing and protected merge; shared `main`,
+  releases, and deployments remain integration-only authority.
 
 ## Local runtime state
 

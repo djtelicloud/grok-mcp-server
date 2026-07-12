@@ -12,6 +12,7 @@
 Exact head SHA reviewed/tested:
 Accountable GitHub contributor:
 Assisting IDE/model (`Agent-Assisted-By`):
+Submitting agent-prefixed branch:
 Changed paths:
 Known risks, generated files, or follow-up work:
 -->
@@ -33,6 +34,7 @@ each claim you make against the actual source:
 - [ ] For docs-only changes: every command in the diff was actually run against a live checkout
 - [ ] Results above apply to this PR's current head SHA (not an earlier commit)
 - [ ] Any `@grok` review shown as current names this exact head SHA
+- [ ] This PR comes from the submitting agent's task branch, not shared `main`
 
 ## Security
 
