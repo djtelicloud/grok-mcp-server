@@ -114,6 +114,14 @@ def test_mcp_ui_swarm_playground_is_served_and_honest(monkeypatch):
     assert "Nothing is simulated" in page.text
     assert script.status_code == 200
     assert "unigrok-swarm-status-v1" in script.text
+    # Discoverable from the Control Center sidebar — as a page LINK, not a
+    # .nav-btn, so the tab router and its keyboard traversal never bind it.
+    with TestClient(create_app(), base_url="http://localhost:8080") as client:
+        index = client.get("/ui/")
+    assert 'id="nav-link-swarm"' in index.text
+    assert 'href="./swarm.html"' in index.text
+    assert 'class="nav-link"' in index.text
+    assert "Swarm Optimizer" in index.text
     assert "get_swarm_status" in script.text
     assert 'id="fileBtn"' in page.text
     assert "onclick=" not in page.text  # blocked by the server's script-src CSP

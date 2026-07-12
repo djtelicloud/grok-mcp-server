@@ -14,6 +14,10 @@ All notable changes to UniGrok MCP will be documented in this file.
   An admin-only verification broker signs landed-PR receipts with Ed25519 and
   publishes the public JWK for offline verification; cloud merge and release
   mutations remain deliberately disabled.
+- **Control Center → Swarm Optimizer navigation**: the sidebar gains a
+  "Contributor" group with a page link to the Pareto Playground
+  (`/ui/swarm.html`). Deliberately a `.nav-link` anchor, not a `.nav-btn`,
+  so the tab router and its arrow-key traversal never bind it.
 - **Swarm Pareto Playground** (`/ui/swarm.html`) and a machine-readable status
   view: `get_swarm_status(task_id, view="json")` returns the stable
   `unigrok-swarm-status-v1` payload — generations grouped for replay,
