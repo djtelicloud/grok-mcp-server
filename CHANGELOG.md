@@ -5,6 +5,15 @@ All notable changes to UniGrok MCP will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- **Private cloud control plane completion**: RFC 8414/9728 OAuth discovery,
+  dynamic public-client registration, authorization-code PKCE, ten-minute
+  scoped tokens, live GitHub membership introspection/revocation, and
+  per-request audit events protect the API-plane-only remote MCP. The hosted
+  review broker binds an immutable PR base/head pair, rechecks it after the
+  bounded diff fetch, and can invoke only the `unigrok:review` tool scope.
+  An admin-only verification broker signs landed-PR receipts with Ed25519 and
+  publishes the public JWK for offline verification; cloud merge and release
+  mutations remain deliberately disabled.
 - **Swarm Pareto Playground** (`/ui/swarm.html`) and a machine-readable status
   view: `get_swarm_status(task_id, view="json")` returns the stable
   `unigrok-swarm-status-v1` payload — generations grouped for replay,

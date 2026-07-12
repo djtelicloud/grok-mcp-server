@@ -127,13 +127,11 @@ bound to the existing project by its checked-in, non-secret Site project ID. It
 is not an idless installer template. The public root and machine-readable
 project routes require no account; `/control` is a separate protected surface.
 
-The protected route first uses dispatch-owned Sign in with ChatGPT to identify
-the viewer, then applies a fail-closed server-side project binding. The current
-`UNIGROK_GITHUB_IDENTITY_BINDINGS` adapter maps an authenticated ChatGPT email
-to a GitHub login and project role. It is an administrator-established
-bootstrap binding, **not** GitHub OAuth or a live collaborator lookup. Missing,
-malformed, or unmatched configuration denies control access; live GitHub
-verification remains pending.
+The public Site redirects `/control` to `https://control.grokmcp.org`, where
+GitHub App OAuth establishes identity and a fresh installation-token lookup
+checks repository permission on every protected request. A fail-closed
+`UNIGROK_GITHUB_IDENTITY_BINDINGS` adapter remains only as the Sites rollback
+fallback; it is not the canonical authorization path.
 
 The hosted Site does not accept provider credentials and does not pretend it
 can reach a contributor's laptop through `localhost`. Local development and
@@ -613,10 +611,12 @@ uv run python -m evals run --check-baseline
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution workflow and PR
 expectations. The staged public site, protected contributor control plane,
-GitHub authorization, and remote landing governance are defined in
+GitHub authorization, private OAuth MCP, hosted review, and landing governance are defined in
 [ADR 0001](docs/adr/0001-cloud-control-plane-governance.md). The ADR clearly
-separates implemented behavior from the future GitHub App broker and signed
-remote receipt contract.
+separates the live read-only and receipt-verification services from the
+deliberately disabled cloud merge/release mutation boundary.
+The production resource boundary and rollback procedure are in
+[Private remote MCP deployment](docs/remote-mcp-deployment.md).
 
 ---
 

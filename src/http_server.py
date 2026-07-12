@@ -10,7 +10,6 @@ import re
 import time
 import uuid
 from contextlib import asynccontextmanager
-from pathlib import Path
 from typing import Any, AsyncIterator, Dict, List, Literal, Optional
 from urllib.parse import urlsplit
 from .models.results import AgentResult
@@ -40,7 +39,6 @@ from .utils import (
     get_runtime_stats,
     get_unigrok_runtime,
     get_request_id,
-    get_xai_client,
     grok_cli_available,
     grok_cli_plane_status,
     credential_plane_contract,
@@ -186,7 +184,96 @@ def _api_keys() -> set[str]:
 
 
 def _auth_is_active() -> bool:
-    return is_cloudrun_runtime() or bool(_api_keys())
+    return is_cloudrun_runtime() or bool(_api_keys()) or bool(_oauth_introspection_url())
+
+
+def _oauth_introspection_url() -> Optional[str]:
+    return _validated_https_url(
+        os.environ.get("UNIGROK_OAUTH_INTROSPECTION_URL", "")
+    )
+
+
+def _oauth_required_scope(path: str, body: bytes = b"") -> str:
+    """Return all space-separated scopes required by one HTTP request."""
+    if path.startswith("/v1"):
+        return "unigrok:chat"
+    if path != "/mcp":
+        return "unigrok:status"
+    if not body:
+        return "unigrok:connect"
+    try:
+        document = json.loads(body)
+    except (TypeError, ValueError):
+        return "unigrok:connect"
+    requests = document if isinstance(document, list) else [document]
+    required = {"unigrok:connect"}
+    for item in requests:
+        if not isinstance(item, dict) or item.get("method") != "tools/call":
+            continue
+        params = item.get("params")
+        name = params.get("name") if isinstance(params, dict) else None
+        if name == "review_pull_request":
+            required.add("unigrok:review")
+        elif name == "agent":
+            required.add("unigrok:invoke")
+        elif name in {
+            "grok_mcp_status",
+            "grok_mcp_discover_self",
+        }:
+            required.add("unigrok:status")
+        else:
+            # Unknown and contributor-only tools never inherit a broad scope.
+            required.add("unigrok:invoke")
+    # tools/call carries its own explicit scope; the connection scope remains
+    # required because the same JSON-RPC batch may also initialize or list.
+    return " ".join(sorted(required))
+
+
+async def _introspect_oauth_token(token: str, required_scope: str) -> Optional[Dict[str, Any]]:
+    url = _oauth_introspection_url()
+    if not url or len(token) > 8_192:
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=5.0, follow_redirects=False) as client:
+            response = await client.post(
+                url,
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/x-www-form-urlencoded",
+                    "User-Agent": "unigrok-remote-mcp/1",
+                },
+                content=f"required_scope={required_scope}",
+            )
+        if response.status_code != 200 or len(response.content) > 16_384:
+            return None
+        payload = response.json()
+    except (httpx.HTTPError, ValueError, TypeError):
+        return None
+    if not isinstance(payload, dict) or payload.get("active") is not True:
+        return None
+    scopes = payload.get("scope", "")
+    scope_set = set(scopes.split()) if isinstance(scopes, str) else set()
+    subject = payload.get("sub")
+    required_scopes = set(required_scope.split())
+    if not required_scopes.issubset(scope_set) or not isinstance(subject, str) or not subject:
+        return None
+    return payload
+
+
+def _oauth_audit(event: str, scope: Dict[str, Any], **fields: Any) -> None:
+    logger.info(
+        "oauth_audit %s",
+        json.dumps(
+            {
+                "event": event,
+                "path": scope.get("path", ""),
+                "request_id": get_request_id(),
+                **fields,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ),
+    )
 
 
 def _allow_unauthenticated() -> bool:
@@ -399,7 +486,7 @@ def _request_may_bypass_auth(scope: Dict[str, Any]) -> bool:
 
 
 class GatewayAuthMiddleware:
-    """Static bearer auth as pure ASGI middleware.
+    """Static or remotely introspected OAuth bearer auth as pure ASGI middleware.
 
     Deliberately NOT Starlette's BaseHTTPMiddleware: its response-buffering
     wrapper is known to interfere with SSE client disconnects on the
@@ -422,12 +509,53 @@ class GatewayAuthMiddleware:
         if not _auth_is_active() or _request_may_bypass_auth(scope):
             await self.app(scope, receive, send)
             return
-        if _token_is_allowed(_extract_bearer_token(_scope_header(scope, b"authorization"))):
+        token = _extract_bearer_token(_scope_header(scope, b"authorization"))
+        if _token_is_allowed(token):
             await self.app(scope, receive, send)
             return
+
+        body = b""
+        if path == "/mcp" and scope.get("method") == "POST":
+            messages = []
+            while True:
+                message = await receive()
+                messages.append(message)
+                if message.get("type") != "http.request" or not message.get("more_body"):
+                    break
+            body = b"".join(message.get("body", b"") for message in messages)
+            replayed = False
+
+            async def replay_receive():
+                nonlocal replayed
+                if replayed:
+                    return {"type": "http.request", "body": b"", "more_body": False}
+                replayed = True
+                return {"type": "http.request", "body": body, "more_body": False}
+
+            receive = replay_receive
+
+        required_scope = _oauth_required_scope(path, body)
+        claims = await _introspect_oauth_token(token or "", required_scope)
+        if claims is not None:
+            scope["unigrok.oauth"] = claims
+            _oauth_audit(
+                "access_allowed",
+                scope,
+                required_scope=required_scope,
+                subject=claims.get("sub"),
+            )
+            await self.app(scope, receive, send)
+            return
+        _oauth_audit("access_denied", scope, required_scope=required_scope)
         response = _json_error("Unauthorized", status_code=401, code="unauthorized")
         # RFC 6750: advertise the expected auth scheme on every 401.
-        response.headers["WWW-Authenticate"] = "Bearer"
+        if _oauth_introspection_url():
+            response.headers["WWW-Authenticate"] = (
+                f'Bearer resource_metadata="{_public_mcp_resource() or "/.well-known/oauth-protected-resource/mcp"}", '
+                f'scope="{required_scope}"'
+            )
+        else:
+            response.headers["WWW-Authenticate"] = "Bearer"
         await response(scope, receive, send)
 
 
@@ -508,6 +636,11 @@ def _derive_http_caller(scope: Dict[str, Any]) -> str:
     identity, also used for session scoping), then the X-Caller header (any
     agent can self-identify), else the matched auth-key alias as
     'http:key-<sha8>', else 'http:anon'."""
+    oauth = scope.get("unigrok.oauth")
+    if isinstance(oauth, dict):
+        subject = normalize_caller(oauth.get("sub"))
+        if subject:
+            return f"oauth:{subject}"
     client_id = _derive_client_id(scope)
     if client_id:
         return client_id
@@ -814,8 +947,10 @@ async def unigrok_public_discovery(_: Request) -> JSONResponse:
             },
             "oauth": {
                 "metadata": "/.well-known/oauth-protected-resource/mcp",
-                "status": "discovery-only",
-                "access_token_validation": "not-implemented",
+                "status": "active" if _oauth_introspection_url() else "unconfigured",
+                "access_token_validation": (
+                    "remote-introspection" if _oauth_introspection_url() else "not-configured"
+                ),
             },
             "documentation": "https://grokmcp.org/",
         },
@@ -824,25 +959,18 @@ async def unigrok_public_discovery(_: Request) -> JSONResponse:
 
 
 async def oauth_protected_resource_metadata(_: Request) -> JSONResponse:
-    """RFC 9728-shaped discovery for the planned external OAuth authority.
-
-    Publishing an authorization-server issuer is intentionally opt-in. The
-    extension fields state that this process does not yet validate OAuth access
-    tokens, so the metadata is an integration contract—not a false claim that
-    UniGrok already implements an authorization server or audience validation.
-    Static ``UNIGROK_API_KEYS`` remain the enforced gateway credential today.
-    """
+    """RFC 9728 protected-resource metadata for the external OAuth authority."""
     resource = _public_mcp_resource()
     authorization_servers = _oauth_authorization_servers()
     scopes = _oauth_scopes()
-    if resource is None or not authorization_servers or not scopes:
+    if resource is None or not authorization_servers or not scopes or not _oauth_introspection_url():
         return JSONResponse(
             {
                 "status": "unavailable",
                 "code": "oauth_discovery_not_configured",
                 "detail": (
-                    "OAuth protected-resource discovery is reserved but no valid "
-                    "public MCP resource and authorization server are configured."
+                    "OAuth is unavailable until the public resource, authorization "
+                    "server, scopes, and introspection boundary are configured."
                 ),
             },
             status_code=503,
@@ -856,8 +984,8 @@ async def oauth_protected_resource_metadata(_: Request) -> JSONResponse:
             "scopes_supported": scopes,
             "bearer_methods_supported": ["header"],
             "resource_documentation": "https://grokmcp.org/",
-            "x_unigrok_authorization_status": "discovery-only",
-            "x_unigrok_access_token_validation": False,
+            "x_unigrok_authorization_status": "active",
+            "x_unigrok_access_token_validation": "remote-introspection",
         },
         headers={"Cache-Control": "public, max-age=300"},
     )
@@ -1975,8 +2103,10 @@ def create_app(*, bound_host: Optional[str] = None) -> Starlette:
         raise RuntimeError(
             "UNIGROK_ALLOW_UNAUTHENTICATED is forbidden in Cloud Run runtime."
         )
-    if is_cloudrun_runtime() and not _api_keys():
-        raise RuntimeError("UNIGROK_API_KEYS must be set in Cloud Run runtime.")
+    if is_cloudrun_runtime() and not (_api_keys() or _oauth_introspection_url()):
+        raise RuntimeError(
+            "UNIGROK_API_KEYS or UNIGROK_OAUTH_INTROSPECTION_URL must be set in Cloud Run runtime."
+        )
 
     public_mcp = create_public_mcp()
     mcp_app = public_mcp.streamable_http_app()

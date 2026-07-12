@@ -73,6 +73,8 @@ Set these ordinary environment variables on the Cloud Run revision:
 | `GITHUB_APP_ID` | Non-secret GitHub App identifier |
 | `GITHUB_APP_CLIENT_ID` | Non-secret GitHub App client identifier |
 | `GITHUB_APP_INSTALLATION_ID` | Installation restricted to this repository |
+| `MCP_RESOURCE_URL` | Exact private resource `https://mcp.grokmcp.org/mcp` |
+| `RECEIPT_SIGNING_KEY_ID` | Stable identifier for the active Ed25519 key |
 
 `NODE_ENV=production`, `HOSTNAME=0.0.0.0`, and the default `PORT=8080` are set
 by the image. Cloud Run may override `PORT`.
@@ -84,15 +86,21 @@ Reference these values from Secret Manager as runtime environment variables:
 | `GITHUB_APP_PRIVATE_KEY` | The GitHub App private key, including its PEM delimiters |
 | `GITHUB_APP_CLIENT_SECRET` | GitHub App OAuth client secret |
 | `AUTH_SESSION_SECRET` | At least 32 cryptographically random bytes, encoded for safe text transport |
+| `MCP_TOKEN_SECRET` | Separate random secret for short-lived OAuth codes and access tokens |
+| `RECEIPT_SIGNING_PRIVATE_KEY` | Ed25519 PKCS#8 private key used only by the receipt broker |
+| `RECEIPT_SIGNING_PUBLIC_KEY` | Matching Ed25519 SPKI public key; also published as JWK |
 
 In the current target project, use these Secret Manager resource names:
 
 - `unigrok-control-center-github-private-key`
 - `unigrok-control-center-github-client-secret`
 - `unigrok-control-center-session-secret`
+- `unigrok-control-center-mcp-token-secret`
+- `unigrok-control-center-receipt-private-key`
+- `unigrok-control-center-receipt-public-key`
 
 Use a dedicated Cloud Run service account with only
-`roles/secretmanager.secretAccessor` on those three secrets. Do not grant it
+`roles/secretmanager.secretAccessor` on those version-pinned secrets. Do not grant it
 project-wide Editor, repository administration, or Artifact Registry write.
 The build identity may push images but must not read runtime secrets.
 
@@ -107,6 +115,15 @@ is absent, and the application rejects malformed security configuration.
 Secret Manager references being present is not sufficient: test an actual
 GitHub login, repository membership check, and session round trip before
 assigning production traffic.
+
+The control origin is also the authorization server for the private remote
+MCP. It publishes RFC 8414 metadata, registers bounded public clients, requires
+authorization-code PKCE, issues ten-minute scoped tokens, and introspects every
+remote request against fresh GitHub repository permission. Revoking repository
+access therefore revokes the token on its next use; rotating `MCP_TOKEN_SECRET`
+revokes every outstanding token. The explicit review broker and admin-only
+receipt endpoint are under `/api/control/`; neither endpoint grants GitHub write
+permission.
 
 ## Release sequence
 

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { authorizeGitHubCollaborator } from "../app/lib/github-app";
+import { authorizeGitHubCollaborator, githubRequest } from "../app/lib/github-app";
 import { loadGitHubAuthConfig, type GitHubAuthConfig } from "../app/lib/github-auth-config";
 import { createGitHubSessionCookie, readGitHubSession } from "../app/lib/github-oauth";
 
@@ -59,4 +59,21 @@ test("a later permission check observes revocation", async () => {
   assert.ok(await authorizeGitHubCollaborator(config, identity, "t".repeat(40), request));
   allowed = false;
   assert.equal(await authorizeGitHubCollaborator(config, identity, "t".repeat(40), request), null);
+});
+
+test("GitHub requests cannot escape the constant repository API origin", async () => {
+  let called = false;
+  const request = async () => {
+    called = true;
+    return Response.json({});
+  };
+  for (const path of [
+    "//evil.example/repos/owner/repo",
+    "/\\evil.example/repos/owner/repo",
+    "/repos/owner/repo\nevil",
+    "/user",
+  ]) {
+    await assert.rejects(() => githubRequest(path, "t".repeat(40), request as typeof fetch));
+  }
+  assert.equal(called, false);
 });

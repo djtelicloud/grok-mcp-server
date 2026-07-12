@@ -110,21 +110,23 @@ export async function githubRequest(
   path: string,
   installationToken: string,
   request: typeof fetch = fetch,
-  options: { allowNotFound?: boolean } = {},
+  options: {
+    accept?: string;
+    allowNotFound?: boolean;
+    responseType?: "json" | "text";
+  } = {},
 ): Promise<unknown | null> {
-  if (!path.startsWith("/") || path.startsWith("//") || path.length > 2_048) {
-    throw new GitHubApiError();
-  }
+  const url = validatedGitHubApiUrl(path);
   if (installationToken.length < 20 || installationToken.length > 1_024) {
     throw new GitHubApiError();
   }
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), GITHUB_REQUEST_TIMEOUT_MS);
-  const response = await request(`${GITHUB_API_ORIGIN}${path}`, {
+  const response = await request(url, {
     cache: "no-store",
     headers: {
-      accept: "application/vnd.github+json",
+      accept: options.accept ?? "application/vnd.github+json",
       authorization: `Bearer ${installationToken}`,
       "x-github-api-version": "2022-11-28",
     },
@@ -141,11 +143,46 @@ export async function githubRequest(
     throw new GitHubApiError();
   }
   const text = await readResponseBody(response);
+  if (options.responseType === "text") return text;
   try {
     return JSON.parse(text) as unknown;
   } catch {
     throw new GitHubApiError();
   }
+}
+
+function validatedGitHubApiUrl(path: string): URL {
+  if (
+    !path.startsWith("/repos/") ||
+    path.startsWith("//") ||
+    path.length > 2_048 ||
+    /[\\\u0000-\u001f\u007f]/u.test(path)
+  ) {
+    throw new GitHubApiError();
+  }
+  let candidate: URL;
+  try {
+    candidate = new URL(path, GITHUB_API_ORIGIN);
+  } catch {
+    throw new GitHubApiError();
+  }
+  if (
+    candidate.protocol !== "https:" ||
+    candidate.hostname !== "api.github.com" ||
+    candidate.port ||
+    candidate.username ||
+    candidate.password ||
+    !candidate.pathname.startsWith("/repos/")
+  ) {
+    throw new GitHubApiError();
+  }
+  // Construct the fetch target from a fresh constant-origin URL. Only the
+  // validated repository pathname and query cross from the candidate; the
+  // network authority never depends on caller-controlled data.
+  const url = new URL(GITHUB_API_ORIGIN);
+  url.pathname = candidate.pathname;
+  url.search = candidate.search;
+  return url;
 }
 
 async function readResponseBody(response: Response): Promise<string> {

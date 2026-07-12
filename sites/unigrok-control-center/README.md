@@ -9,28 +9,32 @@ It has three deliberately separate surfaces:
 - `/llms.txt`, `/.well-known/unigrok.json`, and
   `/api/public/v1/project` expose public-safe project context to people and
   agents without authentication;
-- `/control` requires both dispatch-owned Sign in with ChatGPT and an
-  independent server-side project authorization decision.
+- the canonical `https://control.grokmcp.org/control` uses GitHub App OAuth
+  plus a fresh server-side repository-role decision; the Sites `/control`
+  route redirects there when `CONTROL_CENTER_ORIGIN` is configured.
 
 The source is bound to the existing UniGrok Sites project. It is no longer a
 reusable, idless installer template.
 
 ## Authentication is not authorization
 
-Sites owns `/signin-with-chatgpt`, `/signout-with-chatgpt`, `/callback`, the
-SIWC cookies, and authenticated-user header injection. The app does not
-implement OAuth routes.
+The public Sites build retains a fail-closed SIWC/bootstrap fallback for
+rollback only. Production control runs the same source as a standalone Next.js
+service. It implements GitHub OAuth with PKCE, discards the GitHub user token
+after identity lookup, stores only a signed HttpOnly identity session, and
+performs a fresh installation-token collaborator check for every protected
+request.
 
 `/control` first calls `requireChatGPTUser("/control")`. A successful ChatGPT
 sign-in identifies the viewer, but does not prove GitHub project membership.
 The server then applies `getGitHubProjectAuthorization()` as an independent,
 fail-closed check.
 
-The initial authorization adapter reads
+The legacy Sites fallback authorization adapter reads
 `UNIGROK_GITHUB_IDENTITY_BINDINGS` from the hosted server environment. It is a
 bootstrap mapping established by a project administrator, not GitHub OAuth and
-not a live collaborator lookup. Live GitHub collaborator verification remains
-pending. Missing, malformed, duplicate, oversized, or unmatched bindings deny
+not a live collaborator lookup. The canonical standalone origin performs live
+verification. Missing, malformed, duplicate, oversized, or unmatched bindings deny
 access and never render control-center data.
 
 The value is JSON with a maximum of 100 exact bindings:
@@ -49,9 +53,10 @@ Store real bindings only in the hosted server environment. Do not commit them.
 Only the normalized display name, GitHub login, and role can reach the control
 browser; the ChatGPT email is not serialized.
 
-The planned replacement is a reviewed GitHub App authorization broker with
-live repository-role checks. Do not add an app-owned GitHub OAuth flow to this
-Site until Sites documents and supports that deployment path.
+The standalone control service is also the OAuth authorization server for the
+private API-plane MCP. Its dynamic clients are redirect-bound, authorization
+codes require PKCE, access tokens are short-lived and scoped, and remote MCP
+introspection rechecks live repository membership before every request.
 
 ## Public machine-readable contract
 
@@ -60,7 +65,8 @@ links, route boundaries, and truthful availability states. They do not expose
 credentials, private runtime state, contributor data, inference access, or a
 live health claim.
 
-The remote MCP endpoint is reported as not deployed with OAuth work pending.
+The private remote MCP is reported at `https://mcp.grokmcp.org/mcp` with OAuth
+required. It is never presented as a public inference endpoint.
 The example terminal on the public page is visibly labeled as an example local
 command session, never as a live probe.
 
@@ -73,9 +79,10 @@ The protected connection wizard remains instructional:
 - the deployed Site never claims it can reach a contributor's laptop;
 - no browser form accepts an xAI key, GitHub token, or tunnel credential.
 
-PR, review, and runtime panels stay explicitly unconfigured until approved
-server-side adapters supply sanitized data. Pull-request review state remains
-separate from release impact.
+The standalone control service supplies sanitized GitHub evidence. Hosted Grok
+review is explicit, read-only, immutable-head-bound, API-plane-only, and
+separately scoped. Pull-request review state remains separate from release
+impact.
 
 ## Environment contract
 

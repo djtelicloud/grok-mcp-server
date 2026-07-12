@@ -18,6 +18,8 @@ const nextConfig: NextConfig =
         headers: async () => [
           { headers: [...protectedHeaders], source: "/control/:path*" },
           { headers: [...protectedHeaders], source: "/auth/github/:path*" },
+          { headers: [...protectedHeaders], source: "/oauth/:path*" },
+          { headers: [...protectedHeaders], source: "/api/control/:path*" },
         ],
         output: "standalone",
         poweredByHeader: false,

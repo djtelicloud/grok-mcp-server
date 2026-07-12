@@ -93,15 +93,14 @@ The checked-in defaults intentionally preserve this local path:
   to cloud infrastructure.
 
 There is no switch that permits outside contributors to schedule automatic
-reviews. Adding that capability requires a future reviewed code change after
-the hosted API path has rate limits, cost caps, abuse monitoring, no dependency
-on a maintainer machine, and immutable pins for third-party Actions.
+reviews. The hosted API path is invoked explicitly by an authorized contributor,
+binds the immutable base/head pair, caps evidence, uses only the API plane and
+the `unigrok:review` scope, and rechecks the PR after fetching the diff.
 
-The canonical project Site and its fail-closed server-configured identity
-bootstrap binding are implemented. That binding is not live GitHub OAuth or a
-collaborator lookup. Live GitHub verification, the GitHub App mutation broker,
-signed landing receipts, and the `origin/main` canonical switch remain target
-architecture rather than implemented features. See
+The canonical project Site, standalone GitHub OAuth control, private OAuth MCP,
+hosted review broker, and Ed25519 receipt verifier are implemented. Cloud merge
+and release mutations remain deliberately disabled; protected `origin/main` and
+Codex-owned `scripts/land` remain canonical. See
 [ADR 0001](adr/0001-cloud-control-plane-governance.md).
 
 Official references:
