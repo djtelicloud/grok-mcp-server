@@ -157,6 +157,6 @@
   "best_memory_improvement_pct": -838.5,
   "cost_to_optimize_usd": 0.0
  },
- "folded_state": "[Compacted state fold of 2 earlier messages in this session]\nGOAL: optimize function:dedup in pkg/dedup.py\nCONSTRAINTS:\n- tests that must pass: pkg/test_dedup.py\n- benchmark: /Users/djtelicloud/Documents/agentixai/grok-mcp-server/.claude/worktrees/project-setup-af34d0/.venv/bin/python3 pkg/bench_dedup.py\n- improvements below the noise floor do not count\nACTIVE FILES:\n- pkg/dedup.py\nNARRATIVE: Generation 3. Pareto front holds 2 candidate(s); best latency improvement so far: 98.8% faster.",
+ "folded_state": "[Compacted state fold of 2 earlier messages in this session]\nGOAL: optimize function:dedup in pkg/dedup.py\nCONSTRAINTS:\n- tests that must pass: pkg/test_dedup.py\n- benchmark: python pkg/bench_dedup.py\n- improvements below the noise floor do not count\nACTIVE FILES:\n- pkg/dedup.py\nNARRATIVE: Generation 3. Pareto front holds 2 candidate(s); best latency improvement so far: 98.8% faster.",
  "provenance": "Recorded demo run on the golden nsquared_dedup target. Candidate CODE was scripted for reproducibility; every measurement (tests, benchmarks, Pareto ranks, rewards) is real engine output."
 }

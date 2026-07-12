@@ -143,6 +143,8 @@ def test_mcp_ui_swarm_playground_is_served_and_honest(monkeypatch):
     payload = sample.json()
     assert payload["format"] == "unigrok-swarm-status-v1"
     assert "scripted for reproducibility" in payload["provenance"]
+    assert "/Users/" not in sample.text
+    assert ".claude/worktrees/" not in sample.text
     assert payload["pareto_front"]  # non-empty front to explore
     assert payload["aggregates"]["best_latency_improvement_pct"] > 0
     # Walls are never plotted at invented coordinates.

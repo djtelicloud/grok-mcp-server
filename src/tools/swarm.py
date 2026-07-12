@@ -1,7 +1,7 @@
 """MCP tools for the swarm code optimizer (contributor-mode only).
 
-Public surface: start_code_swarm, get_swarm_status, apply_swarm_winner,
-cancel_swarm. Every tool is triple-gated (contributor mode + attached
+Public surface: start_code_swarm, get_swarm_status, list_swarm_tasks,
+apply_swarm_winner, cancel_swarm. Mutating tools are triple-gated (contributor mode + attached
 workspace + not Cloud Run) — the stable public MCP is workspace-neutral and
 must never mutate a caller's files. apply_swarm_winner is additionally gated on
 UNIGROK_SWARM=active and guarded by the base_file_hash staleness check plus
@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import os
 import shlex
 import signal
@@ -40,14 +41,11 @@ from ..utils import (
     is_cloudrun_runtime,
     redact_secrets,
     register_internal_tool,
-    run_blocking,
     store,
 )
 
 READONLY_TOOL = ToolAnnotations(readOnlyHint=True)
 DESTRUCTIVE_TOOL = ToolAnnotations(destructiveHint=True)
-
-import logging
 
 logger = logging.getLogger("GrokMCP")
 
