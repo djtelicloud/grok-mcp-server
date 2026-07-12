@@ -5,6 +5,15 @@ All notable changes to UniGrok MCP will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- **Swarm Playground on-ramp**: the Pareto Playground no longer assumes a
+  pasted task id. It gains a one-click sample (a bundled RECORDED run of the
+  golden dedup target whose payload carries its own provenance: scripted
+  candidates, real measurements), a recent-swarms picker backed by the new
+  read-only `list_swarm_tasks` MCP tool (newest first, staleness-aware
+  status), and a "Run demo swarm" button that launches `start_code_swarm` on
+  the golden O(N²) target and live-polls the run to completion — surfacing
+  the tool's own refusal verbatim when the swarm mode or contributor gates
+  say no.
 - **Private cloud control plane completion**: RFC 8414/9728 OAuth discovery,
   dynamic public-client registration, authorization-code PKCE, ten-minute
   scoped tokens, live GitHub membership introspection/revocation, and
@@ -14,6 +23,10 @@ All notable changes to UniGrok MCP will be documented in this file.
   An admin-only verification broker signs landed-PR receipts with Ed25519 and
   publishes the public JWK for offline verification; cloud merge and release
   mutations remain deliberately disabled.
+- **Control Center → Swarm Optimizer navigation**: the sidebar gains a
+  "Contributor" group with a page link to the Pareto Playground
+  (`/ui/swarm.html`). Deliberately a `.nav-link` anchor, not a `.nav-btn`,
+  so the tab router and its arrow-key traversal never bind it.
 - **Swarm Pareto Playground** (`/ui/swarm.html`) and a machine-readable status
   view: `get_swarm_status(task_id, view="json")` returns the stable
   `unigrok-swarm-status-v1` payload — generations grouped for replay,

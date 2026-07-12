@@ -73,6 +73,13 @@
           <button id="tab-btn-metrics" type="button" class="nav-btn" data-tab="tab-metrics" role="tab" aria-selected="false" aria-controls="tab-metrics" tabindex="-1" title="Usage &amp; Telemetry">
             <span class="btn-icon" aria-hidden="true">📊</span><span class="btn-label">Usage &amp; Telemetry</span>
           </button>
+          <div class="nav-title nav-title-group">Contributor</div>
+          <!-- A real page link, deliberately NOT a .nav-btn: the tab router
+               and its arrow-key traversal bind .nav-btn only, so this never
+               hijacks tab switching or navigates during keyboard cycling. -->
+          <a id="nav-link-swarm" class="nav-link" href="./swarm.html" title="Swarm Optimizer — Pareto Playground">
+            <span class="btn-icon" aria-hidden="true">🐝</span><span class="btn-label">Swarm Optimizer</span>
+          </a>
           <details id="advancedNav" class="nav-advanced">
           <summary class="nav-title nav-title-group">Advanced</summary>
           <div class="nav-advanced-items">
