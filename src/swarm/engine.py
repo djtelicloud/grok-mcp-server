@@ -40,7 +40,7 @@ from .pareto import rank_candidates
 from .preflight import noise_floor_pct
 from .router import DiscountedUCBRouter, reward_for
 from .sandbox import SandboxError, SwarmSandbox
-from .static_gate import count_violations
+from .static_gate import violation_counts
 
 
 @dataclass
@@ -93,7 +93,7 @@ class SwarmEngine:
     _front: List[Dict[str, Any]] = field(default_factory=list, init=False)
     _spent: float = field(default=0.0, init=False)
     _noise_floor_pct: float = field(default=5.0, init=False)
-    # Baseline F821/F823 count, computed once on first use ("unset" sentinel;
+    # Baseline F821/F823 diagnostics, computed once on first use ("unset" sentinel;
     # None = ruff unavailable, gate disabled for the task).
     _baseline_lint: Any = field(default="unset", init=False)
 
@@ -283,10 +283,13 @@ class SwarmEngine:
         # unavailable/erroring ruff makes the gate a no-op — the tests stage
         # still catches everything this would have.
         if self.config.ruff_filter:
-            baseline_lint = await self._baseline_lint_count()
+            baseline_lint = await self._baseline_lint_counts()
             if baseline_lint is not None:
-                mutant_lint = await count_violations(patched)
-                if mutant_lint is not None and mutant_lint > baseline_lint:
+                mutant_lint = await violation_counts(patched)
+                # Compare diagnostic multisets, not just totals: replacing a
+                # pre-existing undefined name with a different hallucinated
+                # name must still be rejected even when the count is equal.
+                if mutant_lint is not None and mutant_lint - baseline_lint:
                     candidate["stage_reached"] = "lint"
                     return candidate
 
@@ -317,12 +320,12 @@ class SwarmEngine:
 
     # ── Helpers ──────────────────────────────────────────────────────────────
 
-    async def _baseline_lint_count(self) -> Optional[int]:
-        """The original file's F821/F823 count, computed once per task so the
+    async def _baseline_lint_counts(self):
+        """The original file's F821/F823 diagnostics, computed once per task so the
         gate stays baseline-relative (a pre-existing violation must not kill
         every mutant)."""
         if self._baseline_lint == "unset":
-            self._baseline_lint = await count_violations(self.file_source)
+            self._baseline_lint = await violation_counts(self.file_source)
         return self._baseline_lint
 
     def _apply_noise_floor(self, latency_ms: float) -> float:

@@ -9,6 +9,16 @@ drift-prone values live before acting. Do not copy secrets or OAuth codes here.
 
 ## Current repository state
 
+- The Claude-originated swarm static fast-gate is integrated through the
+  protected Codex path; resolve its PR and rebased merge commit live. Codex
+  review hardened Ruff execution with isolated configuration and ignored
+  suppression comments, and changed baseline comparison from a total count to
+  a diagnostic multiset so mutants cannot trade one existing undefined name
+  for a different new one. The reviewed head passed 1,018 tests, 12/12 offline
+  evals, and deterministic OKF verification. The gate remains correctness-only,
+  fail-open when Ruff is unavailable, configurable with
+  `UNIGROK_SWARM_RUFF_FILTER=0`, and additive to the existing test oracle.
+
 - PR #10 merged the Claude-originated swarm optimizer through the protected
   Codex path after landing review repaired strict CLI billing, candidate
   identity, Pareto/apply selection, callable-signature preservation, path and
@@ -126,7 +136,8 @@ drift-prone values live before acting. Do not copy secrets or OAuth codes here.
 
 ## Remaining gates
 
-The v0.6.0 release, Claude intelligence, and swarm optimizer gates are complete:
+The v0.6.0 release, Claude intelligence, swarm optimizer, and static fast-gate
+gates are complete:
 
 1. Sites production environment revision `5` includes the non-secret
    `CONTROL_CENTER_ORIGIN=https://control.grokmcp.org`.
