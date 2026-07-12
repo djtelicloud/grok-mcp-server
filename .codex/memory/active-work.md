@@ -2,7 +2,7 @@
 
 Last updated: 2026-07-12
 Owner: Codex
-Status: Principal-bound identity hardening and first modular extraction landed; no active gate
+Status: Principal-bound identity hardening, first modular extraction, and Control Center redesign landed; no active gate
 
 This is the project-scoped handoff for new Codex chats. Resolve drift-prone
 Git, CI, runtime, DNS, and cloud identifiers live before acting. Never record
@@ -40,6 +40,17 @@ credentials, OAuth codes, tokens, or private keys here.
   principal context, session composition, and telemetry caller parsing.
   Production consumers import it directly; `src.utils` re-exports the same
   objects for compatibility. Tests pin all four ContextVar objects by identity.
+- PR #51 merged to protected `origin/main` as
+  `197063f2f4ccd46b4db8b36812d59d2b45a89bd7`. Its exact reviewed,
+  CI-green, Codex-approved, and locally landed head was
+  `dff71f6953424db5547e5bf27dc7fbbf2070ff60`.
+- The Control Center now uses the shared escape-first renderer in
+  `mcp_ui/markdown.js`, preserving safe headings, lists, emphasis, tables,
+  code fences, and allowlisted links without admitting executable markup.
+- The bench now reports tool errors, degraded state, finish reason, route,
+  plane, model, citations, and workspace-context provenance instead of
+  presenting every response as an undifferentiated success. Browser sessions
+  receive unique IDs, and the refreshed layout includes accessibility fixes.
 
 ## Verification
 
@@ -56,6 +67,15 @@ credentials, OAuth codes, tokens, or private keys here.
 - The initial exact-diff Grok security review returned only a planning stub, so
   no Grok approval is claimed for PR #48. Grok's exact-diff review of PR #49
   found no import-cycle, duplicate-context, or compatibility regression.
+- The PR #51 landing gate printed
+  `LANDED TO MAIN: dff71f6953424db5547e5bf27dc7fbbf2070ff60`
+  after 1,192 tests plus a rebuilt and smoke-tested contributor service.
+- Live browser verification against the contributor service on port 4766
+  confirmed setup readiness for both planes, rendered a real CLI response as
+  an `h2`, bold text, and a safe `https://x.ai` link, exposed a successful
+  non-degraded CLI receipt, and produced no browser console errors.
+- The exact-diff Grok review attempt for PR #51 returned only a planning stub,
+  so no Grok approval is claimed for the Control Center redesign.
 
 ## Deliberately separate work
 
@@ -67,6 +87,9 @@ credentials, OAuth codes, tokens, or private keys here.
 - Signed route receipts, routing counterfactual experiments, and an external
   penetration test remain product/security milestones rather than blockers for
   the local single-operator default.
+- Streaming UI output, a dedicated PR-review panel, and deeper layout-engine
+  interaction remain follow-up product work rather than blockers for the
+  redesigned Control Center.
 - The previously landed public OKF intelligence payload bundle remains valid;
-  this work did not release a new MCP package, deploy the consumer runtime,
-  migrate SQLite, or activate Insider producers/promotions.
+  this work did not release a new MCP package, deploy a public UI or consumer
+  runtime, migrate SQLite, or activate Insider producers/promotions.
