@@ -125,7 +125,7 @@ class GatewayAuthMiddleware
 
 **Keywords:** gateway, auth, middleware
 
-Static bearer auth as pure ASGI middleware.
+Static or remotely introspected OAuth bearer auth as pure ASGI middleware.
 
 Deliberately NOT Starlette's BaseHTTPMiddleware: its response-buffering
 wrapper is known to interfere with SSE client disconnects on the
@@ -224,13 +224,7 @@ async def oauth_protected_resource_metadata(_: Request) -> JSONResponse
 
 **Keywords:** oauth, protected, resource, metadata
 
-RFC 9728-shaped discovery for the planned external OAuth authority.
-
-Publishing an authorization-server issuer is intentionally opt-in. The
-extension fields state that this process does not yet validate OAuth access
-tokens, so the metadata is an integration contract—not a false claim that
-UniGrok already implements an authorization server or audience validation.
-Static ``UNIGROK_API_KEYS`` remain the enforced gateway credential today.
+RFC 9728 protected-resource metadata for the external OAuth authority.
 
 ### Function: `metrics` {#http_server-metrics}
 

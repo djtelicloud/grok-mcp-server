@@ -139,7 +139,7 @@ publish if the event SHA is already stale or if the head changes while Grok is
 working. That proves which evidence was reviewed; it does not prove the review
 was correct and does not authorize a merge.
 
-The future remote landing broker issues a signed receipt containing at least:
+The hosted receipt broker issues a signed receipt containing at least:
 
 - repository identity, pull request number, base SHA, and landed head SHA;
 - required-check conclusions and code-owner/Codex disposition identifiers;
@@ -147,9 +147,13 @@ The future remote landing broker issues a signed receipt containing at least:
 - actor, timestamp, broker version, and policy version;
 - an asymmetric signature plus key id suitable for offline verification.
 
-Receipt signing keys live in managed signing infrastructure, not the repository
-or an agent prompt. Verification must fail closed for an unknown key, altered
-payload, stale head, or missing required gate.
+Receipt signing keys live in versioned Secret Manager resources, not the
+repository, browser, or an agent prompt. The broker verifies the configured
+Ed25519 public/private pair and publishes only its public JWK at
+`https://control.grokmcp.org/.well-known/unigrok-receipt-keys`. Verification
+fails closed for an unknown key, altered payload, stale head, missing exact-head
+Codex approval, a failed check, or a merge commit outside the current default
+branch ancestry. Cloud merge and release mutations remain disabled.
 
 ## Current state versus target state
 
@@ -157,20 +161,21 @@ This ADR intentionally does not pretend the migration already happened.
 
 | Capability | Current implementation | Target before claiming it live |
 |---|---|---|
-| GitHub Grok review | Trusted default-branch script on a restricted self-hosted runner; advisory comment | Configurable authenticated API-plane endpoint on a hosted runner, with cost/rate controls |
-| Landing receipt | Local JSON receipt written by `scripts/land`; not cryptographically signed | Broker-issued signed receipt verifiable against a published key |
-| Canonical integration branch | Protected `origin/main` through PRs; Codex synchronizes local `main` and records the local landing receipt | Broker-verified merge with a signed receipt; local `main` remains a synchronized replica |
-| GitHub authorization | GitHub workflow association gates | GitHub App user identity plus fresh repository-role checks for the protected control surface |
+| Private remote MCP | API-plane-only Streamable HTTP resource with RFC 9728 metadata, OAuth PKCE, short-lived scoped tokens, live introspection, and structured audit events | Live; anonymous inference remains prohibited |
+| GitHub Grok review | Explicit hosted broker fetches an immutable base/head diff, rechecks it for races, and calls only the scoped API-plane `review_pull_request` tool | Live; advisory only and never automatic |
+| Landing receipt | Local `scripts/land` JSON plus an admin-only Ed25519 receipt broker and published JWK | Live verification path; cloud merge and release remain disabled |
+| Canonical integration branch | Protected `origin/main` through PRs; Codex synchronizes local `main` and records the local landing receipt | Unchanged until a separately reviewed cloud mutation broker exists |
+| GitHub authorization | GitHub App OAuth identity plus a fresh repository-role check on every protected request and token introspection | Live |
 | Codex approval | Owner-dispatched required status validates the exact open PR head without model usage | Dedicated project-admin App identity with signed dispositions |
-| GitHub mutation broker | Not implemented; GitHub protected merge remains the mutation boundary | Deployed GitHub App controller with short-lived tokens, allowlisted mutations, and audit log |
+| GitHub mutation broker | Deliberately disabled; GitHub protected merge remains the mutation boundary | Any future mutation path requires a separate reviewed change and signed receipt reconciliation |
 
-Until the target broker and signed receipt verifier are deployed and exercised
-end to end, the repository's transitional `AGENTS.md` contract remains
-operative: every change reaches `origin/main` through a PR, Codex records an
-exact-head disposition, only a `codex/*` integration branch may run
-`scripts/land`, and local `main` is synchronized to the protected merge. The
-connected maintainer identity remains a documented temporary bypass for
-owner-authored agent PRs; it is not the future independent bot approval.
+The repository's `AGENTS.md` contract remains operative: every change reaches
+`origin/main` through a PR, Codex records an exact-head disposition, only a
+`codex/*` integration branch may run `scripts/land`, and local `main` is
+synchronized to the protected merge. The hosted receipt service verifies
+completed landings; it does not authorize or perform a merge. The connected
+maintainer identity remains the documented project-admin mapping for
+owner-authored agent PRs.
 
 ## Required GitHub repository policy
 
@@ -220,6 +225,6 @@ as unknown until GitHub confirms it.
   repository/team boundary.
 - Review and mutation are more auditable but require a GitHub App, hosted
   secrets, rulesets, signature key management, and operational monitoring.
-- The staged migration temporarily has both a local landing receipt and a future
-  remote receipt contract; UI and docs must show which one actually produced a
+- Local landing receipts and hosted signed verification receipts have distinct
+  schemas and producers; UI, audit logs, and docs identify which one produced a
   result.

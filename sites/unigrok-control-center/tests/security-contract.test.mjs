@@ -24,7 +24,7 @@ test("keeps the root public and protects control server-side", async () => {
   assert.doesNotMatch(controlPage, /user\.email[},<]/);
 });
 
-test("authorization bindings fail closed and never claim live GitHub verification", async () => {
+test("legacy Sites authorization fails closed and points to canonical live verification", async () => {
   const authorization = await readFile(new URL("../app/lib/github-project-authorization.ts", import.meta.url), "utf8");
   const denied = await readFile(new URL("../app/control/access-denied.tsx", import.meta.url), "utf8");
   const controlCenter = await readFile(new URL("../app/control-center.tsx", import.meta.url), "utf8");
@@ -33,8 +33,8 @@ test("authorization bindings fail closed and never claim live GitHub verificatio
   assert.match(authorization, /invalid-configuration/);
   assert.match(authorization, /not-authorized/);
   assert.doesNotMatch(authorization, /fetch\(|github\.com\/login\/oauth/);
-  assert.match(denied, /live GitHub collaborator verification is pending/);
-  assert.match(controlCenter, /live GitHub collaborator verification is pending/);
+  assert.match(denied, /canonical control origin uses GitHub OAuth/);
+  assert.match(controlCenter, /canonical control origin performs live GitHub OAuth/);
 });
 
 test("publishes three public-safe machine-readable routes", async () => {
@@ -46,7 +46,7 @@ test("publishes three public-safe machine-readable routes", async () => {
   assert.match(projectRoute, /publicProjectDocument/);
   assert.match(discoveryRoute, /publicDiscoveryDocument/);
   assert.match(llmsRoute, /publicLlmsText/);
-  assert.match(publicProject, /private-api-review-pending/);
+  assert.match(publicProject, /private-oauth-api-plane/);
   assert.doesNotMatch(publicProject, /runtime ready|UNIGROK_GITHUB_IDENTITY_BINDINGS/);
 });
 

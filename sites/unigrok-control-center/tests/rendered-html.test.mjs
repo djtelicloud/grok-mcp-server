@@ -104,7 +104,7 @@ test("renders the public root without authentication or live-status claims", asy
   assert.match(html, /Public project context/);
   assert.match(html, /example · local command session/);
   assert.match(html, /Published route contract · not a live runtime probe/);
-  assert.match(html, /Private review pending · public MCP deferred/);
+  assert.match(html, /Private OAuth · API plane only/);
   assert.match(html, /uv run python main\.py init/);
   assert.match(html, /\/docs\/okf\/index\.md/);
   assert.match(html, /status.*healthy/);
@@ -181,7 +181,7 @@ test("renders authorized control without serializing the ChatGPT email", async (
   assert.match(html, /installer-github/);
   assert.match(html, /Pull-request status/);
   assert.match(html, /Grok review results/);
-  assert.match(html, /live GitHub collaborator verification is pending/);
+  assert.match(html, /canonical control origin performs live GitHub OAuth/);
   assert.doesNotMatch(html, /installer@example\.org/);
 });
 
@@ -262,7 +262,8 @@ test("serves public project, discovery, and llms documents anonymously", async (
   assert.equal(projectResponse.status, 200);
   const project = await projectResponse.json();
   assert.equal(project.name, "UniGrok");
-  assert.equal(project.mcp.remote_status, "private-api-review-pending");
+  assert.equal(project.mcp.remote_status, "private-oauth-api-plane");
+  assert.equal(project.mcp.private_remote, "https://mcp.grokmcp.org/mcp");
   assert.equal(project.control.authorization, "fresh-server-side-github-repository-role-check");
   assert.equal(project.documentation.okf_manifest, "https://grokmcp.org/docs/okf/okf-manifest.json");
 
@@ -271,6 +272,7 @@ test("serves public project, discovery, and llms documents anonymously", async (
   const discovery = await discoveryResponse.json();
   assert.equal(discovery.name, "UniGrok");
   assert.equal(discovery.control, "https://control.grokmcp.org");
+  assert.equal(discovery.private_mcp, "https://mcp.grokmcp.org/mcp");
   assert.equal(discovery.okf, "https://grokmcp.org/docs/okf/okf-manifest.json");
 
   const llmsResponse = await request(worker, "/llms.txt");
@@ -280,5 +282,6 @@ test("serves public project, discovery, and llms documents anonymously", async (
   assert.match(llms, /# UniGrok/);
   assert.match(llms, /fresh server-side repository role check/);
   assert.match(llms, /OKF knowledge bundle/);
+  assert.match(llms, /short-lived scoped tokens/);
   assert.doesNotMatch(llms, /xai-[A-Za-z0-9_-]+/i);
 });

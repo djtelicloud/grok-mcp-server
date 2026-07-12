@@ -355,8 +355,8 @@ def test_chatgpt_github_operator_guide_keeps_credentials_separate():
     assert "Codex remains the only Git" in guide
     assert "immutable `base...head` commit" in guide
     assert "There is no switch that permits outside contributors" in guide
-    assert "bootstrap binding are implemented" in guide
-    assert "not live GitHub OAuth" in guide
+    assert "standalone GitHub OAuth control" in guide
+    assert "Ed25519 receipt verifier" in guide
 
 
 def test_codex_approval_workflow_is_owner_only_and_exact_head_bound():
@@ -383,8 +383,8 @@ def test_cloud_governance_contract_marks_target_features_not_live():
 
     assert "GitHub sign-in plus repository authorization" in adr
     assert "successful GitHub OAuth login is **not** contributor authorization" in adr
-    assert "GitHub mutation broker | Not implemented" in adr
-    assert "not cryptographically signed" in adr
+    assert "GitHub mutation broker | Deliberately disabled" in adr
+    assert "admin-only Ed25519 receipt broker" in adr
     assert "protected `origin/main`" in adr
     assert "Codex remains the decision authority" in adr
     assert "The user is not expected to perform routine Git" in adr
@@ -405,11 +405,12 @@ def test_ci_validates_the_provisioned_project_site():
     assert "site-template:" not in workflow
 
 
-def test_readme_describes_bound_site_and_bootstrap_authorization_truthfully():
+def test_readme_describes_bound_site_and_live_authorization_truthfully():
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     normalized = " ".join(readme.split())
 
     assert "bound to the existing project" in normalized
     assert "It is not an idless installer template" in normalized
-    assert "**not** GitHub OAuth or a live collaborator lookup" in normalized
-    assert "live GitHub verification remains pending" in normalized
+    assert "GitHub App OAuth establishes identity" in normalized
+    assert "fresh installation-token lookup" in normalized
+    assert "Sites rollback fallback" in normalized

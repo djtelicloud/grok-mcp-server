@@ -38,7 +38,7 @@ export default function ControlAccessDenied({
 
         <div className="access-notice">
           <strong>Why two checks?</strong>
-          <p>Sign in with ChatGPT identifies the viewer. It does not prove that the viewer is an administrator or contributor to {PUBLIC_PROJECT.repository.name}. The current control gate uses a server-configured GitHub identity bootstrap binding; live GitHub collaborator verification is pending.</p>
+          <p>Sign in with ChatGPT identifies the viewer. It does not prove that the viewer is an administrator or contributor to {PUBLIC_PROJECT.repository.name}. This legacy Sites fallback uses a server-configured bootstrap binding; the canonical control origin uses GitHub OAuth plus a fresh collaborator check.</p>
         </div>
 
         <div className="public-actions">

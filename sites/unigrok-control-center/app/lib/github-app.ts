@@ -110,7 +110,11 @@ export async function githubRequest(
   path: string,
   installationToken: string,
   request: typeof fetch = fetch,
-  options: { allowNotFound?: boolean } = {},
+  options: {
+    accept?: string;
+    allowNotFound?: boolean;
+    responseType?: "json" | "text";
+  } = {},
 ): Promise<unknown | null> {
   if (!path.startsWith("/") || path.startsWith("//") || path.length > 2_048) {
     throw new GitHubApiError();
@@ -124,7 +128,7 @@ export async function githubRequest(
   const response = await request(`${GITHUB_API_ORIGIN}${path}`, {
     cache: "no-store",
     headers: {
-      accept: "application/vnd.github+json",
+      accept: options.accept ?? "application/vnd.github+json",
       authorization: `Bearer ${installationToken}`,
       "x-github-api-version": "2022-11-28",
     },
@@ -141,6 +145,7 @@ export async function githubRequest(
     throw new GitHubApiError();
   }
   const text = await readResponseBody(response);
+  if (options.responseType === "text") return text;
   try {
     return JSON.parse(text) as unknown;
   } catch {

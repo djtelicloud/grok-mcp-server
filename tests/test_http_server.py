@@ -1,6 +1,5 @@
 import json
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -12,6 +11,7 @@ from src.http_server import (
     MCPOriginMiddleware,
     ModeDialContextMiddleware,
     _ACTIVE_MODE_DIAL,
+    _derive_http_caller,
     _resolve_bind_host,
     _resolve_bind_port,
     create_app,
@@ -99,7 +99,7 @@ def test_public_discovery_is_sanitized_in_cloudrun(monkeypatch):
         "provider_credentials": "server-side-only",
         "remote_inference": "authentication-required",
     }
-    assert payload["oauth"]["access_token_validation"] == "not-implemented"
+    assert payload["oauth"]["access_token_validation"] == "not-configured"
     assert "/runtimez" in payload["access"]["protected"]
     assert "/ui" in payload["access"]["protected"]
     assert xai_secret not in response.text
@@ -114,7 +114,7 @@ def test_public_discovery_is_sanitized_in_cloudrun(monkeypatch):
         assert internal_field not in response.text
 
 
-def test_oauth_protected_resource_metadata_is_discovery_only(monkeypatch):
+def test_oauth_protected_resource_metadata_is_active(monkeypatch):
     monkeypatch.setenv("UNIGROK_RUNTIME", "cloudrun")
     monkeypatch.setenv("UNIGROK_API_KEYS", "client-secret")
     monkeypatch.setenv("UNIGROK_PUBLIC_MCP_URL", "https://mcp.grokmcp.org/mcp/")
@@ -123,6 +123,10 @@ def test_oauth_protected_resource_metadata_is_discovery_only(monkeypatch):
         "https://auth.grokmcp.org/, https://identity.example.com/tenant",
     )
     monkeypatch.setenv("UNIGROK_OAUTH_SCOPES", "unigrok:invoke, unigrok:read")
+    monkeypatch.setenv(
+        "UNIGROK_OAUTH_INTROSPECTION_URL",
+        "https://control.grokmcp.org/oauth/introspect",
+    )
 
     with TestClient(create_app(), base_url="https://mcp.grokmcp.org") as client:
         response = client.get("/.well-known/oauth-protected-resource/mcp")
@@ -137,8 +141,8 @@ def test_oauth_protected_resource_metadata_is_discovery_only(monkeypatch):
         "scopes_supported": ["unigrok:invoke", "unigrok:read"],
         "bearer_methods_supported": ["header"],
         "resource_documentation": "https://grokmcp.org/",
-        "x_unigrok_authorization_status": "discovery-only",
-        "x_unigrok_access_token_validation": False,
+        "x_unigrok_authorization_status": "active",
+        "x_unigrok_access_token_validation": "remote-introspection",
     }
     assert response.headers["Cache-Control"] == "public, max-age=300"
 
@@ -224,9 +228,118 @@ def test_cloudrun_requires_api_keys(monkeypatch):
     monkeypatch.setenv("UNIGROK_RUNTIME", "cloudrun")
     monkeypatch.delenv("UNIGROK_API_KEYS", raising=False)
     monkeypatch.delenv("UNIGROK_ALLOW_UNAUTHENTICATED", raising=False)
+    monkeypatch.delenv("UNIGROK_OAUTH_INTROSPECTION_URL", raising=False)
 
     with pytest.raises(RuntimeError, match="UNIGROK_API_KEYS"):
         create_app()
+
+
+def test_cloudrun_accepts_oauth_introspection_without_static_keys(monkeypatch):
+    monkeypatch.setenv("UNIGROK_RUNTIME", "cloudrun")
+    monkeypatch.delenv("UNIGROK_API_KEYS", raising=False)
+    monkeypatch.setenv(
+        "UNIGROK_OAUTH_INTROSPECTION_URL",
+        "https://control.grokmcp.org/oauth/introspect",
+    )
+
+    create_app()
+
+
+def test_oauth_introspection_enforces_surface_and_tool_scopes(monkeypatch):
+    monkeypatch.setenv("UNIGROK_RUNTIME", "cloudrun")
+    monkeypatch.delenv("UNIGROK_API_KEYS", raising=False)
+    monkeypatch.setenv("UNIGROK_PUBLIC_MCP_URL", "https://mcp.grokmcp.org/mcp")
+    monkeypatch.setenv(
+        "UNIGROK_OAUTH_INTROSPECTION_URL",
+        "https://control.grokmcp.org/oauth/introspect",
+    )
+    observed = []
+
+    async def deny(_token, required_scope):
+        observed.append(required_scope)
+        return None
+
+    monkeypatch.setattr("src.http_server._introspect_oauth_token", deny)
+    with TestClient(create_app(), base_url="https://mcp.grokmcp.org") as client:
+        metrics = client.get("/metrics", headers={"Authorization": "Bearer token-value"})
+        review = client.post(
+            "/mcp",
+            headers={"Authorization": "Bearer token-value"},
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "review_pull_request", "arguments": {}},
+            },
+        )
+        agent = client.post(
+            "/mcp",
+            headers={"Authorization": "Bearer token-value"},
+            json={
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {"name": "agent", "arguments": {}},
+            },
+        )
+        batch = client.post(
+            "/mcp",
+            headers={"Authorization": "Bearer token-value"},
+            json=[
+                {
+                    "jsonrpc": "2.0",
+                    "id": 3,
+                    "method": "tools/call",
+                    "params": {"name": "agent", "arguments": {}},
+                },
+                {
+                    "jsonrpc": "2.0",
+                    "id": 4,
+                    "method": "tools/call",
+                    "params": {"name": "review_pull_request", "arguments": {}},
+                },
+            ],
+        )
+
+    assert metrics.status_code == review.status_code == agent.status_code == batch.status_code == 401
+    assert observed == [
+        "unigrok:status",
+        "unigrok:connect unigrok:review",
+        "unigrok:connect unigrok:invoke",
+        "unigrok:connect unigrok:invoke unigrok:review",
+    ]
+    assert 'scope="unigrok:connect unigrok:review"' in review.headers["WWW-Authenticate"]
+
+
+def test_oauth_introspection_allows_valid_status_token(monkeypatch):
+    monkeypatch.setenv("UNIGROK_RUNTIME", "cloudrun")
+    monkeypatch.delenv("UNIGROK_API_KEYS", raising=False)
+    monkeypatch.setenv(
+        "UNIGROK_OAUTH_INTROSPECTION_URL",
+        "https://control.grokmcp.org/oauth/introspect",
+    )
+
+    async def allow(_token, required_scope):
+        assert required_scope == "unigrok:status"
+        return {"active": True, "scope": "unigrok:status", "sub": "github:42"}
+
+    monkeypatch.setattr("src.http_server._introspect_oauth_token", allow)
+    with TestClient(create_app(), base_url="https://mcp.grokmcp.org") as client:
+        response = client.get("/metrics", headers={"Authorization": "Bearer token-value"})
+
+    assert response.status_code == 200
+
+
+def test_oauth_subject_cannot_evade_budget_attribution_with_client_headers():
+    scope = {
+        "headers": [
+            (b"x-client-id", b"rotating-client"),
+            (b"x-caller", b"spoofed-caller"),
+        ],
+        "unigrok.oauth": {"sub": "github:42"},
+    }
+
+    assert _derive_http_caller(scope) == "oauth:github:42"
 
 
 def test_cloudrun_forbids_unauthenticated_override(monkeypatch):
@@ -759,6 +872,55 @@ def test_mcp_streamable_http_mount_exists(monkeypatch):
         res = client.get("/mcp")
 
     assert res.status_code != 404
+
+
+def test_review_tool_returns_the_hosted_broker_structured_shape(monkeypatch):
+    monkeypatch.delenv("UNIGROK_RUNTIME", raising=False)
+    monkeypatch.setenv("UNIGROK_API_KEYS", "client-secret")
+    result = type(
+        "Result",
+        (),
+        {
+            "response": "No blocking findings.",
+            "model": "grok-4.5",
+            "resolved_plane": "API",
+            "plane": "API",
+            "route": "agentic",
+            "cost_usd": 0.01,
+            "degraded": False,
+        },
+    )()
+    monkeypatch.setattr("src.http_server.public_agent", AsyncMock(return_value=result))
+    with TestClient(create_app(), base_url="http://localhost:8080") as client:
+        response = client.post(
+            "/mcp",
+            headers={
+                "Accept": "application/json, text/event-stream",
+                "Authorization": "Bearer client-secret",
+                "MCP-Protocol-Version": "2025-06-18",
+            },
+            json={
+                "jsonrpc": "2.0",
+                "id": 7,
+                "method": "tools/call",
+                "params": {
+                    "name": "review_pull_request",
+                    "arguments": {
+                        "repository": "owner/repo",
+                        "pull_number": 7,
+                        "title": "PR",
+                        "diff": "+ safe change",
+                        "plane": "api",
+                    },
+                },
+            },
+        )
+
+    assert response.status_code == 200
+    data_line = next(line for line in response.text.splitlines() if line.startswith("data:"))
+    structured = json.loads(data_line[5:].strip())["result"]["structuredContent"]
+    assert structured["review"] == "No blocking findings."
+    assert structured["plane"] == "API"
 
 
 def test_middleware_is_pure_asgi():

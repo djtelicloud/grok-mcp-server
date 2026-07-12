@@ -20,6 +20,8 @@ test("keeps the standalone build separate from the Sites build", async () => {
   assert.match(buildScript, /GITHUB_APP_PRIVATE_KEY/);
   assert.match(buildScript, /GITHUB_APP_CLIENT_SECRET/);
   assert.match(buildScript, /AUTH_SESSION_SECRET/);
+  assert.match(buildScript, /MCP_TOKEN_SECRET/);
+  assert.match(buildScript, /RECEIPT_SIGNING_PRIVATE_KEY/);
   assert.match(buildScript, /Refusing a standalone build/);
 });
 
@@ -47,6 +49,8 @@ test("builds an unprivileged image without credential inputs", async () => {
 
   assert.match(entrypoint, /CONTROL_CENTER_MODE:-.*github/);
   assert.match(entrypoint, /AUTH_SESSION_SECRET/);
+  assert.match(entrypoint, /MCP_TOKEN_SECRET/);
+  assert.match(entrypoint, /RECEIPT_SIGNING_PRIVATE_KEY/);
   assert.match(entrypoint, /GITHUB_REPOSITORY_ID/);
   assert.match(entrypoint, /exit 78/);
   assert.match(entrypoint, /exec node server\.js/);
@@ -62,4 +66,6 @@ test("documents exact-origin auth, versioned secrets, rollback, and domain cutov
   assert.match(deployment, /Do not add a permissive CORS policy/);
   assert.match(deployment, /Cloud CDN disabled/i);
   assert.match(deployment, /Cloud Armor[\s\S]*preview/i);
+  assert.match(deployment, /ten-minute scoped tokens/);
+  assert.match(deployment, /unigrok-control-center-receipt-private-key/);
 });

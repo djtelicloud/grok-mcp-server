@@ -7,5 +7,6 @@
   "llms": "https://grokmcp.org/llms.txt",
   "okf": "https://grokmcp.org/docs/okf/okf-manifest.json",
   "contribute": "https://grokmcp.org/contribute",
-  "control": "https://control.grokmcp.org"
+  "control": "https://control.grokmcp.org",
+  "private_mcp": "https://mcp.grokmcp.org/mcp"
 }

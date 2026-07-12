@@ -62,7 +62,7 @@ export default function Home() {
       <section className="public-status" aria-label="Published route contract, not live runtime status">
         <article><span className="public-status-dot ready" /><div><small>PUBLIC PROJECT INFO</small><strong>Static metadata available</strong></div></article>
         <article><span className="public-status-dot gated" /><div><small>CONTROL CENTER</small><strong>GitHub role-gated</strong></div></article>
-        <article><span className="public-status-dot planned" /><div><small>REMOTE MCP</small><strong>Private review pending · public MCP deferred</strong></div></article>
+        <article><span className="public-status-dot ready" /><div><small>REMOTE MCP</small><strong>Private OAuth · API plane only</strong></div></article>
       </section>
 
       <section className="public-section" id="how-it-works">
