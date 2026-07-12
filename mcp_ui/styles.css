@@ -7,7 +7,9 @@
   --surface-strong: rgba(27, 51, 79, 0.85);
   --ink: #f0f6fc;
   --ink-soft: #8b9eb0;
-  --ink-faint: #4e6172;
+  /* Raised from #4e6172 (~3:1) to clear WCAG 4.5:1 for the small labels and
+     table headers that use it. */
+  --ink-faint: #7d93a6;
   --border: rgba(79, 231, 255, 0.15);
   --border-strong: rgba(79, 231, 255, 0.35);
   --cyan: #4fe7ff;
@@ -195,8 +197,7 @@ body {
   margin-right: 8px;
 }
 
-.chrome-btn,
-.inspector-rail-btn {
+.chrome-btn {
   min-height: 30px;
   padding: 5px 9px;
   border: 1px solid var(--border);
@@ -209,8 +210,7 @@ body {
 }
 
 .chrome-btn:hover,
-.chrome-btn[aria-pressed="true"],
-.inspector-rail-btn:hover {
+.chrome-btn[aria-pressed="true"] {
   color: var(--cyan);
   border-color: var(--border-strong);
   background: var(--cyan-soft);
@@ -594,6 +594,84 @@ textarea:focus {
   border: 1px dashed var(--border);
 }
 
+.msg-error {
+  background: rgba(240, 58, 71, 0.08);
+  border: 1px solid rgba(240, 58, 71, 0.45);
+  color: var(--ink);
+  align-self: flex-start;
+  border-bottom-left-radius: 2px;
+}
+
+.msg-citations {
+  align-self: flex-start;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--cyan);
+  font-size: 12.5px;
+  color: var(--ink-soft);
+}
+
+.msg-citations strong {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--ink);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.msg-citations ol {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.msg-citations li {
+  margin: 3px 0;
+  overflow-wrap: anywhere;
+}
+
+.msg-citations a {
+  color: var(--cyan);
+}
+
+/* Markdown structure inside agent bubbles (rendered by markdown.js) */
+.msg-agent p { margin: 0 0 8px; }
+.msg-agent p:last-child { margin-bottom: 0; }
+.msg-agent h1, .msg-agent h2, .msg-agent h3,
+.msg-agent h4, .msg-agent h5, .msg-agent h6 { margin: 10px 0 6px; line-height: 1.25; }
+.msg-agent h1 { font-size: 17px; }
+.msg-agent h2 { font-size: 16px; }
+.msg-agent h3 { font-size: 15px; }
+.msg-agent h4, .msg-agent h5, .msg-agent h6 { font-size: 14px; }
+.msg-agent ul, .msg-agent ol { margin: 6px 0; padding-left: 20px; }
+.msg-agent li { margin: 2px 0; }
+.msg-agent pre { margin: 8px 0; max-width: 100%; }
+.msg-agent code { font-size: 12.5px; }
+.msg-agent :not(pre) > code {
+  background: rgba(3, 6, 9, 0.6);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+.msg-agent table {
+  border-collapse: collapse;
+  margin: 8px 0;
+  display: block;
+  overflow-x: auto;
+}
+.msg-agent th, .msg-agent td {
+  border: 1px solid var(--border);
+  padding: 4px 8px;
+  text-align: left;
+}
+.msg-agent th { background: rgba(255, 255, 255, 0.04); }
+.msg-agent blockquote {
+  border-left: 3px solid var(--border);
+  margin: 8px 0;
+  padding: 2px 12px;
+  color: var(--ink-soft);
+}
+.msg-agent a { color: var(--teal); }
+
 /* JSON Code Blocks */
 pre {
   background: rgba(3, 6, 9, 0.85);
@@ -668,6 +746,10 @@ pre {
 }
 
 .okf-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font-family: inherit;
   padding: 10px 14px;
   font-size: 13px;
   font-weight: 500;
@@ -740,6 +822,30 @@ pre {
 
 .markdown-preview th {
   background: rgba(255, 255, 255, 0.03);
+}
+
+.markdown-preview h4,
+.markdown-preview h5,
+.markdown-preview h6 {
+  margin-top: 14px;
+  margin-bottom: 8px;
+}
+
+.markdown-preview blockquote {
+  border-left: 3px solid var(--border);
+  margin: 12px 0;
+  padding: 2px 14px;
+  color: var(--ink-soft);
+}
+
+.markdown-preview hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 16px 0;
+}
+
+.markdown-preview a {
+  color: var(--teal);
 }
 
 /* Guard simulator 결과 카드 */
@@ -1776,7 +1882,7 @@ pre {
   font-weight: 600;
 }
 
-.budget-guard-label, .toggle-label-legacy {
+.budget-guard-label {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -1784,11 +1890,6 @@ pre {
   font-size: 12px;
   cursor: pointer;
   user-select: none;
-}
-
-.toggle-label-legacy {
-  margin-top: 24px;
-  align-self: center;
 }
 
 @media (max-width: 1300px) {
@@ -1863,10 +1964,6 @@ pre {
     animation-iteration-count: 1 !important;
     transition-duration: 0s !important;
     scroll-behavior: auto !important;
-  }
-  
-  .primary-btn-glow::after, .small-btn-glow::after {
-    display: none !important;
   }
 }
 
