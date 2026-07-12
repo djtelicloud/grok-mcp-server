@@ -116,16 +116,14 @@ export async function githubRequest(
     responseType?: "json" | "text";
   } = {},
 ): Promise<unknown | null> {
-  if (!path.startsWith("/") || path.startsWith("//") || path.length > 2_048) {
-    throw new GitHubApiError();
-  }
+  const url = validatedGitHubApiUrl(path);
   if (installationToken.length < 20 || installationToken.length > 1_024) {
     throw new GitHubApiError();
   }
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), GITHUB_REQUEST_TIMEOUT_MS);
-  const response = await request(`${GITHUB_API_ORIGIN}${path}`, {
+  const response = await request(url, {
     cache: "no-store",
     headers: {
       accept: options.accept ?? "application/vnd.github+json",
@@ -151,6 +149,34 @@ export async function githubRequest(
   } catch {
     throw new GitHubApiError();
   }
+}
+
+function validatedGitHubApiUrl(path: string): URL {
+  if (
+    !path.startsWith("/repos/") ||
+    path.startsWith("//") ||
+    path.length > 2_048 ||
+    /[\\\u0000-\u001f\u007f]/u.test(path)
+  ) {
+    throw new GitHubApiError();
+  }
+  let url: URL;
+  try {
+    url = new URL(path, GITHUB_API_ORIGIN);
+  } catch {
+    throw new GitHubApiError();
+  }
+  if (
+    url.protocol !== "https:" ||
+    url.hostname !== "api.github.com" ||
+    url.port ||
+    url.username ||
+    url.password ||
+    !url.pathname.startsWith("/repos/")
+  ) {
+    throw new GitHubApiError();
+  }
+  return url;
 }
 
 async function readResponseBody(response: Response): Promise<string> {
