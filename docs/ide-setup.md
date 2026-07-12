@@ -159,6 +159,8 @@ check `codex mcp --help`. Keep the server name as `grok`; this repo's
 `.codex/mcp/grok-routing.json` and Codex intelligence config route to the
 `mcp__grok` tool namespace.)
 
+If running the server locally via stdio for local development (rather than HTTP), you will need to add an `env` block. See the Antigravity section for an example of setting `UNIGROK_SWARM` and `UNIGROK_CONTRIBUTOR_MODE`.
+
 ## Antigravity / Gemini (`settings.json` → MCP servers)
 
 ```json
@@ -167,10 +169,29 @@ check `codex mcp --help`. Keep the server name as `grok`; this repo's
     "unigrok": {
       "httpUrl": "http://localhost:4765/mcp",
       "headers": { "X-Client-ID": "antigravity" }
+    },
+    "grok-stdio-dev": {
+      "command": "uv",
+      "args": [
+        "--directory",
+        "/absolute/path/to/grok-mcp-server",
+        "run",
+        "python",
+        "main.py"
+      ],
+      "env": {
+        "XAI_API_KEY": "xai-...",
+        "UNIGROK_SWARM": "dry_run",
+        "UNIGROK_CONTRIBUTOR_MODE": "1",
+        "UNIGROK_WORKSPACE_ROOT": "/absolute/path/to/grok-mcp-server"
+      }
     }
   }
 }
 ```
+
+> [!NOTE]
+> When using the stdio server (`grok-stdio-dev` example) to develop new MCP tools like `start_code_swarm`, the IDE caches the MCP schema on startup. If you add or modify a tool in the Python server, you must reload the IDE window (e.g. `Cmd+Shift+P` -> `Developer: Reload Window`) to fetch the updated tools. Setting `UNIGROK_CONTRIBUTOR_MODE=1` is required for tools that mutate project files (such as Code Swarm).
 
 ## What the IDEs get
 
