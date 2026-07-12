@@ -160,22 +160,28 @@ function validatedGitHubApiUrl(path: string): URL {
   ) {
     throw new GitHubApiError();
   }
-  let url: URL;
+  let candidate: URL;
   try {
-    url = new URL(path, GITHUB_API_ORIGIN);
+    candidate = new URL(path, GITHUB_API_ORIGIN);
   } catch {
     throw new GitHubApiError();
   }
   if (
-    url.protocol !== "https:" ||
-    url.hostname !== "api.github.com" ||
-    url.port ||
-    url.username ||
-    url.password ||
-    !url.pathname.startsWith("/repos/")
+    candidate.protocol !== "https:" ||
+    candidate.hostname !== "api.github.com" ||
+    candidate.port ||
+    candidate.username ||
+    candidate.password ||
+    !candidate.pathname.startsWith("/repos/")
   ) {
     throw new GitHubApiError();
   }
+  // Construct the fetch target from a fresh constant-origin URL. Only the
+  // validated repository pathname and query cross from the candidate; the
+  // network authority never depends on caller-controlled data.
+  const url = new URL(GITHUB_API_ORIGIN);
+  url.pathname = candidate.pathname;
+  url.search = candidate.search;
   return url;
 }
 
