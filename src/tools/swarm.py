@@ -304,6 +304,12 @@ async def apply_swarm_winner(candidate_id: str) -> str:
         task = await store.get_swarm_task(candidate["task_id"])
         if not task:
             return ctx.format_output("owning swarm task not found.")
+        task_status = effective_status(task)
+        if task_status not in ("completed", "cancelled"):
+            return ctx.format_output(
+                "refusing to apply: the swarm is still running; wait for completion "
+                "or cancel it before applying a verified Pareto candidate."
+            )
         feasible = await store.list_swarm_candidates(task["id"], feasible_only=True)
         front_ids = {c["id"] for c in _current_front(feasible)}
         if candidate_id not in front_ids:
@@ -458,7 +464,12 @@ async def _status_payload(
         best = min(float(c.get("peak_mem_bytes") or base_mem) for c in front)
         best_mem_pct = round((base_mem - best) / base_mem * 100.0, 2)
 
+    generations_run = int(task.get("generation") or 0)
+    last_generation = max([generations_run, *generations.keys()], default=0)
     original_span, span_stale = _live_original_span(task)
+    safe_oracle = dict(oracle) if oracle else None
+    if safe_oracle and safe_oracle.get("error") is not None:
+        safe_oracle["error"] = redact_secrets(str(safe_oracle["error"]))[:400]
     return {
         "format": "unigrok-swarm-status-v1",
         "task_id": task["id"],
@@ -470,18 +481,18 @@ async def _status_payload(
             "test_target": task.get("test_target"),
             "bench_command": task.get("bench_command"),
         },
-        "oracle": oracle or None,
+        "oracle": safe_oracle,
         "baseline": baseline or None,
         "budget": {
             "budget_usd": float(task.get("budget_usd") or 0.0),
             "spent_usd": float(task.get("spent_usd") or 0.0),
-            "generations_run": int(task.get("generation") or 0),
+            "generations_run": generations_run,
         },
         "original_span": original_span,
         "original_span_stale": span_stale,
         "generations": [
-            {"generation": gen, "candidates": generations[gen]}
-            for gen in sorted(generations)
+            {"generation": gen, "candidates": generations.get(gen, [])}
+            for gen in range(1, last_generation + 1)
         ],
         "pareto_front": [
             c["id"] for c in sorted(front, key=lambda x: float(x.get("latency_ms") or 0.0))

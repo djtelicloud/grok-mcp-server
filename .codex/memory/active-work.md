@@ -9,6 +9,17 @@ drift-prone values live before acting. Do not copy secrets or OAuth codes here.
 
 ## Current repository state
 
+- The Claude-originated Pareto Playground and
+  `get_swarm_status(task_id, view="json")` contract are integrated through the
+  protected Codex path; resolve the PR and rebased merge commit live. Codex
+  review made the JSON-export picker CSP-safe, prohibited Apply for static
+  exports and non-terminal runs, preserved empty generations in replay, and
+  kept JSON oracle failures secret-redacted. The reviewed head passed 1,021
+  tests, 12/12 offline evals, deterministic OKF verification, JavaScript syntax
+  checking, and a real browser run against persisted engine data with two
+  Pareto elites, honest latency/memory trade-offs, full receipts/diff, and no
+  browser console errors.
+
 - The Claude-originated swarm static fast-gate is integrated through the
   protected Codex path; resolve its PR and rebased merge commit live. Codex
   review hardened Ruff execution with isolated configuration and ignored
@@ -136,8 +147,8 @@ drift-prone values live before acting. Do not copy secrets or OAuth codes here.
 
 ## Remaining gates
 
-The v0.6.0 release, Claude intelligence, swarm optimizer, and static fast-gate
-gates are complete:
+The v0.6.0 release, Claude intelligence, swarm optimizer, static fast-gate, and
+Pareto Playground gates are complete:
 
 1. Sites production environment revision `5` includes the non-secret
    `CONTROL_CENTER_ORIGIN=https://control.grokmcp.org`.

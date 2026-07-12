@@ -16,7 +16,7 @@ const COLORS = {
   pareto_elite: "var(--green)",
 };
 
-const state = { payload: null, maxGen: 1, shownGen: 1, playing: null };
+const state = { payload: null, source: null, maxGen: 1, shownGen: 1, playing: null };
 
 // ── MCP plumbing (same JSON-RPC shape the Control Center uses) ──────────────
 
@@ -61,7 +61,7 @@ async function loadLive() {
     const raw = await mcpCall("get_swarm_status", { task_id: taskId, view: "json" });
     const payload = JSON.parse(raw);
     if (payload.error) { setMsg(payload.error, true); return; }
-    setPayload(payload, "live");
+    setPayload(payload, "live", "live");
   } catch (err) {
     setMsg(String(err.message || err), true);
   }
@@ -76,7 +76,7 @@ function loadFile(file) {
         setMsg("not a unigrok-swarm-status-v1 export", true);
         return;
       }
-      setPayload(payload, `export: ${file.name}`);
+      setPayload(payload, `export: ${file.name}`, "export");
     } catch (err) {
       setMsg(`unreadable export: ${err.message}`, true);
     }
@@ -90,8 +90,9 @@ function setMsg(text, isError) {
   el.className = isError ? "err" : "muted";
 }
 
-function setPayload(payload, sourceLabel) {
+function setPayload(payload, sourceLabel, source) {
   state.payload = payload;
+  state.source = source;
   state.maxGen = Math.max(1, ...(payload.generations || []).map((g) => g.generation));
   state.shownGen = state.maxGen;
   $("genSlider").max = String(state.maxGen);
@@ -299,10 +300,16 @@ function renderDetail(candidate) {
       : (p.original_span || "(unavailable)");
     html += `<div class="muted" style="margin-top:8px">original vs candidate</div>
              <div class="diff-grid"><pre>${esc(original)}</pre><pre>${esc(candidate.code)}</pre></div>`;
-    const applyDisabled = p.mode !== "active" || p.original_span_stale;
-    const reason = p.mode !== "active"
-      ? "apply is disabled outside UNIGROK_SWARM=active"
-      : (p.original_span_stale ? "file changed since the swarm ran" : "");
+    const terminal = p.status === "completed" || p.status === "cancelled";
+    const applyDisabled = state.source !== "live" || p.mode !== "active"
+      || !terminal || p.original_span_stale;
+    const reason = state.source !== "live"
+      ? "apply is disabled for static exports; load the live task"
+      : (p.mode !== "active"
+        ? "apply is disabled outside UNIGROK_SWARM=active"
+        : (!terminal
+          ? "apply is disabled while the swarm is still running"
+          : (p.original_span_stale ? "file changed since the swarm ran" : "")));
     html += `<div style="margin-top:8px">
                <button id="applyBtn" ${applyDisabled ? "disabled" : ""}>Apply optimization</button>
                <span class="muted" style="font-size:11px"> ${esc(reason)}</span>
@@ -355,6 +362,7 @@ $("genSlider").addEventListener("input", (event) => {
 });
 
 $("loadBtn").addEventListener("click", loadLive);
+$("fileBtn").addEventListener("click", () => $("fileInput").click());
 $("taskId").addEventListener("keydown", (e) => { if (e.key === "Enter") loadLive(); });
 $("fileInput").addEventListener("change", (e) => {
   if (e.target.files && e.target.files[0]) loadFile(e.target.files[0]);
