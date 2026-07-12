@@ -20,7 +20,7 @@ import signal
 import tempfile
 import uuid
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
@@ -210,19 +210,36 @@ async def start_code_swarm(
         )
 
 
-async def get_swarm_status(task_id: str) -> str:
+async def get_swarm_status(task_id: str, view: Literal["text", "json"] = "text") -> str:
     """Report a swarm's status, the oracle-honesty facts (focus-span coverage,
     bench stability), the current Pareto front with relative deltas, and
-    spend."""
+    spend. ``view="json"`` returns the stable machine-readable payload
+    (format ``unigrok-swarm-status-v1``) that the local workbench and any
+    static export consume — one call renders the whole run.
+
+    The JSON schema is deliberately honest: it carries ONLY measured values.
+    No ``instructions_retired``/``allocated_blocks`` (hardware counters are
+    the OptiBench harness's domain, not measurable on this stack), no
+    ``semantic_*`` scores (no judge exists in the v1 funnel by contract), and
+    no invented cost comparisons — ``aggregates`` are computed from the same
+    SQLite rows the text view reads."""
     async with GrokInvocationContext("utility", logger, append_signature=False) as ctx:
         task = await store.get_swarm_task(task_id)
         if not task:
+            if view == "json":
+                return json.dumps({"error": f"no swarm task {task_id}"}, separators=(",", ":"))
             return ctx.format_output(f"no swarm task `{task_id}`.")
         status = effective_status(task)
         oracle = _load_json(task.get("oracle_json"))
         baseline = _load_json(task.get("baseline_json"))
         candidates = await store.list_swarm_candidates(task_id, feasible_only=True)
         front = _current_front(candidates)
+
+        if view == "json":
+            return json.dumps(
+                await _status_payload(task, status, oracle, baseline, front),
+                separators=(",", ":"),
+            )
 
         lines = [
             f"# Swarm `{task_id}`",
@@ -373,6 +390,144 @@ async def _find_candidate(task_id: Optional[str], candidate_id: str) -> Optional
 def _current_front(candidates: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     ranked = rank_candidates([dict(candidate) for candidate in candidates])
     return [candidate for candidate in ranked if candidate.get("pareto_rank") == 0]
+
+
+_STATIC_WALL_STAGES = ("generated", "parse", "signature", "compile", "lint")
+
+
+def _candidate_outcome(candidate: Dict[str, Any], front_ids: set) -> str:
+    """Selection outcome the UI colors by: pareto_elite (green) >
+    dominated (gray) > test_wall (orange, ran but broke the oracle) >
+    static_wall (red, never survived the free filters)."""
+    if candidate["id"] in front_ids:
+        return "pareto_elite"
+    if candidate.get("feasible"):
+        return "dominated"
+    if candidate.get("stage_reached") in _STATIC_WALL_STAGES:
+        return "static_wall"
+    return "test_wall"
+
+
+async def _status_payload(
+    task: Dict[str, Any],
+    status: str,
+    oracle: Dict[str, Any],
+    baseline: Dict[str, Any],
+    front: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """The unigrok-swarm-status-v1 payload: every measured fact of one run,
+    grouped generation-by-generation so a frontend can replay the swarm
+    without further backend calls. Candidate ``code`` rides ONLY on Pareto
+    elites (bounded payload; the detail view exists for winners), and the
+    live original span is included only while base_file_hash still matches —
+    never a stale slice."""
+    all_candidates = await store.list_swarm_candidates(str(task["id"]))
+    front_ids = {c["id"] for c in front}
+    front_code = {c["id"]: c.get("code") for c in front}
+
+    generations: Dict[int, List[Dict[str, Any]]] = {}
+    feasible_count = 0
+    for row in all_candidates:
+        entry = {
+            "candidate_id": row["id"],
+            "arm": row.get("mutator"),
+            "stage": row.get("stage_reached"),
+            "outcome": _candidate_outcome(row, front_ids),
+            "feasible": bool(row.get("feasible")),
+            "latency_ms": row.get("latency_ms"),
+            "peak_mem_bytes": row.get("peak_mem_bytes"),
+            "diff_bytes": row.get("diff_bytes"),
+            "reward": row.get("reward"),
+            "token_cost_usd": float(row.get("gen_cost_usd") or 0.0),
+            "arm_receipt": _load_json(row.get("arm_receipt")) or None,
+        }
+        if row["id"] in front_ids:
+            entry["code"] = front_code.get(row["id"])
+        if entry["feasible"]:
+            feasible_count += 1
+        generations.setdefault(int(row.get("generation") or 0), []).append(entry)
+
+    base_latency = float((baseline or {}).get("latency_ms") or 0.0)
+    base_mem = float((baseline or {}).get("peak_mem_bytes") or 0.0)
+    best_latency_pct = None
+    best_mem_pct = None
+    if front and base_latency > 0:
+        best = min(float(c.get("latency_ms") or base_latency) for c in front)
+        best_latency_pct = round((base_latency - best) / base_latency * 100.0, 2)
+    if front and base_mem > 0:
+        best = min(float(c.get("peak_mem_bytes") or base_mem) for c in front)
+        best_mem_pct = round((base_mem - best) / base_mem * 100.0, 2)
+
+    original_span, span_stale = _live_original_span(task)
+    return {
+        "format": "unigrok-swarm-status-v1",
+        "task_id": task["id"],
+        "status": status,
+        "mode": swarm_config.swarm_mode(),
+        "target": {
+            "path": task.get("target_path"),
+            "focus_node": task.get("focus_node"),
+            "test_target": task.get("test_target"),
+            "bench_command": task.get("bench_command"),
+        },
+        "oracle": oracle or None,
+        "baseline": baseline or None,
+        "budget": {
+            "budget_usd": float(task.get("budget_usd") or 0.0),
+            "spent_usd": float(task.get("spent_usd") or 0.0),
+            "generations_run": int(task.get("generation") or 0),
+        },
+        "original_span": original_span,
+        "original_span_stale": span_stale,
+        "generations": [
+            {"generation": gen, "candidates": generations[gen]}
+            for gen in sorted(generations)
+        ],
+        "pareto_front": [
+            c["id"] for c in sorted(front, key=lambda x: float(x.get("latency_ms") or 0.0))
+        ],
+        "aggregates": {
+            "candidates_total": len(all_candidates),
+            "feasibility_rate": (
+                round(feasible_count / len(all_candidates), 4) if all_candidates else None
+            ),
+            "best_latency_improvement_pct": best_latency_pct,
+            "best_memory_improvement_pct": best_mem_pct,
+            "cost_to_optimize_usd": float(task.get("spent_usd") or 0.0),
+        },
+        "folded_state": task.get("folded_state") or None,
+    }
+
+
+def _live_original_span(task: Dict[str, Any]) -> tuple:
+    """(redacted original focus-span text, stale flag). None/True when the
+    workspace is unavailable or the file changed since the swarm ran — the
+    UI must show a staleness notice instead of a wrong diff."""
+    try:
+        target = _resolve_target(str(task.get("target_path") or ""))
+        live = target.read_bytes()
+    except (ValueError, FileNotFoundError, PermissionError, OSError):
+        return None, True
+    if hashlib.sha256(live).hexdigest() != task.get("base_file_hash"):
+        return None, True
+    rows_span = _task_span(task)
+    if rows_span is None:
+        return None, True
+    start, end = rows_span
+    if not (0 <= start < end <= len(live)):
+        return None, True
+    return redact_secrets(live[start:end].decode("utf-8", errors="replace")), False
+
+
+def _task_span(task: Dict[str, Any]) -> Optional[tuple]:
+    """Recover the focus span from the (hash-verified) live file."""
+    from ..swarm.ast_utils import extract_node_span
+
+    try:
+        target = _resolve_target(str(task.get("target_path") or ""))
+        return extract_node_span(target.read_bytes(), str(task.get("focus_node") or ""))
+    except (ValueError, FileNotFoundError, OSError):
+        return None
 
 
 async def _reverify(task: Dict[str, Any], target: Path, original: bytes) -> tuple:

@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>UniGrok Swarm Optimizer — Pareto Playground</title>
+  <style>
+    :root {
+      --bg: #0e1013; --panel: #16191d; --panel2: #1c2026; --border: #2a2f36;
+      --text: #e7e9ec; --muted: #8b8d98;
+      --red: #e5484d; --orange: #f5a623; --gray: #8b8d98; --green: #30a46c;
+      --accent: #4f8cff;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text);
+           font: 14px/1.5 -apple-system, "Segoe UI", Roboto, sans-serif; }
+    header { display: flex; align-items: baseline; gap: 12px; padding: 14px 20px;
+             border-bottom: 1px solid var(--border); }
+    header h1 { font-size: 16px; margin: 0; }
+    header a { color: var(--accent); text-decoration: none; font-size: 12px; }
+    .wrap { display: grid; grid-template-columns: 1fr 340px; gap: 14px;
+            padding: 14px 20px; max-width: 1280px; }
+    .panel { background: var(--panel); border: 1px solid var(--border);
+             border-radius: 8px; padding: 12px; }
+    .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    input[type=text], input[type=password] { background: var(--panel2); color: var(--text);
+      border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; min-width: 230px; }
+    button { background: var(--panel2); color: var(--text); border: 1px solid var(--border);
+             border-radius: 6px; padding: 6px 12px; cursor: pointer; }
+    button:hover { border-color: var(--accent); }
+    button:disabled { opacity: .45; cursor: not-allowed; }
+    .scorecard { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+                 gap: 8px; margin-top: 12px; }
+    .stat { background: var(--panel2); border: 1px solid var(--border); border-radius: 8px;
+            padding: 8px 10px; }
+    .stat .k { color: var(--muted); font-size: 11px; text-transform: uppercase;
+               letter-spacing: .04em; }
+    .stat .v { font-size: 16px; font-weight: 600; margin-top: 2px; }
+    .legend { display: flex; gap: 14px; flex-wrap: wrap; margin: 10px 0 4px;
+              color: var(--muted); font-size: 12px; }
+    .legend span::before { content: "●"; margin-right: 5px; }
+    .lg-red::before { color: var(--red); } .lg-orange::before { color: var(--orange); }
+    .lg-gray::before { color: var(--gray); } .lg-green::before { color: var(--green); }
+    #chart { width: 100%; background: var(--panel2); border: 1px solid var(--border);
+             border-radius: 8px; }
+    .timeline { display: flex; gap: 10px; align-items: center; margin-top: 10px; }
+    .timeline input[type=range] { flex: 1; }
+    #detail pre { background: var(--panel2); border: 1px solid var(--border);
+                  border-radius: 6px; padding: 8px; overflow: auto; max-height: 220px;
+                  font-size: 12px; white-space: pre-wrap; }
+    .diff-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .muted { color: var(--muted); }
+    .honesty { color: var(--muted); font-size: 11px; padding: 10px 20px 20px; max-width: 1280px; }
+    .err { color: var(--red); }
+    circle.dot { cursor: pointer; }
+    circle.elite { filter: drop-shadow(0 0 4px var(--green)); }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Swarm Optimizer — Pareto Playground</h1>
+    <a href="./index.html">← Control Center</a>
+  </header>
+
+  <div class="wrap">
+    <div>
+      <div class="panel">
+        <div class="controls">
+          <input id="taskId" type="text" placeholder="swarm task id" />
+          <input id="token" type="password" placeholder="bearer token (optional)" />
+          <button id="loadBtn">Load</button>
+          <label>
+            <button type="button" onclick="document.getElementById('fileInput').click()">Load JSON export…</button>
+            <input id="fileInput" type="file" accept=".json" style="display:none" />
+          </label>
+          <span id="loadMsg" class="muted"></span>
+        </div>
+        <div id="scorecard" class="scorecard"></div>
+      </div>
+
+      <div class="panel" style="margin-top:14px">
+        <div class="legend">
+          <span class="lg-red">static wall (parse/signature/compile/lint)</span>
+          <span class="lg-orange">test wall</span>
+          <span class="lg-gray">feasible, dominated</span>
+          <span class="lg-green">Pareto elite</span>
+          <span>★ baseline</span>
+        </div>
+        <svg id="chart" viewBox="0 0 860 420" role="img"
+             aria-label="Latency versus peak memory scatter of swarm candidates"></svg>
+        <div class="timeline">
+          <button id="playBtn">▶ Play</button>
+          <input id="genSlider" type="range" min="1" max="1" value="1" />
+          <span id="genLabel" class="muted">generation –</span>
+        </div>
+        <div class="muted" style="font-size:11px">
+          Unmeasured candidates (killed at a wall before bench) stack in the left
+          gutter — plotting them at invented coordinates would be fiction.
+        </div>
+      </div>
+    </div>
+
+    <div class="panel" id="detail">
+      <div class="muted">Click a dot for its full receipt.</div>
+    </div>
+  </div>
+
+  <div class="honesty">
+    Every value on this page is read from the swarm's SQLite rows via
+    <code>get_swarm_status(view="json")</code> (format
+    <code>unigrok-swarm-status-v1</code>) or a static export of the same payload.
+    Nothing is simulated. Fields this stack does not measure — hardware
+    instruction counters, LLM semantic scores — are absent by design, not
+    hidden. "Verified" means: the task's own <code>test_target</code> passed.
+  </div>
+
+  <script src="./swarm.js"></script>
+</body>
+</html>

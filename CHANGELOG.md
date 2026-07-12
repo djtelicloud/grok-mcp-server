@@ -5,6 +5,19 @@ All notable changes to UniGrok MCP will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- **Swarm Pareto Playground** (`/ui/swarm.html`) and a machine-readable status
+  view: `get_swarm_status(task_id, view="json")` returns the stable
+  `unigrok-swarm-status-v1` payload — generations grouped for replay,
+  color-mappable outcomes (static wall / test wall / dominated / Pareto
+  elite), front ids, and honest aggregates (feasibility rate, best Δlatency/
+  Δmemory vs baseline, cost-to-optimize). The standalone workbench page
+  renders it as an animated generation-by-generation scatter with the front
+  highlighted, a wall gutter (unmeasured candidates are never plotted at
+  invented coordinates), a per-candidate receipt + side-by-side diff panel,
+  and an apply button gated exactly like the tool. The same page consumes a
+  static JSON export of the payload, so a public showcase renders
+  identically to the live workbench with zero extra backend. Unmeasured
+  fields (hardware counters, semantic scores) are absent by design.
 - **Swarm optimizer $0 static fast-gate**: mutants now pass a
   baseline-relative ruff `F821`/`F823` check (undefined names — the
   hallucination class `compile()` cannot catch) between compile and the
