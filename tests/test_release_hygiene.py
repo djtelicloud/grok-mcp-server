@@ -45,6 +45,17 @@ def test_wheel_configuration_includes_runtime_assets():
     assert included["example.env"] == "example.env"
 
 
+def test_sdist_configuration_excludes_generated_dependency_trees():
+    metadata = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    excluded = set(metadata["tool"]["hatch"]["build"]["targets"]["sdist"]["exclude"])
+
+    assert "/sites/**/node_modules" in excluded
+    assert "/sites/**/.sites-runtime" in excluded
+    assert "/sites/**/.next" in excluded
+    assert "/sites/**/.wrangler" in excluded
+    assert "/**/__pycache__" in excluded
+
+
 def test_public_setup_surfaces_use_the_grok_phoneword_endpoint():
     paths = [
         ROOT / "README.md",
