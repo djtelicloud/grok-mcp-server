@@ -139,6 +139,71 @@ class TestEndToEnd:
         assert "dry_run" in apply_out or "disabled" in apply_out
 
     @pytest.mark.asyncio
+    async def test_json_view_carries_the_full_replayable_run(self, wired, monkeypatch):
+        """unigrok-swarm-status-v1: one payload renders the whole run —
+        generations, outcomes for color mapping, front ids, honest aggregates
+        — and carries ONLY measured fields (no hardware counters, no
+        semantic scores, no invented cost comparisons)."""
+        import json as jsonlib
+
+        store, _ws = wired
+        monkeypatch.setenv("UNIGROK_SWARM", "dry_run")
+        monkeypatch.setenv("UNIGROK_SWARM_MAX_GENERATIONS", "2")
+        monkeypatch.setenv("UNIGROK_SWARM_POPULATION", "4")
+        monkeypatch.setenv("UNIGROK_SWARM_BENCH_REPEATS", "3")
+
+        out = await swarm_tools.start_code_swarm(
+            "pkg/dedup.py", "function:dedup", "pkg/test_dedup.py", "python pkg/bench_dedup.py",
+            allow_unstable_bench=True,
+        )
+        task_id = out.split("`")[1]
+        await swarm_tools._get_runner().wait(task_id, timeout=60.0)
+
+        payload = jsonlib.loads(await swarm_tools.get_swarm_status(task_id, view="json"))
+        assert payload["format"] == "unigrok-swarm-status-v1"
+        assert payload["task_id"] == task_id
+        assert payload["mode"] == "dry_run"
+        assert payload["target"]["focus_node"] == "function:dedup"
+        assert payload["oracle"]["focus_coverage_pct"] > 0
+        assert payload["baseline"]["latency_ms"] > 0
+
+        candidates = [c for g in payload["generations"] for c in g["candidates"]]
+        assert candidates
+        assert {c["outcome"] for c in candidates} <= {
+            "pareto_elite", "dominated", "static_wall", "test_wall"
+        }
+        front_ids = set(payload["pareto_front"])
+        assert front_ids  # the fast dedup wins
+        for c in candidates:
+            if c["candidate_id"] in front_ids:
+                assert c["outcome"] == "pareto_elite"
+                assert c.get("code")  # elites carry code for the diff view
+            else:
+                assert "code" not in c  # bounded payload: non-elites don't
+
+        agg = payload["aggregates"]
+        assert agg["candidates_total"] == len(candidates)
+        assert 0 < agg["feasibility_rate"] <= 1
+        assert agg["cost_to_optimize_usd"] == pytest.approx(0.0)  # CLI plane
+        # Honest omissions: unmeasured fields must not exist at all.
+        for c in candidates:
+            for absent in ("instructions_retired", "allocated_blocks",
+                           "semantic_correctness", "semantic_safety"):
+                assert absent not in c
+        assert "kv_cache_savings_pct" not in agg
+
+        # File untouched (dry_run) → live span present and not stale.
+        assert payload["original_span_stale"] is False
+        assert "def dedup" in payload["original_span"]
+
+    @pytest.mark.asyncio
+    async def test_json_view_unknown_task(self, wired):
+        import json as jsonlib
+
+        payload = jsonlib.loads(await swarm_tools.get_swarm_status("nope", view="json"))
+        assert "error" in payload
+
+    @pytest.mark.asyncio
     async def test_active_apply_lands_and_reverifies(self, wired, monkeypatch):
         store, workspace = wired
         monkeypatch.setenv("UNIGROK_SWARM", "active")

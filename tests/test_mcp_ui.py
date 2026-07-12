@@ -98,6 +98,29 @@ def test_mcp_ui_static_files_are_served(monkeypatch):
     assert 'fallback_policy: $("fallbackPolicyInput").value' in script.text
 
 
+def test_mcp_ui_swarm_playground_is_served_and_honest(monkeypatch):
+    """The swarm Pareto Playground: served statically, consumes the
+    unigrok-swarm-status-v1 payload (live or static export — the local/public
+    symmetry), and keeps the no-simulated-data stance in its own copy."""
+    monkeypatch.delenv("UNIGROK_RUNTIME", raising=False)
+    monkeypatch.delenv("UNIGROK_API_KEYS", raising=False)
+
+    with TestClient(create_app(), base_url="http://localhost:8080") as client:
+        page = client.get("/ui/swarm.html")
+        script = client.get("/ui/swarm.js")
+
+    assert page.status_code == 200
+    assert "Pareto Playground" in page.text
+    assert "Nothing is simulated" in page.text
+    assert script.status_code == 200
+    assert "unigrok-swarm-status-v1" in script.text
+    assert "get_swarm_status" in script.text
+    # Walls are never plotted at invented coordinates.
+    assert "gutter" in script.text
+    # Apply stays gated by mode in the UI exactly like the tool.
+    assert "apply is disabled outside UNIGROK_SWARM=active" in script.text
+
+
 def test_mcp_ui_layout_engine_is_local_and_ide_first():
     with TestClient(create_app(), base_url="http://localhost:8080") as client:
         index = client.get("/ui/")

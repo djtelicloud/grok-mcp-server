@@ -1790,14 +1790,23 @@ scripts/swarm_bench.py is the easy path).
 ### Function: `get_swarm_status` {#tools-swarm-get_swarm_status}
 
 ```python
-async def get_swarm_status(task_id: str) -> str
+async def get_swarm_status(task_id: str, view: Literal['text', 'json']='text') -> str
 ```
 
 **Keywords:** get, swarm, status
 
 Report a swarm's status, the oracle-honesty facts (focus-span coverage,
 bench stability), the current Pareto front with relative deltas, and
-spend.
+spend. ``view="json"`` returns the stable machine-readable payload
+(format ``unigrok-swarm-status-v1``) that the local workbench and any
+static export consume — one call renders the whole run.
+
+The JSON schema is deliberately honest: it carries ONLY measured values.
+No ``instructions_retired``/``allocated_blocks`` (hardware counters are
+the OptiBench harness's domain, not measurable on this stack), no
+``semantic_*`` scores (no judge exists in the v1 funnel by contract), and
+no invented cost comparisons — ``aggregates`` are computed from the same
+SQLite rows the text view reads.
 
 ### Function: `apply_swarm_winner` {#tools-swarm-apply_swarm_winner}
 
