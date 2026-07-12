@@ -84,6 +84,35 @@ docker-compose.dev.yml up --build -d` on port 4766. That separate development
 service mounts the UniGrok repository and enables its local file/git/test and
 commit-memory workflows; it is not the globally registered stable service.
 
+## How do contributors enable and test Code Swarm? {#code-swarm-contributor}
+
+**Keywords:** code swarm, optimizer, contributor, dry run, pareto playground, port 4766
+
+Use the repository-mounted contributor Forge, not the workspace-neutral stable
+service and not a second stdio process. Set `UNIGROK_SWARM=dry_run` in the
+server-side `.env`, then run:
+
+```bash
+docker compose -f docker-compose.dev.yml up --build -d
+curl -s http://localhost:4766/runtimez
+```
+
+Connect a repository-specific IDE MCP entry to
+`http://localhost:4766/mcp`; keep the global stable entry on port `4765`.
+The dev Compose file already supplies contributor mode and
+`WORKSPACE_ROOT=/workspace`, and model credentials remain in `.env` rather than
+IDE configuration. Code generation requires the container's Grok CLI plane to
+be ready because swarm generation cannot fail over to the metered API plane.
+
+Start a task with `start_code_swarm`, poll `get_swarm_status`, and inspect it at
+`http://localhost:4766/ui/swarm.html`. `dry_run` can search but cannot apply.
+`active` permits `apply_swarm_winner` only after completion/cancellation, only
+for the current verified Pareto front, and only while the source hash matches;
+it re-runs the supplied tests, reverts on failure, and never commits. “Verified”
+means exactly that the task's `test_target` passed. Review JSON exports before
+publishing them because elite candidates contain replacement source and a live
+payload can include the original span.
+
 ## What are the Grok phoneword mode ports? {#mode-dial-ports}
 
 **Keywords:** dial plan, phoneword, auto port, fast port, thinking port, research port, mode alias

@@ -9,6 +9,16 @@ drift-prone values live before acting. Do not copy secrets or OAuth codes here.
 
 ## Current repository state
 
+- Contributor Code Swarm documentation is integrated through the protected
+  Codex path; resolve the PR and rebased merge commit live. The durable setup
+  surfaces now consistently use the repository-mounted Forge on port `4766`,
+  `WORKSPACE_ROOT=/workspace`, server-side `.env` credentials, CLI-only swarm
+  generation, and the `off`/`dry_run`/`active` ladder. The docs include the
+  golden task, JSON/Pareto Playground flow, exact test-target honesty boundary,
+  terminal/current-front Apply gates, and source-disclosure warning for static
+  exports. An unsafe parallel stdio example, wrong workspace variable, and IDE
+  API-key placeholder from the original handoff were removed.
+
 - The Claude-originated Pareto Playground and
   `get_swarm_status(task_id, view="json")` contract are integrated through the
   protected Codex path; resolve the PR and rebased merge commit live. Codex

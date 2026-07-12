@@ -307,6 +307,12 @@ as:
   contributor-only, commit-anchored engineering evidence for agents developing
   UniGrok itself. Records require a verified `scripts/land` receipt; automatic
   prompt injection is off. These tools are not on the public HTTP service.
+- `start_code_swarm`, `get_swarm_status`, `apply_swarm_winner`,
+  `cancel_swarm`: contributor-only, single-span Python optimization with the
+  caller's tests as the correctness boundary. Generation is CLI-only;
+  `dry_run` cannot apply, while `active` applies only a terminal run's current
+  verified Pareto front and never commits. `/ui/swarm.html` renders the same
+  measured-only JSON status contract used by static exports.
 - `web_search`, `x_search`, `remote_code_execution`: xAI server-side tools.
 - `read_local_file`, `list_project_files`, Git inspection, tests, and guarded
   writes: local contributor capabilities that are not implied by registering
@@ -559,12 +565,19 @@ Contributors who want live mounted source use the separate service on port
 4766:
 
 ```bash
+# Edit .env first: UNIGROK_SWARM=dry_run
 docker compose -f docker-compose.dev.yml up --build -d
+curl -s http://localhost:4766/healthz
 ```
 
 That contributor endpoint conditionally adds the commit-anchored memory tools,
-so repository-local IDE skills can recall and record verified landing evidence.
-Those tools never appear on the stable service used by unrelated projects.
+Code Swarm tools, and repository-mounted test/file facilities. The dev Compose
+file supplies contributor mode and `WORKSPACE_ROOT=/workspace`; model
+credentials stay in `.env`, never in IDE JSON. See
+[IDE setup](docs/ide-setup.md#exercise-code-swarm-safely) for the golden dry-run
+call, rollout ladder, and export warning. These tools never appear on the
+stable service used by unrelated projects.
+Open `http://localhost:4766/ui/swarm.html` to inspect a returned task id.
 
 `scripts/land` may reconcile that contributor service after tests pass. It
 never rebuilds or restarts the stable port-4765 service automatically.

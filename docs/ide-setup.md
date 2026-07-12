@@ -52,12 +52,25 @@ Projects therefore need no UniGrok-specific namespace folders.
 UniGrok contributors have a separate live-source “Forge” service at port 4766:
 
 ```bash
+# Edit .env first: UNIGROK_SWARM=dry_run
 docker compose -f docker-compose.dev.yml up --build -d
+curl -s http://localhost:4766/runtimez
 ```
 
 That contributor service mounts this repository at `/workspace` and enables
-local file/git/test and commit-memory facilities. It is not the service normal
-users register for arbitrary projects.
+local file/git/test, commit-memory, and Code Swarm facilities. The Compose file
+already sets `UNIGROK_CONTRIBUTOR_MODE=1` and `WORKSPACE_ROOT=/workspace`; do
+not invent a second workspace variable or copy those values into every IDE.
+Compose reads model credentials from the server-side `.env`, so never paste
+`XAI_API_KEY` into an IDE MCP configuration. Code Swarm generation requires the
+container's Grok CLI plane to report `ready` because it is pinned to the
+subscription plane and cannot cross to metered API fallback.
+
+Register `http://localhost:4766/mcp` as a separate, repository-specific MCP
+entry only while developing UniGrok. Keep the global stable entry on `4765` for
+unrelated projects. The contributor Control Center is
+`http://localhost:4766/ui/`, and the Pareto Playground is
+`http://localhost:4766/ui/swarm.html`.
 
 ## Optional Grok Dial Plan
 
@@ -159,8 +172,6 @@ check `codex mcp --help`. Keep the server name as `grok`; this repo's
 `.codex/mcp/grok-routing.json` and Codex intelligence config route to the
 `mcp__grok` tool namespace.)
 
-If running the server locally via stdio for local development (rather than HTTP), you will need to add an `env` block. See the Antigravity section for an example of setting `UNIGROK_SWARM` and `UNIGROK_CONTRIBUTOR_MODE`.
-
 ## Antigravity / Gemini (`settings.json` → MCP servers)
 
 ```json
@@ -170,28 +181,45 @@ If running the server locally via stdio for local development (rather than HTTP)
       "httpUrl": "http://localhost:4765/mcp",
       "headers": { "X-Client-ID": "antigravity" }
     },
-    "grok-stdio-dev": {
-      "command": "uv",
-      "args": [
-        "--directory",
-        "/absolute/path/to/grok-mcp-server",
-        "run",
-        "python",
-        "main.py"
-      ],
-      "env": {
-        "XAI_API_KEY": "xai-...",
-        "UNIGROK_SWARM": "dry_run",
-        "UNIGROK_CONTRIBUTOR_MODE": "1",
-        "UNIGROK_WORKSPACE_ROOT": "/absolute/path/to/grok-mcp-server"
-      }
+    "unigrok-forge": {
+      "httpUrl": "http://localhost:4766/mcp",
+      "headers": { "X-Client-ID": "antigravity-forge" }
     }
   }
 }
 ```
 
 > [!NOTE]
-> When using the stdio server (`grok-stdio-dev` example) to develop new MCP tools like `start_code_swarm`, the IDE caches the MCP schema on startup. If you add or modify a tool in the Python server, you must reload the IDE window (e.g. `Cmd+Shift+P` -> `Developer: Reload Window`) to fetch the updated tools. Setting `UNIGROK_CONTRIBUTOR_MODE=1` is required for tools that mutate project files (such as Code Swarm).
+> IDEs cache MCP schemas. After adding or changing a tool, reconnect the Forge
+> MCP entry or reload the IDE window (in Antigravity: **Developer: Reload
+> Window**) before deciding the tool is missing.
+
+## Exercise Code Swarm safely
+
+Start with `UNIGROK_SWARM=dry_run`. It searches and scores candidates but
+refuses every apply request. The golden repository target is:
+
+```text
+start_code_swarm(
+  target_path="evals/tasks/swarm_targets/nsquared_dedup/dedup.py",
+  focus_node="function:dedup",
+  test_target="evals/tasks/swarm_targets/nsquared_dedup/test_dedup.py",
+  bench_command="python evals/tasks/swarm_targets/nsquared_dedup/bench_dedup.py"
+)
+```
+
+Poll the returned id with `get_swarm_status(task_id)` or request the complete
+replay contract with `get_swarm_status(task_id, view="json")`, then load the id
+in the Pareto Playground. The four outcomes are `static_wall`, `test_wall`,
+`dominated`, and `pareto_elite`; values without benchmark measurements stay in
+the wall gutter rather than receiving invented coordinates.
+
+`UNIGROK_SWARM=active` enables `apply_swarm_winner` only for a completed or
+cancelled run's current verified Pareto front and only while the target hash is
+current. Apply re-runs `test_target`, restores the file on failure, and never
+commits. Here “verified” means exactly that the supplied tests passed. Review a
+JSON export before publishing it: Pareto elites intentionally include their
+replacement source and a current live payload can include the original span.
 
 ## What the IDEs get
 
