@@ -11,7 +11,6 @@ import re
 import uuid
 import subprocess
 import tempfile
-from urllib.parse import quote
 from dataclasses import asdict, dataclass, field, replace
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -38,6 +37,24 @@ from .credentials import (
     CLI_AUTH_SETUP_COMMAND,
     build_credential_plane_contract,
     credential_plane_policy,
+)
+from .identity import (
+    _ACTIVE_CALLER,
+    _ACTIVE_CLIENT_ID,
+    _ACTIVE_PRINCIPAL,
+    _ACTIVE_SESSION_ID,
+    caller_from_mcp_context,
+    get_active_caller,
+    get_active_principal,
+    normalize_caller,
+    normalize_principal,
+    reset_active_caller,
+    reset_active_principal,
+    resolve_request_caller,
+    scoped_session,
+    set_active_caller,
+    set_active_principal,
+    telemetry_row_caller,
 )
 
 # Path Resolver for zero-config portability
@@ -502,159 +519,6 @@ async def communicate_with_timeout(
         with contextlib.suppress(Exception):
             await proc.wait()
         raise
-
-# ─── Caller identity (multi-agent workspace) ─────────────────────────────────
-# This MCP is shared by several coding agents (Claude/Codex/Gemini — see
-# .agents/AGENTS.md). The caller identity is a short free-text name derived
-# from the MCP clientInfo sent at initialize (stdio) or from the gateway's
-# X-Caller header / auth-key alias (HTTP). It is attributed to telemetry
-# rows, session message metadata, and research-job rows, and drives the
-# optional per-caller daily budgets. Everything degrades to caller=None.
-
-_ACTIVE_CALLER: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
-    "unigrok_active_caller", default=None
-)
-
-_ACTIVE_PRINCIPAL: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
-    "unigrok_authenticated_principal", default=None
-)
-
-_ACTIVE_CLIENT_ID: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
-    "unigrok_http_client_id", default=None
-)
-
-_ACTIVE_SESSION_ID: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
-    "unigrok_http_session_id", default=None
-)
-
-
-def scoped_session(session: Optional[str]) -> Optional[str]:
-    """Namespace a session by authenticated principal and client label.
-
-    HTTP middleware always binds a principal (OAuth subject, static-key alias,
-    or the loopback anonymous principal). ``X-Client-ID`` remains an untrusted
-    subordinate label that separates one principal's IDEs; it never provides
-    the security boundary by itself. Non-HTTP callers preserve the historical
-    unscoped behavior unless their transport binds one of these context vars.
-    """
-    principal = _ACTIVE_PRINCIPAL.get()
-    client_id = _ACTIVE_CLIENT_ID.get()
-    if not session:
-        session = _ACTIVE_SESSION_ID.get()
-    # Canonically encode independently owned segments before joining. Without
-    # this, principal ``oauth:a:b`` + client ``c`` could collide with
-    # principal ``oauth:a`` + client ``b:c``.
-    namespace = ":".join(
-        quote(part, safe="-._~") for part in (principal, client_id) if part
-    )
-    if namespace and session and not session.startswith(f"{namespace}:"):
-        return f"{namespace}:{session}"
-    return session
-
-
-def normalize_caller(value: Any) -> Optional[str]:
-    """Sanitize a caller identity: strip control characters, trim, and bound
-    to 80 chars (it lands in db rows and metrics keys). None/blank -> None."""
-    if value is None:
-        return None
-    text = re.sub(r"[\x00-\x1f\x7f]", "", str(value)).strip()
-    return text[:80] or None
-
-
-def normalize_principal(value: Any) -> Optional[str]:
-    """Normalize an authenticated principal without collision-prone truncation.
-
-    Provider subjects can exceed the short telemetry-label bound. Preserve
-    ordinary subjects verbatim, but suffix oversized values with a digest so
-    two subjects sharing a long prefix cannot collapse into one namespace.
-    """
-    if value is None:
-        return None
-    text = re.sub(r"[\x00-\x1f\x7f]", "", str(value)).strip()
-    if not text:
-        return None
-    if len(text) <= 240:
-        return text
-    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:24]
-    return f"{text[:215]}~{digest}"
-
-
-def set_active_caller(caller: Optional[str]):
-    """Bind the caller identity to the current async context (the HTTP
-    gateway middleware does this per request). Returns the reset token."""
-    return _ACTIVE_CALLER.set(normalize_caller(caller))
-
-
-def reset_active_caller(token) -> None:
-    with contextlib.suppress(Exception):
-        _ACTIVE_CALLER.reset(token)
-
-
-def get_active_caller() -> Optional[str]:
-    return _ACTIVE_CALLER.get()
-
-
-def set_active_principal(principal: Optional[str]):
-    """Bind the authenticated security principal for the current request."""
-    return _ACTIVE_PRINCIPAL.set(normalize_principal(principal))
-
-
-def reset_active_principal(token) -> None:
-    with contextlib.suppress(Exception):
-        _ACTIVE_PRINCIPAL.reset(token)
-
-
-def get_active_principal() -> Optional[str]:
-    return _ACTIVE_PRINCIPAL.get()
-
-
-def resolve_request_caller(caller: Optional[str]) -> Optional[str]:
-    """Resolve attribution without letting HTTP tool metadata replace the
-    gateway-bound identity.
-
-    FastMCP handlers often pass ``clientInfo.name`` explicitly. On HTTP that
-    value remains only a client label; the middleware's combined
-    ``principal|label`` attribution wins so budget accounting stays anchored
-    to the principal. Stdio has no HTTP principal and preserves explicit
-    caller behavior.
-    """
-    if get_active_principal():
-        return get_active_caller() or get_active_principal()
-    return normalize_caller(caller) or get_active_caller()
-
-
-def caller_from_mcp_context(ctx: Any) -> Optional[str]:
-    """Caller identity from an injected FastMCP Context.
-
-    Introspected against the installed mcp 1.26: ctx.session (the
-    ServerSession) exposes client_params — the InitializeRequestParams the
-    client sent — whose clientInfo (mcp.types.Implementation) carries
-    name/version. Degrades to None for clients that never completed
-    initialize, contexts used outside a request (both raise), or SDK layouts
-    without client_params.
-    """
-    try:
-        params = getattr(getattr(ctx, "session", None), "client_params", None)
-        info = getattr(params, "clientInfo", None)
-        return normalize_caller(getattr(info, "name", None))
-    except Exception:
-        return None
-
-
-def telemetry_row_caller(row: Dict[str, Any]) -> Optional[str]:
-    """Caller name from a telemetry row's metadata column (raw JSON text from
-    the db, or an already-parsed dict from mocks). None for pre-v8 rows,
-    unattributed traffic, and malformed metadata."""
-    meta = row.get("metadata")
-    if isinstance(meta, str):
-        try:
-            meta = json.loads(meta)
-        except Exception:
-            return None
-    if not isinstance(meta, dict):
-        return None
-    return normalize_caller(meta.get("caller"))
-
 
 class CallerBudgetExceeded(RuntimeError):
     """A caller's UNIGROK_CALLER_BUDGETS daily spend is at/over its limit.

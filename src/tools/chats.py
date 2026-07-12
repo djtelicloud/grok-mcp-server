@@ -9,6 +9,7 @@ from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import ToolAnnotations
 from pydantic import BaseModel, Field
 from ..models.results import ChatResult, AgentResult, ReflectionResult
+from ..identity import caller_from_mcp_context, scoped_session
 
 from ..utils import (
     store,
@@ -16,7 +17,6 @@ from ..utils import (
     append_and_save_history,
     MetaLayer,
     GrokInvocationContext,
-    caller_from_mcp_context,
     get_dynamic_context,
     get_xai_client,
     encode_image_to_base64,
@@ -25,7 +25,6 @@ from ..utils import (
     _parse_structured,
     run_agent_turn,
     run_blocking,
-    scoped_session,
     input_limit,
     validate_local_input,
     DEFAULT_PLANNING_MODEL,

@@ -7,7 +7,8 @@ from typing import Any, Dict, List, Optional
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import ToolAnnotations
 
-from ..utils import caller_from_mcp_context, register_internal_tool, store
+from ..identity import caller_from_mcp_context
+from ..utils import register_internal_tool, store
 from ..workspace_memory import (
     WorkspaceMemoryError,
     explain_workspace_evidence as _explain,

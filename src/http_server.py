@@ -26,6 +26,18 @@ from starlette.responses import JSONResponse, Response, StreamingResponse
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
+from .identity import (
+    _ACTIVE_CLIENT_ID,
+    _ACTIVE_SESSION_ID,
+    normalize_caller,
+    normalize_principal,
+    reset_active_caller,
+    reset_active_principal,
+    scoped_session,
+    set_active_caller,
+    set_active_principal,
+    telemetry_row_caller,
+)
 from .utils import (
     FALLBACK_XAI_LANGUAGE_MODELS,
     CLI_AUTH_SETUP_COMMAND,
@@ -43,22 +55,12 @@ from .utils import (
     credential_plane_contract,
     is_cloudrun_runtime,
     new_request_id,
-    normalize_caller,
-    normalize_principal,
-    reset_active_caller,
-    reset_active_principal,
     reset_request_id,
     redact_secrets,
     run_blocking,
     run_agent_turn,
-    set_active_caller,
-    set_active_principal,
     set_request_id,
     store,
-    telemetry_row_caller,
-    _ACTIVE_CLIENT_ID,
-    _ACTIVE_SESSION_ID,
-    scoped_session,
 )
 
 

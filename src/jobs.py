@@ -16,6 +16,7 @@ import uuid
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
+from .identity import get_active_caller, normalize_caller
 from .utils import (
     AGENTIC_TOOLS_SCHEMA,
     _DISTILL_SYS_PROMPT,
@@ -25,9 +26,7 @@ from .utils import (
     _env_timeout,
     _parse_structured,
     check_circuit_breaker,
-    get_active_caller,
     get_xai_client,
-    normalize_caller,
     record_xai_success,
     redact_secrets,
     resolve_model,
