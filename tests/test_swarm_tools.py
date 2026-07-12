@@ -61,6 +61,20 @@ async def wired(workspace, tmp_path, monkeypatch):
 
 class TestGates:
     @pytest.mark.asyncio
+    async def test_unknown_strategy_and_goal_are_rejected(self, wired, monkeypatch):
+        monkeypatch.setenv("UNIGROK_SWARM", "dry_run")
+        bad_strategy = await swarm_tools.start_code_swarm(
+            "pkg/dedup.py", "function:dedup", "pkg/test_dedup.py",
+            "python pkg/bench_dedup.py", search_strategy="evolve",
+        )
+        assert "unknown search_strategy" in bad_strategy
+        bad_goal = await swarm_tools.start_code_swarm(
+            "pkg/dedup.py", "function:dedup", "pkg/test_dedup.py",
+            "python pkg/bench_dedup.py", primary_goal="fastest",
+        )
+        assert "unknown primary_goal" in bad_goal
+
+    @pytest.mark.asyncio
     async def test_off_mode_refuses(self, wired, monkeypatch):
         monkeypatch.setenv("UNIGROK_SWARM", "off")
         out = await swarm_tools.start_code_swarm(
@@ -115,6 +129,70 @@ class TestGates:
 
 class TestEndToEnd:
     @pytest.mark.asyncio
+    async def test_paste_to_verified_champion_is_copy_only(self, wired, monkeypatch):
+        import json as jsonlib
+
+        store, _workspace = wired
+        monkeypatch.setenv("UNIGROK_SWARM", "dry_run")
+        monkeypatch.setenv("UNIGROK_SWARM_MAX_GENERATIONS", "2")
+        monkeypatch.setenv("UNIGROK_SWARM_POPULATION", "4")
+        monkeypatch.setenv("UNIGROK_SWARM_BENCH_REPEATS", "3")
+        source = (GOLDEN / "dedup.py").read_text()
+        test_code = '''
+from module_under_test import dedup
+
+def test_dedup():
+    assert dedup([1, 2, 1, 3, 2]) == [1, 2, 3]
+'''.lstrip()
+        bench_code = '''
+import json
+from module_under_test import dedup
+dedup([1, 2, 1])
+print("SWARM_BENCH " + json.dumps({"latency_ms": 5.0, "peak_mem_bytes": 2048}))
+'''.lstrip()
+
+        out = await swarm_tools.start_paste_swarm(
+            source, test_code, bench_code, "function:dedup",
+            search_strategy="elite_offspring", allow_unstable_bench=True,
+        )
+        task_id = out.split("`")[1]
+        await swarm_tools._get_runner().wait(task_id, timeout=60.0)
+        task = await store.get_swarm_task(task_id)
+        assert task["input_kind"] == "paste"
+        assert task["search_strategy"] == "elite_offspring"
+        assert task["target_path"].startswith("paste://")
+
+        payload = jsonlib.loads(await swarm_tools.get_swarm_status(task_id, view="json"))
+        assert payload["status"] == "completed"
+        assert payload["input_kind"] == "paste"
+        assert payload["champion_id"] in payload["pareto_front"]
+        champion = next(
+            candidate
+            for generation in payload["generations"]
+            for candidate in generation["candidates"]
+            if candidate["candidate_id"] == payload["champion_id"]
+        )
+        assert champion["code"]
+        monkeypatch.setenv("UNIGROK_SWARM", "active")
+        apply_out = await swarm_tools.apply_swarm_winner(payload["champion_id"])
+        assert "copy-only" in apply_out
+
+    @pytest.mark.asyncio
+    async def test_paste_requires_oracle_and_rejects_secrets(self, wired, monkeypatch):
+        monkeypatch.setenv("UNIGROK_SWARM", "dry_run")
+        missing = await swarm_tools.start_paste_swarm(
+            "def f(x):\n    return x\n", "", "", "function:f"
+        )
+        assert "test_code is required" in missing
+        secret = await swarm_tools.start_paste_swarm(
+            'KEY = "xai-abcdefgh12345678"\ndef f(x):\n    return x\n',
+            "def test_f(): pass\n",
+            'print("SWARM_BENCH {}")\n',
+            "function:f",
+        )
+        assert "secret-like" in secret
+
+    @pytest.mark.asyncio
     async def test_dry_run_finds_front_and_refuses_apply(self, wired, monkeypatch):
         store, _ws = wired
         monkeypatch.setenv("UNIGROK_SWARM", "dry_run")
@@ -140,7 +218,7 @@ class TestEndToEnd:
 
     @pytest.mark.asyncio
     async def test_json_view_carries_the_full_replayable_run(self, wired, monkeypatch):
-        """unigrok-swarm-status-v1: one payload renders the whole run —
+        """unigrok-swarm-status-v2: one payload renders the whole run —
         generations, outcomes for color mapping, front ids, honest aggregates
         — and carries ONLY measured fields (no hardware counters, no
         semantic scores, no invented cost comparisons)."""
@@ -160,9 +238,13 @@ class TestEndToEnd:
         await swarm_tools._get_runner().wait(task_id, timeout=60.0)
 
         payload = jsonlib.loads(await swarm_tools.get_swarm_status(task_id, view="json"))
-        assert payload["format"] == "unigrok-swarm-status-v1"
+        assert payload["format"] == "unigrok-swarm-status-v2"
         assert payload["task_id"] == task_id
         assert payload["mode"] == "dry_run"
+        assert payload["input_kind"] == "workspace"
+        assert payload["search_strategy"] == "baseline_batch"
+        assert payload["primary_goal"] == "balanced"
+        assert payload["analytics"]["format"] == "unigrok-swarm-analytics-v1"
         assert payload["target"]["focus_node"] == "function:dedup"
         assert payload["oracle"]["focus_coverage_pct"] > 0
         assert payload["baseline"]["latency_ms"] > 0
@@ -175,12 +257,17 @@ class TestEndToEnd:
         }
         front_ids = set(payload["pareto_front"])
         assert front_ids  # the fast dedup wins
+        assert payload["champion_id"] in front_ids
+        assert payload["comparison"]["champion"]["candidate_id"] == payload["champion_id"]
+        assert payload["comparison"]["diff_from_original"]
         for c in candidates:
             if c["candidate_id"] in front_ids:
                 assert c["outcome"] == "pareto_elite"
                 assert c.get("code")  # elites carry code for the diff view
             else:
                 assert "code" not in c  # bounded payload: non-elites don't
+            assert c["origin"] == "llm"
+            assert "parent_id" in c
 
         agg = payload["aggregates"]
         assert agg["candidates_total"] == len(candidates)

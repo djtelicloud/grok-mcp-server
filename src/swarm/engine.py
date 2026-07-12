@@ -1,9 +1,9 @@
-"""Swarm generation loop: baseline-parent batch search over one focus node.
+"""Swarm generation loop over one focus node.
 
-Each mutant's parent is the ORIGINAL focus-node source (v1 is baseline-parent
-batch search — elite-offspring is v2); "population" is a batch size. Elites
-feed forward only through the folded prompt context, which is why early-stop on
-"no new Pareto point" is meaningful: it is the prompt context that evolves.
+``baseline_batch`` keeps every LLM mutant rooted at the original span.
+``elite_offspring`` allocates elite children, baseline immigrants, and closed
+deterministic AST candidates; selected genetic parents are recorded by id and
+code hash. Elites also feed the bounded folded prompt context.
 
 The loop is: route arms -> generate mutants (CLI plane) -> funnel each
 (dedupe/ast-noop -> parse[+heal] -> signature -> compile -> lint -> tests ->
@@ -18,6 +18,7 @@ import asyncio
 import difflib
 import hashlib
 import json
+import random
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
@@ -26,7 +27,6 @@ from .ast_utils import (
     is_ast_identical,
     parse_ok,
     signature_fingerprint,
-    span_line_range,
 )
 from .fold import build_folded_state
 from .generate import BudgetExceeded, generate_mutation
@@ -36,11 +36,12 @@ from .mutators import (
     build_system_prompt,
     parse_mutation_output,
 )
-from .pareto import rank_candidates
+from .pareto import rank_candidates, select_champion
 from .preflight import noise_floor_pct
 from .router import DiscountedUCBRouter, reward_for
 from .sandbox import SandboxError, SwarmSandbox
 from .static_gate import violation_counts
+from .transforms import deterministic_transforms
 
 
 @dataclass
@@ -56,6 +57,8 @@ class EngineConfig:
     # $0 ruff F821/F823 gate between compile() and the sandbox stages
     # (baseline-relative; no-ops when ruff is unavailable).
     ruff_filter: bool = True
+    search_strategy: str = "baseline_batch"
+    primary_goal: str = "balanced"
 
 
 @dataclass
@@ -96,9 +99,11 @@ class SwarmEngine:
     # Baseline F821/F823 diagnostics, computed once on first use ("unset" sentinel;
     # None = ruff unavailable, gate disabled for the task).
     _baseline_lint: Any = field(default="unset", init=False)
+    _evolution_rng: random.Random = field(init=False)
 
     def __post_init__(self):
         self.router = DiscountedUCBRouter(seed=self.config.seed)
+        self._evolution_rng = random.Random(self.config.seed ^ 0xE10FF5)
         self._noise_floor_pct = noise_floor_pct(
             self.baseline.get("latency_samples") or [self.baseline.get("latency_ms", 0.0)]
         )
@@ -137,10 +142,12 @@ class SwarmEngine:
     # ── One generation ───────────────────────────────────────────────────────
 
     async def _run_generation(self, generation: int) -> GenerationOutcome:
-        picks = [self.router.select(generation) for _ in range(self.config.population)]
+        picks = self._generation_picks(generation)
         semaphore = asyncio.Semaphore(self.config.max_concurrent_gen)
 
         async def _gen(pick):
+            if pick.get("origin") == "ast":
+                return pick.get("replacement")
             async with semaphore:
                 return await self._generate_one(pick, generation)
 
@@ -172,7 +179,8 @@ class SwarmEngine:
                 candidate["stage_reached"], bool(candidate.get("feasible")), on_front
             )
             candidate["reward"] = reward
-            self.router.update(candidate["mutator"], reward)
+            if candidate.get("origin") == "llm":
+                self.router.update(candidate["mutator"], reward)
             candidate["pareto_rank"] = candidate.get("pareto_rank")
             candidate["crowding"] = candidate.get("crowding")
             if self.on_candidate is not None:
@@ -199,10 +207,13 @@ class SwarmEngine:
     # ── Generation + funnel ──────────────────────────────────────────────────
 
     async def _generate_one(self, pick: Dict[str, Any], generation: int) -> Optional[str]:
+        parent_source = str(pick.get("parent_code") or "") or self.original_span.decode(
+            "utf-8", errors="replace"
+        )
         prompt = build_mutation_prompt(
             arm=pick["arm"],
             focus_node=self.focus_node,
-            original_span=self.original_span.decode("utf-8", errors="replace"),
+            original_span=parent_source,
             byte_start=self.span[0],
             byte_end=self.span[1],
             file_excerpt=self.file_source.decode("utf-8", errors="replace")[:8000],
@@ -229,12 +240,17 @@ class SwarmEngine:
         self, pick: Dict[str, Any], replacement: Optional[str], generation: int
     ) -> Optional[Dict[str, Any]]:
         arm = pick["arm"]
+        safe_arm = str(arm).replace(":", "-")
         candidate: Dict[str, Any] = {
-            "id": f"{self.task_id}-g{generation}-s{pick['step']}-{arm}",
+            "id": f"{self.task_id}-g{generation}-s{pick['slot']}-{safe_arm}",
             "task_id": self.task_id,
+            "parent_id": pick.get("parent_id"),
+            "parent_code_hash": pick.get("parent_code_hash"),
             "generation": generation,
             "mutator": arm,
-            "plane": "CLI",
+            "plane": "local" if pick.get("origin") == "ast" else "CLI",
+            "origin": pick.get("origin") or "llm",
+            "transform": pick.get("transform"),
             "byte_start": self.span[0],
             "byte_end": self.span[1],
             "arm_receipt": pick["receipt"],
@@ -319,6 +335,118 @@ class SwarmEngine:
         return candidate
 
     # ── Helpers ──────────────────────────────────────────────────────────────
+
+    def _generation_picks(self, generation: int) -> List[Dict[str, Any]]:
+        if self.config.search_strategy != "elite_offspring":
+            picks = [self.router.select(generation) for _ in range(self.config.population)]
+            return [
+                self._decorate_pick(pick, slot=index + 1, role="baseline_immigrant")
+                for index, pick in enumerate(picks)
+            ]
+
+        population = self.config.population
+        offspring_count = (population + 1) // 2
+        immigrant_count = 0 if population == 1 else max(1, population // 4)
+        ast_count = max(0, population - offspring_count - immigrant_count)
+        picks: List[Dict[str, Any]] = []
+        slot = 1
+        for _ in range(offspring_count):
+            parent, reason = self._select_parent()
+            role = "elite_offspring" if parent else "elite_slot_baseline"
+            picks.append(
+                self._decorate_pick(
+                    self.router.select(generation),
+                    slot=slot,
+                    role=role,
+                    parent=parent,
+                    parent_reason=reason,
+                )
+            )
+            slot += 1
+        for _ in range(immigrant_count):
+            picks.append(
+                self._decorate_pick(
+                    self.router.select(generation), slot=slot, role="baseline_immigrant"
+                )
+            )
+            slot += 1
+        transforms = deterministic_transforms(
+            self.original_span.decode("utf-8", errors="replace")
+        )
+        for index in range(ast_count):
+            selected = transforms[(generation + index - 1) % len(transforms)] if transforms else None
+            transform_name, replacement = selected if selected else ("no_applicable_transform", None)
+            receipt = json.dumps(
+                {
+                    "origin": "ast",
+                    "role": "deterministic_transform",
+                    "transform": transform_name,
+                    "generation": generation,
+                    "slot": slot,
+                },
+                separators=(",", ":"),
+            )
+            picks.append(
+                {
+                    "arm": f"ast:{transform_name}",
+                    "step": slot,
+                    "slot": slot,
+                    "receipt": receipt,
+                    "origin": "ast",
+                    "transform": transform_name,
+                    "replacement": replacement,
+                    "parent_id": None,
+                    "parent_code_hash": None,
+                }
+            )
+            slot += 1
+        return picks
+
+    def _decorate_pick(
+        self,
+        pick: Dict[str, Any],
+        *,
+        slot: int,
+        role: str,
+        parent: Optional[Dict[str, Any]] = None,
+        parent_reason: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        decorated = dict(pick)
+        decorated.update(
+            {
+                "slot": slot,
+                "origin": "llm",
+                "transform": None,
+                "parent_id": parent.get("id") if parent else None,
+                "parent_code_hash": parent.get("code_hash") if parent else None,
+                "parent_code": parent.get("code") if parent else None,
+            }
+        )
+        receipt = json.loads(str(pick["receipt"]))
+        receipt.update(
+            {
+                "origin": "llm",
+                "role": role,
+                "slot": slot,
+                "parent_id": decorated["parent_id"],
+                "parent_policy": parent_reason,
+            }
+        )
+        decorated["receipt"] = json.dumps(receipt, separators=(",", ":"))
+        return decorated
+
+    def _select_parent(self) -> tuple[Optional[Dict[str, Any]], str]:
+        if not self._front:
+            return None, "baseline_no_front"
+        if self._evolution_rng.random() < 0.15:
+            return self._evolution_rng.choice(self._front), "epsilon_front_uniform"
+        if len(self._front) == 1:
+            return self._front[0], "tournament_k2_singleton"
+        contenders = self._evolution_rng.sample(self._front, 2)
+        return (
+            select_champion(contenders, self.config.primary_goal),
+            "tournament_k2_primary_goal",
+        )
 
     async def _baseline_lint_counts(self):
         """The original file's F821/F823 diagnostics, computed once per task so the

@@ -50,7 +50,7 @@ class SandboxError(RuntimeError):
 def parse_bench_line(stdout: str) -> Optional[Dict[str, float]]:
     """Extract the single `SWARM_BENCH {...}` contract line; None when the
     contract is not met (missing, duplicated, or malformed)."""
-    lines = [l for l in (stdout or "").splitlines() if l.startswith(_BENCH_MARKER)]
+    lines = [line for line in (stdout or "").splitlines() if line.startswith(_BENCH_MARKER)]
     if len(lines) != 1:
         return None
     try:

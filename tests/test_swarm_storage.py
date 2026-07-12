@@ -1,5 +1,5 @@
 # tests/test_swarm_storage.py
-# Swarm optimizer storage (migration v12: swarm_tasks + swarm_candidates) and
+# Swarm optimizer storage (migration v13: v2 task contracts + lineage) and
 # the UNIGROK_SWARM_* config ladder. C1 scope only — no engine, no tools.
 
 import asyncio
@@ -7,7 +7,6 @@ import json
 
 import pytest
 
-import src.swarm.config as swarm_config
 from src.swarm.config import (
     reset_swarm_state,
     swarm_bench_repeats,
@@ -19,6 +18,8 @@ from src.swarm.config import (
     swarm_mode,
     swarm_population,
     swarm_stale_after_sec,
+    validate_primary_goal,
+    validate_search_strategy,
 )
 from src.utils import GrokSessionStore
 
@@ -75,19 +76,19 @@ async def _create_task(store, task_id="task-1", **overrides):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Migration v12
+# Migration v13
 # ─────────────────────────────────────────────────────────────────────────────
 
 class TestSwarmMigration:
     @pytest.mark.asyncio
-    async def test_fresh_db_reaches_v12_and_reopen_is_idempotent(self, tmp_path):
+    async def test_fresh_db_reaches_v13_and_reopen_is_idempotent(self, tmp_path):
         db_path = tmp_path / "migrate.db"
         s = GrokSessionStore(db_path=db_path)
         await s._ensure_initialized()
         async with s._read_conn() as conn:
             async with conn.execute("PRAGMA user_version;") as cursor:
                 version = (await cursor.fetchone())[0]
-        assert version == 12
+        assert version == 13
         await s.close()
 
         # Reopen: migration gates must all no-op and the tables survive.
@@ -96,7 +97,7 @@ class TestSwarmMigration:
         assert (await s2.get_swarm_task("task-reopen"))["status"] == "queued"
         async with s2._read_conn() as conn:
             async with conn.execute("PRAGMA user_version;") as cursor:
-                assert (await cursor.fetchone())[0] == 12
+                assert (await cursor.fetchone())[0] == 13
         await s2.close()
 
 
@@ -116,6 +117,11 @@ class TestSwarmTasks:
         assert row["spent_usd"] == pytest.approx(0.0)
         assert row["generation"] == 0
         assert row["seed"] == 42
+        assert row["search_strategy"] == "baseline_batch"
+        assert row["primary_goal"] == "balanced"
+        assert row["input_kind"] == "workspace"
+        assert row["analytics_json"] is None
+        assert row["champion_id"] is None
         assert row["created_at"] and row["updated_at"]
 
     @pytest.mark.asyncio
@@ -143,6 +149,8 @@ class TestSwarmTasks:
             baseline_json=json.dumps({"latency_ms": 100.0}),
             oracle_json=json.dumps({"focus_coverage_pct": 87.5}),
             folded_state="[Compacted state fold of 0 earlier messages]",
+            analytics_json=json.dumps({"format": "unigrok-swarm-analytics-v1"}),
+            champion_id="cand-1",
         )
         row = await wstore.get_swarm_task("task-1")
         assert row["status"] == "running"
@@ -151,6 +159,8 @@ class TestSwarmTasks:
         assert json.loads(row["baseline_json"])["latency_ms"] == 100.0
         assert json.loads(row["oracle_json"])["focus_coverage_pct"] == 87.5
         assert row["folded_state"].startswith("[Compacted")
+        assert json.loads(row["analytics_json"])["format"] == "unigrok-swarm-analytics-v1"
+        assert row["champion_id"] == "cand-1"
 
     @pytest.mark.asyncio
     async def test_list_orders_newest_first(self, wstore):
@@ -189,6 +199,9 @@ class TestSwarmCandidates:
         assert row["byte_start"] == 100 and row["byte_end"] == 400
         assert row["latency_ms"] == pytest.approx(12.5)
         assert row["parent_id"] is None  # v2 elite-offspring reservation
+        assert row["parent_code_hash"] is None
+        assert row["origin"] == "llm"
+        assert row["transform"] is None
         assert json.loads(row["arm_receipt"])["arm"] == "algorithmic"
 
     @pytest.mark.asyncio
@@ -243,6 +256,16 @@ class TestSwarmCandidates:
 # ─────────────────────────────────────────────────────────────────────────────
 
 class TestSwarmConfig:
+    def test_strategy_and_goal_defaults_and_validation(self):
+        assert validate_search_strategy(None) == "baseline_batch"
+        assert validate_search_strategy(" ELITE_OFFSPRING ") == "elite_offspring"
+        assert validate_primary_goal(None) == "balanced"
+        assert validate_primary_goal("LATENCY") == "latency"
+        with pytest.raises(ValueError, match="search_strategy"):
+            validate_search_strategy("evolve")
+        with pytest.raises(ValueError, match="primary_goal"):
+            validate_primary_goal("fastest")
+
     def test_mode_defaults_off(self, monkeypatch):
         monkeypatch.delenv("UNIGROK_SWARM", raising=False)
         assert swarm_mode() == "off"

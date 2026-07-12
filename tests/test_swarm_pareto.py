@@ -9,11 +9,11 @@ import random
 import pytest
 
 from src.swarm.pareto import (
-    OBJECTIVES,
     crowding_distance,
     dominates,
     fast_non_dominated_sort,
     rank_candidates,
+    select_champion,
 )
 
 
@@ -109,3 +109,26 @@ class TestRankCandidates:
         first = [c["id"] for c in rank_candidates([dict(c) for c in cands])]
         second = [c["id"] for c in rank_candidates([dict(c) for c in reversed(cands)])]
         assert first == second
+
+
+class TestChampionSelection:
+    def _front(self):
+        return [
+            {"id": "fast", "feasible": True, "latency_ms": 5,
+             "peak_mem_bytes": 300, "diff_bytes": 80},
+            {"id": "small", "feasible": True, "latency_ms": 12,
+             "peak_mem_bytes": 150, "diff_bytes": 10},
+            {"id": "light", "feasible": True, "latency_ms": 20,
+             "peak_mem_bytes": 50, "diff_bytes": 40},
+        ]
+
+    def test_goal_specific_champion_is_front_only(self):
+        assert select_champion(self._front(), "latency")["id"] == "fast"
+        assert select_champion(self._front(), "memory")["id"] == "light"
+        assert select_champion(self._front(), "size")["id"] == "small"
+        assert select_champion(self._front(), "balanced")["id"] == "small"
+
+    def test_unknown_goal_and_empty_front(self):
+        assert select_champion([], "balanced") is None
+        with pytest.raises(ValueError, match="primary_goal"):
+            select_champion(self._front(), "magic")

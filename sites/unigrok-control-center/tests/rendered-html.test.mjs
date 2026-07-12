@@ -105,6 +105,8 @@ test("renders the public root without authentication or live-status claims", asy
   assert.match(html, /example · local command session/);
   assert.match(html, /Published route contract · not a live runtime probe/);
   assert.match(html, /Private OAuth · API plane only/);
+  assert.match(html, /Swarm Playground/);
+  assert.match(html, /href="\/swarm\/"/);
   assert.match(html, /uv run python main\.py init/);
   assert.match(html, /\/docs\/okf\/index\.md/);
   assert.match(html, /status.*healthy/);

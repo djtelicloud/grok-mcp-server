@@ -51,6 +51,11 @@ class TestExtractSpan:
         with pytest.raises(ValueError, match="not found"):
             extract_node_span(source, "function:inner")
 
+    def test_nested_function_has_explicit_stable_path(self, source):
+        start, end = extract_node_span(source, "function:outer.inner")
+        assert source[start:end].startswith(b"def inner():")
+        assert signature_fingerprint(source, "function:outer.inner").startswith("sync:")
+
     def test_module_and_method_same_name_disambiguated(self, source):
         # slow_sort exists both at module level and as Widget.slow_sort;
         # neither reference is ambiguous because they're different kinds.

@@ -188,3 +188,4 @@ evals/cassettes/recorded.jsonl
 !sites/unigrok-control-center/app/lib/unigrok-config.ts
 !sites/unigrok-control-center/build/
 !sites/unigrok-control-center/build/sites-vite-plugin.ts
+sites/unigrok-control-center/public/swarm/

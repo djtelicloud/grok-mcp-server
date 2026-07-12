@@ -765,6 +765,28 @@ as sqlite). Unknown values fail fast with NotImplementedError naming the
 supported set — a typo must not silently fall back to SQLite. db_path is
 backend-specific (the SQLite file path; tests use per-test temp paths).
 
+## swarm/analytics.py {#swarm-analytics}
+
+### Function: `analyze_python_source` {#swarm-analytics-analyze_python_source}
+
+```python
+def analyze_python_source(source: str) -> Dict[str, Any]
+```
+
+**Keywords:** analyze, python, source
+
+Return measured-only AST analytics or a structured parse error.
+
+### Function: `add_ruff_summary` {#swarm-analytics-add_ruff_summary}
+
+```python
+async def add_ruff_summary(source: str, analytics: Dict[str, Any]) -> Dict[str, Any]
+```
+
+**Keywords:** add, ruff, summary
+
+Attach isolated Ruff aggregate counts without returning source excerpts.
+
 ## swarm/ast_utils.py {#swarm-ast_utils}
 
 ### Function: `parse_ok` {#swarm-ast_utils-parse_ok}
@@ -787,8 +809,8 @@ def extract_node_span(source: bytes, focus_node: str) -> Tuple[int, int]
 
 **Keywords:** extract, node, span
 
-Resolve `focus_node` ("function:<name>" at module level, or
-"method:<Class>.<name>") to its exact byte span, decorators included.
+Resolve `focus_node` (``function:outer.inner`` or
+``method:Class.method.inner``) to its exact byte span, decorators included.
 
 Raises ValueError on: unparseable source, malformed focus spec, missing
 node, or an AMBIGUOUS node (multiple same-named matches — e.g.
@@ -847,6 +869,30 @@ candidate properly (this check may only ever discard true no-ops, never
 hide a real mutant).
 
 ## swarm/config.py {#swarm-config}
+
+### Function: `validate_search_strategy` {#swarm-config-validate_search_strategy}
+
+```python
+def validate_search_strategy(value: str | None) -> str
+```
+
+**Keywords:** validate, search, strategy
+
+Return a canonical strategy or reject an unknown caller value.
+
+Unlike rollout mode, this is request data rather than process
+configuration. Silently coercing a typo would make a run's lineage
+receipt dishonest, so unknown values are errors.
+
+### Function: `validate_primary_goal` {#swarm-config-validate_primary_goal}
+
+```python
+def validate_primary_goal(value: str | None) -> str
+```
+
+**Keywords:** validate, primary, goal
+
+Return a canonical champion-selection goal or reject it.
 
 ### Function: `swarm_mode` {#swarm-config-swarm_mode}
 
@@ -1044,6 +1090,20 @@ def rank_candidates(candidates: List[Dict[str, Any]], objectives: Sequence[str]=
 Annotate FEASIBLE candidates in place with pareto_rank (0 = optimal
 front) and crowding, and return them ordered (rank asc, crowding desc).
 Infeasible candidates are dropped — they are not selectable.
+
+### Function: `select_champion` {#swarm-pareto-select_champion}
+
+```python
+def select_champion(candidates: List[Dict[str, Any]], primary_goal: str='balanced') -> Dict[str, Any] | None
+```
+
+**Keywords:** select, champion
+
+Choose one deterministic CTA candidate from the current Pareto front.
+
+This does not alter Pareto membership. It only turns a multi-objective
+front into the single "Best verified candidate" action requested by the
+UI, with candidate id as the final stable tie-break.
 
 ## swarm/preflight.py {#swarm-preflight}
 
@@ -1252,6 +1312,18 @@ async def count_violations(source: bytes, timeout: float=10.0) -> Optional[int]
 **Keywords:** count, violations
 
 Compatibility helper returning the total F821/F823 diagnostic count.
+
+## swarm/transforms.py {#swarm-transforms}
+
+### Function: `deterministic_transforms` {#swarm-transforms-deterministic_transforms}
+
+```python
+def deterministic_transforms(source: str) -> List[Tuple[str, str]]
+```
+
+**Keywords:** deterministic, transforms
+
+Return unique named rewrites of one definition, in registry order.
 
 ## tools/chats.py {#tools-chats}
 
@@ -1766,10 +1838,24 @@ Register the grok:// resources and the reusable prompts.
 
 ## tools/swarm.py {#tools-swarm}
 
+### Function: `analyze_code_for_swarm` {#tools-swarm-analyze_code_for_swarm}
+
+```python
+async def analyze_code_for_swarm(code: str, language: str='python') -> str
+```
+
+**Keywords:** analyze, code, for, swarm
+
+Analyze pasted Python without a model call, import, or user-code execution.
+
+The source is capped at 256 KiB, read only from this request, and never
+persisted. Cloud Run refuses this server-side tool because the public
+page performs its preview entirely in the browser.
+
 ### Function: `start_code_swarm` {#tools-swarm-start_code_swarm}
 
 ```python
-async def start_code_swarm(target_path: str, focus_node: str, test_target: str, bench_command: str, budget_usd: Optional[float]=None, allow_unstable_bench: bool=False) -> str
+async def start_code_swarm(target_path: str, focus_node: str, test_target: str, bench_command: str, budget_usd: Optional[float]=None, allow_unstable_bench: bool=False, search_strategy: str='baseline_batch', primary_goal: str='balanced') -> str
 ```
 
 **Keywords:** start, code, swarm
@@ -1780,6 +1866,20 @@ get_swarm_status. focus_node is 'function:<name>' or 'method:<Class>.<name>';
 test_target and bench_command define the correctness oracle and the
 benchmark (the command must print a single SWARM_BENCH JSON line —
 scripts/swarm_bench.py is the easy path).
+
+### Function: `start_paste_swarm` {#tools-swarm-start_paste_swarm}
+
+```python
+async def start_paste_swarm(code: str, test_code: str, bench_code: str, focus_node: str, budget_usd: Optional[float]=None, allow_unstable_bench: bool=False, search_strategy: str='elite_offspring', primary_goal: str='balanced') -> str
+```
+
+**Keywords:** start, paste, swarm
+
+Run a verified local swarm over pasted Python, tests, and benchmark.
+
+Source material is written only to a task-scoped local scratch directory.
+Tests and a benchmark are mandatory; examples never count as proof. Paste
+tasks return copyable champions but cannot use workspace Apply.
 
 ### Function: `get_swarm_status` {#tools-swarm-get_swarm_status}
 
@@ -1792,7 +1892,7 @@ async def get_swarm_status(task_id: str, view: Literal['text', 'json']='text') -
 Report a swarm's status, the oracle-honesty facts (focus-span coverage,
 bench stability), the current Pareto front with relative deltas, and
 spend. ``view="json"`` returns the stable machine-readable payload
-(format ``unigrok-swarm-status-v1``) that the local workbench and any
+(format ``unigrok-swarm-status-v2``) that the local workbench and any
 static export consume — one call renders the whole run.
 
 The JSON schema is deliberately honest: it carries ONLY measured values.
@@ -2895,7 +2995,7 @@ Update a job row; updated_at always bumps so staleness detection
 ### Method: `GrokSessionStore.create_swarm_task` {#utils-groksessionstore-create_swarm_task}
 
 ```python
-async def GrokSessionStore.create_swarm_task(self, task_id: str, target_path: str, focus_node: str, base_file_hash: str, test_target: str, bench_command: str, budget_usd: float, seed: int, caller: Optional[str]=None, request_id: Optional[str]=None) -> None
+async def GrokSessionStore.create_swarm_task(self, task_id: str, target_path: str, focus_node: str, base_file_hash: str, test_target: str, bench_command: str, budget_usd: float, seed: int, caller: Optional[str]=None, request_id: Optional[str]=None, search_strategy: str='baseline_batch', primary_goal: str='balanced', input_kind: str='workspace', analytics_json: Optional[str]=None) -> None
 ```
 
 **Keywords:** grok, session, store, create, swarm, task
@@ -2907,7 +3007,7 @@ contract), matching create_job.
 ### Method: `GrokSessionStore.update_swarm_task` {#utils-groksessionstore-update_swarm_task}
 
 ```python
-async def GrokSessionStore.update_swarm_task(self, task_id: str, status: Optional[str]=None, spent_usd: Optional[float]=None, generation: Optional[int]=None, baseline_json: Optional[str]=None, oracle_json: Optional[str]=None, folded_state: Optional[str]=None) -> None
+async def GrokSessionStore.update_swarm_task(self, task_id: str, status: Optional[str]=None, spent_usd: Optional[float]=None, generation: Optional[int]=None, baseline_json: Optional[str]=None, oracle_json: Optional[str]=None, folded_state: Optional[str]=None, analytics_json: Optional[str]=None, champion_id: Optional[str]=None) -> None
 ```
 
 **Keywords:** grok, session, store, update, swarm, task

@@ -112,6 +112,56 @@ def rank_candidates(
     )
 
 
+def select_champion(
+    candidates: List[Dict[str, Any]], primary_goal: str = "balanced"
+) -> Dict[str, Any] | None:
+    """Choose one deterministic CTA candidate from the current Pareto front.
+
+    This does not alter Pareto membership. It only turns a multi-objective
+    front into the single "Best verified candidate" action requested by the
+    UI, with candidate id as the final stable tie-break.
+    """
+    front = [candidate for candidate in rank_candidates(candidates) if candidate["pareto_rank"] == 0]
+    if not front:
+        return None
+    goal = str(primary_goal or "balanced")
+    goal_orders = {
+        "latency": ("latency_ms", "peak_mem_bytes", "diff_bytes"),
+        "memory": ("peak_mem_bytes", "latency_ms", "diff_bytes"),
+        "size": ("diff_bytes", "latency_ms", "peak_mem_bytes"),
+    }
+    if goal in goal_orders:
+        order = goal_orders[goal]
+
+        def key(candidate):
+            return (*(_value(candidate, field) for field in order), str(candidate.get("id", "")))
+
+    elif goal == "balanced":
+        ranges = {
+            objective: (
+                min(_value(candidate, objective) for candidate in front),
+                max(_value(candidate, objective) for candidate in front),
+            )
+            for objective in OBJECTIVES
+        }
+
+        def key(candidate):
+            distance = 0.0
+            for objective in OBJECTIVES:
+                low, high = ranges[objective]
+                if high > low:
+                    distance += (_value(candidate, objective) - low) / (high - low)
+            return distance, str(candidate.get("id", ""))
+    else:
+        raise ValueError(f"unknown primary_goal {primary_goal!r}")
+    return min(front, key=key)
+
+
+def _value(candidate: Dict[str, Any], field: str) -> float:
+    value = candidate.get(field)
+    return float("inf") if value is None else float(value)
+
+
 def _finite(value: float) -> float:
     # inf sorts first when negated; a large finite proxy keeps the sort total.
     if value == float("inf"):

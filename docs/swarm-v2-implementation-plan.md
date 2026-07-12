@@ -1,8 +1,16 @@
 # Swarm v2 implementation plan
 
-Status: proposed; implementation has not started  
-Reviewed: 2026-07-12 with Grok 4.5 on the CLI subscription plane  
+Status: implemented; protected-main landing and publication in progress
+
+Reviewed: 2026-07-12 with Grok 4.5 on the CLI subscription plane
+
 Scope owner: Codex integration
+
+Implementation verification: a browser-launched real Grok CLI paste run
+completed two `elite_offspring` generations with 100% focus coverage, a stable
+benchmark, a 75% candidate feasibility rate, two verified Pareto elites, and a
+copy-only champion. The live run also exposed and closed a legacy non-finite
+bandit-receipt JSON bug before landing.
 
 ## Executive decision
 
@@ -293,7 +301,7 @@ Add or extend these local tools:
 analyze_code_for_swarm(code, language="python") -> analytics-v1 JSON
 start_code_swarm(..., search_strategy="baseline_batch", primary_goal="balanced")
 start_paste_swarm(code, test_code, bench_code, ..., search_strategy, primary_goal)
-get_swarm_status(task_id, view="text|json") -> status-v1 or status-v2
+get_swarm_status(task_id, view="text|json") -> status-v2
 ```
 
 `analyze_code_for_swarm` is read-only, performs no execution or model call, and
@@ -493,7 +501,8 @@ The following are definition-of-done tests, not optional follow-up:
 
 ## Final cut line
 
-Call the release v2 only when Phases 0 through 4 and acceptance tests 1 through
-24 are complete. Phase 5 is the production showcase gate. Do not delay v2 for
+The implemented release satisfies Phases 0 through 4 and acceptance tests 1
+through 24. Phase 5 remains the production publication gate until the public
+Sites deployment is verified. Do not delay v2 for
 mutation testing, bytecode metrics, whole-project types, multi-span rewriting,
 novelty search, or hardware counters.

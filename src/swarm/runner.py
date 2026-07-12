@@ -14,12 +14,13 @@ import asyncio
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional, Set
+from typing import Any, Dict, Set
 
 from . import config as swarm_config
 from .ast_utils import extract_node_span, span_line_range
 from .engine import EngineConfig, SwarmEngine
 from .preflight import PreflightError, run_preflight
+from .pareto import select_champion
 from .sandbox import SandboxError, SwarmSandbox
 
 
@@ -128,6 +129,8 @@ class SwarmRunner:
                     seed=spec["seed"],
                     allow_unstable_bench=spec.get("allow_unstable_bench", False),
                     ruff_filter=swarm_config.swarm_ruff_filter(),
+                    search_strategy=spec.get("search_strategy", "baseline_batch"),
+                    primary_goal=spec.get("primary_goal", "balanced"),
                 ),
                 goal=spec.get("goal", ""),
                 on_candidate=lambda c: self._persist_candidate(task_id, c),
@@ -135,11 +138,15 @@ class SwarmRunner:
             )
             outcomes = await engine.run()
             if outcomes:
+                champion = select_champion(
+                    engine.front, spec.get("primary_goal", "balanced")
+                )
                 await self._store.update_swarm_task(
                     task_id,
                     generation=outcomes[-1].generation,
                     spent_usd=engine.spent_usd,
                     folded_state=outcomes[-1].folded_state,
+                    champion_id=champion.get("id") if champion else None,
                 )
             final = "cancelled" if str(task_id) in self._cancelled else "completed"
             await self._store.update_swarm_task(task_id, status=final)

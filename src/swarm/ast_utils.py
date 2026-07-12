@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import ast
 import textwrap
-from typing import List, Optional, Tuple
+from typing import List, Tuple
 
 import tree_sitter_python
 from tree_sitter import Language, Node, Parser
@@ -74,9 +74,25 @@ def _classes_in(container: Node, name: bytes) -> List[Node]:
     return found
 
 
+def _function_path_in(container: Node, names: List[str]) -> List[Node]:
+    """Resolve a direct function path such as ``outer.inner``."""
+    current = container
+    for index, name in enumerate(names):
+        matches = _functions_in(current, name.encode("utf-8"))
+        if len(matches) != 1:
+            return matches if index == len(names) - 1 else []
+        if index == len(names) - 1:
+            return matches
+        body = matches[0].child_by_field_name("body")
+        if body is None:
+            return []
+        current = body
+    return []
+
+
 def extract_node_span(source: bytes, focus_node: str) -> Tuple[int, int]:
-    """Resolve `focus_node` ("function:<name>" at module level, or
-    "method:<Class>.<name>") to its exact byte span, decorators included.
+    """Resolve `focus_node` (``function:outer.inner`` or
+    ``method:Class.method.inner``) to its exact byte span, decorators included.
 
     Raises ValueError on: unparseable source, malformed focus spec, missing
     node, or an AMBIGUOUS node (multiple same-named matches — e.g.
@@ -93,10 +109,10 @@ def extract_node_span(source: bytes, focus_node: str) -> Tuple[int, int]:
         raise ValueError("target file does not parse cleanly")
 
     if kind == "function":
-        matches = _functions_in(tree.root_node, spec.encode("utf-8"))
+        matches = _function_path_in(tree.root_node, spec.split("."))
     else:
-        class_name, _, fn_name = spec.partition(".")
-        if not class_name or not fn_name:
+        class_name, _, fn_path = spec.partition(".")
+        if not class_name or not fn_path:
             raise ValueError(f"method focus needs '<Class>.<name>', got {spec!r}")
         classes = _classes_in(tree.root_node, class_name.encode("utf-8"))
         if not classes:
@@ -106,7 +122,7 @@ def extract_node_span(source: bytes, focus_node: str) -> Tuple[int, int]:
         body = classes[0].child_by_field_name("body")
         if body is None:
             raise ValueError(f"class {class_name!r} has no body")
-        matches = _functions_in(body, fn_name.encode("utf-8"))
+        matches = _function_path_in(body, fn_path.split("."))
 
     if not matches:
         raise ValueError(f"focus node {focus_node!r} not found")
@@ -131,25 +147,32 @@ def signature_fingerprint(source: bytes, focus_node: str) -> str:
     except (SyntaxError, UnicodeDecodeError) as exc:
         raise ValueError("target file does not parse cleanly") from exc
     nodes: List[ast.AST]
+
+    def function_path(body: List[ast.stmt], names: List[str]) -> List[ast.AST]:
+        current = body
+        matches: List[ast.AST] = []
+        for index, name in enumerate(names):
+            matches = [
+                item for item in current
+                if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and item.name == name
+            ]
+            if len(matches) != 1 or index == len(names) - 1:
+                return matches
+            current = matches[0].body
+        return matches
+
     if kind == "function":
-        nodes = [
-            node for node in tree.body
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-            and node.name == spec
-        ]
+        nodes = function_path(tree.body, spec.split("."))
     elif kind == "method" and "." in spec:
-        class_name, fn_name = spec.split(".", 1)
+        class_name, fn_path = spec.split(".", 1)
         classes = [
             node for node in tree.body
             if isinstance(node, ast.ClassDef) and node.name == class_name
         ]
         if len(classes) != 1:
             raise ValueError(f"class {class_name!r} is missing or ambiguous")
-        nodes = [
-            node for node in classes[0].body
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-            and node.name == fn_name
-        ]
+        nodes = function_path(classes[0].body, fn_path.split("."))
     else:
         raise ValueError(f"invalid focus node {focus_node!r}")
     if len(nodes) != 1:

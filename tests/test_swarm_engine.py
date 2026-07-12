@@ -201,6 +201,43 @@ def _engine(sb, src, span, baseline, generator, **cfg):
 
 class TestEngineLoop:
     @pytest.mark.asyncio
+    async def test_elite_strategy_allocates_and_receipts_real_parents(self, engine_env):
+        import json
+
+        src, span, baseline = await _baseline(engine_env)
+
+        async def gen(prompt, system, *, remaining_budget_usd, **kw):
+            return GenerationResult(_FAST_SORT, "CLI", 0.0, "final_answer")
+
+        engine = _engine(
+            engine_env, src, span, baseline, gen,
+            population=4, search_strategy="elite_offspring", primary_goal="latency",
+        )
+        parent = {
+            "id": "parent-fast", "code": _FAST_SORT, "code_hash": "parent-hash",
+            "feasible": True, "latency_ms": 1.0, "peak_mem_bytes": 100,
+            "diff_bytes": 10, "pareto_rank": 0,
+        }
+        engine._front = [parent]
+        picks = engine._generation_picks(2)
+        assert len(picks) == 4
+        assert [pick["origin"] for pick in picks].count("ast") == 1
+        offspring = [pick for pick in picks if pick.get("parent_id")]
+        assert len(offspring) == 2
+        assert {pick["parent_id"] for pick in offspring} == {"parent-fast"}
+        assert {pick["parent_code_hash"] for pick in offspring} == {"parent-hash"}
+        assert all(json.loads(pick["receipt"])["parent_id"] == "parent-fast" for pick in offspring)
+        immigrants = [
+            pick for pick in picks
+            if json.loads(pick["receipt"]).get("role") == "baseline_immigrant"
+        ]
+        assert len(immigrants) == 1
+
+        engine._front = []
+        first_generation = engine._generation_picks(1)
+        assert all(pick.get("parent_id") is None for pick in first_generation)
+
+    @pytest.mark.asyncio
     async def test_correct_mutant_reaches_front_and_arm_is_rewarded(self, engine_env):
         src, span, baseline = await _baseline(engine_env)
 
@@ -210,7 +247,7 @@ class TestEngineLoop:
             return GenerationResult(text, "CLI", 0.0, "final_answer")
 
         engine = _engine(engine_env, src, span, baseline, gen)
-        outcomes = await engine.run()
+        await engine.run()
 
         assert engine.front, "a correct fast mutant should reach the front"
         assert all(c["feasible"] for c in engine.front)
