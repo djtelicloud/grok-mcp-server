@@ -1869,3 +1869,30 @@ pre {
     display: none !important;
   }
 }
+
+/* Sidebar page links (Swarm Optimizer): nav-btn look, real navigation, inert
+   to the tab router (which binds .nav-btn only). */
+.nav-link {
+  background: transparent;
+  border: none;
+  text-align: left;
+  min-height: 38px;
+  padding: 9px 10px;
+  font-size: 13px;
+  font-weight: 500;
+  border-radius: var(--radius);
+  color: var(--ink-soft);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  transition: color 120ms ease, background-color 120ms ease;
+  white-space: nowrap;
+  overflow: hidden;
+  cursor: pointer;
+  text-decoration: none;
+}
+.nav-link:hover {
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--ink);
+}
+.console-grid[data-nav="rail"] .nav-link { justify-content: center; padding-inline: 5px; }
