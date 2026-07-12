@@ -36,11 +36,11 @@ credentials, OAuth codes, tokens, or private keys here.
 
 ## Runtime and Git state
 
-- The feature content entered protected `main` at
+- The feature content entered protected `origin/main` at
   `b52ed0f187a1969f522ce4bac75d6168afc75d7d`; the handoff update itself lands
   in a later descendant merge, so do not treat that feature SHA as current
   `main`.
-- `scripts/land-status` is the canonical live check for visible `main` and the
+- `./scripts/land-status` is the canonical live check for visible `main` and the
   contributor runtime marker. Both matched after closeout, and each closeout
   merge tree was byte-identical to its certified task head.
 - Stable `127.0.0.1:4765` and contributor `127.0.0.1:4766` health checks pass.
