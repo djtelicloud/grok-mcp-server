@@ -53,6 +53,60 @@ logger = logging.getLogger("GrokMCP")
 # destructiveHint marks tools whose mutations are not trivially reversible.
 READONLY_TOOL = ToolAnnotations(readOnlyHint=True)
 DESTRUCTIVE_TOOL = ToolAnnotations(destructiveHint=True)
+_ALLOWED_FINISH_REASONS = {"final_answer", "fallback", "tool_calls", "length", "unknown", "error"}
+
+
+def _normalize_finish_reason(response: Any) -> str:
+    finish_reason = getattr(response, "finish_reason", "final_answer") or "final_answer"
+    return finish_reason if finish_reason in _ALLOWED_FINISH_REASONS else "unknown"
+
+
+def _tokens_from_response(response: Any) -> int:
+    usage = getattr(response, "usage", None)
+    if not usage:
+        return 0
+    return int((getattr(usage, "prompt_tokens", 0) or 0) + (getattr(usage, "completion_tokens", 0) or 0))
+
+
+def _build_tool_result(
+    ctx: GrokInvocationContext,
+    *,
+    response: Any,
+    route: str,
+    model: str,
+    formatted_text: str,
+    data: Optional[Dict[str, Any]] = None,
+    citations: Optional[List[Dict[str, str]]] = None,
+) -> SystemResult:
+    return SystemResult(
+        response=response.content,
+        text=formatted_text,
+        finish_reason=_normalize_finish_reason(response),
+        cost_usd=float(getattr(response, "cost_usd", 0.0) or 0.0),
+        model=model,
+        tokens=_tokens_from_response(response),
+        latency_sec=ctx.elapsed,
+        route=route,
+        plane="API",
+        citations=citations,
+        data=data,
+    )
+
+
+def _resolve_workspace_file(
+    file_path: str,
+    *,
+    enforce_ignore_policy: bool,
+) -> Path:
+    resolved = PathResolver.validate_path(file_path)
+    proj_root = PathResolver.get_workspace_root()
+    if proj_root is None:
+        raise RuntimeError("No workspace is attached to this UniGrok service.")
+    if enforce_ignore_policy:
+        patterns = load_gitignore_patterns(proj_root)
+        if is_path_ignored(resolved, proj_root, patterns):
+            raise PermissionError(f"path '{file_path}' is ignored or private.")
+    return resolved
 
 
 async def grok_mcp_status(view: Literal["text", "json"] = "text") -> str:
@@ -407,7 +461,7 @@ async def xai_upload_file(file_path: str) -> Dict[str, Any]:
         `filename`, `size_bytes`, and a human-readable `summary`.
     """
     async with GrokInvocationContext("utility", logger, append_signature=False) as ctx:
-        resolved_path = PathResolver.validate_path(file_path)
+        resolved_path = _resolve_workspace_file(file_path, enforce_ignore_policy=True)
         validate_local_input(
             resolved_path,
             max_bytes=input_limit("UNIGROK_MAX_UPLOAD_BYTES", 20_000_000, 1_024, 100_000_000),
@@ -507,16 +561,11 @@ async def read_local_file(file_path: str, max_chars: int = 500000) -> str:
     """Read a local project workspace file for code context or diagnostics."""
     async with GrokInvocationContext("utility", logger, append_signature=False) as ctx:
         try:
-            resolved = PathResolver.validate_path(file_path)
+            resolved = _resolve_workspace_file(file_path, enforce_ignore_policy=True)
+        except RuntimeError:
+            return ctx.format_output("[UNAVAILABLE] No workspace is attached to this UniGrok service.")
         except (PermissionError, ValueError) as e:
             return ctx.format_output(f"[BLOCKED] Access denied: {str(e)}")
-
-        proj_root = PathResolver.get_workspace_root()
-        if proj_root is None:
-            return ctx.format_output("[UNAVAILABLE] No workspace is attached to this UniGrok service.")
-        patterns = load_gitignore_patterns(proj_root)
-        if is_path_ignored(resolved, proj_root, patterns):
-            return ctx.format_output(f"[BLOCKED] Access denied: path '{file_path}' is ignored or private.")
 
         limit = input_limit("UNIGROK_MAX_LOCAL_FILE_CHARS", 500_000, 1_024, 4_000_000)
         try:
@@ -624,23 +673,12 @@ async def remote_code_execution(prompt: str, max_turns: Optional[int] = None) ->
                 code_outputs.append(output.message.content)
 
         formatted = ctx.format_output("\n".join(result), [response])
-        cost_usd = float(getattr(response, "cost_usd", 0.0) or 0.0)
-        finish_reason = getattr(response, "finish_reason", "final_answer") or "final_answer"
-
-        tokens_val = 0
-        if hasattr(response, 'usage') and response.usage:
-            tokens_val = getattr(response.usage, 'prompt_tokens', 0) + getattr(response.usage, 'completion_tokens', 0)
-
-        return SystemResult(
-            response=response.content,
-            text=formatted,
-            finish_reason=finish_reason if finish_reason in ["final_answer", "fallback", "tool_calls", "length", "unknown", "error"] else "unknown",
-            cost_usd=cost_usd,
-            model="grok-4.3",
-            tokens=tokens_val,
-            latency_sec=ctx.elapsed,
+        return _build_tool_result(
+            ctx,
+            response=response,
             route="code_execution",
-            plane="API",
+            model="grok-4.3",
+            formatted_text=formatted,
             data={"code_outputs": code_outputs} if code_outputs else None,
         )
 
@@ -762,24 +800,14 @@ async def web_search(
             for url in response.citations:
                 result.append(f"- {url}")
         formatted = ctx.format_output("\n".join(result), [response])
-        cost_usd = float(getattr(response, "cost_usd", 0.0) or 0.0)
-        finish_reason = getattr(response, "finish_reason", "final_answer") or "final_answer"
-        tokens_val = 0
-        if hasattr(response, 'usage') and response.usage:
-            tokens_val = getattr(response.usage, 'prompt_tokens', 0) + getattr(response.usage, 'completion_tokens', 0)
-
         citations_mapped = [{"url": url} for url in response.citations] if response.citations else None
 
-        return SystemResult(
-            response=response.content,
-            text=formatted,
-            finish_reason=finish_reason if finish_reason in ["final_answer", "fallback", "tool_calls", "length", "unknown", "error"] else "unknown",
-            cost_usd=cost_usd,
-            model="grok-4.3",
-            tokens=tokens_val,
-            latency_sec=ctx.elapsed,
+        return _build_tool_result(
+            ctx,
+            response=response,
             route="web_search",
-            plane="API",
+            model="grok-4.3",
+            formatted_text=formatted,
             citations=citations_mapped,
             data={"query": prompt, "citations": list(response.citations)} if response.citations else {"query": prompt},
         )
@@ -843,24 +871,14 @@ async def x_search(
             for url in response.citations:
                 result.append(f"- {url}")
         formatted = ctx.format_output("\n".join(result), [response])
-        cost_usd = float(getattr(response, "cost_usd", 0.0) or 0.0)
-        finish_reason = getattr(response, "finish_reason", "final_answer") or "final_answer"
-        tokens_val = 0
-        if hasattr(response, 'usage') and response.usage:
-            tokens_val = getattr(response.usage, 'prompt_tokens', 0) + getattr(response.usage, 'completion_tokens', 0)
-
         citations_mapped = [{"url": url} for url in response.citations] if response.citations else None
 
-        return SystemResult(
-            response=response.content,
-            text=formatted,
-            finish_reason=finish_reason if finish_reason in ["final_answer", "fallback", "tool_calls", "length", "unknown", "error"] else "unknown",
-            cost_usd=cost_usd,
-            model="grok-4.3",
-            tokens=tokens_val,
-            latency_sec=ctx.elapsed,
+        return _build_tool_result(
+            ctx,
+            response=response,
             route="x_search",
-            plane="API",
+            model="grok-4.3",
+            formatted_text=formatted,
             citations=citations_mapped,
             data={"query": prompt, "citations": list(response.citations)} if response.citations else {"query": prompt},
         )
