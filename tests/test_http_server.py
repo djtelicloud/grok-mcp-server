@@ -10,6 +10,7 @@ from src.http_server import (
     GatewayAuthMiddleware,
     MCPOriginMiddleware,
     ModeDialContextMiddleware,
+    StaticAssetCacheMiddleware,
     _ACTIVE_MODE_DIAL,
     _derive_http_caller,
     _message_content_size,
@@ -978,6 +979,19 @@ def test_middleware_is_pure_asgi():
     assert not issubclass(GatewayAuthMiddleware, BaseHTTPMiddleware)
     assert not issubclass(MCPOriginMiddleware, BaseHTTPMiddleware)
     assert not issubclass(ModeDialContextMiddleware, BaseHTTPMiddleware)
+    assert not issubclass(StaticAssetCacheMiddleware, BaseHTTPMiddleware)
+
+
+def test_static_asset_cache_prefixes_are_boundary_correct():
+    """The no-cache policy applies to /ui and /docs subtrees only — a
+    hypothetical /uix or /docsish route must not inherit it."""
+    middleware = StaticAssetCacheMiddleware(None)
+    assert middleware._applies("/ui")
+    assert middleware._applies("/ui/app.js")
+    assert middleware._applies("/docs/okf/faq.md")
+    assert not middleware._applies("/uix")
+    assert not middleware._applies("/docsish/thing")
+    assert not middleware._applies("/mcp")
 
 
 def test_mcp_rejects_untrusted_origin(monkeypatch):

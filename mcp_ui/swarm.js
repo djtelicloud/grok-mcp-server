@@ -111,9 +111,15 @@ function setPayload(payload, sourceLabel, source) {
   const badge = $("sourceBadge");
   badge.textContent = source === "live" ? "live gateway data" : sourceLabel;
   badge.className = source === "live" ? "source-badge live" : "source-badge";
-  renderScorecard();
-  renderTradeoffSummary();
-  renderChart();
+  // Each render step is independent diagnostics; one failing panel must not
+  // blank the rest of the page.
+  for (const step of [renderScorecard, renderTradeoffSummary, renderChart]) {
+    try {
+      step();
+    } catch (err) {
+      console.error(`${step.name} failed:`, err);
+    }
+  }
   const candidates = (payload.generations || []).flatMap((generation) => generation.candidates || []);
   const leadingFrontId = payload.pareto_front?.[0];
   const firstUseful = candidates.find((candidate) => candidate.candidate_id === leadingFrontId && candidate.code)

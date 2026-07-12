@@ -19,6 +19,7 @@ import { safeDisplayName } from "../lib/identity-display";
 import { isSiteProvisioned } from "../lib/site-provisioning";
 import { getPublicConnectionConfig } from "../lib/unigrok-config";
 import ControlAccessDenied from "./access-denied";
+import ControlSignedOut from "./signed-out";
 import GitHubControlAccessDenied from "./github-access-denied";
 
 export const dynamic = "force-dynamic";
@@ -88,7 +89,10 @@ async function StandaloneGitHubControl() {
     return <GitHubControlAccessDenied login={null} reason="configuration" />;
   }
   const session = await readGitHubSession(config, requestHeaders.get("cookie"));
-  if (!session) redirect("/auth/github/login?return_to=%2Fcontrol");
+  // Signed-out visitors get an explanation of the surface and one sign-in
+  // action instead of a naked redirect to github.com. Authorization remains
+  // the fresh server-side collaborator check below after OAuth completes.
+  if (!session) return <ControlSignedOut />;
 
   const result = await loadStandaloneGitHubControl(config, session);
   if (result.kind === "denied") forbidden();

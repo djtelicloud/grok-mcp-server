@@ -5,7 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>UniGrok MCP v0.6.0 Control Center</title>
     <meta name="unigrok-ui-regions" content="navigation,workbench,rpc-inspector,rpc-logs,result-facts" />
-  <link rel="stylesheet" href="./styles.css?v=grok-v0.6.0-r2" />
+    <!-- Version handshake: app.js compares this against its own build constant
+         and self-heals a stale-cached page with one revalidating reload. -->
+    <meta name="unigrok-ui-version" content="grok-v0.6.0-r3" />
+  <link rel="stylesheet" href="./tokens.css?v=grok-v0.6.0-r3" />
+  <link rel="stylesheet" href="./styles.css?v=grok-v0.6.0-r3" />
   </head>
   <body>
     <main class="app-shell">
@@ -70,8 +74,8 @@
           <button id="tab-btn-models" type="button" class="nav-btn" data-tab="tab-models" role="tab" aria-selected="false" aria-controls="tab-models" tabindex="-1" title="Models &amp; Planes">
             <span class="btn-icon" aria-hidden="true">◫</span><span class="btn-label">Models &amp; Planes</span>
           </button>
-          <button id="tab-btn-metrics" type="button" class="nav-btn" data-tab="tab-metrics" role="tab" aria-selected="false" aria-controls="tab-metrics" tabindex="-1" title="Usage &amp; Telemetry">
-            <span class="btn-icon" aria-hidden="true">📊</span><span class="btn-label">Usage &amp; Telemetry</span>
+          <button id="tab-btn-metrics" type="button" class="nav-btn" data-tab="tab-metrics" role="tab" aria-selected="false" aria-controls="tab-metrics" tabindex="-1" title="Usage &amp; Costs">
+            <span class="btn-icon" aria-hidden="true">📊</span><span class="btn-label">Usage &amp; Costs</span>
           </button>
           <div class="nav-title nav-title-group">Contributor</div>
           <!-- A real page link, deliberately NOT a .nav-btn: the tab router
@@ -79,6 +83,10 @@
                hijacks tab switching or navigates during keyboard cycling. -->
           <a id="nav-link-swarm" class="nav-link" href="./swarm.html" title="Swarm Optimizer — Pareto Playground">
             <span class="btn-icon" aria-hidden="true">🐝</span><span class="btn-label">Swarm Optimizer</span>
+          </a>
+          <div class="nav-title nav-title-group">Project</div>
+          <a id="nav-link-site" class="nav-link" href="https://grokmcp.org" target="_blank" rel="noopener noreferrer" title="UniGrok project site — docs, onboarding, contributor control">
+            <span class="btn-icon" aria-hidden="true">🌍</span><span class="btn-label">grokmcp.org ↗</span>
           </a>
           <details id="advancedNav" class="nav-advanced">
           <summary class="nav-title nav-title-group">Advanced</summary>
@@ -89,8 +97,8 @@
           <button id="tab-btn-guard" type="button" class="nav-btn" data-tab="tab-guard" role="tab" aria-selected="false" aria-controls="tab-guard" tabindex="-1" title="Reasoning Guard">
             <span class="btn-icon" aria-hidden="true">🛡️</span><span class="btn-label">Reasoning Guard</span>
           </button>
-          <button id="tab-btn-okf" type="button" class="nav-btn" data-tab="tab-okf" role="tab" aria-selected="false" aria-controls="tab-okf" tabindex="-1" title="OKF Browser">
-            <span class="btn-icon" aria-hidden="true">📚</span><span class="btn-label">OKF Browser</span>
+          <button id="tab-btn-okf" type="button" class="nav-btn" data-tab="tab-okf" role="tab" aria-selected="false" aria-controls="tab-okf" tabindex="-1" title="Knowledge (OKF)">
+            <span class="btn-icon" aria-hidden="true">📚</span><span class="btn-label">Knowledge (OKF)</span>
           </button>
           <button id="tab-btn-webmcp" type="button" class="nav-btn" data-tab="tab-webmcp" role="tab" aria-selected="false" aria-controls="tab-webmcp" tabindex="-1" title="WebMCP Tester">
             <span class="btn-icon" aria-hidden="true">🌐</span><span class="btn-label">WebMCP Tester</span>
@@ -138,21 +146,19 @@
               </div>
             </div>
 
-            <section class="playground-launcher" aria-label="Quick start actions">
-              <div>
-                <span class="model-kicker">No prompt needed</span>
-                <strong>Is UniGrok ready?</strong>
-                <p>Checks credentials, planes, routing policy, and local telemetry without spending an inference turn.</p>
-              </div>
-              <button id="verifySetupBtn" type="button" class="primary-btn-glow">Verify Setup</button>
-            </section>
-
             <div class="task-presets" aria-label="Task presets">
               <button id="runSampleBtn" type="button" class="preset-btn" data-prompt="Reply with exactly: UniGrok agent is ready.">Run zero-config sample</button>
               <button type="button" class="preset-btn prompt-preset" data-prompt="Explain which credential plane and model you would use for a coding task, and why.">Explain routing</button>
               <button type="button" class="preset-btn prompt-preset" data-prompt="Review this code or error and give me the three most useful next steps:\n\n">Review code or error</button>
             </div>
-            
+
+            <!-- Scrollable Conversation Log — kept adjacent to the composer so
+                 the chat loop (type, run, read) never crosses secondary UI. -->
+            <div class="conversation-wrapper">
+              <div class="section-title">Playground session</div>
+              <div id="conversation" class="transcript" role="log" aria-live="polite" aria-label="Playground conversation"></div>
+            </div>
+
             <details class="run-options">
               <summary>Run options · SuperGrok subscription · Auto</summary>
               <div class="form-layout">
@@ -218,11 +224,14 @@
             </div>
             </details>
 
-            <!-- Scrollable Conversation Log -->
-            <div class="conversation-wrapper">
-              <div class="section-title">Playground session</div>
-              <div id="conversation" class="transcript" role="log" aria-live="polite" aria-label="Playground conversation"></div>
-            </div>
+            <section class="playground-launcher" aria-label="Quick start actions">
+              <div>
+                <span class="model-kicker">No prompt needed</span>
+                <strong>Is UniGrok ready?</strong>
+                <p>Checks credentials, planes, routing policy, and local telemetry without spending an inference turn.</p>
+              </div>
+              <button id="verifySetupBtn" type="button" class="primary-btn-glow">Verify Setup</button>
+            </section>
           </div>
 
           <!-- TAB 2: Schema Explorer -->
@@ -298,10 +307,10 @@
           <!-- TAB 4: OKF Browser -->
           <div id="tab-okf" class="tab-panel">
             <div class="panel-header">
-              <h2>OKF Browser</h2>
+              <h2>Knowledge (OKF)</h2>
               <button id="copyOkfPathBtn" type="button" class="small-btn-glow">Copy Path</button>
             </div>
-            <p class="panel-desc">Browse files from the zero-shot Open Knowledge Format (OKF) bundle. Headless agents ingest this context on startup.</p>
+            <p class="panel-desc">Browse the project knowledge bundle (Open Knowledge Format). Headless agents ingest this context on startup.</p>
 
             <div class="okf-layout">
               <div class="okf-sidebar">
@@ -406,7 +415,7 @@
           <div id="tab-metrics" class="tab-panel">
             <div class="panel-header">
               <div>
-                <h2>Usage &amp; Telemetry</h2>
+                <h2>Usage &amp; Costs</h2>
                 <p class="panel-desc">Local request truth, exact API billing, and honest CLI subscription activity.</p>
               </div>
               <div class="metrics-actions">
@@ -525,6 +534,21 @@
 
             <div id="setupStatusSummary" class="setup-status-summary" aria-live="polite">Checking the live gateway…</div>
 
+            <!-- One plain-language onboarding action, shown only when the
+                 gateway is not ready. No environment variables required. -->
+            <div id="quickStartCard" class="setup-quickstart hidden">
+              <strong>Get the gateway running</strong>
+              <p>Copy and run this in a terminal. You need Git, Docker Desktop, and uv — nothing else.</p>
+              <pre><code id="quickStartCommands">git clone https://github.com/djtelicloud/grok-mcp-server.git
+cd grok-mcp-server
+uv run python main.py init
+docker compose up --build -d</code></pre>
+              <div class="quickstart-actions">
+                <button id="copyQuickStartBtn" type="button" class="small-btn-glow">Copy commands</button>
+                <span class="quickstart-note">Already installed? Run <code>docker compose up --build -d</code> in the project folder, then Recheck setup.</span>
+              </div>
+            </div>
+
             <details class="raw-telemetry-disclosure onboarding-box">
               <summary><span>Agent-readable setup metadata</span><small>discover_self manifest and OKF paths</small></summary>
               <button id="copyDiscoverBtn" type="button" class="small-btn-glow">Run discover_self</button>
@@ -576,6 +600,6 @@
 
       </section>
     </main>
-  <script type="module" src="./app.js?v=grok-v0.6.0-r2"></script>
+  <script type="module" src="./app.js?v=grok-v0.6.0-r3"></script>
   </body>
 </html>

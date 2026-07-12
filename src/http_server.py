@@ -26,6 +26,8 @@ from starlette.responses import JSONResponse, Response, StreamingResponse
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
+from .version import UI_ASSET_VERSION
+
 from .identity import (
     _ACTIVE_CLIENT_ID,
     _ACTIVE_SESSION_ID,
@@ -854,6 +856,46 @@ class CSPMiddleware:
         await self.app(scope, receive, send_with_csp)
 
 
+class StaticAssetCacheMiddleware:
+    """ASGI middleware that stamps ``Cache-Control: no-cache`` on /ui and /docs
+    responses.
+
+    Starlette's ``StaticFiles`` emits ETag/Last-Modified but no Cache-Control,
+    so browsers apply heuristic freshness and can pair a stale cached
+    ``index.html`` with freshly fetched ``app.js`` — the skew that made the
+    Control Center discard rendered agent answers. ``no-cache`` keeps caching
+    (conditional requests answer 304 via the existing ETags) but forces
+    revalidation, so HTML and JS always come from the same release.
+    """
+
+    _PREFIXES = ("/ui", "/docs")
+
+    def __init__(self, app):
+        self.app = app
+
+    def _applies(self, path: str) -> bool:
+        # Boundary-correct prefix match: "/uix" must not inherit the policy.
+        return any(_path_matches_prefix(path, prefix) for prefix in self._PREFIXES)
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http" or not self._applies(scope.get("path", "")):
+            await self.app(scope, receive, send)
+            return
+
+        async def send_with_cache_control(message):
+            if message["type"] == "http.response.start":
+                headers = [
+                    (name, value)
+                    for name, value in (message.get("headers") or [])
+                    if name.lower() != b"cache-control"
+                ]
+                headers.append((b"cache-control", b"no-cache"))
+                message["headers"] = headers
+            await send(message)
+
+        await self.app(scope, receive, send_with_cache_control)
+
+
 def _validated_https_url(value: str) -> Optional[str]:
     """Return a normalized public HTTPS URL, or ``None`` when unsafe.
 
@@ -1075,6 +1117,7 @@ async def runtimez(request: Request) -> JSONResponse:
         {
             "runtime": get_unigrok_runtime(),
             "transport": "http",
+            "ui_asset_version": UI_ASSET_VERSION,
             "service": {
                 "mode": "contributor" if PathResolver.contributor_mode() else "stable",
                 "workspace_attached": PathResolver.get_workspace_root() is not None,
@@ -2183,6 +2226,7 @@ def create_app(*, bound_host: Optional[str] = None) -> Starlette:
             Middleware(RequestIdMiddleware),
             Middleware(RequestBodyLimitMiddleware),
             Middleware(CSPMiddleware),
+            Middleware(StaticAssetCacheMiddleware),
             Middleware(MCPOriginMiddleware),
             Middleware(GatewayAuthMiddleware, bound_host=effective_bound_host),
             Middleware(ModeDialContextMiddleware),

@@ -201,7 +201,7 @@ and plane. MCP `agent` responses also carry structured execution metadata.
 These values describe the gateway request that produced the response. A
 zero-cost local FAQ lookup is documentation retrieval, not a model invocation.
 
-The Usage & Telemetry tab does not combine API-key billing with SuperGrok CLI
+The Usage & Costs tab does not combine API-key billing with SuperGrok CLI
 activity. API spend is exact per response. CLI activity is tracked locally,
 but xAI exposes no SuperGrok quota/spend API, so subscription cost is shown as
 unknown/included rather than a misleading `$0`. Optional Management API

@@ -1,38 +1,17 @@
+/* Shared palette/identity tokens live in tokens.css (linked before this
+   sheet). This root keeps only Control-Center layout variables. The panel
+   min/max pairs below are the single source of truth for the JS layout
+   controller's LAYOUT_LIMITS — change them here, not in app.js. */
 :root {
-  color-scheme: dark;
-  --page: #060d13;
-  --page-deep: #030609;
-  --surface: rgba(13, 27, 42, 0.65);
-  --surface-soft: rgba(22, 38, 57, 0.5);
-  --surface-strong: rgba(27, 51, 79, 0.85);
-  --ink: #f0f6fc;
-  --ink-soft: #8b9eb0;
-  /* Raised from #4e6172 (~3:1) to clear WCAG 4.5:1 for the small labels and
-     table headers that use it. */
-  --ink-faint: #7d93a6;
-  --border: rgba(79, 231, 255, 0.15);
-  --border-strong: rgba(79, 231, 255, 0.35);
-  --cyan: #4fe7ff;
-  --cyan-soft: rgba(79, 231, 255, 0.08);
-  --teal: #16f0ae;
-  --teal-soft: rgba(22, 240, 174, 0.08);
-  --orange: #ff8c3a;
-  --orange-soft: rgba(255, 140, 58, 0.08);
-  --red: #ff5f78;
-  --red-soft: rgba(255, 95, 120, 0.08);
-  --shadow: 0 16px 48px rgba(0, 0, 0, 0.45);
-  --glow-cyan: 0 0 20px rgba(79, 231, 255, 0.18);
-  --glow-teal: 0 0 20px rgba(22, 240, 174, 0.18);
-  --glow-orange: 0 0 20px rgba(255, 140, 58, 0.18);
-  --radius: 12px;
-  --radius-sm: 6px;
-  --transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   --nav-width: 200px;
+  --nav-min: 148px;
+  --nav-max: 340px;
   --inspector-width: 280px;
+  --inspector-min: 210px;
+  --inspector-max: 460px;
   --rail-width: 44px;
   --splitter-width: 4px;
   --workbench-min: 300px;
-  font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
 * {
@@ -552,8 +531,10 @@ textarea:focus {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 16px;
-  min-height: 200px;
-  max-height: 450px;
+  /* Viewport-relative with clamps: the chat log grows with the window
+     instead of freezing at a fixed pixel height on tall screens. */
+  min-height: clamp(160px, 28vh, 260px);
+  max-height: clamp(260px, 55vh, 680px);
   overflow-y: auto;
   display: flex;
   flex-direction: column;
@@ -691,9 +672,20 @@ pre {
 /* Schema layouts */
 .schemas-layout {
   display: grid;
-  grid-template-columns: 200px minmax(0, 1fr);
+  grid-template-columns: auto minmax(0, 1fr);
   gap: 20px;
   flex-grow: 1;
+  min-height: 0;
+}
+
+/* Native CSS resize: the sidebar column is user-draggable within clamps.
+   resize only works with a non-visible overflow, so pair them. */
+.schema-list-container {
+  width: 200px;
+  min-width: 148px;
+  max-width: min(340px, 45cqw);
+  resize: horizontal;
+  overflow: auto;
 }
 
 .schema-nav-buttons {
@@ -734,9 +726,18 @@ pre {
 /* OKF layout */
 .okf-layout {
   display: grid;
-  grid-template-columns: 220px minmax(0, 1fr);
+  grid-template-columns: auto minmax(0, 1fr);
   gap: 20px;
   flex-grow: 1;
+  min-height: 0;
+}
+
+.okf-sidebar {
+  width: 220px;
+  min-width: 148px;
+  max-width: min(340px, 45cqw);
+  resize: horizontal;
+  overflow: auto;
 }
 
 .okf-file-list {
@@ -781,12 +782,12 @@ pre {
 .markdown-preview {
   background: var(--surface);
   border: 1px solid var(--border);
-  padding: 24px;
+  padding: clamp(12px, 2.4cqw, 24px);
   border-radius: var(--radius);
   overflow-y: auto;
   font-size: 14px;
   line-height: 1.6;
-  max-height: 500px;
+  max-height: min(62vh, 680px);
 }
 
 .markdown-preview h1,
@@ -1058,7 +1059,7 @@ pre {
 
 .metrics-detail-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.35fr) minmax(300px, 0.65fr);
+  grid-template-columns: minmax(0, 1.35fr) minmax(min(300px, 100%), 0.65fr);
   gap: 16px;
   margin: 16px 0;
 }
@@ -1229,7 +1230,7 @@ pre {
 /* Plane-aware model catalog */
 .routing-policy-card {
   display: grid;
-  grid-template-columns: minmax(180px, 0.45fr) minmax(260px, 0.8fr) minmax(260px, 1fr);
+  grid-template-columns: minmax(min(180px, 100%), 0.45fr) minmax(min(260px, 100%), 0.8fr) minmax(min(260px, 100%), 1fr);
   align-items: center;
   gap: 18px;
   border: 1px solid var(--border-strong);
@@ -1419,7 +1420,7 @@ pre {
 
 .routing-receipt summary {
   display: grid;
-  grid-template-columns: minmax(210px, 1fr) minmax(150px, 0.8fr) minmax(210px, auto);
+  grid-template-columns: minmax(min(210px, 100%), 1fr) minmax(min(150px, 100%), 0.8fr) minmax(min(210px, 100%), auto);
   gap: 12px;
   align-items: center;
   padding: 12px 14px;
@@ -1453,7 +1454,7 @@ pre {
 .receipt-facts b { color: var(--ink); }
 .receipt-json {
   margin: 12px 0 0;
-  max-height: 300px;
+  max-height: min(40vh, 360px);
   overflow: auto;
   font-size: 10px;
   color: var(--ink-soft);
@@ -1535,6 +1536,44 @@ pre {
   line-height: 1.55;
 }
 
+/* One-action onboarding card, shown only while the gateway is not ready. */
+.setup-quickstart {
+  margin-top: 14px;
+  padding: 16px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--cyan-soft);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.setup-quickstart.hidden {
+  display: none !important;
+}
+
+.setup-quickstart pre {
+  background: rgba(3, 6, 9, 0.7);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  overflow-x: auto;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.quickstart-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.quickstart-note {
+  font-size: 11px;
+  color: var(--ink-soft);
+}
+
 .console-grid[data-density="compact"] .topbar { min-height: 42px; padding-block: 4px; }
 .console-grid[data-density="compact"] .eyebrow,
 .console-grid[data-density="compact"] .panel-desc { display: none; }
@@ -1577,6 +1616,11 @@ pre {
   .metrics-detail-grid,
   .metrics-detail-grid.compact,
   .model-plane-grid { grid-template-columns: minmax(0, 1fr); }
+  /* Stacked single-column: the draggable sidebar width no longer applies.
+     !important because a native resize drag persists as an inline width
+     style, which would otherwise win over this reset with no handle left. */
+  .schema-list-container,
+  .okf-sidebar { width: auto !important; max-width: none !important; resize: none; }
   .panel-header { align-items: flex-start; gap: 8px; }
   .estimator-row { align-items: flex-start; flex-direction: column; gap: 6px; }
 }
@@ -1784,7 +1828,9 @@ pre {
   color: var(--ink-soft);
 }
 
-@media (max-width: 800px) {
+/* The credential alert sits directly in the app shell, so it reflows on the
+   shell container's width rather than the viewport. */
+@container app-shell (max-width: 800px) {
   .credential-alert,
   .credential-alert-actions {
     align-items: stretch;
@@ -1892,7 +1938,11 @@ pre {
   user-select: none;
 }
 
-@media (max-width: 1300px) {
+/* Content reflow is driven by the WORKBENCH's own width, not the viewport:
+   the workspace panes are sized continuously by the layout controller, so a
+   narrow workbench beside a wide inspector must still reflow. These replace
+   the old viewport media queries that could never see pane widths. */
+@container workbench (max-width: 1080px) {
   .metrics-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -1907,8 +1957,11 @@ pre {
   }
 }
 
-@media (max-width: 1050px) {
-  .metrics-grid {
+@container workbench (max-width: 760px) {
+  .metrics-grid,
+  .metrics-detail-grid,
+  .metrics-detail-grid.compact,
+  .model-plane-grid {
     grid-template-columns: 1fr;
   }
 
@@ -1920,40 +1973,15 @@ pre {
   .metrics-actions {
     width: 100%;
     justify-content: space-between;
-  }
-
-  .routing-policy-card {
-    grid-template-columns: 1fr;
-  }
-
-  .model-plane-grid {
-    grid-template-columns: 1fr;
-  }
-}
-
-/* Content reflow only. The host is an IDE webview, not a mobile page; the
-   workspace columns are controlled continuously by the layout controller. */
-@media (max-width: 768px) {
-  .metrics-grid,
-  .metrics-detail-grid,
-  .metrics-detail-grid.compact,
-  .model-plane-grid {
-    grid-template-columns: 1fr;
+    margin-top: 12px;
   }
 
   .routing-receipt summary { grid-template-columns: 1fr; gap: 6px; }
   .receipt-operational { text-align: left; padding-left: 18px; }
 
-  .metrics-actions {
-    width: 100%;
-    justify-content: space-between;
-    margin-top: 12px;
-  }
-
   .playground-launcher {
     grid-template-columns: 1fr;
   }
-
 }
 
 /* Reduced Motion Respect */

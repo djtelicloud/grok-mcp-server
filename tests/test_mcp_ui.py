@@ -15,8 +15,9 @@ def test_mcp_ui_static_files_are_served(monkeypatch):
     assert index.status_code == 200
     assert "<title>UniGrok MCP v0.6.0 Control Center</title>" in index.text
     assert '<span class="version-badge">v0.6.0</span>' in index.text
-    assert 'script type="module" src="./app.js?v=grok-v0.6.0-r2"' in index.text
-    assert '<link rel="stylesheet" href="./styles.css?v=grok-v0.6.0-r2" />' in index.text
+    assert 'script type="module" src="./app.js?v=grok-v0.6.0-r3"' in index.text
+    assert '<link rel="stylesheet" href="./styles.css?v=grok-v0.6.0-r3" />' in index.text
+    assert '<link rel="stylesheet" href="./tokens.css?v=grok-v0.6.0-r3" />' in index.text
     assert "Control Center" in index.text
     assert "Bearer token" not in index.text
     assert "Agent Playground" in index.text
@@ -335,7 +336,7 @@ def test_mcp_ui_markdown_renderer_is_shared_and_escape_first():
     assert "\\u000E-\\u001F" in renderer.text
     # app.js imports the shared renderer at the current cache-bust version and
     # no longer defines its own.
-    assert 'from "./markdown.js?v=grok-v0.6.0-r2"' in script.text
+    assert 'from "./markdown.js?v=grok-v0.6.0-r3"' in script.text
     assert "import { parseMarkdown" in script.text
     assert "function parseMarkdown" not in script.text
     assert "renderMarkdownInto" in script.text
@@ -448,3 +449,126 @@ def test_mcp_ui_security_csp_headers():
     csp = index.headers["content-security-policy"]
     assert "default-src 'self'" in csp
     assert "frame-ancestors 'none'" in csp
+
+
+def test_mcp_ui_assets_are_never_heuristically_cached():
+    """Regression contract for the stale-skew incident: StaticFiles emits
+    ETag/Last-Modified but no Cache-Control, so browsers heuristically cached
+    index.html and paired it with a newer app.js — renderFactsPane then threw
+    on missing receipt ids and a paid agent answer was discarded. no-cache
+    keeps 304 revalidation cheap while forcing HTML and JS to stay in step."""
+    with TestClient(create_app(), base_url="http://localhost:8080") as client:
+        index = client.get("/ui/")
+        script = client.get("/ui/app.js")
+        tokens = client.get("/ui/tokens.css")
+        okf = client.get("/docs/okf/okf-manifest.json")
+        health = client.get("/healthz")
+
+    for response in (index, script, tokens, okf):
+        assert response.status_code == 200
+        assert response.headers["cache-control"] == "no-cache"
+    # Non-static routes keep their own cache policies.
+    assert health.headers.get("cache-control") != "no-cache"
+
+
+def test_mcp_ui_asset_version_is_single_sourced():
+    """Every copy of the cache-bust token must agree: src/version.py, the
+    index.html meta/link/script pins, the markdown.js import inside app.js,
+    the app.js handshake constant, and the swarm.html tokens link. A skewed
+    pair is exactly the failure the version handshake exists to catch."""
+    from src.version import UI_ASSET_VERSION
+
+    with TestClient(create_app(), base_url="http://localhost:8080") as client:
+        index = client.get("/ui/").text
+        script = client.get("/ui/app.js").text
+        swarm = client.get("/ui/swarm.html").text
+        runtime = client.get("/runtimez").json()
+
+    assert f'<meta name="unigrok-ui-version" content="{UI_ASSET_VERSION}" />' in index
+    assert f'href="./tokens.css?v={UI_ASSET_VERSION}"' in index
+    assert f'href="./styles.css?v={UI_ASSET_VERSION}"' in index
+    assert f'src="./app.js?v={UI_ASSET_VERSION}"' in index
+    assert f'const UI_ASSET_VERSION = "{UI_ASSET_VERSION}"' in script
+    assert f'from "./markdown.js?v={UI_ASSET_VERSION}"' in script
+    assert f'href="./tokens.css?v={UI_ASSET_VERSION}"' in swarm
+    assert runtime["ui_asset_version"] == UI_ASSET_VERSION
+    # The handshake self-heals a stale cached page with one reload, then warns.
+    assert "enforceUiVersionHandshake" in script
+    assert "unigrok-ui-version" in script
+
+
+def test_mcp_ui_receipt_pane_cannot_discard_answers():
+    """The facts pane is diagnostics: rendering it is wrapped so a DOM error
+    there can never re-throw into callAgent and replace an already-received
+    agent answer with 'Invocation failed'. All pane writes are null-safe."""
+    with TestClient(create_app(), base_url="http://localhost:8080") as client:
+        script = client.get("/ui/app.js").text
+
+    assert "function setText(" in script
+    assert "Receipt pane render failed" in script
+    # The pane renders inside its own try/catch at the call site.
+    call_site = script.split('if (toolName === "agent")', 1)[1].split("return responsePayload", 1)[0]
+    assert "try" in call_site and "catch" in call_site
+    # No unguarded direct innerText writes remain inside renderFactsPane.
+    pane_body = script.split("function renderFactsPane", 1)[1].split("\n}\n", 1)[0]
+    assert '$("fact' not in pane_body.replace('setText("fact', "")
+
+
+def test_mcp_ui_not_ready_shows_one_onboarding_action():
+    """A missing/unready gateway must produce a copyable quick-start, not a
+    dead end. The card carries the exact README bootstrap commands and no
+    environment-variable homework."""
+    with TestClient(create_app(), base_url="http://localhost:8080") as client:
+        index = client.get("/ui/").text
+        script = client.get("/ui/app.js").text
+
+    assert 'id="quickStartCard"' in index
+    assert "git clone https://github.com/djtelicloud/grok-mcp-server.git" in index
+    assert "docker compose up --build -d" in index
+    assert 'id="copyQuickStartBtn"' in index
+    # Shown only when the gateway is unreachable; a reachable gateway failing
+    # a readiness check names the failing check instead of suggesting a
+    # from-scratch reinstall.
+    assert 'classList.toggle("hidden", Boolean(ready) || Boolean(detailText))' in script
+
+
+def test_mcp_ui_local_surfaces_link_the_project_site():
+    """Navigation is one product: both local pages link grokmcp.org, and the
+    swarm page links back to the Control Center."""
+    with TestClient(create_app(), base_url="http://localhost:8080") as client:
+        index = client.get("/ui/").text
+        swarm = client.get("/ui/swarm.html").text
+
+    assert 'id="nav-link-site"' in index
+    assert 'https://grokmcp.org' in index
+    assert 'https://grokmcp.org' in swarm
+    assert 'href="./index.html"' in swarm
+
+
+def test_mcp_ui_layout_limits_come_from_css():
+    """Panel min/max bounds are authored once in styles.css custom properties;
+    app.js reads them instead of duplicating pixel numbers."""
+    with TestClient(create_app(), base_url="http://localhost:8080") as client:
+        script = client.get("/ui/app.js").text
+        styles = client.get("/ui/styles.css").text
+
+    assert "--nav-min: 148px" in styles
+    assert "--inspector-max: 460px" in styles
+    assert 'cssPx("--nav-min", 148)' in script
+    assert 'cssPx("--inspector-max", 460)' in script
+
+
+def test_mcp_ui_reflow_is_container_driven():
+    """Pane content reflows on the workbench container's own width, not the
+    viewport: a narrow workbench beside a wide inspector must still stack, so
+    the old viewport media queries for those grids are gone."""
+    with TestClient(create_app(), base_url="http://localhost:8080") as client:
+        styles = client.get("/ui/styles.css").text
+
+    assert "@container workbench (max-width: 1080px)" in styles
+    assert "@container workbench (max-width: 760px)" in styles
+    assert "@media (max-width: 1300px)" not in styles
+    assert "@media (max-width: 1050px)" not in styles
+    assert "@media (max-width: 768px)" not in styles
+    # Fixed sidebar columns became user-resizable with clamps.
+    assert "resize: horizontal" in styles
