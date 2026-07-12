@@ -12,8 +12,10 @@ from src.http_server import (
     ModeDialContextMiddleware,
     _ACTIVE_MODE_DIAL,
     _derive_http_caller,
+    _message_content_size,
     _resolve_bind_host,
     _resolve_bind_port,
+    _validate_chat_payload,
     create_app,
     create_public_mcp,
     public_agent,
@@ -723,6 +725,51 @@ def test_chat_completion_rejects_message_limits(monkeypatch):
 
     assert res.status_code == 413
     assert res.json()["error"]["code"] == "request_too_large"
+
+
+def test_message_content_size_uses_semantic_chars_for_text_and_json_for_structures():
+    text = 'say "hello"\nwith a slash \\'
+    structured = [{"type": "text", "text": text}]
+
+    assert _message_content_size(text) == len(text)
+    assert _message_content_size(structured) == len(
+        json.dumps(structured, ensure_ascii=False, separators=(",", ":"))
+    )
+    assert _message_content_size(None) == len("null")
+
+
+def test_chat_payload_enforces_text_character_boundaries(monkeypatch):
+    monkeypatch.setenv("UNIGROK_MAX_MESSAGES", "10")
+    monkeypatch.setenv("UNIGROK_MAX_MESSAGE_CHARS", "256")
+    monkeypatch.setenv("UNIGROK_MAX_TOTAL_MESSAGE_CHARS", "1024")
+
+    at_message_limit = {"messages": [{"role": "user", "content": "\n" * 256}]}
+    assert _validate_chat_payload(at_message_limit) is None
+
+    over_message_limit = {"messages": [{"role": "user", "content": "x" * 257}]}
+    assert _validate_chat_payload(over_message_limit).status_code == 413
+
+    at_total_limit = {
+        "messages": [{"role": "user", "content": "x" * 256} for _ in range(4)]
+    }
+    assert _validate_chat_payload(at_total_limit) is None
+
+    over_total_limit = {
+        "messages": [{"role": "user", "content": "x" * 256} for _ in range(5)]
+    }
+    assert _validate_chat_payload(over_total_limit).status_code == 413
+
+
+def test_chat_payload_keeps_structured_content_on_compact_json_limit(monkeypatch):
+    monkeypatch.setenv("UNIGROK_MAX_MESSAGE_CHARS", "256")
+    structured = [{"type": "text", "text": "x" * 256}]
+
+    assert _message_content_size(structured) > 256
+    response = _validate_chat_payload(
+        {"messages": [{"role": "user", "content": structured}]}
+    )
+
+    assert response.status_code == 413
 
 
 def test_agent_http_errors_do_not_expose_exception_text(monkeypatch):

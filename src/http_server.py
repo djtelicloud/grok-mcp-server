@@ -135,6 +135,7 @@ def _request_error_message(default: str) -> str:
 
 
 def _message_content_size(content: Any) -> int:
+    """Count text characters directly and structured content as compact JSON."""
     if isinstance(content, str):
         return len(content)
     try:
