@@ -181,9 +181,9 @@ def _validate_chat_payload(payload: Any) -> Optional[JSONResponse]:
     return None
 
 
-def _api_keys() -> set[str]:
+def _api_keys() -> tuple[str, ...]:
     raw = os.environ.get("UNIGROK_API_KEYS", "")
-    return {part.strip() for part in raw.split(",") if part.strip()}
+    return tuple(dict.fromkeys(part.strip() for part in raw.split(",") if part.strip()))
 
 
 def _auth_is_active() -> bool:
@@ -614,20 +614,15 @@ class MCPOriginMiddleware:
 
 
 def _caller_key_alias(token: Optional[str]) -> Optional[str]:
-    """Stable, non-reversible alias for the configured API key a bearer token
-    matched: 'key-' + the first 8 hex chars of the key's SHA-256. Keeps
-    per-key attribution without ever echoing key material into telemetry.
+    """Stable alias for the configured API key a bearer token matched:
+    ``key-`` plus its one-based position in ``UNIGROK_API_KEYS``. Keeps per-key
+    attribution without deriving telemetry identifiers from secret material.
     None when the token matches no configured key."""
     if not token:
         return None
-    for key in _api_keys():
+    for index, key in enumerate(_api_keys(), start=1):
         if _tokens_match(token, key):
-            digest = hashlib.blake2s(
-                key.encode("utf-8", "surrogateescape"),
-                digest_size=4,
-                person=b"unigrok",
-            ).hexdigest()
-            return f"key-{digest}"
+            return f"key-{index}"
     return None
 
 
