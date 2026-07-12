@@ -1,4 +1,5 @@
 from src.routing import (
+    _messages_have_image,
     choose_model_candidate,
     classify_route,
     extract_routing_features,
@@ -28,6 +29,41 @@ def test_image_content_hard_routes_to_vision():
     assert classify_route(mode="auto", thinking_mode=False, features=features) == (
         "vision", "vision_capability"
     )
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        {"type": "image"},
+        {"type": "INPUT_IMAGE"},
+        {"image_url": {"url": "data:"}},
+        [{"wrapper": [{"type": "image_url"}]}],
+    ],
+)
+def test_image_detection_preserves_nested_marker_variants(content):
+    assert _messages_have_image([{"role": "user", "content": content}]) is True
+
+
+def test_image_detection_ignores_nested_scalars():
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "image_url is only prose"},
+                {"metadata": {"attempts": 3, "ready": True, "value": None}},
+            ],
+        }
+    ]
+
+    assert _messages_have_image(messages) is False
+
+
+def test_image_detection_handles_payloads_deeper_than_python_recursion_limit():
+    content = {"type": "image_url", "image_url": {"url": "data:"}}
+    for _ in range(1500):
+        content = [content]
+
+    assert _messages_have_image([{"role": "user", "content": content}]) is True
 
 
 def test_route_classes_cover_research_planning_coding_and_borderline():

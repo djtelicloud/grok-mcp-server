@@ -267,7 +267,7 @@ async def test_xai_upload_file_returns_structured_file_id(tmp_path):
     fake_client = MagicMock()
     fake_client.files.upload.return_value = fake_file
 
-    with patch("src.tools.system.PathResolver.validate_path", return_value=report), \
+    with patch("src.tools.system._resolve_workspace_file", return_value=report), \
          patch("src.tools.system.get_xai_client", return_value=fake_client):
         res = await xai_upload_file(str(report))
 
@@ -883,9 +883,34 @@ async def test_upload_rejects_oversize_input(tmp_path, monkeypatch):
     large_file = tmp_path / "large.bin"
     large_file.write_bytes(b"x" * 2048)
     monkeypatch.setenv("UNIGROK_MAX_UPLOAD_BYTES", "1024")
-    with patch("src.tools.system.PathResolver.validate_path", return_value=large_file):
+    with patch("src.tools.system._resolve_workspace_file", return_value=large_file):
         with pytest.raises(ValueError, match="limit"):
             await xai_upload_file(str(large_file))
+
+
+@pytest.mark.asyncio
+async def test_upload_blocks_ignored_private_file(tmp_path, monkeypatch):
+    from src.server import xai_upload_file
+
+    (tmp_path / ".gitignore").write_text(".env\n", encoding="utf-8")
+    secret = tmp_path / ".env"
+    secret.write_text("SECRET=leak", encoding="utf-8")
+    monkeypatch.setattr("src.tools.system.PathResolver.get_workspace_root", lambda: tmp_path)
+
+    with patch("src.tools.system.PathResolver.validate_path", return_value=secret):
+        with pytest.raises(PermissionError, match="ignored or private"):
+            await xai_upload_file(str(secret))
+
+
+@pytest.mark.asyncio
+async def test_read_local_file_reports_unavailable_without_workspace(monkeypatch):
+    from src.server import read_local_file
+
+    monkeypatch.setattr("src.tools.system.PathResolver.get_workspace_root", lambda: None)
+
+    res = await read_local_file("notes.txt")
+
+    assert "[UNAVAILABLE] No workspace is attached" in res
 
 
 @pytest.mark.asyncio

@@ -2,7 +2,7 @@
 
 Last updated: 2026-07-12
 Owner: Codex
-Status: Swarm v2 rollout and maintainer PR sweep complete
+Status: PR #33 integrated; PR #32 remains queued for maintainer review
 
 This is the project-scoped handoff for new Codex chats. Resolve drift-prone
 Git, CI, runtime, DNS, and cloud identifiers live before acting. Never record
@@ -10,20 +10,28 @@ credentials, OAuth codes, tokens, or private keys here.
 
 ## Completed repository state
 
+- PR #33 is merged on protected `origin/main` at merge commit
+  `d503bf30a9b8d7f3708983b830eef13fd5e03568`. Its reviewed head
+  `b8f615a153a8ce96509c0f1f501e68a5118335fe` hardened upload path policy,
+  deduplicated API tool result construction, and repaired workspace-unavailable
+  handling after review. The landing gate passed 1,071 tests.
 - Protected `origin/main` and visible local `main` were synchronized after PR
-  #28. Use `scripts/land-status` for the current merge commit; this tracked file
+  #33. Use `scripts/land-status` for the current merge commit; this tracked file
   cannot name the merge commit that contains its own update.
 - The Swarm v2 implementation is integrated: bounded paste-code analysis,
   function-aware search setup, goal-specific champion selection, strict status
   v2 receipts, elite-offspring lineage, deterministic AST transforms, and the
   copy-only paste workflow all ship from protected main.
-- The full landing suite passed 1,063 tests. Offline evals passed 12/12 and the
+- The full landing suite passed 1,069 tests. Offline evals passed 12/12 and the
   deterministic OKF bundle was clean.
 - The maintainer sweep repaired and merged PR #22's secret-redaction fast path,
   PR #23's plain-text message-size fast path, and PR #28's SQLite scalar-count
   refactor with focused contract tests. PR #24 was closed without merge because
   replacing JSON validation boundaries with `deepcopy` introduced correctness
   regressions and left no safe optimization after repair.
+- PR #30's routing image detector was repaired and merged with container-only
+  iterative traversal, marker-equivalence tests, and recursion-depth coverage;
+  its verified representative speedup was 2.9%, not the submitted 39% claim.
 - The contribution contract is interface-independent: authorized IDE agents
   may test, commit, push only their own agent-prefixed branch, and open or
   update its draft PR. Any explicitly acting Codex/project-admin surface may
@@ -82,5 +90,7 @@ credentials, OAuth codes, tokens, or private keys here.
 
 ## Remaining work
 
-No release, deployment, integration, issue-tracker, or runtime gate remains for
-this rollout. Future work should start from a new scoped issue or handoff.
+- Draft PR #32 (`copilot/swarm-utils-analytics`, submitted head
+  `a2adc44969d3cec5dbf2c29524a4ad7d75382d25`) remains open and has not been
+  reviewed or landed in this handoff.
+- No release, deployment, or runtime gate remains for PR #33.
