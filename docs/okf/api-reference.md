@@ -836,6 +836,22 @@ def apply_byte_replacement(source: bytes, start: int, end: int, replacement: byt
 
 Exact byte splice: everything outside [start:end) is byte-identical.
 
+### Function: `is_ast_identical` {#swarm-ast_utils-is_ast_identical}
+
+```python
+def is_ast_identical(original_span: bytes, replacement: bytes) -> bool
+```
+
+**Keywords:** is, ast, identical
+
+True when the replacement parses to the SAME AST as the original span
+(a formatting/comment-only no-op mutant) — evaluating it would just
+re-measure the baseline, so the funnel discards it for free like a
+duplicate hash. Indented method spans are dedented before parsing; any
+parse failure returns False so the funnel proceeds and judges the
+candidate properly (this check may only ever discard true no-ops, never
+hide a real mutant).
+
 ## swarm/config.py {#swarm-config}
 
 ### Function: `swarm_mode` {#swarm-config-swarm_mode}
@@ -914,6 +930,19 @@ Heartbeat staleness horizon: a running task whose row has not been
 touched for this long is reported failed_stale (the runner touches
 updated_at after every candidate). Deliberately derived from the eval
 timeout — a healthy swarm can far exceed JobManager's global default.
+
+### Function: `swarm_ruff_filter` {#swarm-config-swarm_ruff_filter}
+
+```python
+def swarm_ruff_filter() -> bool
+```
+
+**Keywords:** swarm, ruff, filter
+
+UNIGROK_SWARM_RUFF_FILTER=0/false/no/off disables the $0 ruff static
+fast-gate between compile() and the sandbox stages. The gate only saves
+sandbox seconds — the tests stage still catches everything it would
+have — so disabling it is always safe.
 
 ### Function: `reset_swarm_state` {#swarm-config-reset_swarm_state}
 
@@ -1195,6 +1224,30 @@ contract command; medians + raw samples (for noise-floor math).
 Raises SandboxError when the command fails or breaks the contract —
 for the BASELINE that fails the task; for a mutant the engine treats
 it as an infeasible candidate at the bench stage.
+
+## swarm/static_gate.py {#swarm-static_gate}
+
+### Function: `ruff_bin` {#swarm-static_gate-ruff_bin}
+
+```python
+def ruff_bin() -> Optional[str]
+```
+
+**Keywords:** ruff, bin
+
+The venv's ruff first (a pinned project dependency), PATH second.
+
+### Function: `count_violations` {#swarm-static_gate-count_violations}
+
+```python
+async def count_violations(source: bytes, timeout: float=10.0) -> Optional[int]
+```
+
+**Keywords:** count, violations
+
+F821/F823 violation count for `source`, or None when the gate cannot
+run (ruff missing, timeout, or internal error) — callers must treat None
+as gate-disabled, never as clean.
 
 ## tools/chats.py {#tools-chats}
 

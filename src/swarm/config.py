@@ -111,6 +111,16 @@ def swarm_stale_after_sec() -> float:
     return 3.0 * swarm_eval_timeout()
 
 
+def swarm_ruff_filter() -> bool:
+    """UNIGROK_SWARM_RUFF_FILTER=0/false/no/off disables the $0 ruff static
+    fast-gate between compile() and the sandbox stages. The gate only saves
+    sandbox seconds — the tests stage still catches everything it would
+    have — so disabling it is always safe."""
+    return os.environ.get("UNIGROK_SWARM_RUFF_FILTER", "").strip().lower() not in (
+        "0", "false", "no", "off"
+    )
+
+
 def reset_swarm_state() -> None:
     """Test isolation for module-level flags."""
     global _MODE_WARNED

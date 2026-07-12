@@ -127,6 +127,7 @@ class SwarmRunner:
                     budget_usd=spec["budget_usd"],
                     seed=spec["seed"],
                     allow_unstable_bench=spec.get("allow_unstable_bench", False),
+                    ruff_filter=swarm_config.swarm_ruff_filter(),
                 ),
                 goal=spec.get("goal", ""),
                 on_candidate=lambda c: self._persist_candidate(task_id, c),

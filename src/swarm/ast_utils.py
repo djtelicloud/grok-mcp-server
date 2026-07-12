@@ -9,6 +9,7 @@ rejected at task start rather than discovered as corrupted files at apply.
 from __future__ import annotations
 
 import ast
+import textwrap
 from typing import List, Optional, Tuple
 
 import tree_sitter_python
@@ -171,3 +172,19 @@ def apply_byte_replacement(source: bytes, start: int, end: int, replacement: byt
     if not (0 <= start <= end <= len(source)):
         raise ValueError("replacement span out of bounds")
     return source[:start] + replacement + source[end:]
+
+
+def is_ast_identical(original_span: bytes, replacement: bytes) -> bool:
+    """True when the replacement parses to the SAME AST as the original span
+    (a formatting/comment-only no-op mutant) — evaluating it would just
+    re-measure the baseline, so the funnel discards it for free like a
+    duplicate hash. Indented method spans are dedented before parsing; any
+    parse failure returns False so the funnel proceeds and judges the
+    candidate properly (this check may only ever discard true no-ops, never
+    hide a real mutant)."""
+    try:
+        a = ast.parse(textwrap.dedent(original_span.decode("utf-8")))
+        b = ast.parse(textwrap.dedent(replacement.decode("utf-8")))
+    except (SyntaxError, UnicodeDecodeError, ValueError):
+        return False
+    return ast.dump(a) == ast.dump(b)
