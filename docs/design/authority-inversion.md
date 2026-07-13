@@ -3,7 +3,7 @@
 - **Status:** Accepted target design; implementation has not started
 - **Date:** 2026-07-13
 - **Decision owner:** Project maintainer, with Codex as integration authority
-- **Scope:** Runtime authority, continuity, memory, learning, and verification
+- **Scope:** Runtime authority, continuity, memory, learning, verification, and distribution
 
 This document defines the target runtime behind UniGrok's single public
 `agent` experience. It is intentionally a design specification rather than a
@@ -111,6 +111,70 @@ another tenant without an explicit data policy. IDE agents, GitHub MCP, Docker
 Agent, and Gordon are discoverable capabilities behind `@Grok`, not separate
 public identities. Docker is an optional runtime/capability adapter, not a
 public installation prerequisite.
+
+### 2.1 Runtime distribution: persistent core, opportunistic edge
+
+Execution placement does not change the authority ladder. The target product
+uses one persistent core plus replaceable edge and capability adapters:
+
+| Layer | Target role | Non-negotiable boundary |
+|---|---|---|
+| `@Grok` LLM tier | First semantic authority over every compatible live capability | UI framework, process host, and accelerator choice never grant or remove model authority |
+| Supervised native `uv` Python | Default public durable core: `/mcp`, credentials, Grok API/CLI adapters, objective and episode ledgers, envelope validation, Git/subprocess work, recovery, and the code floor | Closing a browser or lacking Docker cannot stop the base service, discard an objective, or erase its recovery state |
+| HTMX | Control Center forms, HTML fragments, status updates, and SSE-driven progress | Presentation only; `/mcp` remains the canonical structured agent interface and UI fragment routes do not become a second semantic API |
+| WebMCP plus a small JavaScript bridge | Expose the live page and typed function-card descriptors to browser agents | Tab-bound and ephemeral; it owns no credentials, objective truth, durable memory, or headless continuity |
+| Optional UniGrok `app.wasm` | Sandboxed browser execution for compatible Needle shadow/reflex inference and bounded pre/post-processing | It is a UniGrok runtime artifact, not part of the WebMCP protocol, and every result re-enters the same envelope, receipt, and verification path |
+| Optional Mojo/MAX adapter | Accelerate measured native Python hotspots behind unchanged contracts | Python remains the tested fallback; Apple targets use the documented Metal path, and raw Vulkan is not a public product dependency |
+| Optional Docker and Docker Agent adapters | Container operations, stronger isolation, reproducible CI/hosted deployment, and capabilities that genuinely require a container host | Their absence disables only those capabilities; they never disable ordinary UniGrok or become a public installation prerequisite |
+| Optional Gordon handoff | Interactive Docker expertise when a supported Gordon surface is present | Gordon is an external collaborator, not an autonomous recovery dependency; no effectful machine path exists until Docker documents a structured interface and UniGrok proves standing-permission and receipt contracts |
+
+The browser and durable service are deliberately complementary. WebMCP is a
+[Community Group draft](https://webmachinelearning.github.io/webmcp/) whose
+tools exist only while the page is open; current Chrome guidance describes MCP
+as the persistent service and WebMCP as its live browser partner
+([comparison](https://developer.chrome.com/docs/ai/webmcp/compare-mcp)).
+UniGrok may ship an `app.wasm`, but WebMCP does not define or require that
+artifact.
+
+HTMX lets the Python service return HTML fragments instead of maintaining a
+second client-side application state machine
+([documentation](https://htmx.org/docs/)). A small generic bridge reads typed
+tool descriptors rendered with those fragments and registers or unregisters
+them after HTMX swaps. The bridge carries context; it does not hard-code which
+engineering choice Grok must make. Long-running progress can use HTMX's
+[SSE extension](https://htmx.org/extensions/sse/) while receipts and machine
+clients continue to use the canonical structured contracts.
+
+Browser Needle execution is an optimization and provider-offline reflex surface
+only while the durable Python core remains alive; it is never the only copy of
+a required specialist. If the core is down, browser inference is advisory or
+shadow-only and cannot execute actions, promote a model, create a durable
+receipt, or assert a verified outcome. Where a safe portable export is
+supported, native Python and browser WASM executors consume the same
+content-addressed model and gateway contract. Browser inference may use WASM
+or WebGPU through a measured executor such as
+[ONNX Runtime Web](https://onnxruntime.ai/docs/tutorials/web/); an unavailable
+or incompatible browser executor abstains and leaves the native Needle or code
+floor path intact.
+
+Mojo is evaluated only after profiling demonstrates a useful native hotspot.
+It may be installed inside the same `uv`-managed environment and called behind
+the Python contract; it is not assumed to produce `app.wasm`. On Apple silicon,
+the native acceleration path follows Mojo's documented Metal support, while a
+browser implementation uses WebGPU rather than requiring raw Vulkan
+([Mojo GPU model](https://docs.modular.com/mojo/manual/gpu/fundamentals/)).
+
+This is an additive migration. The current Docker path remains supported until
+a native supervised install proves equivalent install, upgrade, boot,
+crash-recovery, rollback, credential-isolation, durable-state, API-plane, and
+available CLI-plane behavior. Runtime-aware onboarding, authentication,
+restart/status controls, Control Center copy, and public documentation must
+land before the default changes; today's Docker-facing surfaces remain current
+truth until then. Only after those gates pass does native `uv` become the
+public default. Docker remains available afterward for container-specific
+work, hosted deployments, reproducible CI, and users who prefer that isolation
+boundary. Gordon remains an optional external handoff until a supported
+machine interface and standing-permission contract are proven.
 
 ## 3. Authority and continuity ladder
 
@@ -719,6 +783,13 @@ for real asynchronous Needle fine-tuning.
   varied, verified examples and passes held-out evaluation.
 - Checkpoint identities are immutable and content-addressed. Promotion changes
   one atomic registry pointer; rollback restores its parent.
+- A checkpoint is distinct from an executor package such as `app.wasm`.
+  Native and browser executors must bind the same checkpoint, contract,
+  catalog, and lineage identities and pass the same held-out conformance suite.
+- The native executor is the durable path. Browser execution is optional and
+  must abstain on unsupported operators, contract drift, or conformance
+  failure; closing the tab cannot make a promoted specialist or code floor
+  unavailable to the service.
 
 ## 11. Two-speed learning flywheel
 
@@ -826,6 +897,16 @@ contract. Later phases do not begin by weakening an earlier gate.
 Automatic public learning, specialist execution, and promotion remain disabled
 until the P0 and P1 truth gates pass.
 
+The distribution track is additive and may proceed in parallel without
+changing authority semantics: prove native-`uv` parity while Docker remains
+available; migrate one Control Center flow to HTMX plus the generic WebMCP
+bridge; add browser WASM only as a conformance-tested shadow executor; and
+switch the public default only after browser-closure and Docker-absence tests
+prove that the durable core and code floor continue. The switch also requires
+runtime-aware onboarding, auth, restart/status, documentation, supervised
+boot/crash recovery, and rollback. Mojo work begins only after profiling
+identifies a measured hotspot.
+
 ### P0 — Truthful labeling
 
 - Add `terminal_type`, `verdict`, and verification metadata without renaming
@@ -867,12 +948,17 @@ rejected uniformly; a simulated outage preserves and resumes its objective.
 ### P3 — Needle shadow runtime
 
 - Add optional Needle runtime/export tooling and specialist registry.
+- Establish the native shadow executor first, then admit an optional browser
+  `app.wasm` executor only after both pass the same contract and golden-case
+  conformance suite.
 - Implement catalog hashes, explicit abstention, shadow predictions, and the
   0/4/8 conditioning experiment.
 - Activate only the v1 `tool_selection` family in shadow.
 
 **Observable gate:** shadow results have complete lineage and never alter live
-execution; the ICL hypothesis has a published keep/kill result.
+execution; the ICL hypothesis has a published keep/kill result; closing the
+browser or running without Docker leaves native shadowing, objective state,
+and the code floor available.
 
 ### P4 — Asynchronous trainer and Needle evaluation
 
@@ -920,6 +1006,7 @@ supervision debt, and is audited on reconnect.
 | D15 | Factory/admin, tenant runtime, and unified public `@Grok` are separate scopes; Docker and discovered agents are optional capabilities behind `@Grok` | Leak contributor mechanics into tenant context or require Docker for public use |
 | D16 | Unified branding always exposes actual decider/verdict; signed policy profiles and owner controls replace technical setup | Hide degraded authority or require customers to author schemas and runbooks |
 | D17 | Stable semantic effect IDs plus hash-linked, fenced objective heads make retries and concurrent resume replay-safe | Derive idempotency from attempts or trust content hashes without ordering/fencing |
+| D18 | A supervised native `uv` Python service is the durable public core; HTMX, WebMCP, `app.wasm`, Mojo, Docker, and Docker Agent are replaceable presentation, reflex, acceleration, or capability adapters; Gordon remains an external handoff until it has a supported machine contract | Put durable autonomy in a browser tab, require Docker for public use, turn HTMX into a second MCP protocol, require raw Vulkan, or pretend an interactive Gordon surface is an autonomous API |
 
 ## 15. Rejected simplifications
 
@@ -935,6 +1022,18 @@ supervision debt, and is audited on reconnect.
   evidence persist, and external prerequisites create event-triggered waits.
 - **"The envelope should choose the safest route."** The envelope validates
   facts and authority. Grok decides intent among valid choices.
+- **"WebMCP plus `app.wasm` replaces the backend."** WebMCP tools are
+  tab-bound; browser execution can accelerate a reflex but cannot own durable
+  objectives, credentials, Git/CLI work, or the code floor.
+- **"HTMX becomes the agent protocol."** HTMX is the Control Center's
+  hypermedia layer. MCP contracts and receipts remain the machine interface.
+- **"Mojo/Vulkan must ship before the design works."** Acceleration is an
+  optional measured adapter with a tested Python fallback, not an authority or
+  availability prerequisite.
+- **"Gordon is already a default autonomous agent API."** Until Docker exposes
+  a supported structured interface and UniGrok proves standing permissions and
+  receipts, Gordon is an optional external handoff, not a recovery or effect
+  executor.
 
 ## 16. Completion criteria for the architecture migration
 
@@ -957,6 +1056,13 @@ The migration is complete only when all of the following are demonstrated:
    technical human engineer decision.
 8. Offline supervision debt is automatically audited, retained until closed,
    and quarantines only the affected family when verification fails.
+9. A supervised native `uv` install passes lifecycle and credential/state
+   parity tests without Docker, including boot, crash recovery, upgrade,
+   rollback, onboarding, auth, restart/status controls, and current docs;
+   closing every browser tab preserves `/mcp`, active objectives, native
+   recovery, and the code floor, while optional HTMX, WebMCP, WASM, Mojo,
+   Docker, and Docker Agent layers only expand capability and Gordon remains a
+   truthful external handoff.
 
 Until these criteria are met, documentation and receipts must distinguish the
 current deterministic router, experimental Needle projections, and target
