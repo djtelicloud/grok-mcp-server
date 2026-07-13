@@ -2,7 +2,7 @@
 
 Last updated: 2026-07-13
 Owner: Codex
-Status: Stage 0.5 provider wiring is in stacked draft PR #67; CI and integration remain
+Status: Stage 0.5 wiring is in stacked draft PR #67; parent CI and integration remain
 
 This is the project-scoped handoff for new Codex chats. Verify drift-prone Git,
 CI, runtime, DNS, cloud, and benchmark state live before acting. Never record
@@ -32,12 +32,16 @@ credentials, OAuth codes, tokens, or private keys here.
   focused campaign/release tests on Python 3.12; Ruff and `git diff --check`
   green; Docker build green with only `.grok/prompts` and `.grok/hyperparams`
   present in the image.
+- GitHub reports PR #67 clean and mergeable. It has no check rollout because
+  `.github/workflows/ci.yml` runs pull-request CI only when the base is `main`;
+  the integrated parent PR #66 head must therefore carry the GitHub CI gate.
 
 ## Remaining gates
 
-- Review the current head of draft PR #67 after GitHub CI completes, then
-  integrate it into `gemini/campaign-gemma-needle-2000-v1` through the normal
-  Codex gate if the exact head remains green.
+- Review the current head of draft PR #67, then integrate it into
+  `gemini/campaign-gemma-needle-2000-v1` through the normal Codex gate. Require
+  the resulting exact parent PR #66 head to pass the GitHub CI checks against
+  `main` before any training campaign proceeds.
 - Do not start Stage 1 generation until the stacked repair is integrated into
   the Gemini campaign branch and its exact head passes CI/Codex review.
 - Do not represent the replay cache as authenticated against a malicious
