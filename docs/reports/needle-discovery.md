@@ -30,9 +30,14 @@ trajectory policy — plus undocumented capabilities found by reading its source
      with pairs-per-card (1 pair → 20%, 12 pairs → 60%)
    - **Zero side-effect on tool-calling** (head-only freeze; generation output
      byte-identical quality before/after)
-   - Implication: **capsules-as-database with Needle as learned retrieval is
-     real.** One 26M checkpoint = generation reflex + semantic retrieval over
-     plain JSON files. No SQLite in the loop anywhere in this lab.
+   - **Baseline check (audit-added): trivial lexical retrieval beats the
+     revived head on the same memory benchmark** — word TF-IDF 86%, char-3gram
+     TF-IDF 92% vs the head's 60% (top-1, identical 50 queries/10 cards).
+     Corrected implication: the revived head is a **candidate shadow ranker**,
+     not a database replacement. The *file-only lifecycle* (datasets,
+     manifests, invalidation, candidate records — no SQLite anywhere in this
+     lab) is demonstrated; the learned component is not yet justified over
+     deterministic lexical retrieval at this scale.
 2. **The architecture is an encoder-decoder** (12-enc/8-dec, attention-only
    blocks, tied embeddings, 8192 BPE) — not a decoder-only LLM. Decoding is
    greedy argmax: **fully deterministic**, the right property for a reflex
@@ -110,16 +115,22 @@ fine-tuning on 145–344 examples takes it to perfect on held-out in-template
 data in 50–160 optimizer steps on CPU. Out-of-template generalization is
 measured separately (Grok-authored OOD set, below).
 
-### Interference test: one checkpoint, seven families — zero interference
+### Interference test — **RESULT INVALID (split contamination; audit-confirmed)**
 
-The combined checkpoint (7 families, ~2.7k examples, 6 epochs, 36 min) scored
-**100% on every family's own held-out split** (route 10/10, observation 10/10,
-recovery 10/10, memory 10/10, tool_selection 60/60, extraction 10/10,
-next_step 60/60†; internal packed-eval 99.2%). First actual measurement of
-the "split specialists only when interference is shown" rule: **at this scale,
-splitting is not justified — one 26M checkpoint serves all families.**
-Caveats: in-template splits only (OOD-level interference untested);
-† next_step inherits its leakage caveat; most splits n=10.
+The combined run concatenated family JSONLs and let the trainer re-split the
+combined file (seed 42) — which selected *different* test rows than the
+per-family splits. Verified contamination of the per-family test rows inside
+the combined TRAINING data: observation 7/10, recovery 10/10, memory 8/10,
+tool_selection 51/60, extraction 10/10, next_step 56/60 — **only routing
+(0/10) stayed clean**, and routing scored 100% either way. The combined
+checkpoint's per-family scores therefore measure memorization of trained
+rows, not interference. **No conclusion about one-vs-many checkpoints can be
+drawn from this run.** Production Needle training remains separated by exact
+output-contract family; the combined checkpoint is retained only as a
+research control. Catastrophic forgetting is neither proven nor disproven
+here. (Root cause: grouped/objective-level split policy must be frozen
+BEFORE any multi-family corpus is assembled — now a mechanical veto for the
+training-packet protocol.)
 
 Footgun F7 discovered en route: needle's trainer computes
 `total_steps = packed_rows // batch × epochs`; when `batch > packed rows` it
@@ -130,9 +141,9 @@ rows and clamps batch size.
 
 ## Undocumented capability probes
 
-### Retrieval revival — CONFIRMED (headline finding #1)
+### Retrieval revival — head revives; loses to lexical baselines (headline finding #1, as corrected)
 
-### Few-shot ICL at inference (kill-criterion experiment) — **KILLED**
+### Few-shot ICL at inference — **tested recipes harm; capability not declared impossible**
 
 Injected k ∈ {0,4,8} verified examples via both channels (tools-JSON smuggling
 à la `build_needle_tools_context`, and query-prefix), against base and tuned
@@ -144,13 +155,16 @@ checkpoints, on the 48-query OOD set (`lab/icl_probe.py`):
 | tuned / query | **45.8%** | 25.0% | 25.0% | 100% |
 | base / either | 0% | 0% | 0% | degrades w/ k |
 
-Monotonic degradation in every condition. At k=8 in the tools channel the
-examples crowd the real tool schemas out of the 1024-token encoder and even
-tool-NAME accuracy collapses. **Needle has no in-context learning; inference-
-time example injection is strictly harmful.** Design consequence (D4): the
-"real-time learning" tier is honest only as (a) minutes-scale retraining and
-(b) contrastive-retrieval revival; the verified-example JSONL channel feeds
-training, never inference context.
+Monotonic degradation in every condition tested. At k=8 in the tools channel
+the examples crowd the real tool schemas out of the 1024-token encoder and
+even tool-NAME accuracy collapses. **Scope (audit-corrected): this tests two
+particular random-injection recipes at k∈{4,8} on one 48-row routing set —
+not the exact production projection, not retrieval-selected shots, not
+repeated shot seeds, not k<4.** Actionable conclusion: disable the current
+examples-into-inference-context recipe (it is harmful as implemented); do not
+declare the capability impossible. The "real-time learning" tier remains
+honest as (a) minutes-scale retraining and (b) shadow-ranker retrieval; the
+verified-example JSONL channel feeds training.
 
 ### Out-of-template generalization (route_selection vs Grok-authored OOD)
 
@@ -277,96 +291,124 @@ per-family specialists from the immutable base with replay/KL retention →
 promotion only on multi-seed end-to-end shadow parity. Objective-level splits
 with a sealed test set the generator never sees.
 
-## Dry run: confusion-driven training loop (Swarm `training_experiment` shape)
+## Dry run: manual adaptive-recipe pilot (audit-corrected framing)
 
-Miniature two-iteration validation of the proposed Swarm-as-experiment-
-optimizer loop, on the one *measured* confusion cell (messy-coding→planning
-misroutes). All arms trained from the immutable base; candidate records with
-base/dataset hashes (`lab/build_arms.py`, `data/arm_candidates.json`); sealed
-40-query test set (10/class, fresh domains) frozen with a mechanical
-zero-overlap guard BEFORE evaluation (`sha 52276cf8…`); forgetting gate on
-every arm.
+Two-iteration pilot of the proposed confusion-driven recipe loop, on the one
+*measured* confusion cell (messy-coding→planning misroutes). All arms trained
+from the immutable base; candidate records with base/dataset hashes for arms
+B/C/D (`lab/build_arms.py`, `data/arm_candidates.json`; arm E lacks a
+manifest — a defect). **Naming correction: the 40-query set
+(`sha 52276cf8…`) was frozen with a zero-overlap guard before iteration 1,
+but iteration 1's results were used to design arm E, which was then evaluated
+on the same set — so from iteration 2 onward it is an *adaptive OOD
+development set*, NOT a sealed set.**
 
-| arm (recipe) | sealed | dev OOD | in-template | worst class | forgetting |
+| arm (recipe) | adaptive OOD dev | secondary OOD | in-template | worst class | retention* |
 |---|---|---|---|---|---|
 | A control (templates) | 40.0% | 45.8% | 100% | vision 10% | 3/3 |
 | B +40 hard negatives | 45.0% | 47.9% | 100% | vision 10% | 3/3 |
 | C +30 metamorphic | 42.5% | 47.9% | 100% | planning 20% | 3/3 |
 | D balanced resample | 40.0% | 45.8% | 100% | research 10% | 3/3 |
-| **E = B + worst-cell delta** (iter 2) | **52.5%** | **56.2%** | 100% | research 20% | 3/3 |
+| E = B + worst-cell delta (iter 2) | 52.5% | 56.2% | 100% | research 20% | 3/3 |
 
-Findings:
+\* retention = three canned tool-calling probes, not a capability suite.
+
+Findings (honest scope):
 1. **Small targeted deltas do NOT fix distribution problems** (B/C/D within
-   the ±8pp noise band of n=40) — the cheap version of the confusion-loop
-   hypothesis is dead. OOD movement requires breadth/volume of realistic
-   data; the flywheel's fuel must be verified real episodes.
-2. **The adaptive cycle itself works**: iteration 1's Pareto table exposed a
-   NEW worst cell (vision at 10% recall — 20 near-identical templates vs
-   diverse sealed phrasings); iteration 2's targeted arm (+32 diverse vision,
-   +16 research examples) fixed vision AND lifted sealed +12.5pp / dev OOD
-   +10.4pp over control, zero forgetting, in-template retained. Worst cell
-   moved to research — generation 3's target. Two full cycles of
-   measure→arm→train→sealed-eval ran mechanically.
+   the ±8pp noise band of n=40). OOD movement requires breadth/volume of
+   realistic data; the flywheel's fuel must be verified real episodes.
+2. **Adaptive-recipe signal, not proof**: iteration 2's worst-cell arm raised
+   the development-set score by five additional correct answers (40→52.5%,
+   single seed, overlapping confidence intervals) and fixed the vision cell.
+   Encouraging directional evidence that worst-cell-targeted data helps;
+   NOT a sealed-set improvement claim.
 3. **Early stopping matters**: arm B at the naive step target burned 44 min;
-   arms C/D/E at 12 epochs (~8-9 min) reached identical convergence. "Keep
-   training" must be an optimizer decision, not a constant.
-4. **Caveats**: same-generator correlation (grok-4.5 authored both sealed set
-   and deltas in separate context-free calls; zero string overlap verified,
-   stylistic correlation possible — production loop should diversify
-   generators as it does judges); n=40 sealed set ⇒ coarse ±8pp resolution;
-   single seed per arm (multi-seed is a promotion-gate requirement, not a
-   dry-run one).
+   arms C/D/E at 12 fixed epochs (~8-9 min) reached identical convergence —
+   but actual validation-based early stopping was NOT implemented.
+4. **What this pilot is**: pipeline feasibility. The evaluator prints a table
+   but computes no Pareto frontier; retention is three canned calls; no
+   validation early-stop; single seed. The real optimizer, verifiers, and
+   promotion gates remain to be built (per the C0-C7 structural plan).
+5. **Caveats**: same-generator correlation (grok-4.5 authored both the
+   40-query set and the arm deltas in separate context-free calls; stylistic
+   correlation possible — production must diversify generators as it does
+   judges).
 
-Verdict for the Swarm integration: the `training_experiment` target type
-earns its integration — with data-recipe arms as the primary search
-dimension, mechanical training-vitals vetoes (F7 class), sealed-set +
-forgetting gates, and worst-cell-first curriculum. Hyperparameter arms are a
-minor dimension at this model scale.
+Verdict for the Swarm integration: **feasibility demonstrated; effectiveness
+unproven.** Data-recipe arms remain the most promising search dimension, and
+training-vitals vetoes (F7 class), grouped-split enforcement, sealed-set
+discipline (with a set that STAYS sealed), multi-seed, and a real Pareto/
+forgetting gate are all mandatory before the `training_experiment` target
+type carries any authority.
 
 ## Design implications (vs the authority-inversion decision log)
 
 | Decision | Lab verdict |
 |---|---|
-| D5 capsules-as-DB, SQL demoted to projection | **STRENGTHENED** — retrieval engine exists inside Needle itself; the whole lab ran file-only |
-| D9 memory-rank cut from v1 families | **REVISE** — memory-rank is not a rank-via-tool-calling task; it is native contrastive retrieval, cheap to revive and side-effect-free. Promote to v1 alongside tool_selection |
-| D4 ICL as falsifiable hypothesis | pending ICL probe; retrieval retraining (3 min) already provides the "real-time learning" tier honestly |
+| D5 capsules-as-DB, SQL demoted to projection | **File-only lifecycle demonstrated**; the learned retrieval head loses to char-TF-IDF (60% vs 92%) — deterministic lexical retrieval remains the projection of record, learned head is a shadow-ranker candidate |
+| D9 memory-rank cut from v1 families | Revised only to: revived head may run as an additional **shadow** ranker (cheap, side-effect-free); it does not displace deterministic retrieval |
+| D4 ICL as falsifiable hypothesis | Tested recipes harm (disable them); capability not declared impossible — retest with production projection, retrieval-selected shots, k<4, repeated seeds |
 | D12 never pickle | **CONFIRMED + urgent** (F6) |
-| D3 bounded self-loop | pending selfloop probe |
-| D11 catalog-hash pinning | pending drift probe |
+| D3 bounded self-loop | Toy-mechanism signal only: sequencing + slot copying on 5 fixed-shape happy paths; no effect/TTL/authority/restart validation; both recovery cases failed |
+| D11 catalog-hash pinning | Narrow support (10 renamed-key + 6 new-tool cases); encouraging, not general robustness |
 
-## Conclusion
+## Reproducibility pins
 
-What one day of empirical work established, none of it from vendor claims:
+Upstream needle commit `ffb1c5144c5a16cb8ec650dbc8a6f6fd3854f8f2`; base
+weights `needle.pkl` sha256-prefix `40a32e91d1d4197b` (HF
+Cactus-Compute/needle, force-download noted in F4); python 3.12.13, jax
+0.10.2 (XLA CPU), flax 0.12.7; Apple M3 Max / Darwin 25.5.0. Dataset hashes:
+`evals/needle_lab/data/manifest.json` + `arm_candidates.json`; 40-query
+adaptive-dev set sha `52276cf8e483738b`; splits: needle `_per_tool_split`
+seed 42 throughout. Sanitized evidence bundle (scripts, datasets, manifests,
+trimmed logs — NO pickle checkpoints) committed at `evals/needle_lab/`,
+quarantine-labeled `research_dev`. Full raw lab (28 GB incl. checkpoints and
+venvs) lives in the ephemeral session scratchpad only.
 
-**Confirmed capabilities** (each with a runnable script + logged metric):
-one 26M checkpoint learns all 7 UniGrok gateway families with zero measured
-interference; selection-shaped outputs (ids, enums, pre-bound candidates) are
-its strongest mode; schema-reading generalization lets it use tools it was
-never trained on; the dormant contrastive head revives in 3 minutes into a
-real retrieval engine over plain files; a bounded self-loop chains multi-step
-work on unseen vocabulary; the whole lifecycle — datasets, checkpoints,
-invalidation, candidate records — ran end-to-end with **zero databases**.
+## Conclusion (audit-amended)
 
-**Confirmed limits**: no in-context learning (injection strictly harms);
-in-template perfection says nothing about OOD (40-56% sealed); small clever
-data deltas don't fix distribution gaps — verified real episodes at volume
-are the only honest fuel; recovery needs full repair arcs or enumerated
-recovery candidates; values remain the weak tier under distribution shift.
+What one day of empirical work established, and what it did not:
 
-**Confirmed process**: the confusion-driven loop (measure worst cell →
-targeted arm → sealed eval → Pareto + forgetting gate) cycled twice and
-improved both times (+12.5pp sealed). The Swarm `training_experiment`
-integration earns a green light with data-recipe arms as the primary search
-dimension.
+**Supported by evidence**: Needle fine-tunes quickly onto narrow structured
+output contracts (100% in-template across families, 0-11% base); selection,
+id-copying, schema-conditioned calls, and value transfer are promising reflex
+behaviors; schema-reading generalization selects never-trained tools from
+descriptions; the released contrastive head is structurally dead and a
+re-initialized replacement can learn a small ranking problem; a bounded loop
+can sequence multi-step happy paths on unseen vocabulary in a toy simulator;
+the file-only artifact lifecycle works; the engineering footguns (F1-F7) are
+real and reproducible.
 
-**Status of these artifacts**: pre-foundation research artifacts and baseline
-arms, per the accepted review framing — mechanism evidence, not promotion
-evidence. The next study is the sealed agentic-parity benchmark
-(fast-Grok + Needle dispatch vs Grok 4.5/Build on verified long-running
-objectives) under the C0-C7 structural plan, with training opened only by
-measured deficiency.
+**Not established** (removed or corrected after independent audit): the
+zero-interference claim (invalid — split contamination); the "+12.5pp sealed"
+claim (adaptive development set, single seed, 5 answers); the SQLite/
+retrieval-replacement claim (char-TF-IDF 92% beats the head's 60%); the
+blanket no-ICL claim (two recipes tested); general drift robustness; any
+promotion-grade evidence of the synapse-reflex architecture.
+
+**Standing lessons**: template accuracy is not capability (40-56% OOD);
+diverse verified real episodes are the fuel; recovery needs complete repair
+arcs; production training separates by exact output-contract family (the
+combined checkpoint is a research control only); grouped-split policy,
+Pareto/forgetting gates, multi-seed, and validation early-stop must be
+frozen BEFORE the next training campaign; and a model judge cannot establish
+success — during this very lab the CLI-pinned reviewer twice returned a
+promise labeled `finish_reason=final_answer`.
+
+**Status**: all datasets and checkpoints from this lab are quarantined
+`research_dev` — mechanism evidence and baseline arms, never verified
+training truth, validation, or sealed evaluation. Next: Codex freezes the
+exact Needle contracts, TTL representation, envelopes, grouped-split policy,
+and verifiers (C0-C7); then the Gemini synthetic campaign starting at the
+2,000-root pilot gated on schema/novelty/leakage/verifier-yield; the system
+benchmark compares complete systems (code floor / +Needle / +Gemma /
+fast-Grok±Needle / Grok 4.5 / Grok Build) on downstream verified objective
+success with TTL, authority, effects, receipts, recovery, latency, multi-seed.
 
 ---
-*Lab: scratchpad `lab/` (scripts, logs, datasets, checkpoints; excluded from
-repo). Agent-Assisted-By: Claude via Claude Code; peer review: Grok 4.5 (CLI
-plane), ChatGPT 5.6 (relayed), Gemini/Antigravity (structural plan).*
+*Evidence bundle: `evals/needle_lab/` (research_dev). CI note: GitHub CI ran
+1,233 tests green on this branch (local run: 1,220); docs-green CI validates
+tree-neutrality only, not the experiments. Agent-Assisted-By: Claude via
+Claude Code; peer review: Grok 4.5 (CLI plane), ChatGPT 5.6 Sol (relayed,
+incl. the audit that corrected this report), Gemini/Antigravity (structural
+plan).*

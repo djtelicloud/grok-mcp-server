@@ -1,0 +1,92 @@
+[
+ {
+  "arm": "A_control",
+  "sealed": 0.4,
+  "dev_ood": 0.4583,
+  "in_template": 1.0,
+  "sealed_recalls": {
+   "coding": 0.8,
+   "planning": 0.3,
+   "research": 0.4,
+   "vision": 0.1
+  },
+  "worst_class": [
+   "vision",
+   0.1
+  ],
+  "forgetting": "3/3",
+  "checkpoint": "needle_finetuned_20260713084509_97647_12_512_best.pkl"
+ },
+ {
+  "arm": "B_hardneg",
+  "sealed": 0.45,
+  "dev_ood": 0.4792,
+  "in_template": 1.0,
+  "sealed_recalls": {
+   "coding": 0.9,
+   "planning": 0.5,
+   "research": 0.3,
+   "vision": 0.1
+  },
+  "worst_class": [
+   "vision",
+   0.1
+  ],
+  "forgetting": "3/3",
+  "checkpoint": "needle_finetuned_20260713112819_87831_12_512_best.pkl"
+ },
+ {
+  "arm": "C_metamorphic",
+  "sealed": 0.425,
+  "dev_ood": 0.4792,
+  "in_template": 1.0,
+  "sealed_recalls": {
+   "coding": 0.8,
+   "planning": 0.2,
+   "research": 0.3,
+   "vision": 0.4
+  },
+  "worst_class": [
+   "planning",
+   0.2
+  ],
+  "forgetting": "3/3",
+  "checkpoint": "needle_finetuned_20260713121240_35267_12_512_best.pkl"
+ },
+ {
+  "arm": "D_balanced",
+  "sealed": 0.4,
+  "dev_ood": 0.4583,
+  "in_template": 1.0,
+  "sealed_recalls": {
+   "coding": 0.9,
+   "planning": 0.5,
+   "research": 0.1,
+   "vision": 0.1
+  },
+  "worst_class": [
+   "research",
+   0.1
+  ],
+  "forgetting": "3/3",
+  "checkpoint": "needle_finetuned_20260713121246_35492_12_512_best.pkl"
+ },
+ {
+  "arm": "E_worstcell",
+  "sealed": 0.525,
+  "dev_ood": 0.5625,
+  "in_template": 1.0,
+  "sealed_recalls": {
+   "coding": 0.7,
+   "planning": 0.3,
+   "research": 0.2,
+   "vision": 0.9
+  },
+  "worst_class": [
+   "research",
+   0.2
+  ],
+  "forgetting": "3/3",
+  "checkpoint": "needle_finetuned_20260713122736_40225_12_512_best.pkl"
+ }
+]

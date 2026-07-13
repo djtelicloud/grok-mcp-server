@@ -1,0 +1,44 @@
+[
+  {
+    "family": "route_selection",
+    "path": "/private/tmp/claude-501/-Users-djtelicloud-Documents-agentixai-grok-mcp-server--claude-worktrees-new-session-3336a5/b197cbf6-7853-495f-b5fa-d110a98ddf7d/scratchpad/lab/data/route_selection.jsonl",
+    "n": 344,
+    "catalog_hash": "a8b0a066176fb67c"
+  },
+  {
+    "family": "observation_typing",
+    "path": "/private/tmp/claude-501/-Users-djtelicloud-Documents-agentixai-grok-mcp-server--claude-worktrees-new-session-3336a5/b197cbf6-7853-495f-b5fa-d110a98ddf7d/scratchpad/lab/data/observation_typing.jsonl",
+    "n": 145,
+    "catalog_hash": "20e1dc4a5ad88278"
+  },
+  {
+    "family": "recovery_selection",
+    "path": "/private/tmp/claude-501/-Users-djtelicloud-Documents-agentixai-grok-mcp-server--claude-worktrees-new-session-3336a5/b197cbf6-7853-495f-b5fa-d110a98ddf7d/scratchpad/lab/data/recovery_selection.jsonl",
+    "n": 240,
+    "catalog_hash": "b36d2f8ac7261066"
+  },
+  {
+    "family": "memory_rerank",
+    "path": "/private/tmp/claude-501/-Users-djtelicloud-Documents-agentixai-grok-mcp-server--claude-worktrees-new-session-3336a5/b197cbf6-7853-495f-b5fa-d110a98ddf7d/scratchpad/lab/data/memory_rerank.jsonl",
+    "n": 165,
+    "catalog_hash": "5e9d51925807abc6"
+  },
+  {
+    "family": "tool_selection",
+    "path": "/private/tmp/claude-501/-Users-djtelicloud-Documents-agentixai-grok-mcp-server--claude-worktrees-new-session-3336a5/b197cbf6-7853-495f-b5fa-d110a98ddf7d/scratchpad/lab/data/tool_selection.jsonl",
+    "n": 564,
+    "catalog_hash": "73b8f33f05c642af"
+  },
+  {
+    "family": "extraction",
+    "path": "/private/tmp/claude-501/-Users-djtelicloud-Documents-agentixai-grok-mcp-server--claude-worktrees-new-session-3336a5/b197cbf6-7853-495f-b5fa-d110a98ddf7d/scratchpad/lab/data/extraction.jsonl",
+    "n": 600,
+    "catalog_hash": "6c7c6cdd536e0dcf"
+  },
+  {
+    "family": "abstention",
+    "path": "/private/tmp/claude-501/-Users-djtelicloud-Documents-agentixai-grok-mcp-server--claude-worktrees-new-session-3336a5/b197cbf6-7853-495f-b5fa-d110a98ddf7d/scratchpad/lab/data/abstention.jsonl",
+    "n": 364,
+    "catalog_hash": "f30f67f98c45bce0"
+  }
+]

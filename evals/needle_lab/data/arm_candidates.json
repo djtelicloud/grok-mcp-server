@@ -1,0 +1,47 @@
+[
+ {
+  "arm": "arm_B",
+  "base_checkpoint_hash": "40a32e91d1d4197b",
+  "dataset_hash": "bcea4a681e4db17d",
+  "n": 384,
+  "dropped_dups": 0,
+  "class_counts": {
+   "research": 48,
+   "coding": 240,
+   "planning": 76,
+   "vision": 20
+  },
+  "recipe": "base+hard_negatives",
+  "seed": 42
+ },
+ {
+  "arm": "arm_C",
+  "base_checkpoint_hash": "40a32e91d1d4197b",
+  "dataset_hash": "fa83cdf200c27a4f",
+  "n": 374,
+  "dropped_dups": 0,
+  "class_counts": {
+   "research": 52,
+   "coding": 236,
+   "planning": 66,
+   "vision": 20
+  },
+  "recipe": "base+metamorphic",
+  "seed": 42
+ },
+ {
+  "arm": "arm_D",
+  "base_checkpoint_hash": "40a32e91d1d4197b",
+  "dataset_hash": "67e85570e6ad8902",
+  "n": 269,
+  "dropped_dups": 0,
+  "class_counts": {
+   "research": 52,
+   "coding": 111,
+   "planning": 86,
+   "vision": 20
+  },
+  "recipe": "balanced(base+hard+meta)",
+  "seed": 42
+ }
+]
