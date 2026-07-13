@@ -27,7 +27,12 @@ def test_public_runtime_files_do_not_embed_a_developer_home_path():
         ROOT / "architecture.md",
         ROOT / "src" / "tools" / "system.py",
     ]
-    for directory in (ROOT / ".agents", ROOT / ".codex", ROOT / ".gemini"):
+    for directory in (
+        ROOT / ".agents",
+        ROOT / ".claude",
+        ROOT / ".codex",
+        ROOT / ".gemini",
+    ):
         paths.extend(path for path in directory.rglob("*") if path.is_file())
     private_home = "/Users/" + "djtelicloud"
 
@@ -77,6 +82,9 @@ def test_public_setup_surfaces_use_the_grok_phoneword_endpoint():
         ROOT / ".mcp.json",
         ROOT / "skills" / "using-unigrok" / "SKILL.md",
         ROOT / ".github" / "skills" / "using-unigrok" / "SKILL.md",
+        ROOT / ".agents" / "skills" / "using-unigrok" / "SKILL.md",
+        ROOT / ".claude" / "skills" / "using-unigrok" / "SKILL.md",
+        ROOT / ".claude" / "settings.json",
         ROOT / ".agents" / "AGENTS.md",
         ROOT / ".agents" / "skills" / "uni-grok-mcp" / "SKILL.md",
     ]
@@ -88,11 +96,33 @@ def test_public_setup_surfaces_use_the_grok_phoneword_endpoint():
 
 def test_agent_guidance_preserves_workspace_and_credential_boundaries():
     using_unigrok = (ROOT / "skills" / "using-unigrok" / "SKILL.md").read_text(encoding="utf-8")
+    claude = (ROOT / ".claude" / "skills" / "using-unigrok" / "SKILL.md").read_text(
+        encoding="utf-8"
+    )
     gemini = (ROOT / ".gemini" / "GEMINI.md").read_text(encoding="utf-8")
 
     assert 'fallback_policy="same_plane"' in using_unigrok
     assert "workspace-neutral" in using_unigrok
     assert "workspace-neutral" in gemini
+
+    for guidance in (using_unigrok, claude):
+        description = guidance.split("---", maxsplit=2)[1].lower()
+        normalized = " ".join(guidance.split())
+        assert "deferred" not in description
+        assert "imagine" not in description
+        assert "video" not in description
+        assert "project-qualified" in normalized
+        assert "workspace_label" in normalized
+        assert "descriptive" in normalized
+        assert "does not isolate" in normalized
+        assert "collide across repositories" in normalized
+        assert "server-derived principal" in normalized
+        assert "http:anon" in normalized
+        assert "shared `http:anon` principal" in normalized
+        assert "caller-controlled" in normalized
+        assert "no cross-user isolation without configured auth" in normalized
+        assert "caching hits" in normalized
+        assert "CLI provider cost remains unavailable" in normalized
 
 
 def test_copilot_project_skill_uses_a_supported_discovery_path():
@@ -100,6 +130,38 @@ def test_copilot_project_skill_uses_a_supported_discovery_path():
     assert skill_path.is_file()
     assert not (ROOT / ".copilot" / "skills" / "using-unigrok" / "SKILL.md").exists()
     assert "not a default project discovery path" in skill_path.read_text(encoding="utf-8")
+
+
+def test_shared_agent_project_skill_tracks_the_canonical_skill():
+    canonical = (ROOT / "skills" / "using-unigrok" / "SKILL.md").read_text(
+        encoding="utf-8"
+    )
+    shared = (ROOT / ".agents" / "skills" / "using-unigrok" / "SKILL.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert shared == canonical
+
+
+def test_claude_project_skill_and_permissions_use_supported_discovery_paths():
+    skill_path = ROOT / ".claude" / "skills" / "using-unigrok" / "SKILL.md"
+    claude_rules = (ROOT / "CLAUDE.md").read_text(encoding="utf-8")
+    settings = json.loads((ROOT / ".claude" / "settings.json").read_text(encoding="utf-8"))
+    allowed = set(settings["permissions"]["allow"])
+
+    assert skill_path.is_file()
+    assert ".claude/skills/using-unigrok/SKILL.md" in claude_rules
+    assert "mcp__unigrok__agent" in allowed
+    assert "mcp__unigrok__grok_mcp_status" in allowed
+    assert "mcp__unigrok__grok_mcp_discover_self" in allowed
+    assert not any(entry.startswith("mcp__grok__") for entry in allowed)
+    assert "Bash(./scripts/land-status)" in allowed
+    assert "Bash(./scripts/land-status:*)" not in allowed
+
+    skill = skill_path.read_text(encoding="utf-8")
+    assert "mcp__grok__agent" in skill
+    assert "user-owned `grok` alias" in skill
+    assert "verify that it" in skill
 
 
 def test_agent_rules_allow_draft_pr_submission_but_reserve_final_integration():
