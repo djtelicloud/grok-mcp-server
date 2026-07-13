@@ -7,9 +7,13 @@ from src.metrics import build_metrics_snapshot, fetch_provider_api_usage, teleme
 from src.utils import GrokSessionStore
 
 
-def _row(*, created_at, plane="API", success=1, latency=1.0, cost=0.0, metadata=None):
+def _row(
+    *, created_at, plane="API", success=1, latency=1.0, cost=0.0,
+    metadata=None, intent=None,
+):
     return {
         "created_at": created_at.isoformat(),
+        "intent": intent,
         "chosen_plane": plane,
         "success": success,
         "latency": latency,
@@ -41,6 +45,7 @@ def test_structured_metrics_separate_api_billing_from_cli_subscription():
     snapshot = build_metrics_snapshot(rows, now=now)
     today = snapshot["usage"]["today"]
 
+    assert snapshot["schema_version"] == 3
     assert today["summary"]["requests"] == 2
     assert today["summary"]["api_cost_usd"] == pytest.approx(0.012)
     assert today["summary"]["tracked_tokens"] == 200
@@ -53,8 +58,14 @@ def test_structured_metrics_separate_api_billing_from_cli_subscription():
     assert today["summary"]["route_classes"] == {"planning": 1}
     assert today["summary"]["selection_reasons"] == {"reasoning_score": 1}
     assert today["callers"] == {
-        "claude": {"requests": 1, "success_rate": 1.0, "total_cost_usd": 0.0},
-        "codex": {"requests": 1, "success_rate": 1.0, "total_cost_usd": pytest.approx(0.012)},
+        "claude": {
+            "requests": 1, "verified_outcomes": 1, "unverified_requests": 0,
+            "success_rate": 1.0, "total_cost_usd": 0.0,
+        },
+        "codex": {
+            "requests": 1, "verified_outcomes": 1, "unverified_requests": 0,
+            "success_rate": 1.0, "total_cost_usd": pytest.approx(0.012),
+        },
     }
     assert snapshot["usage"]["lifetime"]["callers"]["codex"]["requests"] == 1
     receipt = today["recent_routes"][0]
@@ -75,6 +86,54 @@ def test_structured_metrics_empty_period_is_null_not_fake_zero():
     assert summary["caller_attributed_requests"] == 0
     assert snapshot["usage"]["today"]["planes"] == {}
     assert snapshot["usage"]["today"]["callers"] == {}
+
+
+def test_unverified_rows_preserve_usage_without_fabricating_failure():
+    now = datetime(2026, 7, 10, 12, 0, 0)
+    rows = [
+        _row(created_at=now, success=None, cost=0.02, metadata='{"caller":"codex"}'),
+        _row(created_at=now, success=0, cost=0.01, metadata='{"caller":"codex"}'),
+        _row(
+            created_at=now,
+            success=1,
+            cost=0.50,
+            metadata='{"caller":"codex"}',
+            intent="history-compaction",
+        ),
+    ]
+
+    snapshot = build_metrics_snapshot(rows, now=now)
+    summary = snapshot["usage"]["today"]["summary"]
+    caller = snapshot["usage"]["today"]["callers"]["codex"]
+
+    assert summary["requests"] == 2
+    assert summary["verified_outcomes"] == 1
+    assert summary["unverified_requests"] == 1
+    assert summary["success_rate"] == 0.0
+    assert summary["api_cost_usd"] == pytest.approx(0.53)
+    assert caller["requests"] == 2
+    assert caller["verified_outcomes"] == 1
+    assert caller["unverified_requests"] == 1
+    assert caller["success_rate"] == 0.0
+    assert caller["total_cost_usd"] == pytest.approx(0.53)
+    assert snapshot["usage"]["today"]["recent_routes"] == []
+
+
+def test_all_unverified_rows_omit_success_rate():
+    now = datetime(2026, 7, 10, 12, 0, 0)
+    rows = [
+        _row(
+            created_at=now,
+            success=None,
+            metadata='{"caller":"codex","routing":{"resolved_model":"grok-4.5"}}',
+        )
+    ]
+
+    snapshot = build_metrics_snapshot(rows, now=now)
+
+    assert snapshot["planes"]["API"]["success_rate"] is None
+    assert snapshot["callers"]["codex"]["success_rate"] is None
+    assert snapshot["usage"]["today"]["recent_routes"][0]["success"] is None
 
 
 def test_telemetry_metadata_tolerates_old_and_malformed_rows():

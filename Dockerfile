@@ -46,7 +46,8 @@ COPY main.py ./
 COPY src/ ./src/
 COPY mcp_ui/ ./mcp_ui/
 COPY docs/okf/ ./docs/okf/
-COPY .grok/ ./.grok/
+COPY .grok/hyperparams/ ./.grok/hyperparams/
+COPY .grok/prompts/ ./.grok/prompts/
 
 # Run as an unprivileged user. Stable mutable data lives under /state, never
 # in the application bundle or an IDE project.

@@ -1150,6 +1150,18 @@ def _bounded_redacted(text: str, limit: int) -> str:
     return value[:limit] + f"\n[...truncated {len(value) - limit} chars]"
 
 
+def _normalize_verified_outcome(value: Optional[int]) -> Optional[int]:
+    """Normalize the tri-state outcome domain or fail closed."""
+
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return int(value)
+    if type(value) is int and value in (0, 1):
+        return value
+    raise ValueError("success must be None (unverified), 0, or 1")
+
+
 def _json_sanitize(
     value: Any, *, separators: tuple[str, str] = (",", ":")
 ) -> tuple[Any, str]:
@@ -1247,7 +1259,12 @@ def format_task_memory_notes(memories: List[Dict[str, Any]]) -> str:
         return ""
     lines = ["# Prior UniGrok Task Memory"]
     for item in memories[:3]:
-        status = "success" if int(item.get("success") or 0) else "failure"
+        outcome = item.get("success")
+        status = (
+            "success" if outcome == 1
+            else "failure" if outcome == 0
+            else "unverified"
+        )
         profile = item.get("profile") or "unknown"
         plane = item.get("plane") or "unknown"
         summary = str(item.get("outcome_summary") or "").replace("\n", " ")[:500]
@@ -2622,6 +2639,28 @@ class GrokSessionStore:
                     await self._conn.rollback()
                     raise
 
+            if version < 14:
+                # Historical turn completions were labeled successful at the
+                # transport boundary without semantic or mechanical proof.
+                # Withdraw those unsupported labels before the router or
+                # metrics can learn from them. Explicit failures and the
+                # mechanically verified history-compaction operation remain.
+                await self._conn.execute("BEGIN IMMEDIATE;")
+                try:
+                    await self._conn.execute(
+                        "UPDATE task_memory SET success = NULL;"
+                    )
+                    await self._conn.execute(
+                        "UPDATE telemetry SET success = NULL "
+                        "WHERE success = 1 "
+                        "AND COALESCE(intent, '') <> 'history-compaction';"
+                    )
+                    await self._conn.execute("PRAGMA user_version = 14;")
+                    await self._conn.commit()
+                except Exception:
+                    await self._conn.rollback()
+                    raise
+
             # knowledge_fts is (re)checked on EVERY init, not just inside the
             # v7 gate: FTS5 is a compile-time SQLite option, so a db created
             # on a build WITH it can be reopened by one WITHOUT it (and vice
@@ -2767,7 +2806,7 @@ class GrokSessionStore:
         self,
         intent: str,
         chosen_plane: str,
-        success: int,
+        success: Optional[int],
         latency: float,
         cost: float,
         context_id: Optional[str] = None,
@@ -2781,6 +2820,7 @@ class GrokSessionStore:
         folded: Optional[bool] = None,
     ):
         await self._ensure_initialized()
+        success_value = _normalize_verified_outcome(success)
         # caller and request_id ride the metadata JSON column (v8) so future
         # per-row attributes extend the same envelope without another
         # migration. Both fall back to the values bound to the current async
@@ -2788,6 +2828,11 @@ class GrokSessionStore:
         # src/storage.py contract — so indirect writers (run_thinking_loop,
         # maybe_compact_history) stay attributed without threading params.
         meta: Dict[str, Any] = {}
+        if success_value is None:
+            # Transport completion is not proof of semantic or mechanical
+            # success. NULL keeps an honest third state and prevents routing
+            # calibration from learning an invented failure.
+            meta["outcome_verified"] = False
         clean_caller = normalize_caller(caller) or get_active_caller()
         if clean_caller:
             meta["caller"] = clean_caller
@@ -2827,7 +2872,7 @@ class GrokSessionStore:
                 await self._conn.execute(
                     "INSERT INTO telemetry (intent, chosen_plane, success, latency, cost, context_id, metadata, created_at) "
                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                    (intent, chosen_plane, success, latency, cost, context_id, meta_str, now_str)
+                    (intent, chosen_plane, success_value, latency, cost, context_id, meta_str, now_str)
                 )
                 await self._conn.commit()
             except Exception:
@@ -2979,7 +3024,7 @@ class GrokSessionStore:
     @_with_read_retry_async
     async def get_caller_stats_today(self, limit: int = 10) -> List[Dict[str, Any]]:
         """Per-caller aggregate over TODAY's telemetry rows, busiest first:
-        {caller, requests, success_rate, total_cost_usd}. Unattributed rows
+        {caller, requests, verified_outcomes, success_rate, total_cost_usd}. Unattributed rows
         (pre-v8 or anonymous) are excluded. Same bounded created_at-indexed
         read as get_caller_cost_today — consumed by grok_mcp_status."""
         await self._ensure_initialized()
@@ -2987,7 +3032,7 @@ class GrokSessionStore:
         day_start = datetime.now().date().isoformat()
         async with self._read_conn() as conn:
             async with conn.execute(
-                "SELECT success, cost, metadata FROM telemetry WHERE created_at >= ?",
+                "SELECT intent, success, cost, metadata FROM telemetry WHERE created_at >= ?",
                 (day_start,),
             ) as cursor:
                 rows = await cursor.fetchall()
@@ -2999,11 +3044,24 @@ class GrokSessionStore:
                 grouped.setdefault(caller, []).append(entry)
         stats = []
         for caller, entries in grouped.items():
-            successes = sum(1 for entry in entries if entry.get("success") == 1)
+            request_entries = [
+                entry
+                for entry in entries
+                if str(entry.get("intent") or "") != "history-compaction"
+            ]
+            if not request_entries:
+                continue
+            verified = [
+                entry for entry in request_entries if entry.get("success") in (0, 1)
+            ]
+            successes = sum(1 for entry in verified if entry.get("success") == 1)
             stats.append({
                 "caller": caller,
-                "requests": len(entries),
-                "success_rate": round(successes / len(entries), 4),
+                "requests": len(request_entries),
+                "verified_outcomes": len(verified),
+                "success_rate": (
+                    round(successes / len(verified), 4) if verified else None
+                ),
                 "total_cost_usd": round(
                     sum(float(entry["cost"]) for entry in entries if entry.get("cost") is not None), 6
                 ),
@@ -3026,13 +3084,15 @@ class GrokSessionStore:
             async with conn.execute(
                 """
                 SELECT plane, model,
-                       COUNT(*) AS samples,
+                       COUNT(success) AS samples,
                        AVG(success) AS success_rate,
                        AVG(cost) AS avg_cost,
                        AVG(latency) AS avg_latency
                 FROM (
                     SELECT plane, model, success, cost, latency
-                    FROM task_memory ORDER BY id DESC LIMIT ?
+                    FROM task_memory
+                    WHERE success IS NOT NULL
+                    ORDER BY id DESC LIMIT ?
                 )
                 GROUP BY plane, model
                 """,
@@ -3114,13 +3174,14 @@ class GrokSessionStore:
         plane: str,
         model: str,
         profile: str,
-        success: int,
+        success: Optional[int],
         latency: float,
         cost: float,
         context_id: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> Optional[int]:
         await self._ensure_initialized()
+        success_value = _normalize_verified_outcome(success)
         terms = _task_terms(prompt)
         prompt_terms_text = " ".join(terms)
         prompt_excerpt = _bounded_redacted(prompt, 500)
@@ -3149,7 +3210,7 @@ class GrokSessionStore:
                         str(plane or "unknown"),
                         str(model or "unknown"),
                         str(profile or "unknown"),
-                        int(1 if success else 0),
+                        success_value,
                         float(latency or 0.0),
                         float(cost or 0.0),
                         context_id,
@@ -3185,6 +3246,7 @@ class GrokSessionStore:
         prompt: str,
         context_id: Optional[str] = None,
         limit: int = 3,
+        verified_only: bool = False,
     ) -> List[Dict[str, Any]]:
         """Rank stored task memories against a prompt; every row carries a
         `score` (higher = better on both paths).
@@ -3205,19 +3267,37 @@ class GrokSessionStore:
 
         if self._task_memory_fts and prompt_terms:
             match_expr = " OR ".join(sorted(prompt_terms))
-            async with self._read_conn() as conn:
-                async with conn.execute(
+            if verified_only:
+                fts_query = (
                     "SELECT t.*, bm25(task_memory_fts) AS fts_rank FROM task_memory_fts "
                     "JOIN task_memory t ON t.id = task_memory_fts.rowid "
-                    "WHERE task_memory_fts MATCH ? ORDER BY fts_rank LIMIT 50",
+                    "WHERE task_memory_fts MATCH ? AND t.success IS NOT NULL "
+                    "ORDER BY fts_rank LIMIT 50"
+                )
+                context_query = (
+                    "SELECT * FROM task_memory WHERE context_id = ? "
+                    "AND success IS NOT NULL ORDER BY id DESC LIMIT 10"
+                )
+            else:
+                fts_query = (
+                    "SELECT t.*, bm25(task_memory_fts) AS fts_rank FROM task_memory_fts "
+                    "JOIN task_memory t ON t.id = task_memory_fts.rowid "
+                    "WHERE task_memory_fts MATCH ? ORDER BY fts_rank LIMIT 50"
+                )
+                context_query = (
+                    "SELECT * FROM task_memory WHERE context_id = ? "
+                    "ORDER BY id DESC LIMIT 10"
+                )
+            async with self._read_conn() as conn:
+                async with conn.execute(
+                    fts_query,
                     (match_expr,),
                 ) as cursor:
                     fts_rows = await cursor.fetchall()
                 context_rows: List[Any] = []
                 if context_id:
                     async with conn.execute(
-                        "SELECT * FROM task_memory WHERE context_id = ? "
-                        "ORDER BY id DESC LIMIT 10",
+                        context_query,
                         (context_id,),
                     ) as cursor:
                         context_rows = await cursor.fetchall()
@@ -3251,9 +3331,14 @@ class GrokSessionStore:
             return scored[:bounded]
 
         async with self._read_conn() as conn:
-            async with conn.execute(
-                "SELECT * FROM task_memory ORDER BY id DESC LIMIT 200"
-            ) as cursor:
+            if verified_only:
+                query = (
+                    "SELECT * FROM task_memory WHERE success IS NOT NULL "
+                    "ORDER BY id DESC LIMIT 200"
+                )
+            else:
+                query = "SELECT * FROM task_memory ORDER BY id DESC LIMIT 200"
+            async with conn.execute(query) as cursor:
                 rows = await cursor.fetchall()
 
         scored = []
@@ -3309,11 +3394,14 @@ class GrokSessionStore:
         self,
         limit: int = 50,
         max_attempts: Optional[int] = None,
+        verified_only: bool = False,
     ) -> List[Dict[str, Any]]:
         await self._ensure_initialized()
         bounded = max(1, min(int(limit or 50), 200))
         query = "SELECT * FROM task_memory WHERE synced_at IS NULL"
         params: List[Any] = []
+        if verified_only:
+            query += " AND success IS NOT NULL"
         if max_attempts is not None:
             query += " AND sync_attempts < ?"
             params.append(int(max_attempts))
@@ -3378,18 +3466,19 @@ class GrokSessionStore:
         return [self._decode_task_memory_row(row) for row in rows]
 
     @_with_read_retry_async
-    async def count_unsynced_task_memories(self) -> int:
+    async def count_unsynced_task_memories(self, verified_only: bool = False) -> int:
         await self._ensure_initialized()
+        query = "SELECT COUNT(*) FROM task_memory WHERE synced_at IS NULL"
+        if verified_only:
+            query += " AND success IS NOT NULL"
         async with self._read_conn() as conn:
-            async with conn.execute(
-                "SELECT COUNT(*) FROM task_memory WHERE synced_at IS NULL"
-            ) as cursor:
+            async with conn.execute(query) as cursor:
                 row = await cursor.fetchone()
                 return self._safe_db_int(row[0] if row else 0)
 
     @_with_write_retry_async
     async def reset_task_memory_sync(self) -> int:
-        """Re-queue EVERY task memory for mirroring (rag backfill
+        """Re-queue every VERIFIED task memory for mirroring (rag backfill
         --force-reupload): deterministic document names keep the re-upload
         idempotent on the collection side. Returns the row count."""
         await self._ensure_initialized()
@@ -3397,7 +3486,8 @@ class GrokSessionStore:
             await self._conn.execute("BEGIN IMMEDIATE;")
             try:
                 cursor = await self._conn.execute(
-                    "UPDATE task_memory SET synced_at = NULL, sync_attempts = 0, sync_error = NULL"
+                    "UPDATE task_memory SET synced_at = NULL, sync_attempts = 0, "
+                    "sync_error = NULL WHERE success IS NOT NULL"
                 )
                 count = self._safe_db_int(cursor.rowcount)
                 await self._conn.commit()
@@ -4862,6 +4952,214 @@ class GitContextCache:
 # Recursive MetaLayer
 ModelPlane = Literal["reasoning", "composer", "cli-fallback"]
 
+_PROMISE_ACTION = (
+    r"(?:run|review|audit|check|inspect|investigate|analy[sz]e|start|begin|"
+    r"perform|conduct|try|recover|fix|work\s+on|get\s+(?:started|right\s+on)|"
+    r"look\s+into|take\s+a\s+look|explain|summarize|report|answer|proceed|"
+    r"handle(?:\s+(?:it|this|that))?|do\s+(?:it|this|that)|get\s+back)"
+)
+_PROMISE_WRAPPER = (
+    r"(?:(?:(?:sure\s+thing|no\s+problem|all\s+right|sure|okay|ok|understood|"
+    r"absolutely|certainly|got\s+it|on\s+it|thanks|of\s+course)\b"
+    r"[\s,.:;!—–-]*|update\s*:\s*))*"
+)
+_PROMISE_ADVERB = r"(?:(?:first|quickly|now|next|briefly|immediately)\s+)?"
+_PROMISE_ONLY_PREFIX_RE = re.compile(
+    rf"""(?ix)^\s*(?:[>*#-]+\s*)?
+        {_PROMISE_WRAPPER}(?:
+          i(?:['’]ll|\s+will)\s+{_PROMISE_ADVERB}{_PROMISE_ACTION}\b
+          | we\s+will\s+{_PROMISE_ADVERB}{_PROMISE_ACTION}\b
+          | i(?:['’]m|\s+am)\s+(?:going|about)\s+to\s+{_PROMISE_ADVERB}{_PROMISE_ACTION}\b
+          | let\s+me\s+{_PROMISE_ADVERB}{_PROMISE_ACTION}\b
+          | (?:i(?:['’]m|\s+am)\s+)?{_PROMISE_ADVERB}
+            (?:performing|running|starting|beginning|conducting|checking|reviewing|
+               auditing|investigating|analyzing|working\s+on)\b
+        )"""
+)
+_PLAN_ONLY_HEADING_RE = re.compile(
+    r"(?ix)^\s*(?:\#{1,6}\s*)?"
+    r"(?:plan|steps?|approach|next\s+steps?|proposed\s+approach|"
+    r"(?:here(?:['’]s|\s+is)\s+)?what\s+i(?:['’]ll|\s+will)\s+do)\s*:"
+)
+_PLAN_ACTION_LINE_RE = re.compile(
+    r"(?ix)^\s*(?:[-*+]\s+|\d+[.)]\s+)"
+    r"(?:inspect|examine|review|run|execute|check|analy[sz]e|audit|investigate|"
+    r"update|change|fix|"
+    r"implement|test|verify|validate|report|summarize|return|open|read|compare|"
+    r"generate|create|build|add|remove|refactor|deploy|send|apply|modify|rerun)\b"
+)
+_SEQUENCED_PLAN_RE = re.compile(
+    r"(?is)\bfirst(?:ly)?\b.{1,500}\bthen\b"
+)
+_EXPLICIT_PLAN_REQUEST_RE = re.compile(
+    r"(?is)(?:"
+    r"\b(?:give|create|write|draft|provide|produce|make|develop|recommend)\b"
+    r".{0,40}\b(?:plan|roadmap|approach|strategy|step(?:s|-by-step)?)\b"
+    r"|\bhow\s+(?:do|can|should)\s+i\b"
+    r"|\bhow\s+to\b"
+    r"|\b(?:tell|show)\s+me\s+how\b"
+    r"|\bhelp\s+me\b"
+    r"|\bwhat\s+(?:steps?|should\s+i\s+do|do\s+i\s+do\s+next)\b"
+    r"|\b(?:what|which)\s+(?:changes?|fixes|actions?|improvements?)\b"
+    r"|\bwhat\s+do\s+you\s+recommend\b"
+    r"|\b(?:instructions?|walk\s+me\s+through|what\s+next)\b"
+    r")"
+)
+_COMPLETION_EVIDENCE_RE = re.compile(
+    r"""(?ix)
+        \b(?:i|we)\s+(?:have\s+)?
+          (?:found|identified|confirmed|verified|completed|finished|fixed|
+             implemented|changed|updated|tested)\b
+        | \b(?:the\s+)?(?:audit|review|tests?|checks?|build|command)\s+
+          (?:has\s+|have\s+)?
+          (?:found|identified|revealed|showed|confirmed|passed|failed|completed|finished)\b
+        | \b\d+\s+(?:tests?|checks?)\s+(?:passed|failed)\b
+        | (?m:^\s*(?:diff\s+--git|@@\s))
+    """
+)
+_RESULT_MARKER_RE = re.compile(
+    r"(?is)\b(?:findings?|results?|verdict|evidence|answer|cause|fix|issue|problem)"
+    r"\s*(?::|[—-]|\b(?:is|are)\b)\s*(?P<value>[^\n]{1,240})"
+)
+_FENCED_RESULT_RE = re.compile(
+    r"(?is)```[^\n`]*\n?(?P<value>.*?)```"
+)
+_OBSERVATION_RESULT_RE = re.compile(
+    r"(?is)\b(?:this|that|it|the\s+(?:output|result|evidence|trace|log))\s+"
+    r"(?:reveals?|shows?|demonstrates?|indicates?)\s+(?P<value>[^\n]{1,240})"
+)
+_PLACEHOLDER_RESULT_RE = re.compile(
+    r"(?is)^\s*(?:(?:still\s+)?pending|tbd|todo|forthcoming|coming\b|later\b|"
+    r"unknown\b|to\s+follow\b|(?:i\s+)?will\s+(?:follow\s+up|report|return)\b|"
+    r"(?:i\s+)?need\s+more\s+time\b|going\s+to\s+follow\b|not\s+yet\b|"
+    r"not\s+(?:checked|run|verified|done|available)\b|no\s+(?:result|answer)\s+yet\b)"
+)
+_UNFINISHED_EVIDENCE_RE = re.compile(
+    r"(?is)(?:"
+    r"\b(?:i|we)\s+(?:have\s+)?not\s+"
+    r"(?:started|run|begun|checked|performed|completed)\b"
+    r"|\b(?:i|we)\s+need\s+more\s+time\b"
+    r"|\bfound\s+that\s+(?:i|we)\s+need\s+more\s+time\b"
+    r"|\b(?:found|verified)\s+nothing\s+because\b"
+    r"|\b0\s+(?:tests?|checks?)\s+(?:passed|completed)\b.{0,120}"
+    r"\bnot\s+(?:run|started|begun)\b"
+    r")"
+)
+_IMMEDIATE_DELIVERY_RE = re.compile(
+    rf"(?is)^\s*(?:[>*#-]+\s*)?{_PROMISE_WRAPPER}"
+    rf"(?:i(?:['’]ll|\s+will)|let\s+me)\s+{_PROMISE_ADVERB}"
+    r"(?:explain|clarify|answer|summarize|report|review|check|analy[sz]e|audit|inspect)"
+    r"\b[^:\n.]{0,80}"
+    r"(?::|[—–-]|\.\s+|\n+)\s*(?P<value>\S[\s\S]*)"
+)
+
+
+def _prompt_explicitly_requests_plan(prompt: str) -> bool:
+    if not isinstance(prompt, str):
+        return False
+    lowered = prompt.lower()
+    if re.search(r"\b(?:do\s+not|don't)\b.{0,30}\b(?:plan|roadmap)\b", lowered):
+        return False
+    return bool(_EXPLICIT_PLAN_REQUEST_RE.search(prompt))
+
+
+def _is_substantive_result(value: str) -> bool:
+    clean = str(value or "").strip()
+    return bool(clean) and not _PLACEHOLDER_RESULT_RE.match(clean)
+
+
+def _has_completion_evidence(text: str) -> bool:
+    if _COMPLETION_EVIDENCE_RE.search(text):
+        return True
+    for match in _RESULT_MARKER_RE.finditer(text):
+        if _is_substantive_result(match.group("value")):
+            return True
+    for match in _FENCED_RESULT_RE.finditer(text):
+        if _is_substantive_result(match.group("value")):
+            return True
+    for match in _OBSERVATION_RESULT_RE.finditer(text):
+        if _is_substantive_result(match.group("value")):
+            return True
+    return False
+
+
+def _contains_unfinished_result(text: str) -> bool:
+    if _UNFINISHED_EVIDENCE_RE.search(text):
+        return True
+    for pattern in (_RESULT_MARKER_RE, _OBSERVATION_RESULT_RE):
+        for match in pattern.finditer(text):
+            if not _is_substantive_result(match.group("value")):
+                return True
+    return False
+
+
+def _looks_like_plan(text: str) -> bool:
+    if _PLAN_ONLY_HEADING_RE.search(text) or _SEQUENCED_PLAN_RE.search(text):
+        return True
+    nonempty_lines = [line for line in text.splitlines() if line.strip()]
+    action_lines = sum(
+        bool(_PLAN_ACTION_LINE_RE.search(line)) for line in nonempty_lines
+    )
+    return action_lines >= 2 and action_lines >= len(nonempty_lines) - 1
+
+
+def _is_nonanswer_completion(content: Any, *, prompt: str = "") -> bool:
+    """Reject transport-level stops that promise work but provide no result."""
+
+    if not isinstance(content, str) or not content.strip():
+        return True
+    text = "\n".join(line.rstrip() for line in content.strip().splitlines()).strip()
+    has_completion_evidence = _has_completion_evidence(text)
+    plan_requested = _prompt_explicitly_requests_plan(prompt)
+
+    promise = _PROMISE_ONLY_PREFIX_RE.search(text)
+    if promise:
+        immediate = _IMMEDIATE_DELIVERY_RE.search(text)
+        delivered = bool(
+            immediate
+            and _is_substantive_result(immediate.group("value"))
+            and not _contains_unfinished_result(immediate.group("value"))
+        )
+        # Wrapper words and the promise verb itself are not evidence. Only
+        # inspect content delivered after the matched promise lead.
+        promise_payload = text[promise.end():]
+        promise_evidence = (
+            not _contains_unfinished_result(promise_payload)
+            and _has_completion_evidence(promise_payload)
+        )
+        requested_plan = plan_requested and _looks_like_plan(text)
+        return not (delivered or promise_evidence or requested_plan)
+
+    if has_completion_evidence or plan_requested:
+        return False
+    if _looks_like_plan(text):
+        return True
+    return False
+
+
+def _completion_finish_reason(content: Any, intended: str, *, prompt: str = "") -> str:
+    """Apply the content contract without claiming semantic correctness."""
+
+    if intended in {"final_answer", "fallback"} and _is_nonanswer_completion(
+        content, prompt=prompt
+    ):
+        return "error"
+    return intended
+
+
+def _verified_outcome_label(finish_reason: str) -> Optional[int]:
+    """Return the verified outcome, preserving unknown as a third state.
+
+    A final answer or successful transport fallback may still be wrong, so it
+    remains unverified (NULL). Gateway-detectable contract and execution
+    failures are verified failures (0). A later mechanical verifier or
+    semantic-evaluation pipeline may promote an outcome independently.
+    """
+
+    if finish_reason in {"error", "budget_exhausted", "depth_exhausted"}:
+        return 0
+    return None
+
 @dataclass
 class MetaLayer:
     plan: str = ""
@@ -5833,10 +6131,16 @@ class AgentLoop:
                 tool_calls = getattr(response, "tool_calls", None) or []
 
                 if not tool_calls:
-                    # Model produced final answer — no more tools needed
+                    # No tool call is only a transport-level stop. Empty,
+                    # promise-only, and unsolicited plan text is not an answer.
                     layer.generation = content
-                    layer.finish_reason = "final_answer"
-                    self._logger.info(f"AgentLoop complete at depth {depth + 1} (no tool calls)")
+                    layer.finish_reason = _completion_finish_reason(
+                        content, "final_answer", prompt=prompt
+                    )
+                    self._logger.info(
+                        f"AgentLoop complete at depth {depth + 1} "
+                        f"(no tool calls; outcome={layer.finish_reason})"
+                    )
                     break
 
                 # Cap tool calls per turn
@@ -6734,7 +7038,9 @@ class RoutingAdvisor:
             unsynced: Optional[int] = None
             if rag_mode != "off" and store is not None:
                 try:
-                    unsynced = await store.count_unsynced_task_memories()
+                    unsynced = await store.count_unsynced_task_memories(
+                        verified_only=True
+                    )
                 except Exception:
                     unsynced = None
             task_rag_view = {
@@ -7166,7 +7472,9 @@ async def run_thinking_loop(
         total_tokens += attempt.tokens
         layer.generation = attempt.generation
         layer.tool_trace = attempt.tool_trace
-        layer.finish_reason = attempt.finish_reason
+        layer.finish_reason = _completion_finish_reason(
+            attempt.generation, attempt.finish_reason, prompt=prompt
+        )
         # The accepted attempt's stored-completion id is the session's next
         # previous_response_id (empty when server state was not used).
         layer.response_id = attempt.response_id
@@ -7186,6 +7494,13 @@ async def run_thinking_loop(
             )
             break
 
+        if layer.finish_reason == "error":
+            reflection_notes.append(
+                f"[Attempt {iteration + 1}]: empty, promise-only, or plan-only "
+                "completion rejected."
+            )
+            break
+
         verdict, r_tokens, r_cost = await _reflect_on_answer(
             prompt, attempt.generation, attempt.tool_trace, model
         )
@@ -7199,7 +7514,9 @@ async def run_thinking_loop(
             )
             break
         if verdict.status == "pass":
-            layer.finish_reason = "final_answer"
+            layer.finish_reason = _completion_finish_reason(
+                attempt.generation, "final_answer", prompt=prompt
+            )
             reflection_notes.append(f"[Attempt {iteration + 1}]: verdict=pass.")
             break
         issues_text = "; ".join(issue for issue in verdict.issues if issue) or "unspecified issues"
@@ -7234,11 +7551,15 @@ async def run_thinking_loop(
     layer.policy_mode = current_policy_mode()
     layer.context_id = context_id
     layer.latency = time.time() - start_time
+    # A reviewer pass cannot resurrect a content-free completion.
+    layer.finish_reason = _completion_finish_reason(
+        layer.generation, layer.finish_reason, prompt=prompt
+    )
     if store:
         await store.save_telemetry(
             prompt[:100],
             layer.plane,
-            1 if layer.finish_reason == "final_answer" else 0,
+            _verified_outcome_label(layer.finish_reason),
             layer.latency,
             total_cost,
             context_id=context_id,
@@ -7788,7 +8109,7 @@ async def _save_task_memory_safe(
     prompt: str,
     layer: MetaLayer,
     model: str,
-    success: int,
+    success: Optional[int],
 ):
     if not active_store:
         return
@@ -7796,6 +8117,8 @@ async def _save_task_memory_safe(
         # Escalation outcomes ride task-memory metadata so future retrieval
         # sees which tasks needed the planning model.
         task_metadata: Dict[str, Any] = {}
+        if success is None:
+            task_metadata["outcome_verified"] = False
         if layer.escalated:
             task_metadata["escalated"] = True
         routing_receipt = getattr(layer, "routing_receipt", None)
@@ -8191,8 +8514,16 @@ async def orchestrate(
             layer.routing_why = routing_why
             layer.routing_receipt = routing_receipt
             layer.degraded = False
-            success = 1 if layer.finish_reason == "final_answer" else 0
-            await _save_task_memory_safe(store, prompt, layer, actual_model, success)
+            layer.finish_reason = _completion_finish_reason(
+                layer.generation, layer.finish_reason, prompt=prompt
+            )
+            await _save_task_memory_safe(
+                store,
+                prompt,
+                layer,
+                actual_model,
+                _verified_outcome_label(layer.finish_reason),
+            )
             return layer
         except Exception as e:
             logging.getLogger("GrokMCP").warning(
@@ -8225,7 +8556,11 @@ async def orchestrate(
             layer.routing_why = routing_why
             layer.routing_receipt = routing_receipt
             layer.degraded = False
-            success = 1 if layer.finish_reason == "final_answer" else 0
+            layer.finish_reason = _completion_finish_reason(
+                layer.generation, layer.finish_reason, prompt=prompt
+            )
+            # Transport completion is not semantic or mechanical verification.
+            success = _verified_outcome_label(layer.finish_reason)
             if store:
                 await store.save_telemetry(
                     prompt[:100], layer.plane, success, layer.latency,
@@ -8282,7 +8617,11 @@ async def orchestrate(
         layer.plane = "CLI" if is_cli else "API"
         layer.route = "fast"
         layer.model = actual_model
-        layer.finish_reason = "fallback" if degraded_route else "final_answer"
+        layer.finish_reason = _completion_finish_reason(
+            gen_res,
+            "fallback" if degraded_route else "final_answer",
+            prompt=prompt,
+        )
         layer.profile = str(active_profile.get("profile") or "")
         layer.policy_mode = current_policy_mode()
         layer.context_id = context_id
@@ -8297,7 +8636,9 @@ async def orchestrate(
             }
         if store:
             await store.save_telemetry(
-                prompt[:100], layer.plane, 1, time.time() - start_time,
+                prompt[:100], layer.plane,
+                _verified_outcome_label(layer.finish_reason),
+                time.time() - start_time,
                 g_cost, context_id=context_id, caller=caller,
                 **_telemetry_usage_kwargs(
                     plane=layer.plane, model=actual_model,
@@ -8405,7 +8746,9 @@ async def orchestrate(
             layer.model = "grok-composer-2.5-fast"
             layer.profile = str(fallback_profile.get("profile") or "")
             layer.policy_mode = current_policy_mode()
-            layer.finish_reason = "fallback"
+            layer.finish_reason = _completion_finish_reason(
+                gen_res, "fallback", prompt=prompt
+            )
             layer.degraded = True
             layer.routing_why = "failover"
             layer.routing_receipt = {
@@ -8420,7 +8763,9 @@ async def orchestrate(
             }
             if store:
                 await store.save_telemetry(
-                    prompt[:100], layer.plane, 1, time.time() - start_time,
+                    prompt[:100], layer.plane,
+                    _verified_outcome_label(layer.finish_reason),
+                    time.time() - start_time,
                     g_cost, context_id=context_id, caller=caller,
                     **_telemetry_usage_kwargs(
                         plane=layer.plane, model=layer.model,
@@ -8465,7 +8810,7 @@ async def orchestrate(
     layer.latency = time.time() - start_time
     await _save_task_memory_safe(
         store, prompt, layer, layer.model or actual_model,
-        1 if layer.finish_reason == "final_answer" else 0,
+        _verified_outcome_label(layer.finish_reason),
     )
     if layer.finish_reason == "fallback":
         logging.getLogger("GrokMCP").warning(

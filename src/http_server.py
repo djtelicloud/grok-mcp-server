@@ -1168,13 +1168,23 @@ def _aggregate_telemetry_planes(rows: List[Dict[str, Any]]) -> Dict[str, Dict[st
         grouped.setdefault(plane, []).append(row)
     planes: Dict[str, Dict[str, Any]] = {}
     for plane, entries in sorted(grouped.items()):
+        request_entries = [
+            entry
+            for entry in entries
+            if str(entry.get("intent") or "") != "history-compaction"
+        ]
         latencies = sorted(
-            float(entry["latency"]) for entry in entries if entry.get("latency") is not None
+            float(entry["latency"])
+            for entry in request_entries
+            if entry.get("latency") is not None
         )
-        successes = sum(1 for entry in entries if entry.get("success") == 1)
+        verified = [entry for entry in request_entries if entry.get("success") in (0, 1)]
+        successes = sum(1 for entry in verified if entry.get("success") == 1)
         planes[plane] = {
-            "requests": len(entries),
-            "success_rate": round(successes / len(entries), 4) if entries else 0.0,
+            "requests": len(request_entries),
+            "verified_outcomes": len(verified),
+            "unverified_requests": len(request_entries) - len(verified),
+            "success_rate": round(successes / len(verified), 4) if verified else None,
             "avg_latency_sec": round(sum(latencies) / len(latencies), 4) if latencies else 0.0,
             "p95_latency_sec": round(_percentile(latencies, 0.95), 4),
             "total_cost_usd": round(
@@ -1200,13 +1210,32 @@ def _aggregate_telemetry_callers(rows: List[Dict[str, Any]]) -> Dict[str, Dict[s
         if not caller:
             continue
         grouped.setdefault(caller, []).append(row)
-    ranked = sorted(grouped.items(), key=lambda item: (-len(item[1]), item[0]))
+    ranked = sorted(
+        grouped.items(),
+        key=lambda item: (
+            -sum(
+                str(entry.get("intent") or "") != "history-compaction"
+                for entry in item[1]
+            ),
+            item[0],
+        ),
+    )
     callers: Dict[str, Dict[str, Any]] = {}
     for caller, entries in ranked[:_METRICS_TOP_CALLERS]:
-        successes = sum(1 for entry in entries if entry.get("success") == 1)
+        request_entries = [
+            entry
+            for entry in entries
+            if str(entry.get("intent") or "") != "history-compaction"
+        ]
+        if not request_entries:
+            continue
+        verified = [entry for entry in request_entries if entry.get("success") in (0, 1)]
+        successes = sum(1 for entry in verified if entry.get("success") == 1)
         callers[caller] = {
-            "requests": len(entries),
-            "success_rate": round(successes / len(entries), 4) if entries else 0.0,
+            "requests": len(request_entries),
+            "verified_outcomes": len(verified),
+            "unverified_requests": len(request_entries) - len(verified),
+            "success_rate": round(successes / len(verified), 4) if verified else None,
             "total_cost_usd": round(
                 sum(float(entry["cost"]) for entry in entries if entry.get("cost") is not None), 6
             ),
@@ -1254,8 +1283,22 @@ def _render_prometheus_metrics(snapshot: Dict[str, Any]) -> str:
     )
     family(
         "unigrok_plane_success_rate", "gauge",
-        "Success rate over recorded telemetry, by execution plane.",
-        [({"plane": plane}, entry.get("success_rate", 0.0)) for plane, entry in planes.items()],
+        "Success rate over verified telemetry outcomes, by execution plane.",
+        [
+            ({"plane": plane}, entry["success_rate"])
+            for plane, entry in planes.items()
+            if entry.get("success_rate") is not None
+        ],
+    )
+    family(
+        "unigrok_plane_verified_outcomes_total", "counter",
+        "Requests with a verified outcome, by execution plane.",
+        [({"plane": plane}, entry.get("verified_outcomes", 0)) for plane, entry in planes.items()],
+    )
+    family(
+        "unigrok_plane_unverified_requests_total", "counter",
+        "Requests without a verified outcome, by execution plane.",
+        [({"plane": plane}, entry.get("unverified_requests", 0)) for plane, entry in planes.items()],
     )
     family(
         "unigrok_plane_avg_latency_seconds", "gauge",
@@ -1281,8 +1324,22 @@ def _render_prometheus_metrics(snapshot: Dict[str, Any]) -> str:
     )
     family(
         "unigrok_caller_success_rate", "gauge",
-        "Success rate of attributed requests, by caller identity.",
-        [({"caller": caller}, entry.get("success_rate", 0.0)) for caller, entry in callers.items()],
+        "Success rate of verified attributed outcomes, by caller identity.",
+        [
+            ({"caller": caller}, entry["success_rate"])
+            for caller, entry in callers.items()
+            if entry.get("success_rate") is not None
+        ],
+    )
+    family(
+        "unigrok_caller_verified_outcomes_total", "counter",
+        "Attributed requests with a verified outcome, by caller identity.",
+        [({"caller": caller}, entry.get("verified_outcomes", 0)) for caller, entry in callers.items()],
+    )
+    family(
+        "unigrok_caller_unverified_requests_total", "counter",
+        "Attributed requests without a verified outcome, by caller identity.",
+        [({"caller": caller}, entry.get("unverified_requests", 0)) for caller, entry in callers.items()],
     )
     family(
         "unigrok_caller_cost_usd_total", "counter",

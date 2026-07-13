@@ -11,6 +11,7 @@ Welcome, Gemini Agent! You are operating inside the local environment of the **G
 * **Telemetry Sanitization**: Never write raw `XAI_API_KEY`s or authorization bearer tokens to logs or telemetry rows. Sanitize them using regex patterns before persisting them to the database.
 * **CLI Command Validation**: Ensure inputs processed by command lines are escaped to prevent command injection.
 * **Secret Scan Validation**: Before saving any edits or committing configuration files, scan the changes to ensure no sensitive variables (such as `XAI_API_KEY`, `sk-` live Stripe keys, or `ghp-` GitHub PATs) are hardcoded.
+* **Credential References Only**: Never copy `~/.gemini/config/config.json`, Google ADC, Grok OAuth, Claude auth, Codex auth, or a repository `.env` into this checkout. In particular, `.gemini/config.json` is tracked public project configuration and must never be replaced with the similarly named host file. Campaigns use the external owner-only provider profile, standard ADC discovery, and the loopback UniGrok MCP.
 
 ## 3. Grok MCP Tool Routing
 Select modular tools based on the nature of the request:

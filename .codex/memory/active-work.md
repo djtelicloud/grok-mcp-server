@@ -2,44 +2,48 @@
 
 Last updated: 2026-07-13
 Owner: Codex
-Status: Session-continuity integration complete; no active landing or runtime gate
+Status: Stage 1 mock safety gate complete; all live generation and training blocked
 
 This is the project-scoped handoff for new Codex chats. Verify drift-prone Git,
 CI, runtime, DNS, cloud, and benchmark state live before acting. Never record
 credentials, OAuth codes, tokens, or private keys here.
 
-## Completed state
+## Verified campaign state
 
-- Gemini handed off `459c741b729cad4f821472ab49edcbda545079eb` as a
-  session/telemetry repair. Exact review rejected its promise-string heuristic
-  and blanket `success=0` changes because they mislabeled unverified results as
-  failures and would poison routing/task-memory readers.
-- The salvageable continuity work was corrected at reviewed head
-  `d0eedcc316880c5fa6d89031d2d0389aa80874bc`: Grok CLI 0.2.93 now creates
-  sessions with `--session-id`, resumes with `--resume`, forks genuinely busy
-  sessions, rebuilds missing mappings from bounded SQLite history, and keeps
-  explicit message arrays authoritative.
-- PR #62 passed 1,233 local tests, all required CI and CodeQL checks, Grok 4.5
-  exact-diff review, exact-head Codex Approval, and `./scripts/land`. The
-  landing receipt printed `LANDED TO MAIN: d0eedcc316880c5fa6d89031d2d0389aa80874bc`.
-- PR #62 merged to protected `origin/main` as
-  `741460316cc95083ff43b82d333976303a13fb0f`; visible local `main`, cached
-  `origin/main`, and live remote `main` were synchronized to that merge.
-- Stable `:4765` was rebuilt from synchronized main. Its in-container
-  `src/utils.py` hash matched the source tree, health and CLI OAuth readiness
-  were green, and a live public-MCP three-turn CLI replay returned
-  `SAVED`, `NEEDLE-LIVE-7414`, then `NEEDLE-LIVE-7414-THIRD` on one persisted
-  native session without busy/missing/error logs.
-- Existing contributor worktrees and the primary checkout's untracked
-  `scratch_swarm/` directory were preserved.
+- The Stage 1 gate is a deterministic, transport-free structural exercise: 30
+  roots, 120 variants, 150 mechanically evaluated candidates, and 120 bounded
+  mock role attempts across the six declared packs.
+- Every prediction input carries its own TTL context. Exact request payloads,
+  trusted scenarios, executable oracle results, effect receipts, terminal
+  evidence, and confusion matrices are persisted in owner-private,
+  content-addressed artifacts and reconstruct cleanly in a fresh process.
+- Provider output cannot assign authority. Proposal validity, episode outcome,
+  TTL validity, effect observation, and completion are derived mechanically.
+- The attempt ledger is fail-closed under lease expiry, crash takeover,
+  duplicate work, missing artifacts, and exact-boundary completion. Started or
+  indeterminate work is never retried silently.
+- Executor code and every callable dependency are bound before execution;
+  post-bind injection is rejected before an attempt or injected call occurs.
+- Promise-only and unsolicited plan-shaped completions fail closed as errors;
+  unverified terminal text persists as `NULL`, explicit gateway failures as
+  `0`, and only a future receipt-bound verifier may write `1`. Schema v14
+  quarantines unsupported historical positives.
+- Routing, local semantic evidence, the v2 cloud mirror, caller metrics, and
+  status output all preserve the tri-state contract. Auxiliary history
+  compaction is excluded from task outcome rates, and an existing explicit v1
+  collection setting is safely redirected to v2.
+- Local verification passed 150 campaign tests and 1,480 repository tests,
+  plus Ruff, repository generation checks, JSON validation, and diff hygiene.
+- No live provider call, dataset write, model download, training run, or sealed
+  evaluation occurred while repairing or validating this gate.
 
-## Follow-up boundary
+## Remaining authorization gates
 
-- Truthful outcome telemetry is separate product work, not an unfinished gate
-  on PR #62. Follow `docs/design/authority-inversion.md`: preserve
-  `finish_reason`, add a three-valued verified-success/verified-failure/
-  unverified verdict, keep semantic judges advisory, and quarantine unverified
-  or legacy binary rows from training, task memory, RAG, and routing.
-- Do not feed the current binary `success` field into Needle training. A Swarm
-  optimizer can generate adversarial candidates and mechanically verified code
-  episodes, but it must not act as its own semantic judge.
+- Stage 2 is fail-closed. A new, bounded live Stage 1 manifest must separately
+  specify provider, call, cost, time, privacy, retry, and artifact limits and
+  receive Codex approval at its exact head before any live generation.
+- Any generated dataset must pass the mechanical gates and another exact-head
+  Codex review before training. Training and sealed evaluation require their
+  own later authorization and must remain structurally separate.
+- Stage 0.5 provider wiring uses Google ADC and the loopback UniGrok gateway;
+  never copy user credential files or secrets into the repository.

@@ -484,6 +484,33 @@ class TestPrometheusRendering:
         assert "unigrok_plane_requests_total{" not in text
         assert "unigrok_routing_prefers_planning" not in text
 
+    def test_unverified_success_rate_series_is_omitted(self):
+        snapshot = {
+            "planes": {
+                "API": {
+                    "requests": 1,
+                    "verified_outcomes": 0,
+                    "unverified_requests": 1,
+                    "success_rate": None,
+                }
+            },
+            "callers": {
+                "codex": {
+                    "requests": 1,
+                    "verified_outcomes": 0,
+                    "unverified_requests": 1,
+                    "success_rate": None,
+                }
+            },
+        }
+
+        text = _render_prometheus_metrics(snapshot)
+
+        assert 'unigrok_plane_success_rate{plane="API"}' not in text
+        assert 'unigrok_caller_success_rate{caller="codex"}' not in text
+        assert 'unigrok_plane_unverified_requests_total{plane="API"} 1' in text
+        assert 'unigrok_caller_unverified_requests_total{caller="codex"} 1' in text
+
     def test_metrics_endpoint_format_switch(self, monkeypatch):
         monkeypatch.delenv("UNIGROK_RUNTIME", raising=False)
         monkeypatch.delenv("UNIGROK_API_KEYS", raising=False)
@@ -514,7 +541,7 @@ class TestPrometheusRendering:
 def _task_rag_view():
     return {
         "mode": "shadow",
-        "collection": "unigrok-task-memories-v1",
+        "collection": "unigrok-task-memories-v2",
         "ready": True,
         "unsynced": 4,
         "fused_score_bucket_bounds": [0.2, 0.4, 0.6, 0.8, 1.0],
@@ -577,7 +604,7 @@ class TestTaskRagPrometheusRendering:
             payload = client.get("/metrics").json()
         task_rag = payload["routing_advisor"]["task_rag"]
         assert task_rag["mode"] == "off"
-        assert task_rag["collection"] == "unigrok-task-memories-v1"
+        assert task_rag["collection"] == "unigrok-task-memories-v2"
 
 
 # ─────────────────────────────────────────────────────────────────────────────

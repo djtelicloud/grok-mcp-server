@@ -811,6 +811,8 @@ class TestMetricsSegmentation:
 
         assert set(callers) == {"claude-code", "codex-cli"}
         assert callers["claude-code"]["requests"] == 2
+        assert callers["claude-code"]["verified_outcomes"] == 2
+        assert callers["claude-code"]["unverified_requests"] == 0
         assert callers["claude-code"]["success_rate"] == 0.5
         assert callers["claude-code"]["total_cost_usd"] == pytest.approx(0.03)
         assert callers["codex-cli"]["requests"] == 1
@@ -855,15 +857,20 @@ class TestMetricsSegmentation:
     async def test_caller_stats_today_aggregates_and_ranks(self, cstore):
         await cstore.save_telemetry("a", "API", 1, 0.1, 0.01, caller="claude-code")
         await cstore.save_telemetry("b", "API", 0, 0.1, 0.02, caller="claude-code")
+        await cstore.save_telemetry("u", "API", None, 0.1, 0.04, caller="claude-code")
+        await cstore.save_telemetry(
+            "history-compaction", "API", 1, 0.1, 0.50, caller="claude-code"
+        )
         await cstore.save_telemetry("c", "API", 1, 0.1, 0.30, caller="codex-cli")
         await cstore.save_telemetry("d", "API", 1, 0.1, 0.90)  # unattributed
 
         stats = await cstore.get_caller_stats_today(limit=5)
 
         assert [row["caller"] for row in stats] == ["claude-code", "codex-cli"]
-        assert stats[0]["requests"] == 2
+        assert stats[0]["requests"] == 3
+        assert stats[0]["verified_outcomes"] == 2
         assert stats[0]["success_rate"] == 0.5
-        assert stats[0]["total_cost_usd"] == pytest.approx(0.03)
+        assert stats[0]["total_cost_usd"] == pytest.approx(0.57)
         assert stats[1]["total_cost_usd"] == pytest.approx(0.30)
 
     @pytest.mark.asyncio
@@ -882,7 +889,7 @@ class TestMetricsSegmentation:
         status = await grok_mcp_status()
 
         assert "Top Callers Today" in status
-        assert "`claude-code`: 3 reqs, 100% success, $0.0120" in status
+        assert "`claude-code`: 3 reqs, 100% success (3 verified), $0.0120" in status
 
     @pytest.mark.asyncio
     async def test_status_top_callers_degrade_to_none(self, monkeypatch):

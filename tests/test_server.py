@@ -94,7 +94,7 @@ async def test_grok_mcp_status_json_view_is_structured(monkeypatch):
 
     result = json.loads(await grok_mcp_status(view="json"))
 
-    assert result["schema_version"] == 2
+    assert result["schema_version"] == 3
     assert result["usage"]["today"]["summary"]["requests"] == 1
     assert result["usage"]["today"]["summary"]["api_cost_usd"] == pytest.approx(0.004)
     assert result["credential_planes"]["version"] == 1

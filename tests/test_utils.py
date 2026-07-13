@@ -21,7 +21,6 @@ import json
 import os
 import re
 import sqlite3
-import tempfile
 import threading
 import time
 
@@ -31,7 +30,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-import pytest_asyncio
 
 # Ensure dummy key is set before any src import
 os.environ.setdefault("XAI_API_KEY", "xai-test-dummy-key-for-unit-tests")
@@ -43,7 +41,6 @@ from src.utils import (
     GitContextCache,
     GrokInvocationContext,
     GrokSessionStore,
-    store,
     MetaLayer,
     PathResolver,
     ToolObservation,
@@ -919,11 +916,21 @@ class TestTier2ToolsRegistered:
         )
 
     @pytest.mark.asyncio
-    async def test_list_project_files_returns_string(self):
+    async def test_list_project_files_returns_string(self, tmp_path, monkeypatch):
         """raw_list_project_files should run and return a non-empty string."""
+        src_dir = tmp_path / "src"
+        src_dir.mkdir()
+        (src_dir / "app.py").write_text("pass\n", encoding="utf-8")
+        monkeypatch.setattr(
+            PathResolver,
+            "get_workspace_root",
+            staticmethod(lambda: tmp_path),
+        )
+
         obs = await dispatch_internal_tool("list_project_files", {})
+
         assert obs.success is True
-        assert "src" in obs.content or "pyproject" in obs.content
+        assert "`src/app.py`" in obs.content
 
     @pytest.mark.asyncio
     async def test_list_project_files_skips_nested_worktrees(self, tmp_path, monkeypatch):
@@ -1895,9 +1902,138 @@ class TestDefaultAgenticRouting:
         assert layer.finish_reason == "fallback"
 
 
+class TestCompletionContentContract:
+    reproduced_promises = (
+        "I'll run a hostile Stage-1 authority-inversion review of chunk 1 "
+        "(manifests + harness), mapping concrete P0/P1/P2 defects with file/line "
+        "evidence and saving findings for the later consolidated verdict.",
+        "Performing the chunk-1 audit from the supplied Stage-1 harness/manifest "
+        "material now — concrete findings only, no deferred work.",
+    )
+    wrapped_promises = (
+        "Sure — I'll run the audit now and report back.",
+        "Absolutely, I'll run the audit now and report back.",
+        "Update:\nI'll run the audit now and report back.",
+        "On it — I'll audit the repository and get back to you.",
+        "I'll take a look and get back to you.",
+        "We will run the audit and report back.",
+        "I'll run it; the answer is coming shortly.",
+        "I'll run it. Results: pending.",
+        "I'll run it. Evidence: forthcoming.",
+        "I'll run it. Issue: not checked yet.",
+        "I'll run it. ```pending```",
+        "I'll first inspect the repository and report back.",
+        "I'll quickly inspect the repository and report back.",
+        "No problem — I'll inspect the repository and report back.",
+        "Sure thing — I'll inspect the repository and report back.",
+        "I'll audit now. This indicates I need more time.",
+        "I'll audit now. Results: still pending.",
+        "I'll audit now. Answer is not yet available.",
+        "I'll audit now. Evidence: I will follow up.",
+        "I'll audit now. I found that I need more time.",
+        "I'll audit now. I verified nothing because I have not started.",
+        "I'll audit now. 0 tests passed because I have not run them.",
+    )
+
+    @pytest.mark.parametrize(
+        "content",
+        (
+            "",
+            "   \n\t",
+            *reproduced_promises,
+            *wrapped_promises,
+            "Plan:\n1. Inspect the repository.\n2. Run the tests.\n3. Report the results.",
+            "1. Inspect the repository.\n2. Run the tests.\n3. Report back.",
+            "Here's what I'll do:\n1. Inspect the repository.\n2. Run the tests.",
+            "Approach:\n1. Inspect the repository.\n2. Run the tests.",
+            "Steps:\n1. Inspect the repository.\n2. Run the tests.",
+            "First, inspect the repository. Then run the tests. Finally, report back.",
+            "1. Examine the repository.\n2. Execute the tests.\n3. Send the results.",
+        ),
+    )
+    def test_rejects_empty_promise_and_unsolicited_plan_nonanswers(self, content):
+        from src.utils import _is_nonanswer_completion
+
+        assert _is_nonanswer_completion(content, prompt="Audit the repository") is True
+
+    @pytest.mark.parametrize(
+        "content",
+        (
+            'The sentence "I\'ll run the audit" is a promise, not an answer. '
+            "The fix is to require evidence before accepting completion.",
+            '"Performing the audit now" is not evidence. I found the bug in '
+            "src/utils.py and verified the completion guard.",
+            "I'll answer: 42",
+            "I will use option A because it preserves the verified receipt.",
+            "I will not help bypass that safety control.",
+            "Let me explain: TTL belongs in every prediction input.",
+            "Let me explain. TTL belongs in every prediction input.",
+            "Let me explain—TTL belongs in every prediction input.",
+            "I'll summarize — TTL belongs in every prediction input.",
+            "I'll explain\nTTL belongs in every prediction input.",
+            "I'll fix this:\n```python\nprint('fixed')\n```",
+        ),
+    )
+    def test_accepts_substantive_answers_and_discussion_of_promises(self, content):
+        from src.utils import _is_nonanswer_completion
+
+        assert _is_nonanswer_completion(content, prompt="Audit the repository") is False
+
+    def test_accepts_action_plan_when_user_explicitly_requests_one(self):
+        from src.utils import _is_nonanswer_completion
+
+        content = "Plan:\n1. Inspect the repository.\n2. Run the tests.\n3. Report the results."
+        assert _is_nonanswer_completion(content, prompt="Please create a plan") is False
+
+    def test_accepts_narrative_plan_when_explicitly_requested(self):
+        from src.utils import _is_nonanswer_completion
+
+        content = "I will first inspect the repository, then run the tests."
+        assert _is_nonanswer_completion(content, prompt="Please create a plan") is False
+
+    @pytest.mark.parametrize(
+        ("prompt", "content"),
+        (
+            (
+                "Review these options",
+                "I'll review each option: option A is safer because it preserves the receipt.",
+            ),
+            (
+                "Check these claims",
+                "I'll check each claim: claim one is false; claim two is true.",
+            ),
+        ),
+    )
+    def test_accepts_inline_review_answers(self, prompt, content):
+        from src.utils import _is_nonanswer_completion
+
+        assert _is_nonanswer_completion(content, prompt=prompt) is False
+
+    def test_accepts_next_steps_when_user_asks_what_to_do(self):
+        from src.utils import _is_nonanswer_completion
+
+        content = "Next steps:\n1. Open the terminal.\n2. Run uv run pytest."
+        assert _is_nonanswer_completion(content, prompt="What should I do next?") is False
+
+    def test_accepts_direct_instructions_for_how_to_prompt(self):
+        from src.utils import _is_nonanswer_completion
+
+        content = "- Open the terminal.\n- Run uv run pytest."
+        assert _is_nonanswer_completion(content, prompt="How do I run tests?") is False
+
+    @pytest.mark.parametrize(
+        "prompt",
+        ("Which changes are required?", "What fixes do you recommend?"),
+    )
+    def test_accepts_action_list_for_advice_prompt(self, prompt):
+        from src.utils import _is_nonanswer_completion
+
+        content = "- Update the TTL guard.\n- Add missing receipt validation."
+        assert _is_nonanswer_completion(content, prompt=prompt) is False
+
+
 class TestHonestOutcomes:
-    """Now#3: telemetry/task-memory success labels derive from finish_reason
-    instead of the old unconditional success=1."""
+    """Completion labels never fabricate semantic or mechanical success."""
 
     def _mock_store(self):
         mock_store = MagicMock()
@@ -1915,7 +2051,7 @@ class TestHonestOutcomes:
         return mock_client
 
     @pytest.mark.asyncio
-    async def test_agentic_final_answer_records_success(self, monkeypatch):
+    async def test_agentic_final_answer_remains_unverified(self, monkeypatch):
         from src.utils import orchestrate
 
         monkeypatch.delenv("UNIGROK_FORCE_FAST", raising=False)
@@ -1928,8 +2064,88 @@ class TestHonestOutcomes:
             )
 
         assert layer.finish_reason == "final_answer"
-        assert mock_store.save_telemetry.await_args.args[2] == 1
-        assert mock_store.save_task_memory.await_args.kwargs["success"] == 1
+        assert mock_store.save_telemetry.await_args.args[2] is None
+        assert mock_store.save_task_memory.await_args.kwargs["success"] is None
+        assert (
+            mock_store.save_task_memory.await_args.kwargs["metadata"][
+                "outcome_verified"
+            ]
+            is False
+        )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "content",
+        TestCompletionContentContract.reproduced_promises
+        + TestCompletionContentContract.wrapped_promises,
+    )
+    async def test_agentic_promise_only_completion_is_error(self, monkeypatch, content):
+        from src.utils import orchestrate
+
+        monkeypatch.delenv("UNIGROK_FORCE_FAST", raising=False)
+        resp = _make_response(content=content, tool_calls=[], cost_usd=0.001)
+        mock_store = self._mock_store()
+
+        with patch("xai_sdk.Client", return_value=self._mock_client(lambda: resp)):
+            layer = await orchestrate(
+                prompt="Audit the repository",
+                mode="auto",
+                store=mock_store,
+                dynamic_sys_prompt="sys",
+            )
+
+        assert layer.generation == content
+        assert layer.finish_reason == "error"
+        assert mock_store.save_telemetry.await_args.args[2] == 0
+        assert mock_store.save_task_memory.await_args.kwargs["success"] == 0
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "promise",
+        (
+            TestCompletionContentContract.reproduced_promises[1],
+            TestCompletionContentContract.wrapped_promises[0],
+            TestCompletionContentContract.wrapped_promises[6],
+        ),
+    )
+    async def test_fast_promise_only_completion_is_error(self, monkeypatch, promise):
+        from src.utils import orchestrate
+
+        mock_store = self._mock_store()
+
+        with patch("src.utils._call_plane", new_callable=AsyncMock) as mock_call:
+            mock_call.return_value = (promise, 10, 0.001, False)
+            layer = await orchestrate(
+                prompt="Audit the repository",
+                mode="auto",
+                store=mock_store,
+                dynamic_sys_prompt="sys",
+                enable_agentic=False,
+            )
+
+        assert layer.generation == promise
+        assert layer.finish_reason == "error"
+        assert mock_store.save_telemetry.await_args.args[2] == 0
+        assert mock_store.save_task_memory.await_args.kwargs["success"] == 0
+
+    @pytest.mark.asyncio
+    async def test_fast_final_answer_remains_unverified(self, monkeypatch):
+        from src.utils import orchestrate
+
+        mock_store = self._mock_store()
+        with patch("src.utils._call_plane", new_callable=AsyncMock) as mock_call:
+            mock_call.return_value = ("The audit found no blockers.", 10, 0.001, False)
+            layer = await orchestrate(
+                prompt="Audit the repository",
+                mode="auto",
+                store=mock_store,
+                dynamic_sys_prompt="sys",
+                enable_agentic=False,
+            )
+
+        assert layer.finish_reason == "final_answer"
+        assert mock_store.save_telemetry.await_args.args[2] is None
+        assert mock_store.save_task_memory.await_args.kwargs["success"] is None
 
     @pytest.mark.asyncio
     async def test_agentic_depth_exhaustion_records_failure(self, monkeypatch):
@@ -2011,7 +2227,15 @@ class TestHonestOutcomes:
         assert layer.generation == "cli recovered"
         assert layer.route == "cli-fallback"
         assert layer.finish_reason == "fallback"
-        assert mock_store.save_task_memory.await_args.kwargs["success"] == 0
+        assert mock_store.save_telemetry.await_args.args[2] is None
+        assert mock_store.save_task_memory.await_args.kwargs["success"] is None
+
+    def test_unknown_finish_reason_stays_unverified(self):
+        from src.utils import _verified_outcome_label
+
+        assert _verified_outcome_label("unknown") is None
+        assert _verified_outcome_label("") is None
+        assert _verified_outcome_label("error") == 0
 
 
 class TestArchitectureUpgrades:
@@ -2103,7 +2327,7 @@ class TestDynamicCapacityLimits:
 
     @pytest.mark.asyncio
     async def test_dispatch_one_overrides_max_chars_and_max_bytes(self):
-        from src.utils import AgentLoop, AgentLoopPolicy, dispatch_internal_tool
+        from src.utils import AgentLoop, AgentLoopPolicy
         
         policy = AgentLoopPolicy(max_obs_chars=50000)
         loop = AgentLoop(policy=policy, dynamic_sys_prompt="System", model="grok-4.3")
@@ -2191,6 +2415,34 @@ class TestThinkingLoop:
         # Plan = first attempt's opening reasoning segment.
         assert layer.plan == "first segment"
         assert "verdict=pass" in layer.reflection
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "promise",
+        (
+            TestCompletionContentContract.reproduced_promises[0],
+            TestCompletionContentContract.wrapped_promises[6],
+        ),
+    )
+    async def test_promise_only_attempt_is_error_before_review(self, promise):
+        from src.utils import run_thinking_loop
+
+        async def fake_run(self, prompt, session=None, history=None, input_messages=None):
+            return TestThinkingLoop._attempt_layer(generation=promise)
+
+        mock_reflect = AsyncMock(
+            return_value=(ReflectionVerdict(status="pass"), 5, 0.001)
+        )
+        mock_store = MagicMock()
+        mock_store.save_telemetry = AsyncMock()
+        with patch("src.utils.AgentLoop.run", new=fake_run), \
+             patch("src.utils._reflect_on_answer", new=mock_reflect):
+            layer = await run_thinking_loop("Audit the repository", store=mock_store)
+
+        mock_reflect.assert_not_awaited()
+        assert layer.generation == promise
+        assert layer.finish_reason == "error"
+        assert mock_store.save_telemetry.await_args.args[2] == 0
 
     @pytest.mark.asyncio
     async def test_failing_verdict_triggers_bounded_retry(self):
@@ -5237,6 +5489,13 @@ class TestSelfEscalation:
         )
         assert mock_store.save_task_memory.await_args.kwargs["metadata"] is None
 
+        await _save_task_memory_safe(
+            mock_store, "p", MetaLayer(generation="done"), "m", None
+        )
+        assert mock_store.save_task_memory.await_args.kwargs["metadata"] == {
+            "outcome_verified": False
+        }
+
     @pytest.mark.asyncio
     async def test_run_agent_turn_records_escalation_in_message_metadata(self, monkeypatch):
         """The gateway save path stamps escalated=True into the persisted
@@ -5278,6 +5537,35 @@ class TestSelfEscalation:
             assert memories and memories[0]["metadata"] == {"escalated": True}
             notes = format_task_memory_notes(memories)
             assert "needed escalation to the planning model" in notes
+
+            await s.save_task_memory(
+                prompt="refactor the unknown layer",
+                outcome_summary="provider returned text",
+                plane="API", model="grok-4.3", profile="default",
+                success=None, latency=1.0, cost=0.01,
+            )
+            unknown = await s.get_similar_task_memories("refactor the unknown layer")
+            assert "unverified" in format_task_memory_notes(unknown)
+        finally:
+            await s.close()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("invalid", (-1, 2, 0.0, 1.0, "1"))
+    async def test_outcome_storage_rejects_values_outside_tristate(
+        self, tmp_path, invalid
+    ):
+        s = GrokSessionStore(db_path=tmp_path / f"invalid-{invalid!s}.db")
+        try:
+            with pytest.raises(ValueError, match="success must be"):
+                await s.save_telemetry("intent", "API", invalid, 1.0, 0.0)
+            with pytest.raises(ValueError, match="success must be"):
+                await s.save_task_memory(
+                    prompt="task", outcome_summary="outcome", plane="API",
+                    model="grok-4.5", profile="default", success=invalid,
+                    latency=1.0, cost=0.0,
+                )
+            assert await s.get_telemetry_stats() == []
+            assert await s.get_task_memory_count() == 0
         finally:
             await s.close()
 
@@ -5446,6 +5734,11 @@ class TestRoutingAdvisor:
                 plane="API", model="grok-build-0.1", profile="default",
                 success=0, latency=1.0, cost=0.01,
             )
+            await s.save_task_memory(
+                prompt="unverified newest task", outcome_summary="provider stopped",
+                plane="API", model="grok-4.3", profile="default",
+                success=None, latency=1.0, cost=9.99,
+            )
 
             rows = await s.get_recent_model_stats(200)
             by_model = {r["model"]: r for r in rows}
@@ -5454,7 +5747,8 @@ class TestRoutingAdvisor:
             assert by_model["grok-4.3"]["avg_cost"] == pytest.approx(0.04)
             assert by_model["grok-build-0.1"]["samples"] == 1
 
-            # A window of 1 sees only the newest row (the coding failure).
+            # The evidence window excludes the newest unverified row and sees
+            # the newest verified row (the coding failure).
             newest = await s.get_recent_model_stats(1)
             assert len(newest) == 1
             assert newest[0]["model"] == "grok-build-0.1"

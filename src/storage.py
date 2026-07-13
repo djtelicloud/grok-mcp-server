@@ -53,7 +53,7 @@ class SessionStoreProtocol(Protocol):
         self,
         intent: str,
         chosen_plane: str,
-        success: int,
+        success: Optional[int],
         latency: float,
         cost: float,
         context_id: Optional[str] = None,
@@ -97,21 +97,28 @@ class SessionStoreProtocol(Protocol):
         plane: str,
         model: str,
         profile: str,
-        success: int,
+        success: Optional[int],
         latency: float,
         cost: float,
         context_id: Optional[str] = None,
         metadata: Optional[dict] = None,
     ) -> Optional[int]: ...
     async def get_similar_task_memories(
-        self, prompt: str, context_id: Optional[str] = None, limit: int = 3
+        self,
+        prompt: str,
+        context_id: Optional[str] = None,
+        limit: int = 3,
+        verified_only: bool = False,
     ) -> List[Dict[str, Any]]: ...
     async def get_task_memory_count(self) -> int: ...
 
     # ── Task-memory cloud-mirror outbox (UNIGROK_TASK_RAG) ──────────────────
     # `synced_at IS NULL` is the durable outbox; rows are marked in place.
     async def list_unsynced_task_memories(
-        self, limit: int = 50, max_attempts: Optional[int] = None
+        self,
+        limit: int = 50,
+        max_attempts: Optional[int] = None,
+        verified_only: bool = False,
     ) -> List[Dict[str, Any]]: ...
     async def mark_task_memory_synced(
         self, memory_id: int, remote_file_id: str
@@ -122,7 +129,7 @@ class SessionStoreProtocol(Protocol):
     async def get_task_memories_by_remote_ids(
         self, file_ids: List[str]
     ) -> List[Dict[str, Any]]: ...
-    async def count_unsynced_task_memories(self) -> int: ...
+    async def count_unsynced_task_memories(self, verified_only: bool = False) -> int: ...
     async def reset_task_memory_sync(self) -> int: ...
 
     # ── Commit-anchored workspace evidence ─────────────────────────────────

@@ -33,7 +33,7 @@ def test_public_runtime_files_do_not_embed_a_developer_home_path():
         ROOT / ".codex",
         ROOT / ".gemini",
     ):
-        paths.extend(path for path in directory.rglob("*") if path.is_file())
+        paths.extend(path for path in directory.rglob("*") if path.is_file() and path.suffix != ".pyc" and "__pycache__" not in path.parts)
     private_home = "/Users/" + "djtelicloud"
 
     for path in paths:
@@ -46,8 +46,47 @@ def test_wheel_configuration_includes_runtime_assets():
 
     assert included["mcp_ui"] == "mcp_ui"
     assert included["docs/okf"] == "docs/okf"
-    assert included[".grok"] == ".grok"
+    assert included[".grok/hyperparams"] == ".grok/hyperparams"
+    assert included[".grok/prompts"] == ".grok/prompts"
+    assert ".grok" not in included
     assert included["example.env"] == "example.env"
+
+
+def test_local_provider_credentials_are_ignored_and_not_force_included():
+    gitignore = (ROOT / ".gitignore").read_text(encoding="utf-8")
+    dockerignore = (ROOT / ".dockerignore").read_text(encoding="utf-8")
+    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+
+    for path in (
+        ".codex/auth.json",
+        ".gemini/config/",
+        ".gemini/settings.local.json",
+        ".claude/.credentials.json",
+        ".grok/auth.json",
+        ".gcloud/",
+        ".google/",
+        "secrets/",
+    ):
+        assert path in gitignore
+
+    assert ".grok/**" in dockerignore
+    assert "!.grok/prompts/**" in dockerignore
+    assert "!.grok/hyperparams/**" in dockerignore
+    assert "COPY .grok/ ./.grok/" not in dockerfile
+    assert "COPY .grok/prompts/ ./.grok/prompts/" in dockerfile
+    assert "COPY .grok/hyperparams/ ./.grok/hyperparams/" in dockerfile
+
+    gemini_config = json.loads((ROOT / ".gemini" / "config.json").read_text())
+    assert gemini_config == {
+        "userSettings": {
+            "browserJsExecutionPolicy": "BROWSER_JS_EXECUTION_POLICY_TURBO",
+            "useAiCredits": True,
+            "verboseAgentChat": True,
+        }
+    }
+    gemini_guidance = (ROOT / ".gemini" / "GEMINI.md").read_text(encoding="utf-8")
+    assert "must never be replaced" in gemini_guidance
+    assert "standard ADC discovery" in gemini_guidance
 
 
 def test_forge_execution_tools_are_not_core_runtime_dependencies():

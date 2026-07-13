@@ -83,7 +83,7 @@ observations and continuation conditions rather than false successful answers.
 | Model and route choice | Deterministic feature thresholds and ordered candidates choose before Grok runs (`src/routing.py:1-27`, `src/utils.py:7767-7947`) | Code emits an advisory proposal; Grok decides among live compatible choices |
 | Agent completion | A response with no tool call becomes `final_answer` (`src/utils.py:5821-5826`) | Completion requires a `VerifiedOutcome`; syntactic stopping is not semantic completion |
 | Needle | One bounded tools-array context projection with no runtime caller (`src/intelligence_payloads.py:979-1135`) | Typed specialist registry, shadow inference, training, evaluation, promotion, and rollback |
-| Learning evidence | `task_memory.success` is binary and can be derived from transport/finish state (`src/utils.py:3096-3166`, `src/utils.py:8106-8151`) | Content-addressed TenantVerifiedEpisodes are learning truth; SQL is a rebuildable projection |
+| Learning evidence | `task_memory.success` is now tri-state; provider stops remain `NULL`, legacy positives are quarantined by schema v14, and routing/RAG consume verified rows only | Content-addressed TenantVerifiedEpisodes are learning truth; SQL is a rebuildable projection |
 | Semantic grading | Optional shadow grader defaults off (`src/semantic_evals.py:44-69`) | Verification sources are first-class and gate every reader and training export |
 | Continuity | Route exceptions eventually return fallback/error results | Attempts become observations; objectives persist, degrade, or wait and resume |
 
@@ -290,24 +290,21 @@ it does not erase debt or block unrelated verified work.
 
 ## 4. VerifiedOutcome: truth before learning
 
-The current runtime can turn a planning stub into positive evidence:
+The runtime now separates transport stopping from verified outcome evidence:
 
-1. An AgentLoop response without a tool call is labeled `final_answer`
-   (`src/utils.py:5821-5826`).
-2. Thinking and agentic persistence convert that finish reason into
-   `success=1` (`src/utils.py:7224-7239`, `src/utils.py:8106-8151`).
-3. The fast path hard-codes telemetry success, including for a degraded
-   `fallback` result (`src/utils.py:8191-8219`, `src/utils.py:8320-8342`).
-4. `save_task_memory` persists that binary label (`src/utils.py:3096-3166`).
-5. Similar-memory reads do not require verification
-   (`src/utils.py:3169-3263`), and prompt rendering names every binary-positive
-   row a success (`src/utils.py:1231-1247`).
-6. Aggregated task-memory labels and later eval calibration can influence
-   route and model selection; semantic routing also treats the raw binary
-   label as evidence (`src/utils.py:3001-3028`, `src/routing.py:145-220`,
-   `src/rag.py:552-600`).
+1. `final_answer` and successful `fallback` results persist `success=NULL`.
+2. Explicit gateway-detectable failures persist `0`; the storage boundary
+   rejects every value outside `NULL`, `0`, and `1`.
+3. Schema v14 withdraws unsupported historical positive labels.
+4. RoutingAdvisor, local semantic RAG, the versioned cloud mirror, metrics,
+   and prompt rendering preserve or require the verified-only distinction.
+5. Auxiliary `history-compaction` operations are excluded from task success
+   denominators, and shadow semantic judges remain observational.
 
-No learning or promotion work starts before this path is repaired.
+This closes the false-positive learning path, but it does not establish the
+target learning authority. No training or promotion work starts until a
+versioned verifier can write attributable `1` outcomes and the episode ledger
+is integrated.
 
 ### 4.1 Preserve compatibility; add truthful fields
 
@@ -511,10 +508,10 @@ The episode ledger provides:
 ### 5.1 SQL's transitional role
 
 The current `GrokSessionStore` remains the operational implementation during
-migration. A dual write creates tenant-private episode records beside existing
-task-memory rows and reuses the current durable outbox shape
-(`src/storage.py:111-126`). Readers move to verified episode projections before
-legacy binary labels are retired.
+migration. Schema v14 has retired unsupported legacy positive labels and the
+current readers use verified-only SQL projections. A later dual write creates
+tenant-private episode records beside those transitional task-memory rows and
+reuses the current durable outbox shape (`src/storage.py:111-126`).
 
 The target agent runtime stores the append-only tenant ledger in its private
 state root (or tenant-isolated hosted object store) and treats SQLite as an
