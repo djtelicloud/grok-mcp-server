@@ -3264,27 +3264,40 @@ class GrokSessionStore:
         prompt_terms = set(_task_terms(prompt))
         prompt_hash = _task_hash(prompt)
         bounded = max(1, min(int(limit or 3), 10))
-        verified_fts_clause = " AND t.success IS NOT NULL" if verified_only else ""
-        verified_table_clause = " AND success IS NOT NULL" if verified_only else ""
 
         if self._task_memory_fts and prompt_terms:
             match_expr = " OR ".join(sorted(prompt_terms))
-            async with self._read_conn() as conn:
-                async with conn.execute(
+            if verified_only:
+                fts_query = (
                     "SELECT t.*, bm25(task_memory_fts) AS fts_rank FROM task_memory_fts "
                     "JOIN task_memory t ON t.id = task_memory_fts.rowid "
-                    "WHERE task_memory_fts MATCH ?"
-                    + verified_fts_clause
-                    + " ORDER BY fts_rank LIMIT 50",
+                    "WHERE task_memory_fts MATCH ? AND t.success IS NOT NULL "
+                    "ORDER BY fts_rank LIMIT 50"
+                )
+                context_query = (
+                    "SELECT * FROM task_memory WHERE context_id = ? "
+                    "AND success IS NOT NULL ORDER BY id DESC LIMIT 10"
+                )
+            else:
+                fts_query = (
+                    "SELECT t.*, bm25(task_memory_fts) AS fts_rank FROM task_memory_fts "
+                    "JOIN task_memory t ON t.id = task_memory_fts.rowid "
+                    "WHERE task_memory_fts MATCH ? ORDER BY fts_rank LIMIT 50"
+                )
+                context_query = (
+                    "SELECT * FROM task_memory WHERE context_id = ? "
+                    "ORDER BY id DESC LIMIT 10"
+                )
+            async with self._read_conn() as conn:
+                async with conn.execute(
+                    fts_query,
                     (match_expr,),
                 ) as cursor:
                     fts_rows = await cursor.fetchall()
                 context_rows: List[Any] = []
                 if context_id:
                     async with conn.execute(
-                        "SELECT * FROM task_memory WHERE context_id = ?"
-                        + verified_table_clause
-                        + " ORDER BY id DESC LIMIT 10",
+                        context_query,
                         (context_id,),
                     ) as cursor:
                         context_rows = await cursor.fetchall()
@@ -3318,10 +3331,13 @@ class GrokSessionStore:
             return scored[:bounded]
 
         async with self._read_conn() as conn:
-            query = "SELECT * FROM task_memory"
             if verified_only:
-                query += " WHERE success IS NOT NULL"
-            query += " ORDER BY id DESC LIMIT 200"
+                query = (
+                    "SELECT * FROM task_memory WHERE success IS NOT NULL "
+                    "ORDER BY id DESC LIMIT 200"
+                )
+            else:
+                query = "SELECT * FROM task_memory ORDER BY id DESC LIMIT 200"
             async with conn.execute(query) as cursor:
                 rows = await cursor.fetchall()
 
