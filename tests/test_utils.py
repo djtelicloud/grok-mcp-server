@@ -1909,6 +1909,16 @@ class TestCompletionContentContract:
         "evidence and saving findings for the later consolidated verdict.",
         "Performing the chunk-1 audit from the supplied Stage-1 harness/manifest "
         "material now — concrete findings only, no deferred work.",
+        "I'll peer-review PR #64 now and return a concrete verdict.",
+        "Pulling PR #64 now — I'll report concrete findings shortly.",
+        "I'll inspect the completion guard, then return concrete findings. "
+        "I found the relevant helper in src/utils.py; next I'll read its tests.",
+        "I'll inspect the completion-contract guard and related tests directly, "
+        "then return concrete findings and the smallest deterministic fix.I found "
+        "the guard in `utils.py`; next I'll read the full promise/nonanswer logic "
+        "and the tests that cover it.",
+        "Before I answer, I'll inspect the repository and report back.",
+        "I'll carefully peer-review the patch and return a verdict.",
     )
     wrapped_promises = (
         "Sure — I'll run the audit now and report back.",
@@ -1933,6 +1943,7 @@ class TestCompletionContentContract:
         "I'll audit now. I found that I need more time.",
         "I'll audit now. I verified nothing because I have not started.",
         "I'll audit now. 0 tests passed because I have not run them.",
+        "I'll audit now. Verdict: I will provide the result after I inspect it.",
     )
 
     @pytest.mark.parametrize(
@@ -1972,6 +1983,8 @@ class TestCompletionContentContract:
             "I'll summarize — TTL belongs in every prediction input.",
             "I'll explain\nTTL belongs in every prediction input.",
             "I'll fix this:\n```python\nprint('fixed')\n```",
+            "I'll review this now. Verdict: the TTL guard fails because it "
+            "accepts an expired lease.",
         ),
     )
     def test_accepts_substantive_answers_and_discussion_of_promises(self, content):
@@ -2104,11 +2117,16 @@ class TestHonestOutcomes:
         "promise",
         (
             TestCompletionContentContract.reproduced_promises[1],
+            TestCompletionContentContract.reproduced_promises[2],
+            TestCompletionContentContract.reproduced_promises[3],
+            TestCompletionContentContract.reproduced_promises[5],
             TestCompletionContentContract.wrapped_promises[0],
             TestCompletionContentContract.wrapped_promises[6],
         ),
     )
-    async def test_fast_promise_only_completion_is_error(self, monkeypatch, promise):
+    async def test_fast_repeated_promise_only_completion_is_error(
+        self, monkeypatch, promise
+    ):
         from src.utils import orchestrate
 
         mock_store = self._mock_store()
@@ -2123,10 +2141,60 @@ class TestHonestOutcomes:
                 enable_agentic=False,
             )
 
-        assert layer.generation == promise
+        assert layer.generation == (
+            "Grok returned a non-answer completion twice; UniGrok "
+            "rejected both responses and produced no result."
+        )
         assert layer.finish_reason == "error"
+        assert mock_call.await_count == 2
+        assert "# Original request\nAudit the repository" in (
+            mock_call.await_args_list[1].args[1]
+        )
+        assert layer.routing_receipt["completion_recovery"] == {
+            "attempted": True,
+            "reason": "nonanswer_completion",
+            "succeeded": False,
+            "attempts": 1,
+        }
         assert mock_store.save_telemetry.await_args.args[2] == 0
         assert mock_store.save_task_memory.await_args.kwargs["success"] == 0
+
+    @pytest.mark.asyncio
+    async def test_fast_promise_only_completion_recovers_once(self, monkeypatch):
+        from src.utils import orchestrate
+
+        mock_store = self._mock_store()
+        promise = "I'll peer-review PR #64 now and return a concrete verdict."
+
+        with patch("src.utils._call_plane", new_callable=AsyncMock) as mock_call:
+            mock_call.side_effect = (
+                (promise, 10, 0.001, True),
+                ("Findings: the PR needs a current-main rebase.", 12, 0.002, True),
+            )
+            layer = await orchestrate(
+                prompt="Audit the repository",
+                mode="auto",
+                store=mock_store,
+                dynamic_sys_prompt="sys",
+                enable_agentic=False,
+            )
+
+        assert layer.generation == "Findings: the PR needs a current-main rebase."
+        assert layer.finish_reason == "final_answer"
+        assert layer.tokens == 22
+        assert layer.cost_usd == pytest.approx(0.003)
+        assert mock_call.await_count == 2
+        assert mock_call.await_args_list[0].kwargs["requested_model"] == (
+            mock_call.await_args_list[1].kwargs["requested_model"]
+        )
+        assert layer.routing_receipt["completion_recovery"] == {
+            "attempted": True,
+            "reason": "nonanswer_completion",
+            "succeeded": True,
+            "attempts": 1,
+        }
+        assert mock_store.save_telemetry.await_args.args[2] is None
+        assert mock_store.save_task_memory.await_args.kwargs["success"] is None
 
     @pytest.mark.asyncio
     async def test_fast_final_answer_remains_unverified(self, monkeypatch):
@@ -2421,6 +2489,7 @@ class TestThinkingLoop:
         "promise",
         (
             TestCompletionContentContract.reproduced_promises[0],
+            TestCompletionContentContract.reproduced_promises[5],
             TestCompletionContentContract.wrapped_promises[6],
         ),
     )

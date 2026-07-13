@@ -23,7 +23,7 @@ import functools
 import concurrent.futures
 import aiosqlite
 from datetime import datetime, timedelta
-from typing import Optional, List, Dict, Any, Literal, Callable
+from typing import Optional, List, Dict, Any, Literal, Callable, Awaitable
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field as PydanticField
 from .routing import (
@@ -4953,7 +4953,9 @@ class GitContextCache:
 ModelPlane = Literal["reasoning", "composer", "cli-fallback"]
 
 _PROMISE_ACTION = (
-    r"(?:run|review|audit|check|inspect|investigate|analy[sz]e|start|begin|"
+    r"(?:run|(?:peer[-\s]?)?review|audit|check|inspect|investigate|analy[sz]e|"
+    r"pull|fetch|load|read|retrieve|gather|collect|open|examine|evaluate|assess|"
+    r"test|validate|verify|compare|trace|query|start|begin|"
     r"perform|conduct|try|recover|fix|work\s+on|get\s+(?:started|right\s+on)|"
     r"look\s+into|take\s+a\s+look|explain|summarize|report|answer|proceed|"
     r"handle(?:\s+(?:it|this|that))?|do\s+(?:it|this|that)|get\s+back)"
@@ -4961,9 +4963,13 @@ _PROMISE_ACTION = (
 _PROMISE_WRAPPER = (
     r"(?:(?:(?:sure\s+thing|no\s+problem|all\s+right|sure|okay|ok|understood|"
     r"absolutely|certainly|got\s+it|on\s+it|thanks|of\s+course)\b"
-    r"[\s,.:;!—–-]*|update\s*:\s*))*"
+    r"[\s,.:;!—–-]*|update\s*:\s*|before\s+i\s+(?:answer|respond)\b"
+    r"[\s,.:;!—–-]*))*"
 )
-_PROMISE_ADVERB = r"(?:(?:first|quickly|now|next|briefly|immediately)\s+)?"
+_PROMISE_ADVERB = (
+    r"(?:(?:first|quickly|now|next|briefly|immediately|carefully|thoroughly|"
+    r"directly|independently)\s+)?"
+)
 _PROMISE_ONLY_PREFIX_RE = re.compile(
     rf"""(?ix)^\s*(?:[>*#-]+\s*)?
         {_PROMISE_WRAPPER}(?:
@@ -4973,7 +4979,10 @@ _PROMISE_ONLY_PREFIX_RE = re.compile(
           | let\s+me\s+{_PROMISE_ADVERB}{_PROMISE_ACTION}\b
           | (?:i(?:['’]m|\s+am)\s+)?{_PROMISE_ADVERB}
             (?:performing|running|starting|beginning|conducting|checking|reviewing|
-               auditing|investigating|analyzing|working\s+on)\b
+               peer[-\s]?reviewing|auditing|investigating|analyzing|pulling|
+               fetching|loading|reading|retrieving|gathering|collecting|opening|
+               examining|evaluating|assessing|testing|validating|verifying|
+               comparing|tracing|querying|working\s+on)\b
         )"""
 )
 _PLAN_ONLY_HEADING_RE = re.compile(
@@ -5031,6 +5040,7 @@ _OBSERVATION_RESULT_RE = re.compile(
 _PLACEHOLDER_RESULT_RE = re.compile(
     r"(?is)^\s*(?:(?:still\s+)?pending|tbd|todo|forthcoming|coming\b|later\b|"
     r"unknown\b|to\s+follow\b|(?:i\s+)?will\s+(?:follow\s+up|report|return)\b|"
+    r"(?:i\s+)?will\s+(?:provide|deliver|share)\b|"
     r"(?:i\s+)?need\s+more\s+time\b|going\s+to\s+follow\b|not\s+yet\b|"
     r"not\s+(?:checked|run|verified|done|available)\b|no\s+(?:result|answer)\s+yet\b)"
 )
@@ -5044,6 +5054,15 @@ _UNFINISHED_EVIDENCE_RE = re.compile(
     r"|\b0\s+(?:tests?|checks?)\s+(?:passed|completed)\b.{0,120}"
     r"\bnot\s+(?:run|started|begun)\b"
     r")"
+)
+_TERMINAL_FUTURE_WORK_RE = re.compile(
+    rf"(?is)(?:"
+    rf"\b(?:next|then|after\s+that|afterwards?)\s*,?\s*"
+    rf"(?:i|we)(?:['’]ll|\s+will)\s+{_PROMISE_ADVERB}{_PROMISE_ACTION}\b"
+    rf"|\b(?:i|we)(?:['’]ll|\s+will)\s+(?:next|then)\s+{_PROMISE_ACTION}\b"
+    rf"|\b(?:i|we)\s+(?:still\s+)?(?:need|plan|intend)\s+to\s+"
+    rf"{_PROMISE_ADVERB}{_PROMISE_ACTION}\b"
+    rf")"
 )
 _IMMEDIATE_DELIVERY_RE = re.compile(
     rf"(?is)^\s*(?:[>*#-]+\s*)?{_PROMISE_WRAPPER}"
@@ -5084,7 +5103,10 @@ def _has_completion_evidence(text: str) -> bool:
 
 
 def _contains_unfinished_result(text: str) -> bool:
-    if _UNFINISHED_EVIDENCE_RE.search(text):
+    if (
+        _UNFINISHED_EVIDENCE_RE.search(text)
+        or _TERMINAL_FUTURE_WORK_RE.search(text)
+    ):
         return True
     for pattern in (_RESULT_MARKER_RE, _OBSERVATION_RESULT_RE):
         for match in pattern.finditer(text):
@@ -5123,9 +5145,15 @@ def _is_nonanswer_completion(content: Any, *, prompt: str = "") -> bool:
         # Wrapper words and the promise verb itself are not evidence. Only
         # inspect content delivered after the matched promise lead.
         promise_payload = text[promise.end():]
+        deferred_matches = list(_TERMINAL_FUTURE_WORK_RE.finditer(promise_payload))
+        evidence_payload = (
+            promise_payload[deferred_matches[-1].end():]
+            if deferred_matches
+            else promise_payload
+        )
         promise_evidence = (
-            not _contains_unfinished_result(promise_payload)
-            and _has_completion_evidence(promise_payload)
+            not _contains_unfinished_result(evidence_payload)
+            and _has_completion_evidence(evidence_payload)
         )
         requested_plan = plan_requested and _looks_like_plan(text)
         return not (delivered or promise_evidence or requested_plan)
@@ -5145,6 +5173,40 @@ def _completion_finish_reason(content: Any, intended: str, *, prompt: str = "") 
     ):
         return "error"
     return intended
+
+
+def _completion_recovery_prompt(original_prompt: str) -> str:
+    """Ask once for the result after a transport-level non-answer."""
+
+    return (
+        "Your previous response described future work but did not deliver a "
+        "result. Complete the original request now. Return the actual answer, "
+        "findings, or a concrete verified blocker. Do not narrate setup, promise "
+        "future work, or defer the result.\n\n"
+        f"# Original request\n{original_prompt}"
+    )
+
+
+async def _recover_nonanswer_once(
+    invoke: Callable[[str], Awaitable[tuple[str, int, float, bool]]],
+    original_prompt: str,
+    initial: tuple[str, int, float, bool],
+) -> tuple[tuple[str, int, float, bool], bool]:
+    """Retry one non-answer on the same caller-supplied execution plane."""
+
+    text, tokens, cost, is_cli = initial
+    if not _is_nonanswer_completion(text, prompt=original_prompt):
+        return initial, False
+
+    retry_text, retry_tokens, retry_cost, retry_is_cli = await invoke(
+        _completion_recovery_prompt(original_prompt)
+    )
+    return (
+        retry_text,
+        tokens + retry_tokens,
+        cost + retry_cost,
+        retry_is_cli,
+    ), True
 
 
 def _verified_outcome_label(finish_reason: str) -> Optional[int]:
@@ -8597,20 +8659,36 @@ async def orchestrate(
 
     layer = MetaLayer(routing_receipt=routing_receipt)
     try:
-        gen_res, g_tok, g_cost, is_cli = await _call_plane(
-            actual_mode, prompt, session, store, dynamic_sys_prompt,
-            requested_model=actual_model,
-            agent_count=agent_count,
-            input_messages=input_messages,
-            profile=active_profile,
-            on_event=on_event,
-            include=include,
-            max_turns=cli_max_turns,
-            cli_no_plan=cli_no_plan,
-            cli_verbatim=cli_verbatim,
-            cli_allowed_tools=cli_allowed_tools,
-            cli_isolated=cli_isolated,
+        async def _invoke_fast_plane(
+            call_prompt: str,
+        ) -> tuple[str, int, float, bool]:
+            call_messages = input_messages
+            if input_messages is not None and call_prompt != prompt:
+                call_messages = [
+                    *input_messages,
+                    {"role": "user", "content": call_prompt},
+                ]
+            return await _call_plane(
+                actual_mode, call_prompt, session, store, dynamic_sys_prompt,
+                requested_model=actual_model,
+                agent_count=agent_count,
+                input_messages=call_messages,
+                profile=active_profile,
+                on_event=on_event,
+                include=include,
+                max_turns=cli_max_turns,
+                cli_no_plan=cli_no_plan,
+                cli_verbatim=cli_verbatim,
+                cli_allowed_tools=cli_allowed_tools,
+                cli_isolated=cli_isolated,
+            )
+
+        fast_result, completion_recovery_attempted = await _recover_nonanswer_once(
+            _invoke_fast_plane,
+            prompt,
+            await _invoke_fast_plane(prompt),
         )
+        gen_res, g_tok, g_cost, is_cli = fast_result
         layer.generation = gen_res
         layer.tokens = g_tok
         layer.cost_usd = g_cost
@@ -8634,6 +8712,22 @@ async def orchestrate(
                 "why_detail": "agentic_to_fast",
                 "fallback": {"from_route": "agentic", "to_route": "fast"},
             }
+        if completion_recovery_attempted:
+            recovery_succeeded = layer.finish_reason != "error"
+            layer.routing_receipt = {
+                **layer.routing_receipt,
+                "completion_recovery": {
+                    "attempted": True,
+                    "reason": "nonanswer_completion",
+                    "succeeded": recovery_succeeded,
+                    "attempts": 1,
+                },
+            }
+            if not recovery_succeeded:
+                layer.generation = (
+                    "Grok returned a non-answer completion twice; UniGrok "
+                    "rejected both responses and produced no result."
+                )
         if store:
             await store.save_telemetry(
                 prompt[:100], layer.plane,
@@ -8728,16 +8822,28 @@ async def orchestrate(
         layer.plane = "CLI-Fallback"
         try:
             fallback_profile = load_grok_profile("grok-composer-2.5-fast")
-            gen_res, g_tok, g_cost, _ = await _call_plane(
-                "cli-fallback", prompt, session, store, dynamic_sys_prompt,
-                requested_model="grok-composer-2.5-fast",
-                profile=fallback_profile,
-                max_turns=cli_max_turns,
-                cli_no_plan=cli_no_plan,
-                cli_verbatim=cli_verbatim,
-                cli_allowed_tools=cli_allowed_tools,
-                cli_isolated=cli_isolated,
+            async def _invoke_cli_fallback(
+                call_prompt: str,
+            ) -> tuple[str, int, float, bool]:
+                return await _call_plane(
+                    "cli-fallback", call_prompt, session, store, dynamic_sys_prompt,
+                    requested_model="grok-composer-2.5-fast",
+                    profile=fallback_profile,
+                    max_turns=cli_max_turns,
+                    cli_no_plan=cli_no_plan,
+                    cli_verbatim=cli_verbatim,
+                    cli_allowed_tools=cli_allowed_tools,
+                    cli_isolated=cli_isolated,
+                )
+
+            fallback_result, completion_recovery_attempted = (
+                await _recover_nonanswer_once(
+                    _invoke_cli_fallback,
+                    prompt,
+                    await _invoke_cli_fallback(prompt),
+                )
             )
+            gen_res, g_tok, g_cost, _ = fallback_result
             layer.generation = gen_res
             layer.tokens = g_tok
             layer.cost_usd = g_cost
@@ -8761,6 +8867,22 @@ async def orchestrate(
                 "fallback_occurred": True,
                 "billing_class": "subscription",
             }
+            if completion_recovery_attempted:
+                recovery_succeeded = layer.finish_reason != "error"
+                layer.routing_receipt = {
+                    **layer.routing_receipt,
+                    "completion_recovery": {
+                        "attempted": True,
+                        "reason": "nonanswer_completion",
+                        "succeeded": recovery_succeeded,
+                        "attempts": 1,
+                    },
+                }
+                if not recovery_succeeded:
+                    layer.generation = (
+                        "Grok returned a non-answer completion twice; UniGrok "
+                        "rejected both responses and produced no result."
+                    )
             if store:
                 await store.save_telemetry(
                     prompt[:100], layer.plane,
