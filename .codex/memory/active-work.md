@@ -2,35 +2,25 @@
 
 Last updated: 2026-07-13
 Owner: Codex
-Status: PR #58 draft published; exact-head review and merge remain pending
+Status: PR #58 integration landed; no active repository gate
 
 This is the project-scoped handoff for new Codex chats. Resolve drift-prone
 Git, CI, runtime, DNS, cloud, and benchmark state live before acting. Never
 record credentials, OAuth codes, tokens, or private keys here.
 
-## Active design PR
-
-- Draft PR #58 (`codex/authority-inversion-design`) defines the accepted target
-  authority inversion. The approved runtime-distribution amendment is commit
-  `0776ade47e4763ec7ad9cac5aff86b51bbf26dcb`.
-- The durable public target is a supervised native `uv` Python core. HTMX and
-  WebMCP are presentation/context layers; optional `app.wasm` is a browser
-  Needle executor; Mojo is measured native acceleration; Docker and Docker
-  Agent are optional capabilities. Gordon remains an external handoff until a
-  supported machine contract exists.
-- This remains a docs-only target. Current Docker-facing runtime, onboarding,
-  auth, status/restart controls, and public documentation remain operational
-  truth until native lifecycle and parity gates land.
-- Exact amended wording passed `git diff --check` and the full suite with
-  `1220 passed`. Independent review found no remaining distribution-design
-  contradiction after the Gordon and browser/core boundaries were corrected.
-- The updated branch is published at PR #58. Verify its current head and checks
-  live because this handoff is a locator, not proof. Remaining gates are the
-  normal exact-head Codex disposition, ready-for-review transition, landing,
-  and protected merge. Do not begin runtime removal from this handoff.
-
 ## Completed state
 
+- PR #58 merged to protected `origin/main` as
+  `5de42b31077dbacf0016460a6194ffbb896f191f`. Its exact reviewed and locally
+  landed head was `d0b6cd4f7ddf788437c3d0fcb6600bf99f416a72`.
+- The accepted target is Grok first, typed Needle reflexes second, and
+  versioned code floors third. Distribution is a supervised native `uv` Python
+  core with optional HTMX/WebMCP/WASM, Mojo, Docker, and Docker Agent layers;
+  Gordon remains an external handoff until a supported machine contract exists.
+- PR #58 changed documentation only. Current Docker-facing runtime,
+  onboarding, auth, status/restart controls, and public documentation remain
+  operational truth until the native lifecycle and parity gates land. Do not
+  interpret the design merge as authorization to rip out working runtime paths.
 - PR #56 merged to protected `origin/main` as
   `228c0c37db0211f245e92a0943823c2febd121bf`. Its exact reviewed and locally
   landed head was `b54b8d21fc9d3af78aa9465a2fd3014f6e822a2e`.
@@ -56,6 +46,13 @@ record credentials, OAuth codes, tokens, or private keys here.
 
 ## Verification
 
+- The PR #58 landing gate printed
+  `LANDED TO MAIN: d0b6cd4f7ddf788437c3d0fcb6600bf99f416a72`
+  after 1,220 tests and reported `Runtime: unchanged`.
+- Fresh exact-head Python 3.11/3.12 CI, Project Site, control image, Docker,
+  offline evals, CodeQL, and `Codex Approval` passed. Protected `origin/main`
+  and visible local `main` agreed at `5de42b31077dbacf0016460a6194ffbb896f191f`;
+  stable port 4765 and contributor port 4766 were healthy.
 - The PR #56 landing gate printed
   `LANDED TO MAIN: b54b8d21fc9d3af78aa9465a2fd3014f6e822a2e`
   after 1,220 tests; the dependency audit reported no known vulnerabilities.
