@@ -2,56 +2,44 @@
 
 Last updated: 2026-07-13
 Owner: Codex
-Status: Conditional closeout for PR #61; verify live reachability on protected main
+Status: Session-continuity integration complete; no active landing or runtime gate
 
-This is the project-scoped handoff for new Codex chats. Resolve drift-prone
-Git, CI, runtime, DNS, cloud, and benchmark state live before acting. Never
-record credentials, OAuth codes, tokens, or private keys here.
+This is the project-scoped handoff for new Codex chats. Verify drift-prone Git,
+CI, runtime, DNS, cloud, and benchmark state live before acting. Never record
+credentials, OAuth codes, tokens, or private keys here.
 
-## Completed integration state
+## Completed state
 
-- PR #60 merged to protected `origin/main` as
-  `faa69801d90a7783571ccc675a5d60ce6481f984`. Its exact reviewed and locally
-  landed head was `d7edfc6c1faa471581d5c0785b0b95474b23b57e`.
-- PR #60 preserves the useful Gemini and Claude contributions from drafts #42
-  and #43, with corrected discovery, permissions, session, identity, cost, and
-  supported-tool contracts. Drafts #42 and #43 are closed as superseded.
-- PR #61 integrates draft #55's unified Control Center at contributor head
-  `1ea5f72c560325cacd8f44532baa5107635df2fe`. The reviewed implementation is
-  preserved by commits `a71bb6320d7f14349073cae8863c44d852650885` and
-  `abdf871c124125d339ea212e3702c35c95e1a703`.
-- PR #61 prevents stale cached UI assets from discarding completed Grok
-  answers, version-locks Control Center and Swarm assets, improves responsive
-  layout and onboarding, and keeps hosted protected data behind GitHub-backed
-  authorization while rendering public signed-out context.
-- No contributor worktree or untracked user file was removed.
+- Gemini handed off `459c741b729cad4f821472ab49edcbda545079eb` as a
+  session/telemetry repair. Exact review rejected its promise-string heuristic
+  and blanket `success=0` changes because they mislabeled unverified results as
+  failures and would poison routing/task-memory readers.
+- The salvageable continuity work was corrected at reviewed head
+  `d0eedcc316880c5fa6d89031d2d0389aa80874bc`: Grok CLI 0.2.93 now creates
+  sessions with `--session-id`, resumes with `--resume`, forks genuinely busy
+  sessions, rebuilds missing mappings from bounded SQLite history, and keeps
+  explicit message arrays authoritative.
+- PR #62 passed 1,233 local tests, all required CI and CodeQL checks, Grok 4.5
+  exact-diff review, exact-head Codex Approval, and `./scripts/land`. The
+  landing receipt printed `LANDED TO MAIN: d0eedcc316880c5fa6d89031d2d0389aa80874bc`.
+- PR #62 merged to protected `origin/main` as
+  `741460316cc95083ff43b82d333976303a13fb0f`; visible local `main`, cached
+  `origin/main`, and live remote `main` were synchronized to that merge.
+- Stable `:4765` was rebuilt from synchronized main. Its in-container
+  `src/utils.py` hash matched the source tree, health and CLI OAuth readiness
+  were green, and a live public-MCP three-turn CLI replay returned
+  `SAVED`, `NEEDLE-LIVE-7414`, then `NEEDLE-LIVE-7414-THIRD` on one persisted
+  native session without busy/missing/error logs.
+- Existing contributor worktrees and the primary checkout's untracked
+  `scratch_swarm/` directory were preserved.
 
-## Verification evidence
+## Follow-up boundary
 
-- The PR #60 landing gate printed
-  `LANDED TO MAIN: d7edfc6c1faa471581d5c0785b0b95474b23b57e`
-  after 1,222 tests. All 11 exact-head GitHub checks passed.
-- PR #61's reviewed implementation passed 1,228 Python tests, 127 focused
-  UI/HTTP tests, 21 relevant hosted-site tests, and 59 canonical deployment
-  tests. Independent exact-head review found no blocker.
-- Live browser checks covered Control Center and Swarm at 1,280, 500, and 375
-  pixels with no horizontal overflow or console errors. A live zero-config
-  Grok sample completed on the CLI plane with a routing receipt.
-
-## Live completion rule
-
-- If this handoff commit is not yet reachable from `origin/main`, PR #61's only
-  remaining gates are exact-head CI and Codex Approval, `./scripts/land`, the
-  protected merge, closing superseded draft #55, and synchronizing local main.
-- If this handoff is reachable from `origin/main`, PR #61 is merged, draft #55
-  should be closed, and local main should match `origin/main`; verify those
-  drift-prone facts live. Once they agree, this sweep has no active repository
-  gate.
-
-## Existing external evidence boundary
-
-- CursorBench 3.2 uses Cursor's private/internal task suite and has no public
-  submission harness. An official leaderboard result or `#1` claim still
-  requires Cursor to evaluate UniGrok or provide an accepted interface.
-- Public claims must distinguish the reproducible internal suite and live
-  golden-target results from an official CursorBench ranking.
+- Truthful outcome telemetry is separate product work, not an unfinished gate
+  on PR #62. Follow `docs/design/authority-inversion.md`: preserve
+  `finish_reason`, add a three-valued verified-success/verified-failure/
+  unverified verdict, keep semantic judges advisory, and quarantine unverified
+  or legacy binary rows from training, task memory, RAG, and routing.
+- Do not feed the current binary `success` field into Needle training. A Swarm
+  optimizer can generate adversarial candidates and mechanically verified code
+  episodes, but it must not act as its own semantic judge.
