@@ -15,6 +15,11 @@ not change today's operational truth: until the broker is implemented and
 verified, `scripts/land` and the shared local `main` contract in `AGENTS.md`
 remain authoritative.
 
+The accepted target for inverting runtime authority—Grok first, typed Needle
+reflexes second, and versioned code continuity floors third—is specified in
+[the authority-inversion design](docs/design/authority-inversion.md). It is a
+phased target, not a claim about the current deterministic router.
+
 The stable MCP is a product service, not an ambient view of the source checkout
 or the folder open in an IDE. Bundled code and support assets resolve from the
 immutable service root (`/app` in Docker), mutable sessions/logs/SQLite resolve

@@ -2,11 +2,32 @@
 
 Last updated: 2026-07-13
 Owner: Codex
-Status: PR #56 integration landed; no active repository gate
+Status: PR #58 draft published; exact-head review and merge remain pending
 
 This is the project-scoped handoff for new Codex chats. Resolve drift-prone
 Git, CI, runtime, DNS, cloud, and benchmark state live before acting. Never
 record credentials, OAuth codes, tokens, or private keys here.
+
+## Active design PR
+
+- Draft PR #58 (`codex/authority-inversion-design`) defines the accepted target
+  authority inversion. The approved runtime-distribution amendment is commit
+  `0776ade47e4763ec7ad9cac5aff86b51bbf26dcb`.
+- The durable public target is a supervised native `uv` Python core. HTMX and
+  WebMCP are presentation/context layers; optional `app.wasm` is a browser
+  Needle executor; Mojo is measured native acceleration; Docker and Docker
+  Agent are optional capabilities. Gordon remains an external handoff until a
+  supported machine contract exists.
+- This remains a docs-only target. Current Docker-facing runtime, onboarding,
+  auth, status/restart controls, and public documentation remain operational
+  truth until native lifecycle and parity gates land.
+- Exact amended wording passed `git diff --check` and the full suite with
+  `1220 passed`. Independent review found no remaining distribution-design
+  contradiction after the Gordon and browser/core boundaries were corrected.
+- The updated branch is published at PR #58. Verify its current head and checks
+  live because this handoff is a locator, not proof. Remaining gates are the
+  normal exact-head Codex disposition, ready-for-review transition, landing,
+  and protected merge. Do not begin runtime removal from this handoff.
 
 ## Completed state
 
