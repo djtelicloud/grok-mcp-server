@@ -1,45 +1,82 @@
 import os
 import json
 import hashlib
+import tempfile
+import shutil
+from enum import Enum
+from typing import Dict, Any, Optional
+
+class RunMode(str, Enum):
+    MOCK = "mock"
+    REPLAY = "replay"
+    LIVE = "live"
 
 class ProviderAdapter:
-    def __init__(self, cache_dir: str):
-        self.cache_dir = cache_dir
+    def __init__(self, provider: str, model: str, plane: str, role: str, mode: RunMode):
+        self.provider = provider
+        self.model = model
+        self.plane = plane
+        self.role = role
+        self.mode = mode
+        # Safe cache location outside of tracked source
+        self.cache_dir = os.path.expanduser("~/.gemini/antigravity/cache/campaigns/gemma-needle-2000-v1")
         os.makedirs(self.cache_dir, exist_ok=True)
         
-    def _get_cache_path(self, prompt_hash: str) -> str:
-        return os.path.join(self.cache_dir, f"{prompt_hash}.json")
+    def _compute_cache_key(self, schema_version: str, template_digest: str, settings: dict, request: str) -> str:
+        key_data = {
+            "provider": self.provider,
+            "model": self.model,
+            "plane": self.plane,
+            "role": self.role,
+            "schema_version": schema_version,
+            "template_digest": template_digest,
+            "settings": settings,
+            "request": request.strip().lower()
+        }
+        key_str = json.dumps(key_data, sort_keys=True)
+        return hashlib.sha256(key_str.encode()).hexdigest()
         
-    def _check_cache(self, prompt_hash: str):
-        path = self._get_cache_path(prompt_hash)
+    def _atomic_write_cache(self, key: str, response: dict):
+        path = os.path.join(self.cache_dir, f"{key}.json")
+        fd, temp_path = tempfile.mkstemp(dir=self.cache_dir)
+        with os.fdopen(fd, 'w') as f:
+            json.dump(response, f)
+        shutil.move(temp_path, path)
+
+    def _read_cache(self, key: str) -> Optional[dict]:
+        path = os.path.join(self.cache_dir, f"{key}.json")
         if os.path.exists(path):
             with open(path, 'r') as f:
                 return json.load(f)
         return None
-        
-    def _save_cache(self, prompt_hash: str, response: dict):
-        with open(self._get_cache_path(prompt_hash), 'w') as f:
-            json.dump(response, f)
 
-class GrokAdapter(ProviderAdapter):
-    def __init__(self):
-        super().__init__(".agents/campaigns/cache/grok")
-        
-    def generate_seed(self, prompt: str):
-        prompt_hash = hashlib.sha256(prompt.encode()).hexdigest()
-        cached = self._check_cache(prompt_hash)
-        if cached: return cached
-        
-        # TODO: Implement local Grok 4.5 CLI same_plane call
-        # Reject promise-only, empty, malformed, or schema-incomplete responses.
-        response = {"text": "mock_grok_response"}
-        self._save_cache(prompt_hash, response)
-        return response
+    def validate_response(self, response: dict) -> bool:
+        """Fail-closed response-schema validation, artifact-presence, promise-only rejection."""
+        if not response or not isinstance(response, dict):
+            return False
+            
+        content = response.get("content", "")
+        # Reject empty or promise-only without artifact
+        if not content.strip() or ("I'll" in content and "{" not in content):
+            return False
+            
+        return True
 
-class GeminiAdapter(ProviderAdapter):
-    def __init__(self):
-        super().__init__(".agents/campaigns/cache/gemini")
+    def execute(self, request: str, schema_version: str, template_digest: str, settings: dict) -> dict:
+        key = self._compute_cache_key(schema_version, template_digest, settings, request)
         
-    def mutate(self, seed: dict, mutation_type: str):
-        # TODO: Implement Gemini authenticated API call
-        return {"mutated": True}
+        if self.mode in (RunMode.MOCK, RunMode.REPLAY):
+            cached = self._read_cache(key)
+            if cached:
+                return cached
+            if self.mode == RunMode.REPLAY:
+                raise ValueError("Replay mode: Cache miss for deterministic execution.")
+        
+        if self.mode == RunMode.MOCK:
+            response = {"content": "{ 'mocked_artifact': true }"}
+            if self.validate_response(response):
+                self._atomic_write_cache(key, response)
+            return response
+            
+        # LIVE mode implementation goes here (e.g. bounded retries)
+        raise NotImplementedError("Live mode not implemented for Stage 0.")

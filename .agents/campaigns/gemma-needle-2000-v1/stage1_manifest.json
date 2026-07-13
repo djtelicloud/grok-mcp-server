@@ -10,5 +10,6 @@
     "Gemini mutation execution",
     "Blinded Grok 4.5 critic execution",
     "Gemini adjudicator execution"
-  ]
+  ],
+  "pre_requisite": "Complete Stage 0 pass."
 }

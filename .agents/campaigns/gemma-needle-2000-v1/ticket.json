@@ -40,7 +40,7 @@
       "target_roots": 100
     }
   ],
-  "balance_requirements": {
+  "balance_requirements_overlapping_minima": {
     "abstain_clarify_wait_denied": 0.25,
     "ttl_boundaries": 0.20,
     "catalog_schema_drift": 0.20,

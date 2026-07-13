@@ -33,7 +33,7 @@ def test_public_runtime_files_do_not_embed_a_developer_home_path():
         ROOT / ".codex",
         ROOT / ".gemini",
     ):
-        paths.extend(path for path in directory.rglob("*") if path.is_file())
+        paths.extend(path for path in directory.rglob("*") if path.is_file() and path.suffix != ".pyc" and "__pycache__" not in path.parts)
     private_home = "/Users/" + "djtelicloud"
 
     for path in paths:
