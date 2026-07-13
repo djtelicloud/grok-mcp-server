@@ -1,12 +1,10 @@
 import pytest
-from pathlib import Path
 from datetime import datetime, timezone, timedelta
 import uuid
 
-from evals.campaigns.gemma_needle_2000_v1.attempt_ledger import AttemptLedger
 from evals.campaigns.gemma_needle_2000_v1.stage1_harness import Stage1MockHarness, CeilingExceededError
-from evals.campaigns.gemma_needle_2000_v1.role_schemas import SeedCandidate, VariantCandidate, VariantBatch
-from evals.campaigns.gemma_needle_2000_v1.schemas import ProposalVerdict, EpisodeOutcome, TTLState
+from evals.campaigns.gemma_needle_2000_v1.role_schemas import SeedCandidate, VariantBatch
+from evals.campaigns.gemma_needle_2000_v1.schemas import ProposalVerdict, EpisodeOutcome
 from pydantic import ValidationError
 
 @pytest.fixture

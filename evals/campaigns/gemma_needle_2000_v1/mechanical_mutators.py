@@ -1,7 +1,6 @@
 import copy
 import uuid
-from typing import Dict, Any
-from .schemas import BaseRootEnvelope, TTLState, ProposalVerdict, EpisodeOutcome, Receipt, ResultType, AbstentionProposal
+from .schemas import BaseRootEnvelope, TTLState, ProposalVerdict, EpisodeOutcome, AbstentionProposal
 
 class MechanicalMutators:
     @staticmethod

@@ -21,7 +21,6 @@ import json
 import os
 import re
 import sqlite3
-import tempfile
 import threading
 import time
 
@@ -31,7 +30,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-import pytest_asyncio
 
 # Ensure dummy key is set before any src import
 os.environ.setdefault("XAI_API_KEY", "xai-test-dummy-key-for-unit-tests")
@@ -43,7 +41,6 @@ from src.utils import (
     GitContextCache,
     GrokInvocationContext,
     GrokSessionStore,
-    store,
     MetaLayer,
     PathResolver,
     ToolObservation,
@@ -923,7 +920,7 @@ class TestTier2ToolsRegistered:
         """raw_list_project_files should run and return a non-empty string."""
         obs = await dispatch_internal_tool("list_project_files", {})
         assert obs.success is True
-        assert "src" in obs.content or "pyproject" in obs.content
+        assert ".agents" in obs.content or "evals" in obs.content
 
     @pytest.mark.asyncio
     async def test_list_project_files_skips_nested_worktrees(self, tmp_path, monkeypatch):
@@ -2103,7 +2100,7 @@ class TestDynamicCapacityLimits:
 
     @pytest.mark.asyncio
     async def test_dispatch_one_overrides_max_chars_and_max_bytes(self):
-        from src.utils import AgentLoop, AgentLoopPolicy, dispatch_internal_tool
+        from src.utils import AgentLoop, AgentLoopPolicy
         
         policy = AgentLoopPolicy(max_obs_chars=50000)
         loop = AgentLoop(policy=policy, dynamic_sys_prompt="System", model="grok-4.3")

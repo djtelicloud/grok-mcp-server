@@ -1,10 +1,9 @@
 import sqlite3
-import json
 import uuid
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Optional, List
 
 class AttemptEvent:
     def __init__(self, work_item_id: str, event_type: str, role: str, root_reference: Optional[str] = None, variant_key: Optional[str] = None):

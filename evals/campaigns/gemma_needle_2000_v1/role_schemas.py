@@ -1,6 +1,5 @@
-import json
 from enum import Enum
-from typing import List, Dict, Optional, Literal, Any, Union
+from typing import List, Dict, Optional, Any
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .schemas import ProposalResultType
@@ -19,7 +18,6 @@ class SeedCandidate(BaseModel):
     observations: List[Dict[str, Any]]
     capabilities: List[str]
     forbidden_effects: List[str]
-    stable_effect_id: str
     result: ProposalResultType
     decision_summary: Optional[str] = None
     plan_state: Optional[str] = None
@@ -38,7 +36,6 @@ class VariantCandidate(BaseModel):
     variant_key: str
     objective: str
     observations: List[Dict[str, Any]]
-    stable_effect_id: str
     result: ProposalResultType
     decision_summary: Optional[str] = None
     plan_state: Optional[str] = None
