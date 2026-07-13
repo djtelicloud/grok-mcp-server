@@ -32,7 +32,11 @@ trajectory policy — plus undocumented capabilities found by reading its source
      byte-identical quality before/after)
    - **Baseline check (audit-added): trivial lexical retrieval beats the
      revived head on the same memory benchmark** — word TF-IDF 86%, char-3gram
-     TF-IDF 92% vs the head's 60% (top-1, identical 50 queries/10 cards).
+     TF-IDF 92% vs the head's 60% (top-1, identical 50 queries/10 cards;
+     deterministic reproduction from committed data:
+     `evals/needle_lab/tfidf_baseline.py` prints 86–96% across analyzer/
+     idf-fit variants, every variant beating the head — log:
+     `logs/tfidf-baseline.log`).
      Corrected implication: the revived head is a **candidate shadow ranker**,
      not a database replacement. The *file-only lifecycle* (datasets,
      manifests, invalidation, candidate records — no SQLite anywhere in this
@@ -50,7 +54,11 @@ trajectory policy — plus undocumented capabilities found by reading its source
    works** (7.5 s incl. compile), but the **backward pass fails** in the MPS
    compiler (`null operand found` at the gated-residual scalar inside
    `nn.scan`+`remat`, `architecture.py:250`). Training therefore runs on the
-   XLA **CPU** backend — the correct call, not a lazy one. Memory is a
+   XLA **CPU** backend — the correct call, not a lazy one. (Log caveat: the
+   decisive forward-OK/backward-fail run was never redirected to a file; the
+   only saved metal log is an earlier probe that failed on a missing
+   dependency — `logs/metal-probe-FAILED-moduleerror.log`. These figures are
+   session-observed; see `logs/README.md`.) Memory is a
    non-factor: a full fine-tune peaks ~1.2 GB RSS of the 128 GB available. The
    real throughput lever on this machine is **parallel experiment lanes**
    (waves of concurrent fine-tunes), not backend exotica. No Mojo path exists
@@ -69,13 +77,13 @@ trajectory policy — plus undocumented capabilities found by reading its source
 
 | # | Footgun | Evidence |
 |---|---|---|
-| F1 | Contrastive head ships at exact-zero saddle; gradient descent can never revive it — re-init required | revive logs v1 (loss frozen at ln(32)) vs v3 |
-| F2 | `optax.masked` leaks raw gradients as updates for unmasked leaves → silently corrupts the whole network (gibberish generation). Use `optax.multi_transform` + `set_to_zero` | revive v2 log (model lobotomized) vs v3 (clean) |
-| F3 | needle's tokenizer `mp.Pool` requires the *calling script* to be `__main__`-guarded on macOS (spawn) — unguarded drivers crash with the bootstrapping RuntimeError | matrix run 1 failure logs |
+| F1 | Contrastive head ships at exact-zero saddle; gradient descent can never revive it — re-init required | `logs/revive-v1-frozen-saddle.log` (loss frozen at ln 32) vs `logs/revive-v3-clean-revival.log` |
+| F2 | `optax.masked` leaks raw gradients as updates for unmasked leaves → silently corrupts the whole network (gibberish generation). Use `optax.multi_transform` + `set_to_zero` | `logs/revive-v2-gradient-leak-lobotomy.log` vs `logs/revive-v3-clean-revival.log` |
+| F3 | needle's tokenizer `mp.Pool` requires the *calling script* to be `__main__`-guarded on macOS (spawn) — unguarded drivers crash with the bootstrapping RuntimeError | matrix run 1 failure (log not preserved — overwritten by run 2's redirects; see `logs/README.md`) |
 | F4 | `needle finetune` **force-re-downloads** the base checkpoint from HF on every invocation (`_resolve_checkpoint`, `force_download=True`) — patch for lab/offline use | finetune.py:215-228 |
 | F5 | `num_memory_slots=64` in the config is dead — declared, threaded through, consumed nowhere | grep of architecture.py/train.py |
 | F6 | Checkpoints are **pickle** (arbitrary-code-execution artifacts). Load official weights only; any UniGrok integration must export to safetensors/ONNX before a checkpoint registry exists | run.py `pickle.load` |
-| F7 | `batch_size > packed rows` ⇒ silent 0-step NaN schedule: full wall-clock spent, unchanged base promoted as `_best.pkl`, no error raised. Needle PACKS examples into `max_enc_len` rows, so small datasets hit this at default batch 64 | observation_typing run 1 log; train.py:255-257 |
+| F7 | `batch_size > packed rows` ⇒ silent 0-step NaN schedule: full wall-clock spent, unchanged base promoted as `_best.pkl`, no error raised. Needle PACKS examples into `max_enc_len` rows, so small datasets hit this at default batch 64 | observation_typing run 1 (782 s, exact_match 0.0; log overwritten by run 2 — `logs/ft-observation-typing-RUN2-batch8-1338s.log` is the clamped rerun); train.py:255-257 |
 
 ## Live poisoning specimen (field observation)
 
@@ -84,18 +92,24 @@ Mid-lab, a data-generation request routed to `grok-composer-2.5-fast` returned
 — a statement of intent with **zero content** — and the UniGrok runtime
 labeled it `finish_reason="final_answer"`. This is the exact
 confident-non-answer → `success=1` mislabel identified in the
-authority-inversion design review (src/utils.py:5821-5826 / fast path :8197),
-observed organically during this session. The VerifiedOutcome contract (design
-Phase 0) remains the prerequisite for any learning flywheel.
+authority-inversion design review (at lab time: `success = 1 if
+layer.finish_reason == "final_answer" else 0`), observed organically during
+this session. Since the lab ran, main has landed the first VerifiedOutcome
+implementation — `_verified_outcome_label` keeps `final_answer` **unverified
+(NULL)** and marks only gateway-detectable failures as 0 (src/utils.py:5212
+at this head) — plus promise-only completion detection and recovery, so this
+exact specimen would no longer be labeled a success. The full VerifiedOutcome
+contract (design Phase 0) remains the prerequisite for any learning flywheel;
+this landing validates, not closes, that requirement.
 
 ## Fine-tune matrix (UniGrok gateway families)
 
 Datasets: 8 families, ~3.0k examples total, generated as plain JSONL capsule
-files with per-family catalog hashes (`lab/gen_datasets.py`,
+files with per-family catalog hashes (`evals/needle_lab/gen_datasets.py`,
 `gen_nextstep.py`); out-of-template test set for routing authored by
 **grok-4.5 through the UniGrok MCP itself** (48 messy realistic queries).
 Splits are needle's own per-tool 100/10/10 (seed 42). Scoring separates
-tool-name / arg-key / arg-value tiers (`lab/eval_family.py`).
+tool-name / arg-key / arg-value tiers (`evals/needle_lab/eval_family.py`).
 
 <!-- MATRIX_RESULTS -->
 | Family | n | Base args-acc | Tuned exact (held-out) | Steps / wall |
@@ -105,10 +119,14 @@ tool-name / arg-key / arg-value tiers (`lab/eval_family.py`).
 | observation_typing (label enum) | 145 | 0% | **100%** (10/10) | 160 / ~22 min |
 | memory_rerank (id-copy) | 165 | — | **100%** (10/10) | 240 / ~47 min |
 | tool_selection (6-tool CursorBench-style) | 564 | 0% | **100%** (60/60, clean split, free values incl.) | 481 / ~96 min |
-| extraction (free values: path+symbol+action) | 600 | 0% | **100%** (clean split) | ~116 min* |
+| extraction (free values: path+symbol+action) | 600 | 0% | **100%** (clean split) | 480 / ~116 min* |
 | abstention (+abstain pseudo-tool) | 364 | — | **VOIDED** — 20/40 test-train leakage; run killed | — |
 | next_step (trajectory policy) | 560 | — | 100% (**quarantined**: split leakage; see self-loop probe for the valid signal) | ~30 epochs |
-| combined (7 families, interference test) | ~2.7k | — | see interference table below | 6 epochs
+| combined (7 families, interference test) | 2,618 | — | INVALID — see interference section below | 6 epochs |
+
+\* extraction's wall-clock ran concurrently with the abstention lane (killed
+mid-run when the leakage was found); the comparable single-lane run is
+tool_selection at 481 steps ≈ 96 min. Log: `logs/ft-extraction-480steps-6983s.log`.
 
 Reading: the pretrained model **cannot** do enum selection (0–11% args-acc);
 fine-tuning on 145–344 examples takes it to perfect on held-out in-template
@@ -122,7 +140,10 @@ combined file (seed 42) — which selected *different* test rows than the
 per-family splits. Verified contamination of the per-family test rows inside
 the combined TRAINING data: observation 7/10, recovery 10/10, memory 8/10,
 tool_selection 51/60, extraction 10/10, next_step 56/60 — **only routing
-(0/10) stayed clean**, and routing scored 100% either way. The combined
+(0/10) stayed clean**, and routing scored 100% either way. (Deterministic
+reproduction from committed data:
+`evals/needle_lab/check_combined_contamination.py`; log:
+`logs/combined-contamination-check.log`.) The combined
 checkpoint's per-family scores therefore measure memorization of trained
 rows, not interference. **No conclusion about one-vs-many checkpoints can be
 drawn from this run.** Production Needle training remains separated by exact
@@ -147,15 +168,19 @@ rows and clamps batch size.
 
 Injected k ∈ {0,4,8} verified examples via both channels (tools-JSON smuggling
 à la `build_needle_tools_context`, and query-prefix), against base and tuned
-checkpoints, on the 48-query OOD set (`lab/icl_probe.py`):
+checkpoints, on the 48-query OOD set (`evals/needle_lab/icl_probe.py`;
+log: `logs/icl-probe-verdict.log`):
 
 | Checkpoint / channel | k=0 args | k=4 args | k=8 args | k=8 name |
 |---|---|---|---|---|
 | tuned / tools | **45.8%** | 33.3% | 18.8% | 39.6% (collapse) |
 | tuned / query | **45.8%** | 25.0% | 25.0% | 100% |
-| base / either | 0% | 0% | 0% | degrades w/ k |
+| base / either | 0% | 0% | 0% | 33.3% (tools) / 79.2% (query) |
 
-Monotonic degradation in every condition tested. At k=8 in the tools channel
+Monotonic args-accuracy degradation in every tuned condition tested (the
+tuned/query channel plateaus at 25% from k=4; base-checkpoint tool-NAME
+accuracy is non-monotonic in the query channel — 89.6% → 97.9% → 79.2% —
+and monotonically collapses only in the tools channel). At k=8 in the tools channel
 the examples crowd the real tool schemas out of the 1024-token encoder and
 even tool-NAME accuracy collapses. **Scope (audit-corrected): this tests two
 particular random-injection recipes at k∈{4,8} on one 48-row routing set —
@@ -169,7 +194,8 @@ verified-example JSONL channel feeds training.
 ### Out-of-template generalization (route_selection vs Grok-authored OOD)
 
 100% in-template → **45.8% exact** on 48 messy realistic queries
-(parse 100%, name 100%, key 100% — every failure is value-tier). Failures are
+(parse 100%, name 100%, key 100% — every failure is value-tier; log:
+`logs/eval-route-ood-45p8-exact.log`). Failures are
 systematic, not noise: long/discursive **coding** requests misroute to
 `reasoning/planning` (the template style leaked into the decision boundary);
 research/vision/planning classes mostly hold. Lesson: **phrasing diversity
@@ -178,9 +204,11 @@ not synthetic templates. (0.48 s/call batched eval on CPU.)
 
 ### Self-loop: Needle-ReAct micro-loop on unseen vocabulary — 5/7, mechanism proven
 
-Simulated-env loop (`lab/selfloop.py`) against the next_step fine-tune, on
-symbols/files absent from ALL training data, bounds: 8 iterations,
-same-call-twice stop. MECHANISM-ONLY evidence (the trained `done` emission
+Simulated-env loop (`evals/needle_lab/selfloop.py`) against the next_step
+fine-tune, on symbols/files absent from ALL training data, bounds: 8
+iterations, same-call-twice stop. (Session-observed: `selfloop.py` printed
+its verdict to stdout only and no log file was written — see
+`logs/README.md`.) MECHANISM-ONLY evidence (the trained `done` emission
 violates the verifier-owned completion contract; env verifier gates every
 `done` on edited ∧ tested ∧ committed):
 
@@ -202,7 +230,8 @@ enumerated `dispatch_candidate` decision instead of a generative one.
 
 ### Catalog drift + hash-guard flywheel (file-only, no DB)
 
-Ran against the clean tool_selection checkpoint (`lab/drift_probe.py`).
+Ran against the clean tool_selection checkpoint
+(`evals/needle_lab/drift_probe.py`; log: `logs/drift-probe-verdict.log`).
 **Two predicted failure modes did not reproduce; the model is more robust than
 the adversarial design assumed:**
 
@@ -295,9 +324,12 @@ with a sealed test set the generator never sees.
 
 Two-iteration pilot of the proposed confusion-driven recipe loop, on the one
 *measured* confusion cell (messy-coding→planning misroutes). All arms trained
-from the immutable base; candidate records with base/dataset hashes for arms
-B/C/D (`lab/build_arms.py`, `data/arm_candidates.json`; arm E lacks a
-manifest — a defect). **Naming correction: the 40-query set
+from the immutable base; candidate records with base/dataset hashes in
+`data/arm_candidates.json` (`evals/needle_lab/build_arms.py`). Arm E's
+record was originally missing — a defect the audit pass repaired: the
+record was reconstructed post-hoc after verifying `route_arm_E.jsonl`
+byte-exact as `route_arm_B.jsonl` + the `grok_route_test.py` transform of
+`vision_research_delta.json` (dataset sha256[:16] `c2cf0abf9b75ada9`). **Naming correction: the 40-query set
 (`sha 52276cf8…`) was frozen with a zero-overlap guard before iteration 1,
 but iteration 1's results were used to design arm E, which was then evaluated
 on the same set — so from iteration 2 onward it is an *adaptive OOD
@@ -323,8 +355,10 @@ Findings (honest scope):
    Encouraging directional evidence that worst-cell-targeted data helps;
    NOT a sealed-set improvement claim.
 3. **Early stopping matters**: arm B at the naive step target burned 44 min;
-   arms C/D/E at 12 fixed epochs (~8-9 min) reached identical convergence —
-   but actual validation-based early stopping was NOT implemented.
+   arms C/D/E at 12 fixed epochs (~8–9 min) reached equivalent in-template
+   scores on the eval_arms set (arm E's own 10-row trainer split scored
+   8/10 — `logs/ft-arm-E-worstcell-12epochs-493s.log`) — but actual
+   validation-based early stopping was NOT implemented.
 4. **What this pilot is**: pipeline feasibility. The evaluator prints a table
    but computes no Pareto frontier; retention is three canned calls; no
    validation early-stop; single seed. The real optimizer, verifiers, and
@@ -357,13 +391,29 @@ type carries any authority.
 Upstream needle commit `ffb1c5144c5a16cb8ec650dbc8a6f6fd3854f8f2`; base
 weights `needle.pkl` sha256-prefix `40a32e91d1d4197b` (HF
 Cactus-Compute/needle, force-download noted in F4); python 3.12.13, jax
-0.10.2 (XLA CPU), flax 0.12.7; Apple M3 Max / Darwin 25.5.0. Dataset hashes:
-`evals/needle_lab/data/manifest.json` + `arm_candidates.json`; 40-query
-adaptive-dev set sha `52276cf8e483738b`; splits: needle `_per_tool_split`
-seed 42 throughout. Sanitized evidence bundle (scripts, datasets, manifests,
-trimmed logs — NO pickle checkpoints) committed at `evals/needle_lab/`,
-quarantine-labeled `research_dev`. Full raw lab (28 GB incl. checkpoints and
-venvs) lives in the ephemeral session scratchpad only.
+0.10.2 (XLA CPU), flax 0.12.7; Apple M3 Max / Darwin 25.5.0.
+
+Lineage: `evals/needle_lab/data/manifest.json` (rebuilt by
+`rebuild_manifest.py`) records repo-relative paths, per-file sha256 of the
+committed bytes, row counts, and generator provenance for every committed
+data file; the 7 generated families additionally carry their tool-catalog
+hashes (schema hashes, not content hashes). Retrain-arm records (base +
+dataset content hashes, arms B–E) live in `arm_candidates.json`. The
+40-query adaptive-dev set is pinned at sha256[:16] `52276cf8e483738b`
+(`route_sealed.jsonl`; byte-reproducible from `sealed_raw.json` via
+`grok_route_test.py`). `next_step.jsonl` is canonical as committed
+(sha256[:16] `8bb294f2c14bb195`): its generator originally chose failure
+branches with Python's per-process-randomized `hash()` — fixed post-audit
+to a sha256 digest, so the committed bytes, not a re-run, are the record.
+Splits: needle `_per_tool_split` seed 42 throughout.
+
+Sanitized evidence bundle (scripts, datasets, manifests, trimmed logs — NO
+pickle checkpoints) committed at `evals/needle_lab/`, quarantine-labeled
+`research_dev`. Trimmed logs live under `evals/needle_lab/logs/` with a
+citation map in `logs/README.md`; two run-1 logs (the F3 matrix crash and
+the F7 observation_typing NaN run) were overwritten in-session and are not
+recoverable. Full raw lab (28 GB incl. checkpoints and venvs) lives in the
+ephemeral session scratchpad only.
 
 ## Conclusion (audit-amended)
 
@@ -406,9 +456,14 @@ fast-Grok±Needle / Grok 4.5 / Grok Build) on downstream verified objective
 success with TTL, authority, effects, receipts, recovery, latency, multi-seed.
 
 ---
-*Evidence bundle: `evals/needle_lab/` (research_dev). CI note: GitHub CI ran
-1,233 tests green on this branch (local run: 1,220); docs-green CI validates
-tree-neutrality only, not the experiments. Agent-Assisted-By: Claude via
+*Evidence bundle: `evals/needle_lab/` (research_dev). CI note: the full
+suite runs green at this head (1,234 tests locally under CI's invocation,
+`pytest tests/` on the branch rebased onto main). This PR is not purely
+docs: committing the evidence bundle exposed a flat-alphabetical-ordering
+weakness in the bounded `list_project_files` listing (deep bundle files
+crowded out `src/` and `pyproject.toml`), fixed in `src/tools/system.py`
+with shallow-first ordering plus a regression test. Green CI validates the
+tree and that one fix — not the experiments. Agent-Assisted-By: Claude via
 Claude Code; peer review: Grok 4.5 (CLI plane), ChatGPT 5.6 Sol (relayed,
 incl. the audit that corrected this report), Gemini/Antigravity (structural
 plan).*

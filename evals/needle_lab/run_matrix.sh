@@ -27,10 +27,12 @@ run abstention &
 wait
 # wave 4
 run next_step &
-# combined interference: all 8 families in one file
+# combined interference: 7 families in one file (abstention excluded —
+# family VOIDED for test-train leakage; the committed combined.jsonl is
+# this 7-family concat, sha256[:16] c0165afbebb2c0ee, 2618 rows)
 cat data/route_selection.jsonl data/observation_typing.jsonl data/recovery_selection.jsonl \
     data/memory_rerank.jsonl data/tool_selection.jsonl data/extraction.jsonl \
-    data/abstention.jsonl data/next_step.jsonl > data/combined.jsonl
+    data/next_step.jsonl > data/combined.jsonl
 run combined --data data/combined.jsonl --batch-size 32 &
 wait
 # data-efficiency curve on route_selection

@@ -1,0 +1,13 @@
+# LIFTED VERBATIM from session-lab logs/drift.log (882 bytes, unmodified). Drift table evidence: renamed-key 10/10, new-tool 6/6, hash-guard ABSTAIN.
+[drift] 10 held-out edit_file cases
+[drift/renamed-key] emitted new key: 10/10, wrong value under new key: 0, parse fails: 0
+  sample: '[{"name":"edit_file","arguments":{"path":"src/storage.py","needle_find":"renderNav","replace":"renderNav_v2"}}]'
+  'format src/utils.py with the project formatter' -> format_code
+  'auto-format app/router.ts' -> format_code
+  'run the formatter on lib/parse.go' -> format_code
+  'prettify cmd/main.rs using our standard style' -> format_code
+  'apply code formatting to src/storage.py' -> format_code
+  'format tests/test_jobs.py' -> format_code
+[drift/new-tool] picked format_code: 6/6
+[flywheel] trained_hash=73b8f33f05c642af served_hash=4e6a26c573140284 match=False -> ABSTAIN + queue retrain (file-only check, no db)
+VERDICT:{"stale_forced": 0, "new_key_emitted": 10, "n_edit": 10, "new_tool_picked": 6, "n_fmt": 6, "hash_guard_fires": true}

@@ -1,44 +1,171 @@
 [
-  {
-    "family": "route_selection",
-    "path": "/private/tmp/claude-501/-Users-djtelicloud-Documents-agentixai-grok-mcp-server--claude-worktrees-new-session-3336a5/b197cbf6-7853-495f-b5fa-d110a98ddf7d/scratchpad/lab/data/route_selection.jsonl",
-    "n": 344,
-    "catalog_hash": "a8b0a066176fb67c"
-  },
-  {
-    "family": "observation_typing",
-    "path": "/private/tmp/claude-501/-Users-djtelicloud-Documents-agentixai-grok-mcp-server--claude-worktrees-new-session-3336a5/b197cbf6-7853-495f-b5fa-d110a98ddf7d/scratchpad/lab/data/observation_typing.jsonl",
-    "n": 145,
-    "catalog_hash": "20e1dc4a5ad88278"
-  },
-  {
-    "family": "recovery_selection",
-    "path": "/private/tmp/claude-501/-Users-djtelicloud-Documents-agentixai-grok-mcp-server--claude-worktrees-new-session-3336a5/b197cbf6-7853-495f-b5fa-d110a98ddf7d/scratchpad/lab/data/recovery_selection.jsonl",
-    "n": 240,
-    "catalog_hash": "b36d2f8ac7261066"
-  },
-  {
-    "family": "memory_rerank",
-    "path": "/private/tmp/claude-501/-Users-djtelicloud-Documents-agentixai-grok-mcp-server--claude-worktrees-new-session-3336a5/b197cbf6-7853-495f-b5fa-d110a98ddf7d/scratchpad/lab/data/memory_rerank.jsonl",
-    "n": 165,
-    "catalog_hash": "5e9d51925807abc6"
-  },
-  {
-    "family": "tool_selection",
-    "path": "/private/tmp/claude-501/-Users-djtelicloud-Documents-agentixai-grok-mcp-server--claude-worktrees-new-session-3336a5/b197cbf6-7853-495f-b5fa-d110a98ddf7d/scratchpad/lab/data/tool_selection.jsonl",
-    "n": 564,
-    "catalog_hash": "73b8f33f05c642af"
-  },
-  {
-    "family": "extraction",
-    "path": "/private/tmp/claude-501/-Users-djtelicloud-Documents-agentixai-grok-mcp-server--claude-worktrees-new-session-3336a5/b197cbf6-7853-495f-b5fa-d110a98ddf7d/scratchpad/lab/data/extraction.jsonl",
-    "n": 600,
-    "catalog_hash": "6c7c6cdd536e0dcf"
-  },
-  {
-    "family": "abstention",
-    "path": "/private/tmp/claude-501/-Users-djtelicloud-Documents-agentixai-grok-mcp-server--claude-worktrees-new-session-3336a5/b197cbf6-7853-495f-b5fa-d110a98ddf7d/scratchpad/lab/data/abstention.jsonl",
-    "n": 364,
-    "catalog_hash": "f30f67f98c45bce0"
-  }
+ {
+  "path": "evals/needle_lab/data/abstention.jsonl",
+  "sha256": "8315ac351eb3f68ae04935b766f0ba5d81e08d1f1b25ae669ddbdcdab3562caa",
+  "n": 364,
+  "generator": "gen_datasets.py (seed 42); family VOIDED (20/40 test-train leakage)",
+  "catalog_hash": "f30f67f98c45bce0"
+ },
+ {
+  "path": "evals/needle_lab/data/arm_candidates.json",
+  "sha256": "fe392e051f6b2d0e5600a0446ec70df77dbb7864e9966a558fa2d1b3ea3b810b",
+  "n": 4,
+  "generator": "build_arms.py candidate records (arm E record reconstructed post-audit from committed bytes)"
+ },
+ {
+  "path": "evals/needle_lab/data/arm_results.json",
+  "sha256": "511eb377f904e1b8817b3a45a41be0d92659f974ea451bddf8a3d00e9256d4ef",
+  "n": 5,
+  "generator": "eval_arms.py output (legacy keys: 'sealed'/'sealed_recalls' = the adaptive OOD dev set)"
+ },
+ {
+  "path": "evals/needle_lab/data/combined.jsonl",
+  "sha256": "c0165afbebb2c0eeec85783181b017f0c804b16e0ab41891b956e9803126c389",
+  "n": 2618,
+  "generator": "run_matrix.sh: concat of the 7 non-abstention families, in FAMILIES order",
+  "derived_from": [
+   "evals/needle_lab/data/route_selection.jsonl",
+   "evals/needle_lab/data/observation_typing.jsonl",
+   "evals/needle_lab/data/recovery_selection.jsonl",
+   "evals/needle_lab/data/memory_rerank.jsonl",
+   "evals/needle_lab/data/tool_selection.jsonl",
+   "evals/needle_lab/data/extraction.jsonl",
+   "evals/needle_lab/data/next_step.jsonl"
+  ]
+ },
+ {
+  "path": "evals/needle_lab/data/extraction.jsonl",
+  "sha256": "5628fe985a1a957b00df6ac9488fdc657d7571950ae721d8452589729411a1d1",
+  "n": 600,
+  "generator": "gen_datasets.py (seed 42)",
+  "catalog_hash": "6c7c6cdd536e0dcf"
+ },
+ {
+  "path": "evals/needle_lab/data/hard_negatives.json",
+  "sha256": "5c0fd33612e45d4fc1600d5f37aea69d097a33935a4fbaeb79260d61b211862b",
+  "n": 40,
+  "generator": "one-shot grok-4.5 generation via UniGrok MCP (external; unreproducible)"
+ },
+ {
+  "path": "evals/needle_lab/data/memory_pairs.json",
+  "sha256": "2a96502d96633b98edb5b5eb6341b887995e6cd5a68017edb5f620b97123ff92",
+  "n": 170,
+  "generator": "one-shot grok-4.5 generation via UniGrok MCP (external; unreproducible)"
+ },
+ {
+  "path": "evals/needle_lab/data/memory_rerank.jsonl",
+  "sha256": "3f4f86fbc15860cbf1b94dc133252d8b222527e95f49527d4b67ae36e79dc0d0",
+  "n": 165,
+  "generator": "gen_datasets.py (seed 42)",
+  "catalog_hash": "5e9d51925807abc6"
+ },
+ {
+  "path": "evals/needle_lab/data/metamorphic.json",
+  "sha256": "fd87451ef9d9bd954fb9fe7c69592fb73a78034c30eb813d79595e960cfef839",
+  "n": 30,
+  "generator": "one-shot grok-4.5 generation via UniGrok MCP (external; unreproducible)"
+ },
+ {
+  "path": "evals/needle_lab/data/next_step.jsonl",
+  "sha256": "8bb294f2c14bb195021c833ddad3fbe84c6b72119a4a227915cfc8841c513e69",
+  "n": 560,
+  "generator": "gen_nextstep.py (seed 7) \u2014 HISTORICAL BYTES CANONICAL: the original run used Python's per-process-randomized hash() for failure-branch selection (fixed post-audit to a sha256 digest), so the committed file is pinned by sha256, not regenerable byte-exactly"
+ },
+ {
+  "path": "evals/needle_lab/data/observation_typing.jsonl",
+  "sha256": "522eb23cf3b1f7d795e76c4bbe8f8fc2dc98f0491d3e0e4308a1d82ef3da132b",
+  "n": 145,
+  "generator": "gen_datasets.py (seed 42)",
+  "catalog_hash": "20e1dc4a5ad88278"
+ },
+ {
+  "path": "evals/needle_lab/data/recovery_selection.jsonl",
+  "sha256": "9914e4b5e501092f3f882656a8c63b4456b93048fc51ce9fee99d55d666b5433",
+  "n": 240,
+  "generator": "gen_datasets.py (seed 42)",
+  "catalog_hash": "b36d2f8ac7261066"
+ },
+ {
+  "path": "evals/needle_lab/data/route_arm_B.jsonl",
+  "sha256": "bcea4a681e4db17d64d14fa35cfd18626435a55409f309f085b107c1d7f82bc6",
+  "n": 384,
+  "generator": "build_arms.py (route_selection train + hard_negatives)",
+  "derived_from": [
+   "evals/needle_lab/data/route_selection.jsonl",
+   "evals/needle_lab/data/hard_negatives.json"
+  ]
+ },
+ {
+  "path": "evals/needle_lab/data/route_arm_C.jsonl",
+  "sha256": "fa83cdf200c27a4f571c2f26ccdd663159d7a691d7118987559c9fa0bffc1f92",
+  "n": 374,
+  "generator": "build_arms.py (route_selection train + metamorphic)",
+  "derived_from": [
+   "evals/needle_lab/data/route_selection.jsonl",
+   "evals/needle_lab/data/metamorphic.json"
+  ]
+ },
+ {
+  "path": "evals/needle_lab/data/route_arm_D.jsonl",
+  "sha256": "67e85570e6ad8902cff04b2e4328df942777b9c3fabde5d7382bc0b18712523d",
+  "n": 269,
+  "generator": "build_arms.py (balanced resample of base+hard+meta)",
+  "derived_from": [
+   "evals/needle_lab/data/route_selection.jsonl",
+   "evals/needle_lab/data/hard_negatives.json",
+   "evals/needle_lab/data/metamorphic.json"
+  ]
+ },
+ {
+  "path": "evals/needle_lab/data/route_arm_E.jsonl",
+  "sha256": "c2cf0abf9b75ada9740cd037d305e3dd61884a1f3e0961a38f214eb002d06b64",
+  "n": 432,
+  "generator": "route_arm_B.jsonl + grok_route_test-style transform of vision_research_delta.json (verified byte-exact)",
+  "derived_from": [
+   "evals/needle_lab/data/route_arm_B.jsonl",
+   "evals/needle_lab/data/vision_research_delta.json"
+  ]
+ },
+ {
+  "path": "evals/needle_lab/data/route_sealed.jsonl",
+  "sha256": "52276cf8e483738b0faba8764253fd8ba0338f3190c8476d4837879eac5208ac",
+  "n": 40,
+  "generator": "grok_route_test.py-style transform of sealed_raw.json (verified byte-exact)",
+  "derived_from": [
+   "evals/needle_lab/data/sealed_raw.json"
+  ]
+ },
+ {
+  "path": "evals/needle_lab/data/route_selection.jsonl",
+  "sha256": "e8f0db4c018090d22932a3bb64f60699bb6e913d7a4af6eccd9acaf49cc16bd3",
+  "n": 344,
+  "generator": "gen_datasets.py (seed 42)",
+  "catalog_hash": "a8b0a066176fb67c"
+ },
+ {
+  "path": "evals/needle_lab/data/route_selection_ood.jsonl",
+  "sha256": "630bde93f3e7757cc75e2c10edda238fc12675a1da0ce81a9f6b0de1da0d9893",
+  "n": 48,
+  "generator": "grok_route_test.py transform of a one-shot grok-4.5 generation (raw input not committed)",
+  "derived_from": []
+ },
+ {
+  "path": "evals/needle_lab/data/sealed_raw.json",
+  "sha256": "230054e6772085b894777653f5c34ac5cd9dc59003cd643a349f19bf7d606ced",
+  "n": 40,
+  "generator": "one-shot grok-4.5 generation via UniGrok MCP (external; unreproducible)"
+ },
+ {
+  "path": "evals/needle_lab/data/tool_selection.jsonl",
+  "sha256": "c24f8ae4bf5ee9b5c7c6659a1b92dbc7781f70d3815c9359123049de157c99a6",
+  "n": 564,
+  "generator": "gen_datasets.py (seed 42)",
+  "catalog_hash": "73b8f33f05c642af"
+ },
+ {
+  "path": "evals/needle_lab/data/vision_research_delta.json",
+  "sha256": "d8700123c48ae2379248725a0319a6a55b55645c6bdc48cb1611a19636efa309",
+  "n": 48,
+  "generator": "one-shot grok-4.5 generation via UniGrok MCP (external; unreproducible)"
+ }
 ]

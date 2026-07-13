@@ -1,0 +1,83 @@
+# TRIMMED from session-lab logs/ft_memory_rerank.log (389652 bytes original). Matrix row 4: exact 10/10; wall=2823s.
+# Trim rule: progress-bar lines removed; kept config header and everything from 'Training complete.' to EOF. Nothing redacted.
+[ft] batch clamped 32 -> 22 (est packed rows ~44)
+[ft] family=memory_rerank n=165 epochs=80 batch=22 -> /private/tmp/claude-501/-Users-djtelicloud-Documents-agentixai-grok-mcp-server--claude-worktrees-new-session-3336a5/b197cbf6-7853-495f-b5fa-d110a98ddf7d/scratchpad/lab/checkpoints/memory_rerank
+Loaded 165 examples from /private/tmp/claude-501/-Users-djtelicloud-Documents-agentixai-grok-mcp-server--claude-worktrees-new-session-3336a5/b197cbf6-7853-495f-b5fa-d110a98ddf7d/scratchpad/lab/data/memory_rerank.jsonl
+Split: 145 train / 10 val / 10 test (per-tool)
+  Compacting JSON and preparing texts...
+Prepared 145 tool-call pairs
+  Contrastive: 145 queries, 145 individual tools
+  Packed 145 sequences into 73 bins (78% utilization)
+  Compacting JSON and preparing texts...
+Prepared 10 tool-call pairs
+  Contrastive: 10 queries, 10 individual tools
+  Packed 10 sequences into 5 bins (77% utilization)
+Tokenized: 145 train / 10 val sequences
+Evaluating base model on 10 test examples...
+BASE_EVAL:{"call_f1": 0.0, "name_f1": 0.4615, "exact_match": 0.0, "parse_rate": 0.3, "args_acc": 0.0, "n": 10, "per_tool": {"select_context": {"correct": 0, "total": 10}}}
+  Base: call_f1=0.0%, exact=0.0%
+Starting training...
+
+[1/3] Detecting devices...
+      1 local device(s), 1 total across 1 hosts
+
+[2/3] Loading tokenizer...
+
+[3/3] Loading prepared data from disk (mmap)...
+      73 train / 5 val packed bins (memory-mapped)
+      Contrastive: 145 queries, 145 tools
+Resuming from checkpoint: /private/tmp/claude-501/-Users-djtelicloud-Documents-agentixai-grok-mcp-server--claude-worktrees-new-session-3336a5/b197cbf6-7853-495f-b5fa-d110a98ddf7d/scratchpad/lab/checkpoints/needle.pkl
+  Config: d=512, heads=8, layers=12/8
+  Loaded checkpoint params into train state
+
+  ─────────────────────────────────────
+  Parameters      26,315,421
+  d_model                512
+  Heads               8 (4 KV)
+  Layers             12 enc / 8 dec
+  Dtype             bfloat16
+  ─────────────────────────────────────
+  Hosts                    1
+  Devices           1/host, 1 total
+  Batch              22 x 1 = 22
+  Adam LR         3e-05 x 1 = 3e-05
+  Muon LR        0.0200 -> 0.0200
+  Schedule      12w / 216s / 12d (WSD)
+  Total steps            240
+  Epochs                  80
+  ─────────────────────────────────────
+
+  ─────────────────────────────────────
+  Epoch 1/80
+  ─────────────────────────────────────
+  Text loss            3.5761
+  Text val ppl           1.00
+  Quant val ppl          1.00  (INT4)
+  ─── Single-Call (10 samples) ──
+  JSON parse          40.0%
+  Name F1             57.1%
+  Param haluc          0.0%
+  Param miss           0.0%
+  Value acc            0.0%
+  Args acc             0.0%
+  Call F1              0.0%
+  Exact match          0.0%
+  #tools     n   name_f1   nTP  nFP  nFN   call_f1   cTP  cFP  cFN   exact   parse
+       1    10    57.1%     4    0    6     0.0%     0   10   10   0.0%  40.0%
+  ─── Failures (10 captured) ───
+  [1] Q: task: which model should a design review go to?
+cards:
+evals: golden tasks live in evals/tasks; baseline gate is --check
+      Ref:  [{"name":"select_context","arguments":{"ids":["routing"]}}]
+      Pred: [{"name":"select_context","arguments":{"ids":"evals/tasks; baseline gate is --check-baseline Theater live in evals/tasks; baseline gate is --check-baseline Priesessions: native CLI sessions via -s id 
+      Why:  missing_tools:select_context
+
+  [2] Q: task: the container lost its login after rebuild
+cards:
+sessions: native CLI sessions via -s id are the continuity mecha
+# [... TRIMMED: training epochs elided ...]
+Training complete.
+Evaluating finetuned model on 10 test examples...
+FINETUNED_EVAL:{"call_f1": 1.0, "name_f1": 1.0, "exact_match": 1.0, "parse_rate": 1.0, "args_acc": 1.0, "n": 10, "per_tool": {"select_context": {"correct": 10, "total": 10}}}
+  Finetuned: call_f1=100.0%, exact=100.0%
+[ft] wall=2823s

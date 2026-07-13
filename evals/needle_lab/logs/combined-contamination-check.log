@@ -1,0 +1,9 @@
+# REGENERATED 2026-07-13 from committed data (deterministic; see ../check_combined_contamination.py)
+combined.jsonl: 2618 rows; combined-run TRAIN split: 2378 rows
+route_selection     : 0/10 family-test rows inside combined TRAIN  [CLEAN]
+observation_typing  : 7/10 family-test rows inside combined TRAIN  [CONTAMINATED]
+recovery_selection  : 10/10 family-test rows inside combined TRAIN  [CONTAMINATED]
+memory_rerank       : 8/10 family-test rows inside combined TRAIN  [CONTAMINATED]
+tool_selection      : 51/60 family-test rows inside combined TRAIN  [CONTAMINATED]
+extraction          : 10/10 family-test rows inside combined TRAIN  [CONTAMINATED]
+next_step           : 56/60 family-test rows inside combined TRAIN  [CONTAMINATED]

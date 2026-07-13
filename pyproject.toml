@@ -75,6 +75,11 @@ exclude = [
     "/.codex",
     "/.grok/auth.json",
     "/.pytest_cache",
+    # research_dev quarantine: the needle evidence bundle is repo history,
+    # not distributable runtime material. The second glob out-precedences the
+    # .gitignore negation that re-includes evals/needle_lab/logs/.
+    "/evals/needle_lab",
+    "/evals/needle_lab/**",
     "/.ruff_cache",
     "/.venv",
     "/build",

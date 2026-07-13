@@ -1,0 +1,18 @@
+# LIFTED VERBATIM from session-lab logs/revive2.log (2557 bytes, unmodified). F2 evidence: optax.masked leak; post-train generation is gibberish; retrieval back to 16.7%.
+[head] contrastive_hidden max|w| before = 0.00e+00
+[head] contrastive_proj max|w| before = 0.00e+00
+[pairs] train=454 test(tool)=60 test(mem)=10
+[before] tool-retrieval top1=41.7% (60 queries/6 docs)  memory-retrieval top1=10.0% (10 queries/10 cards)
+  step   0 loss=3.4219 (2s)
+  step  50 loss=3.3438 (56s)
+  step 100 loss=3.4688 (101s)
+  step 150 loss=3.5000 (142s)
+  step 200 loss=3.4688 (182s)
+  step 250 loss=3.4531 (222s)
+  step 300 loss=3.5938 (266s)
+  step 350 loss=3.4688 (313s)
+  step 399 loss=3.4688 (343s)
+[after] tool-retrieval top1=16.7% (60 queries/6 docs)  memory-retrieval top1=10.0% (10 queries/10 cards)
+[side-effect] tool-calling after contrastive training: 'vn ettvn ettvnjovn ettvn ettvnjovn ett colorglifevn ettvn ettvnjovn ettvnjovn ettvn ettvn ettvnjovn ettvnjovn ettvn ettvn ettvnjovn ettvnjovn ettvn ettvnjovn ettvnjovn ettvnjovn ettvnjovn ett colorvn ettvn ettvn ettvnjovn ettvnjovn ettvn ettvn ett colorvnjovn ett colorvn ett colorvn ettvnjovn ettvn ettvnjovn ett colorvn ett colorvn ett colorvnlifevn ettvn ett colorvnlifevn ett colorvn ett colorvnlifevn ett colorvn ett colorvnlifevn ettvnjovn ett colorvn ett colorvn ett colorvnlifevn ettvnjovn ettvn ett colorvnlifevn ett colorglifevn ettvn ett colorvnlifevn ettvnjovn ettvnjovn ettvnjovn ettvnjovn ettvnjovn ettvnjovn ettvn ettvnjovn ettvnjovn ettvnjovn ettvn ettvnjovn ettvnjovn ettvn ettvn ettvnjovn ettvn ettvnjovn ettvnjovn ett colorvnlifevn ett colorvnlifevn ett colorvnlifevn ettvn ett colorvnlifevn ett colorglifevn ett colorvnlifevn ett colorvnlifevn ett colorvn ett colorglifevn ett colorvnlifevn ett colorvnlifevn ett colorglifevn ett colorvnlifevn ett colorvnlifevn ettvnjovn ett colorvnlifevn ett colorhovnlifevn ett colorhovnlifevn ettvnjovn ettvn ett colorvnjovn ett colorvnlifevn ettvnjovn ett colorvnlifevn ettvnjovn ett colorvnlifevn ettvn ett colorvnlifevn ettvnjovn ett colorlifevn ett colorlifevn ett colorlifevn ettvnjovn ettvn ett colorhovnlifevn ett colorlifevn ettvnjovn ett colorvnlifevn ettvnjovn ett colorhovnlifevn ett colorhovnlifevn ett colorhovnlifevn ett colorlifevnlifevn ett colorlifevnlifevnyevn colorlifevnlifevnyevn colorlifevnyevn colorlifevn colorlifevnyevnlifevn colorflowvnyevnflowvnyevnyevnflowvnflowvn colorvnflowvnflowvnflowvnflowflow colorflowvnflowvnflowvn'
+[saved] /private/tmp/claude-501/-Users-djtelicloud-Documents-agentixai-grok-mcp-server--claude-worktrees-new-session-3336a5/b197cbf6-7853-495f-b5fa-d110a98ddf7d/scratchpad/lab/checkpoints/needle_retrieval.pkl
+VERDICT:{"tool_top1": 0.16666666666666666, "mem_top1": 0.1}

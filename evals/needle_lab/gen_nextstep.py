@@ -4,7 +4,7 @@ Each example: query = task + 'so far:' history of (call -> observation digest),
 answer = the next tool call. Trains Needle to act as a bounded ReAct policy.
 Includes a 'done' pseudo-tool so the loop can terminate itself.
 """
-import itertools, json, os, random
+import hashlib, itertools, json, os, random
 
 LAB = os.path.dirname(os.path.abspath(__file__))
 rng = random.Random(7)
@@ -72,8 +72,12 @@ for s, f in itertools.product(SYMS, FILES):
         out.append({"query": render(task, hist), "tools": cj(TOOLS), "answers": cj([call])})
         if obs is not None:
             hist.append((call, obs))
-    # one failure branch per (s,f) pair
-    idx, failobs, correct = FAIL_BRANCHES[hash((s, f)) % len(FAIL_BRANCHES)]
+    # one failure branch per (s,f) pair. Deterministic digest, NOT builtin
+    # hash(): the original run used hash(), which is randomized per process
+    # (PYTHONHASHSEED), so the committed next_step.jsonl (sha256[:16]
+    # 8bb294f2c14bb195) is canonical and not regenerable byte-exactly.
+    branch_digest = hashlib.sha256(f"{s}|{f}".encode()).hexdigest()
+    idx, failobs, correct = FAIL_BRANCHES[int(branch_digest, 16) % len(FAIL_BRANCHES)]
     hist = [(c, o) for c, o in [x for x in steps[:idx] if x[1] is not None]]
     failed_call = steps[idx][0]
     hist.append((failed_call, failobs.format(f=f)))

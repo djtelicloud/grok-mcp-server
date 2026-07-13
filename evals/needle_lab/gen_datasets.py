@@ -31,7 +31,9 @@ def write(name, examples, tools):
     with open(path, "w") as f:
         for e in examples:
             f.write(json.dumps(e) + "\n")
-    return {"family": name, "path": path, "n": len(examples),
+    # repo-relative path (an absolute session path here was the original
+    # manifest defect; rebuild_manifest.py writes the canonical manifest)
+    return {"family": name, "path": f"data/{name}.jsonl", "n": len(examples),
             "catalog_hash": catalog_hash(tools)}
 
 manifest = []

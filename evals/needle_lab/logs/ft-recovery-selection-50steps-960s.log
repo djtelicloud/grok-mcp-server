@@ -1,0 +1,83 @@
+# TRIMMED from session-lab logs/ft_recovery_selection.log (221182 bytes original). Matrix row 2: exact 10/10; wall=960s.
+# Trim rule: progress-bar lines removed; kept config header and everything from 'Training complete.' to EOF. Nothing redacted.
+[ft] family=recovery_selection n=240 epochs=50 batch=32 -> /private/tmp/claude-501/-Users-djtelicloud-Documents-agentixai-grok-mcp-server--claude-worktrees-new-session-3336a5/b197cbf6-7853-495f-b5fa-d110a98ddf7d/scratchpad/lab/checkpoints/recovery_selection
+Loaded 240 examples from /private/tmp/claude-501/-Users-djtelicloud-Documents-agentixai-grok-mcp-server--claude-worktrees-new-session-3336a5/b197cbf6-7853-495f-b5fa-d110a98ddf7d/scratchpad/lab/data/recovery_selection.jsonl
+Split: 220 train / 10 val / 10 test (per-tool)
+  Compacting JSON and preparing texts...
+Prepared 220 tool-call pairs
+  Contrastive: 220 queries, 220 individual tools
+  Packed 220 sequences into 47 bins (88% utilization)
+  Compacting JSON and preparing texts...
+Prepared 10 tool-call pairs
+  Contrastive: 10 queries, 10 individual tools
+  Packed 10 sequences into 3 bins (64% utilization)
+Tokenized: 220 train / 10 val sequences
+Evaluating base model on 10 test examples...
+BASE_EVAL:{"call_f1": 0.087, "name_f1": 1.0, "exact_match": 0.0, "parse_rate": 1.0, "args_acc": 0.0588, "n": 10, "per_tool": {"recover": {"correct": 1, "total": 10}}}
+  Base: call_f1=8.7%, exact=0.0%
+Starting training...
+
+[1/3] Detecting devices...
+      1 local device(s), 1 total across 1 hosts
+
+[2/3] Loading tokenizer...
+
+[3/3] Loading prepared data from disk (mmap)...
+      47 train / 3 val packed bins (memory-mapped)
+      Contrastive: 220 queries, 220 tools
+Resuming from checkpoint: /private/tmp/claude-501/-Users-djtelicloud-Documents-agentixai-grok-mcp-server--claude-worktrees-new-session-3336a5/b197cbf6-7853-495f-b5fa-d110a98ddf7d/scratchpad/lab/checkpoints/needle.pkl
+  Config: d=512, heads=8, layers=12/8
+  Loaded checkpoint params into train state
+
+  ─────────────────────────────────────
+  Parameters      26,315,421
+  d_model                512
+  Heads               8 (4 KV)
+  Layers             12 enc / 8 dec
+  Dtype             bfloat16
+  ─────────────────────────────────────
+  Hosts                    1
+  Devices           1/host, 1 total
+  Batch              32 x 1 = 32
+  Adam LR         3e-05 x 1 = 3e-05
+  Muon LR        0.0200 -> 0.0200
+  Schedule      2w / 46s / 2d (WSD)
+  Total steps             50
+  Epochs                  50
+  ─────────────────────────────────────
+
+[hf] Warning: checkpoint upload failed: Client error '401 Unauthorized' for url 'https://huggingface.co/api/repos/create' (Request ID: Root=1-6a54de1e-38afe1f64435e3e8290817c7;5c1164b2-54cf-46ff-bc03-a2d0fe639319)
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401
+
+Invalid username or password.
+
+  ─────────────────────────────────────
+  Epoch 1/50
+  ─────────────────────────────────────
+  Text loss            1.1910
+  Text val ppl           1.00
+  Quant val ppl          1.00  (INT4)
+  ─── Single-Call (10 samples) ──
+  JSON parse         100.0%
+  Name F1            100.0%
+  Param haluc          0.0%
+  Param miss           0.0%
+  Value acc           15.8%
+  Args acc            15.8%
+  Call F1             27.3%
+  Exact match         10.0%
+  #tools     n   name_f1   nTP  nFP  nFN   call_f1   cTP  cFP  cFN   exact   parse
+       1    10   100.0%    10    0    0    27.3%     3    9    7  10.0%  100.0%
+  ─── Failures (9 captured) ───
+  [1] Q: context: model grok-composer overloaded, catalog has grok-4.5 same plane, attempt 2 what now?
+      Ref:  [{"name":"recover","arguments":{"action":"retry_alt_model"}}]
+      Pred: [{"name":"recover","arguments":{"action":"fail_typed"}},{"name":"recover","arguments":{"action":"retry_alt_model"}},{"name":"recover","arguments":{"action":"fail_typed"}},{"name":"recover","arguments"
+      Why:  recover.action="fail_typed"!="retry_alt_model", recover.action="fail_typed"!="retry_alt_model", recover.action="fail_typed"!="retry_alt_model"
+
+  [2] Q: context: model grok-composer overloaded, catalog has grok-4.5 same plane, attempt 2 — pick a recovery
+# [... TRIMMED: training epochs elided ...]
+Training complete.
+Evaluating finetuned model on 10 test examples...
+FINETUNED_EVAL:{"call_f1": 1.0, "name_f1": 1.0, "exact_match": 1.0, "parse_rate": 1.0, "args_acc": 1.0, "n": 10, "per_tool": {"recover": {"correct": 10, "total": 10}}}
+  Finetuned: call_f1=100.0%, exact=100.0%
+[ft] wall=960s

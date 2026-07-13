@@ -1,0 +1,6 @@
+# REGENERATED 2026-07-13 from committed data (deterministic; see ../tfidf_baseline.py)
+benchmark: 50 held-out queries / 10 cards (same as revived head's 60% top-1)
+tfidf word  / idf-fit=cards      : top-1 43/50 = 86%
+tfidf word  / idf-fit=cards+train: top-1 44/50 = 88%
+tfidf char3 / idf-fit=cards      : top-1 48/50 = 96%
+tfidf char3 / idf-fit=cards+train: top-1 46/50 = 92%

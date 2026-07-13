@@ -1,0 +1,216 @@
+# LIFTED VERBATIM from session-lab logs/icl.log (13678 bytes, unmodified). ICL table source; VERDICT JSON at end has all 12 conditions.
+Constrained decoding: no valid tokens found, falling back to unconstrained
+Constrained decoding: no valid tokens found, falling back to unconstrained
+Constrained decoding: no valid tokens found, falling back to unconstrained
+Constrained decoding: off-trie at 'route', falling back
+Constrained decoding: off-trie at 'route', falling back
+Constrained decoding: off-trie at 'route', falling back
+Constrained decoding: off-trie at 'route_', falling back
+Constrained decoding: off-trie at 'route_', falling back
+Constrained decoding: off-trie at 'route_', falling back
+Constrained decoding: off-trie at 'route_c', falling back
+Constrained decoding: off-trie at 'route_c', falling back
+Constrained decoding: off-trie at 'route_c', falling back
+Constrained decoding: off-trie at 'route_class', falling back
+Constrained decoding: off-trie at 'route_class', falling back
+Constrained decoding: off-trie at 'route_class', falling back
+Constrained decoding: no valid tokens found, falling back to unconstrained
+Constrained decoding: off-trie at 'mode', falling back
+Constrained decoding: no valid tokens found, falling back to unconstrained
+Constrained decoding: off-trie at 'mode', falling back
+Constrained decoding: no valid tokens found, falling back to unconstrained
+Constrained decoding: off-trie at 'mode', falling back
+Constrained decoding: no valid tokens found, falling back to unconstrained
+Constrained decoding: no valid tokens found, falling back to unconstrained
+Constrained decoding: no valid tokens found, falling back to unconstrained
+Constrained decoding: no valid tokens found, falling back to unconstrained
+Constrained decoding: no valid tokens found, falling back to unconstrained
+Constrained decoding: off-trie at 'route', falling back
+Constrained decoding: off-trie at 'route', falling back
+Constrained decoding: off-trie at 'route', falling back
+Constrained decoding: off-trie at 'route', falling back
+Constrained decoding: off-trie at 'route', falling back
+Constrained decoding: off-trie at 'route_', falling back
+Constrained decoding: off-trie at 'route_', falling back
+Constrained decoding: off-trie at 'route_', falling back
+Constrained decoding: off-trie at 'route_', falling back
+Constrained decoding: off-trie at 'route_', falling back
+Constrained decoding: off-trie at 'route_c', falling back
+Constrained decoding: off-trie at 'route_c', falling back
+Constrained decoding: off-trie at 'route_c', falling back
+Constrained decoding: off-trie at 'route_c', falling back
+Constrained decoding: off-trie at 'route_c', falling back
+Constrained decoding: off-trie at 'route_class', falling back
+Constrained decoding: off-trie at 'route_class', falling back
+Constrained decoding: off-trie at 'route_class', falling back
+Constrained decoding: off-trie at 'route_class', falling back
+Constrained decoding: off-trie at 'route_class', falling back
+Constrained decoding: no valid tokens found, falling back to unconstrained
+Constrained decoding: no valid tokens found, falling back to unconstrained
+Constrained decoding: off-trie at 'mode', falling back
+Constrained decoding: no valid tokens found, falling back to unconstrained
+Constrained decoding: off-trie at 'mode', falling back
+Constrained decoding: off-trie at 'mode', falling back
+Constrained decoding: no valid tokens found, falling back to unconstrained
+Constrained decoding: off-trie at 'mode', falling back
+Constrained decoding: no valid tokens found, falling back to unconstrained
+Constrained decoding: off-trie at 'mode', falling back
+Constrained decoding: no valid tokens found, falling back to unconstrained
+Constrained decoding: no valid tokens found, falling back to unconstrained
+Constrained decoding: no valid tokens found, falling back to unconstrained
+Constrained decoding: no valid tokens found, falling back to unconstrained
+Constrained decoding: no valid tokens found, falling back to unconstrained
+Constrained decoding: no valid tokens found, falling back to unconstrained
+Constrained decoding: no valid tokens found, falling back to unconstrained
+Constrained decoding: off-trie at 'route', falling back
+Constrained decoding: off-trie at 'route', falling back
+Constrained decoding: off-trie at 'route', falling back
+Constrained decoding: off-trie at 'route', falling back
+Constrained decoding: off-trie at 'route', falling back
+Constrained decoding: off-trie at 'route', falling back
+Constrained decoding: off-trie at 'route', falling back
+Constrained decoding: off-trie at 'route_', falling back
+Constrained decoding: off-trie at 'route_', falling back
+Constrained decoding: off-trie at 'route_', falling back
+Constrained decoding: off-trie at 'route_', falling back
+Constrained decoding: off-trie at 'route_', falling back
+Constrained decoding: off-trie at 'route_', falling back
+Constrained decoding: off-trie at 'route_', falling back
+Constrained decoding: off-trie at 'route_c', falling back
+Constrained decoding: off-trie at 'route_c', falling back
+Constrained decoding: off-trie at 'route_c', falling back
+Constrained decoding: off-trie at 'route_c', falling back
+Constrained decoding: off-trie at 'route_c', falling back
+Constrained decoding: off-trie at 'route_c', falling back
+Constrained decoding: off-trie at 'route_c', falling back
+Constrained decoding: off-trie at 'route_class', falling back
+Constrained decoding: off-trie at 'route_class', falling back
+Constrained decoding: off-trie at 'route_class', falling back
+Constrained decoding: off-trie at 'route_class', falling back
+Constrained decoding: off-trie at 'route_class', falling back
+Constrained decoding: off-trie at 'route_class', falling back
+Constrained decoding: off-trie at 'route_class', falling back
+Constrained decoding: no valid tokens found, falling back to unconstrained
+Constrained decoding: no valid tokens found, falling back to unconstrained
+Constrained decoding: off-trie at 'mode', falling back
+Constrained decoding: off-trie at 'mode', falling back
+Constrained decoding: no valid tokens found, falling back to unconstrained
+Constrained decoding: off-trie at '\\', falling back
+Constrained decoding: off-trie at '\\u', falling back
+Constrained decoding: off-trie at '\\u00', falling back
+Constrained decoding: off-trie at '\\u00f', falling back
+Constrained decoding: off-trie at '\\u00f7', falling back
+Constrained decoding: off-trie at '\\u00f7\\', falling back
+Constrained decoding: off-trie at '\\u00f7\\u', falling back
+Constrained decoding: no valid tokens found, falling back to unconstrained
+Constrained decoding: off-trie at 'mode', falling back
+Constrained decoding: no valid tokens found, falling back to unconstrained
+Constrained decoding: no valid tokens found, falling back to unconstrained
+Constrained decoding: no valid tokens found, falling back to unconstrained
+Constrained decoding: no valid tokens found, falling back to unconstrained
+Constrained decoding: no valid tokens found, falling back to unconstrained
+Constrained decoding: no valid tokens found, falling back to unconstrained
+Constrained decoding: no valid tokens found, falling back to unconstrained
+Constrained decoding: no valid tokens found, falling back to unconstrained
+Constrained decoding: no valid tokens found, falling back to unconstrained
+Constrained decoding: off-trie at 'route', falling back
+Constrained decoding: off-trie at 'route', falling back
+Constrained decoding: off-trie at 'route', falling back
+Constrained decoding: off-trie at 'route', falling back
+Constrained decoding: off-trie at 'route', falling back
+Constrained decoding: off-trie at 'route', falling back
+Constrained decoding: off-trie at 'route', falling back
+Constrained decoding: off-trie at 'route', falling back
+Constrained decoding: off-trie at 'route', falling back
+Constrained decoding: off-trie at 'route_', falling back
+Constrained decoding: off-trie at 'route_', falling back
+Constrained decoding: off-trie at 'route_', falling back
+Constrained decoding: off-trie at 'route_', falling back
+Constrained decoding: off-trie at 'route_', falling back
+Constrained decoding: off-trie at 'route_', falling back
+Constrained decoding: off-trie at 'route_', falling back
+Constrained decoding: off-trie at 'route_', falling back
+Constrained decoding: off-trie at 'route_', falling back
+Constrained decoding: off-trie at 'route_c', falling back
+Constrained decoding: off-trie at 'route_c', falling back
+Constrained decoding: off-trie at 'route_c', falling back
+Constrained decoding: off-trie at 'route_c', falling back
+Constrained decoding: off-trie at 'route_c', falling back
+Constrained decoding: off-trie at 'route_c', falling back
+Constrained decoding: off-trie at 'route_c', falling back
+Constrained decoding: off-trie at 'route_c', falling back
+Constrained decoding: off-trie at 'route_c', falling back
+Constrained decoding: off-trie at 'route_class', falling back
+Constrained decoding: off-trie at 'route_class', falling back
+Constrained decoding: off-trie at 'route_class', falling back
+Constrained decoding: off-trie at 'route_class', falling back
+Constrained decoding: off-trie at 'route_class', falling back
+Constrained decoding: off-trie at 'route_class', falling back
+Constrained decoding: off-trie at 'route_class', falling back
+Constrained decoding: off-trie at 'route_class', falling back
+Constrained decoding: off-trie at 'route_class', falling back
+Constrained decoding: no valid tokens found, falling back to unconstrained
+Constrained decoding: off-trie at 'mode', falling back
+Constrained decoding: no valid tokens found, falling back to unconstrained
+Constrained decoding: no valid tokens found, falling back to unconstrained
+Constrained decoding: no valid tokens found, falling back to unconstrained
+Constrained decoding: off-trie at 'mode', falling back
+Constrained decoding: off-trie at 'label', falling back
+Constrained decoding: off-trie at 'mode', falling back
+Constrained decoding: no valid tokens found, falling back to unconstrained
+Constrained decoding: off-trie at 'mode', falling back
+Constrained decoding: no valid tokens found, falling back to unconstrained
+Constrained decoding: off-trie at 'route', falling back
+Constrained decoding: off-trie at 'route_', falling back
+Constrained decoding: off-trie at 'route_c', falling back
+Constrained decoding: off-trie at 'route_class', falling back
+Constrained decoding: no valid tokens found, falling back to unconstrained
+Constrained decoding: no valid tokens found, falling back to unconstrained
+Constrained decoding: no valid tokens found, falling back to unconstrained
+Constrained decoding: off-trie at 'mode', falling back
+Constrained decoding: off-trie at 'mode', falling back
+Constrained decoding: off-trie at 'mode', falling back
+Constrained decoding: no valid tokens found, falling back to unconstrained
+Constrained decoding: no valid tokens found, falling back to unconstrained
+Constrained decoding: no valid tokens found, falling back to unconstrained
+Constrained decoding: off-trie at 'route', falling back
+Constrained decoding: off-trie at 'color', falling back
+Constrained decoding: off-trie at 'color', falling back
+Constrained decoding: off-trie at 'route_', falling back
+Constrained decoding: off-trie at 'route_c', falling back
+Constrained decoding: off-trie at 'route_class', falling back
+Constrained decoding: no valid tokens found, falling back to unconstrained
+Constrained decoding: no valid tokens found, falling back to unconstrained
+Constrained decoding: no valid tokens found, falling back to unconstrained
+Constrained decoding: off-trie at 'mode', falling back
+Constrained decoding: off-trie at 'mode', falling back
+Constrained decoding: off-trie at 'mode', falling back
+Constrained decoding: no valid tokens found, falling back to unconstrained
+Constrained decoding: no valid tokens found, falling back to unconstrained
+Constrained decoding: no valid tokens found, falling back to unconstrained
+Constrained decoding: off-trie at 'color', falling back
+Constrained decoding: off-trie at 'color', falling back
+Constrained decoding: off-trie at 'color', falling back
+Constrained decoding: no valid tokens found, falling back to unconstrained
+Constrained decoding: no valid tokens found, falling back to unconstrained
+Constrained decoding: no valid tokens found, falling back to unconstrained
+Constrained decoding: off-trie at 'mode', falling back
+Constrained decoding: off-trie at 'mode', falling back
+Constrained decoding: off-trie at 'mode', falling back
+Constrained decoding: no valid tokens found, falling back to unconstrained
+Constrained decoding: no valid tokens found, falling back to unconstrained
+Constrained decoding: no valid tokens found, falling back to unconstrained
+Constrained decoding: off-trie at 'color', falling back
+Constrained decoding: off-trie at 'color', falling back
+Constrained decoding: off-trie at 'color', falling back
+  base   channel=tools  k=0: name=89.6% args=0.0%
+  base   channel=tools  k=4: name=66.7% args=0.0%
+  base   channel=tools  k=8: name=33.3% args=0.0%
+  base   channel=query  k=4: name=97.9% args=0.0%
+  base   channel=query  k=8: name=79.2% args=0.0%
+  tuned  channel=tools  k=0: name=100.0% args=45.8%
+  tuned  channel=tools  k=4: name=91.7% args=33.3%
+  tuned  channel=tools  k=8: name=39.6% args=18.8%
+  tuned  channel=query  k=4: name=100.0% args=25.0%
+  tuned  channel=query  k=8: name=100.0% args=25.0%
+VERDICT:{"base/tools/k0": [0.896, 0.0], "base/tools/k4": [0.667, 0.0], "base/tools/k8": [0.333, 0.0], "base/query/k0": [0.896, 0.0], "base/query/k4": [0.979, 0.0], "base/query/k8": [0.792, 0.0], "tuned/tools/k0": [1.0, 0.458], "tuned/tools/k4": [0.917, 0.333], "tuned/tools/k8": [0.396, 0.188], "tuned/query/k0": [1.0, 0.458], "tuned/query/k4": [1.0, 0.25], "tuned/query/k8": [1.0, 0.25]}

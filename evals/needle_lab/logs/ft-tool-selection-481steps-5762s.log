@@ -1,0 +1,83 @@
+# TRIMMED from session-lab logs/ft_tool_selection.log (261324 bytes original). Matrix row 5: exact 60/60; wall=5762s (~96 min).
+# Trim rule: progress-bar lines removed; kept config header and everything from 'Training complete.' to EOF. Nothing redacted.
+[ft] family=tool_selection n=564 epochs=37 batch=32 -> /private/tmp/claude-501/-Users-djtelicloud-Documents-agentixai-grok-mcp-server--claude-worktrees-new-session-3336a5/b197cbf6-7853-495f-b5fa-d110a98ddf7d/scratchpad/lab/checkpoints/tool_selection
+Loaded 564 examples from /private/tmp/claude-501/-Users-djtelicloud-Documents-agentixai-grok-mcp-server--claude-worktrees-new-session-3336a5/b197cbf6-7853-495f-b5fa-d110a98ddf7d/scratchpad/lab/data/tool_selection.jsonl
+
+⚠  WARNING: The following tools have fewer than 120 examples (need at least 120 per tool: 100 train / 10 val / 10 test):
+   • edit_file: 80
+   • list_dir: 80
+   • read_file: 96
+   • run_tests: 80
+   • search_code: 100
+   Finetuning with too few examples will overfit (perfect training metrics but poor real-world performance). Add more diverse examples.
+
+Split: 444 train / 60 val / 60 test (per-tool)
+  Compacting JSON and preparing texts...
+Prepared 444 tool-call pairs
+  Contrastive: 444 queries, 2664 individual tools
+  Packed 444 sequences into 426 bins (47% utilization)
+  Compacting JSON and preparing texts...
+Prepared 60 tool-call pairs
+  Contrastive: 60 queries, 360 individual tools
+  Packed 60 sequences into 58 bins (47% utilization)
+Tokenized: 444 train / 60 val sequences
+Evaluating base model on 60 test examples...
+BASE_EVAL:{"call_f1": 0.4167, "name_f1": 0.6667, "exact_match": 0.4167, "parse_rate": 1.0, "args_acc": 0.625, "n": 60, "per_tool": {"list_dir": {"correct": 7, "total": 10}, "search_code": {"correct": 6, "total": 10}, "git_commit": {"correct": 8, "total": 10}, "run_tests": {"correct": 2, "total": 10}, "read_file": {"correct": 1, "total": 10}, "edit_file": {"correct": 1, "total": 10}}}
+  Base: call_f1=41.7%, exact=41.7%
+Starting training...
+
+[1/3] Detecting devices...
+      1 local device(s), 1 total across 1 hosts
+
+[2/3] Loading tokenizer...
+
+[3/3] Loading prepared data from disk (mmap)...
+      426 train / 58 val packed bins (memory-mapped)
+      Contrastive: 444 queries, 2,664 tools
+Resuming from checkpoint: /private/tmp/claude-501/-Users-djtelicloud-Documents-agentixai-grok-mcp-server--claude-worktrees-new-session-3336a5/b197cbf6-7853-495f-b5fa-d110a98ddf7d/scratchpad/lab/checkpoints/needle.pkl
+  Config: d=512, heads=8, layers=12/8
+  Loaded checkpoint params into train state
+
+  ─────────────────────────────────────
+  Parameters      26,315,421
+  d_model                512
+  Heads               8 (4 KV)
+  Layers             12 enc / 8 dec
+  Dtype             bfloat16
+  ─────────────────────────────────────
+  Hosts                    1
+  Devices           1/host, 1 total
+  Batch              32 x 1 = 32
+  Adam LR         3e-05 x 1 = 3e-05
+  Muon LR        0.0200 -> 0.0200
+  Schedule      24w / 433s / 24d (WSD)
+  Total steps            481
+  Epochs                  37
+  ─────────────────────────────────────
+
+[hf] Warning: checkpoint upload failed: Client error '401 Unauthorized' for url 'https://huggingface.co/api/repos/create' (Request ID: Root=1-6a54e2e7-1219a780071d2fd83e48aa08;dce3179f-7464-4b26-a0fd-a4aa93386a9b)
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401
+
+Invalid username or password.
+
+  ─────────────────────────────────────
+  Epoch 1/37
+  ─────────────────────────────────────
+  Text loss            0.1548
+  Text val ppl           1.02
+  Quant val ppl          1.02  (INT4)
+  ─── Single-Call (50 samples) ──
+  JSON parse         100.0%
+  Name F1             78.0%
+  Param haluc          0.0%
+  Param miss           0.0%
+  Value acc           98.2%
+  Args acc            97.4%
+  Call F1             76.0%
+  Exact match         76.0%
+# [... TRIMMED: training epochs elided ...]
+Training complete.
+Evaluating finetuned model on 60 test examples...
+FINETUNED_EVAL:{"call_f1": 1.0, "name_f1": 1.0, "exact_match": 1.0, "parse_rate": 1.0, "args_acc": 1.0, "n": 60, "per_tool": {"list_dir": {"correct": 10, "total": 10}, "search_code": {"correct": 10, "total": 10}, "git_commit": {"correct": 10, "total": 10}, "run_tests": {"correct": 10, "total": 10}, "read_file": {"correct": 10, "total": 10}, "edit_file": {"correct": 10, "total": 10}}}
+  Finetuned: call_f1=100.0%, exact=100.0%
+[ft] wall=5762s

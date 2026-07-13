@@ -1,0 +1,19 @@
+# LIFTED VERBATIM from session-lab logs/metal.log (1176 bytes, unmodified). WARNING: this only saved probe run FAILED (ModuleNotFoundError: datasets). It does NOT show the report's forward-OK-7.5s / backward-null-operand result.
+Activate with: source .venv-metal/bin/activate
+ + wheel==0.47.0
+ + zipp==4.1.0
+Platform 'METAL' is experimental and not all JAX functionality may be correctly supported!
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+W0000 00:00:1783946556.899728 13690736 mps_client.cc:510] WARNING: JAX Apple GPU support is experimental and not all JAX functionality is correctly supported!
+Metal device set to: Apple M3 Max
+I0000 00:00:1783946556.949316 13690736 service.cc:145] XLA service 0xa112a6b00 initialized for platform METAL (this does not guarantee that XLA will be used). Devices:
+I0000 00:00:1783946556.949402 13690736 service.cc:153]   StreamExecutor device (0): Metal, <undefined>
+I0000 00:00:1783946556.963124 13690736 mps_client.cc:406] Using Simple allocator.
+I0000 00:00:1783946556.963189 13690736 mps_client.cc:384] XLA backend will use up to 115448250368 bytes on device 0 for SimpleAllocator.
+[metal] devices: [METAL(id=0)]
+[metal] VERDICT: FAILED — ModuleNotFoundError: No module named 'datasets'
+I0000 00:00:1783946558.179457 13690736 mps_client.h:209] MetalClient destroyed.
+
+systemMemory: 128.00 GB
+maxCacheSize: 53.76 GB
+

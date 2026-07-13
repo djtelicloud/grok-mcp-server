@@ -43,5 +43,20 @@
   },
   "recipe": "balanced(base+hard+meta)",
   "seed": 42
+ },
+ {
+  "arm": "arm_E",
+  "base_checkpoint_hash": "40a32e91d1d4197b",
+  "dataset_hash": "c2cf0abf9b75ada9",
+  "n": 432,
+  "dropped_dups": 0,
+  "class_counts": {
+   "research": 64,
+   "coding": 240,
+   "planning": 76,
+   "vision": 52
+  },
+  "recipe": "arm_B + worst-cell delta (grok_route_test-style transform of vision_research_delta.json)",
+  "reconstructed": "record written post-audit; route_arm_E.jsonl verified byte-exact as route_arm_B.jsonl + transform(vision_research_delta.json)"
  }
 ]

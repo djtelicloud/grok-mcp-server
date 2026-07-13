@@ -1,0 +1,14 @@
+# LIFTED VERBATIM from session-lab logs/revive.log (861 bytes, unmodified). F1 evidence: loss frozen 3.4688 (~ln 32=3.4657) for 300 steps; no head re-init.
+[pairs] train=454 test(tool)=60 test(mem)=10
+[before] tool-retrieval top1=16.7% (60 queries/6 docs)  memory-retrieval top1=10.0% (10 queries/10 cards)
+  step   0 loss=3.4688 (3s)
+  step  50 loss=3.4688 (56s)
+  step 100 loss=3.4688 (102s)
+  step 150 loss=3.4688 (144s)
+  step 200 loss=3.4688 (185s)
+  step 250 loss=3.4688 (229s)
+  step 299 loss=3.4688 (273s)
+[after] tool-retrieval top1=16.7% (60 queries/6 docs)  memory-retrieval top1=10.0% (10 queries/10 cards)
+[side-effect] tool-calling after contrastive training: '[{"name":"toggle_lights","arguments":{"room":"kitchen","state":"off"}}]'
+[saved] /private/tmp/claude-501/-Users-djtelicloud-Documents-agentixai-grok-mcp-server--claude-worktrees-new-session-3336a5/b197cbf6-7853-495f-b5fa-d110a98ddf7d/scratchpad/lab/checkpoints/needle_retrieval.pkl
+VERDICT:{"tool_top1": 0.16666666666666666, "mem_top1": 0.1}

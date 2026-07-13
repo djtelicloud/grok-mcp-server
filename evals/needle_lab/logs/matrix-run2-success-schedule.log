@@ -1,0 +1,11 @@
+# LIFTED VERBATIM from session-lab logs/matrix.log (1100 bytes, unmodified). NOTE: this is the SECOND (successful) matrix run. The run-1 mp.Pool RuntimeError log (F3) was NOT saved/was overwritten.
+[matrix] start route_selection 08:45:08
+[matrix] start recovery_selection 08:45:08
+[matrix] done  recovery_selection 09:01:10 FINETUNED_EVAL:{"call_f1": 1.0, "name_f1": 1.0, "exact_match": 1.0, "parse_rate": 1.0, "args_acc": 1.0, "n": 10, "per_tool": {"recover": {"correct": 10, "total": 10}}}
+[matrix] done  route_selection 09:01:49 FINETUNED_EVAL:{"call_f1": 1.0, "name_f1": 1.0, "exact_match": 1.0, "parse_rate": 1.0, "args_acc": 1.0, "n": 10, "per_tool": {"route": {"correct": 10, "total": 10}}}
+[matrix] start memory_rerank 09:01:49
+[matrix] start tool_selection 09:01:49
+[matrix] done  memory_rerank 09:48:54 FINETUNED_EVAL:{"call_f1": 1.0, "name_f1": 1.0, "exact_match": 1.0, "parse_rate": 1.0, "args_acc": 1.0, "n": 10, "per_tool": {"select_context": {"correct": 10, "total": 10}}}
+[matrix] done  tool_selection 10:37:53 FINETUNED_EVAL:{"call_f1": 1.0, "name_f1": 1.0, "exact_match": 1.0, "parse_rate": 1.0, "args_acc": 1.0, "n": 60, "per_tool": {"list_dir": {"correct": 10, "total": 10}, "search_code": {"correct": 10, "
+[matrix] start extraction 10:37:53
+[matrix] start abstention 10:37:53

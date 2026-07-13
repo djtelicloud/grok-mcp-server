@@ -208,3 +208,8 @@ evals/cassettes/recorded.jsonl
 !sites/unigrok-control-center/build/
 !sites/unigrok-control-center/build/sites-vite-plugin.ts
 sites/unigrok-control-center/public/swarm/
+
+# PR #64 evidence bundle: the trimmed research_dev logs are part of the
+# committed record (negates the global *.log and logs/ rules above)
+!evals/needle_lab/logs/
+!evals/needle_lab/logs/**

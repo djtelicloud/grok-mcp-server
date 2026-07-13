@@ -1,0 +1,83 @@
+# TRIMMED from session-lab logs/ft_route_selection.log (159075 bytes original). Matrix row 1: exact 10/10; wall=1000s.
+# Trim rule: progress-bar lines removed; kept config header and everything from 'Training complete.' to EOF. Nothing redacted.
+[ft] family=route_selection n=344 epochs=33 batch=32 -> /private/tmp/claude-501/-Users-djtelicloud-Documents-agentixai-grok-mcp-server--claude-worktrees-new-session-3336a5/b197cbf6-7853-495f-b5fa-d110a98ddf7d/scratchpad/lab/checkpoints/route_selection
+Loaded 344 examples from /private/tmp/claude-501/-Users-djtelicloud-Documents-agentixai-grok-mcp-server--claude-worktrees-new-session-3336a5/b197cbf6-7853-495f-b5fa-d110a98ddf7d/scratchpad/lab/data/route_selection.jsonl
+Split: 324 train / 10 val / 10 test (per-tool)
+  Compacting JSON and preparing texts...
+Prepared 324 tool-call pairs
+  Contrastive: 324 queries, 324 individual tools
+  Packed 324 sequences into 71 bins (89% utilization)
+  Compacting JSON and preparing texts...
+Prepared 10 tool-call pairs
+  Contrastive: 10 queries, 10 individual tools
+  Packed 10 sequences into 3 bins (64% utilization)
+Tokenized: 324 train / 10 val sequences
+Evaluating base model on 10 test examples...
+BASE_EVAL:{"call_f1": 0.1053, "name_f1": 0.9474, "exact_match": 0.1, "parse_rate": 1.0, "args_acc": 0.1111, "n": 10, "per_tool": {"route": {"correct": 1, "total": 10}}}
+  Base: call_f1=10.5%, exact=10.0%
+Starting training...
+
+[1/3] Detecting devices...
+      1 local device(s), 1 total across 1 hosts
+
+[2/3] Loading tokenizer...
+
+[3/3] Loading prepared data from disk (mmap)...
+      71 train / 3 val packed bins (memory-mapped)
+      Contrastive: 324 queries, 324 tools
+Resuming from checkpoint: /private/tmp/claude-501/-Users-djtelicloud-Documents-agentixai-grok-mcp-server--claude-worktrees-new-session-3336a5/b197cbf6-7853-495f-b5fa-d110a98ddf7d/scratchpad/lab/checkpoints/needle.pkl
+  Config: d=512, heads=8, layers=12/8
+  Loaded checkpoint params into train state
+
+  ─────────────────────────────────────
+  Parameters      26,315,421
+  d_model                512
+  Heads               8 (4 KV)
+  Layers             12 enc / 8 dec
+  Dtype             bfloat16
+  ─────────────────────────────────────
+  Hosts                    1
+  Devices           1/host, 1 total
+  Batch              32 x 1 = 32
+  Adam LR         3e-05 x 1 = 3e-05
+  Muon LR        0.0200 -> 0.0200
+  Schedule      3w / 60s / 3d (WSD)
+  Total steps             66
+  Epochs                  33
+  ─────────────────────────────────────
+
+  ─────────────────────────────────────
+  Epoch 1/33
+  ─────────────────────────────────────
+  Text loss            2.5248
+  Text val ppl           1.00
+  Quant val ppl          1.00  (INT4)
+  ─── Single-Call (10 samples) ──
+  JSON parse         100.0%
+  Name F1             88.9%
+  Param haluc          0.0%
+  Param miss           0.0%
+  Value acc            0.0%
+  Args acc             0.0%
+  Call F1              0.0%
+  Exact match          0.0%
+  #tools     n   name_f1   nTP  nFP  nFN   call_f1   cTP  cFP  cFN   exact   parse
+       1    10    88.9%     8    0    2     0.0%     0    8   10   0.0%  100.0%
+  ─── Failures (10 captured) ───
+  [1] Q: how should we roll out event sourcing safely?
+      Ref:  [{"name":"route","arguments":{"mode":"reasoning","route_class":"planning"}}]
+      Pred: [{"name":"route","arguments":{"route_class":"event sourcing","mode":"thinking"}}]
+      Why:  route.route_class="event sourcing"!="planning", route.mode="thinking"!="reasoning"
+
+  [2] Q: is this chart for me showing a regression?
+      Ref:  [{"name":"route","arguments":{"mode":"fast","route_class":"vision"}}]
+      Pred: []
+      Why:  missing_tools:route, false_negative
+
+  [3] Q: compare multi-region failover vs the billing rewrite and recommend one
+# [... TRIMMED: training epochs elided ...]
+Training complete.
+Evaluating finetuned model on 10 test examples...
+FINETUNED_EVAL:{"call_f1": 1.0, "name_f1": 1.0, "exact_match": 1.0, "parse_rate": 1.0, "args_acc": 1.0, "n": 10, "per_tool": {"route": {"correct": 10, "total": 10}}}
+  Finetuned: call_f1=100.0%, exact=100.0%
+[ft] wall=1000s

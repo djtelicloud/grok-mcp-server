@@ -1,0 +1,18 @@
+# LIFTED VERBATIM from session-lab logs/revive4.log (1001 bytes, unmodified). Headline #1: 12 pairs/card, 50 held-out queries/10 cards -> mem top1 60%, tool 100%.
+[head] contrastive_hidden max|w| before = 0.00e+00
+[head] contrastive_proj max|w| before = 0.00e+00
+[pairs] train=564 test(tool)=60 test(mem)=50
+[before] tool-retrieval top1=41.7% (60 queries/6 docs)  memory-retrieval top1=30.0% (50 queries/10 cards)
+  step   0 loss=3.4375 (2s)
+  step  50 loss=2.6562 (29s)
+  step 100 loss=2.5312 (44s)
+  step 150 loss=2.5312 (58s)
+  step 200 loss=2.4375 (71s)
+  step 250 loss=2.4062 (84s)
+  step 300 loss=2.3438 (97s)
+  step 350 loss=2.2656 (110s)
+  step 399 loss=2.1562 (123s)
+[after] tool-retrieval top1=100.0% (60 queries/6 docs)  memory-retrieval top1=60.0% (50 queries/10 cards)
+[side-effect] tool-calling after contrastive training: '[{"name":"toggle_lights","arguments":{"room":"kitchen","state":"off"}}]'
+[saved] /private/tmp/claude-501/-Users-djtelicloud-Documents-agentixai-grok-mcp-server--claude-worktrees-new-session-3336a5/b197cbf6-7853-495f-b5fa-d110a98ddf7d/scratchpad/lab/checkpoints/needle_retrieval.pkl
+VERDICT:{"tool_top1": 1.0, "mem_top1": 0.6}
