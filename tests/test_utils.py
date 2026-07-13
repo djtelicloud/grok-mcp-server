@@ -3567,7 +3567,7 @@ class TestCliPlaneV2:
         assert (content, is_cli) == ("ok", True)
         assert captured["cmd"] == [
             "/tmp/grok",
-            "-s",
+            "--resume",
             "sid-existing",
             "--system-prompt-override",
             "sys",
@@ -3738,8 +3738,8 @@ class TestCliPlaneV2:
 
         cmd = captured["cmd"]
         assert cmd[cmd.index("--output-format") + 1] == "json"
-        # New sessions get a generated -s id (create-or-resume semantics)...
-        generated = cmd[cmd.index("-s") + 1]
+        # New sessions get a generated --session-id.
+        generated = cmd[cmd.index("--session-id") + 1]
         uuid_module.UUID(generated)
         # ...but the CLI's reported sessionId wins for persistence.
         store.save_session.assert_awaited_once_with(
@@ -3777,11 +3777,74 @@ class TestCliPlaneV2:
 
         assert content == "resumed"
         cmd = captured["cmd"]
-        assert cmd[cmd.index("-s") + 1] == "abc-123"
+        assert cmd[cmd.index("--resume") + 1] == "abc-123"
+        assert "--session-id" not in cmd
         store.save_session.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_cli_retries_stale_session_id_with_fresh_mapping(self, monkeypatch):
+    async def test_cli_replays_server_history_when_stored_session_is_missing(
+        self, monkeypatch
+    ):
+        import json as json_module
+        import uuid as uuid_module
+
+        from src.utils import _call_plane
+
+        monkeypatch.setenv("UNIGROK_RUNTIME", "local")
+        captured = {"cmds": []}
+
+        class FakeProc:
+            def __init__(self, returncode):
+                self.returncode = returncode
+
+        async def fake_exec(*cmd, **kwargs):
+            captured["cmds"].append(list(cmd))
+            return FakeProc(1 if len(captured["cmds"]) == 1 else 0)
+
+        payload = json_module.dumps({
+            "text": "recovered from server history",
+            "sessionId": "fresh-cli-session",
+        }).encode()
+
+        async def fake_communicate(proc, timeout_sec, input_data=None):
+            if proc.returncode:
+                return (
+                    b"",
+                    b"Session abc-123 not found locally. Failed to restore session from remote: 404 Not Found",
+                )
+            return payload, b""
+
+        monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+        monkeypatch.setattr("src.utils.communicate_with_timeout", fake_communicate)
+
+        store = self._fake_store(session_row={"cli_session_id": "abc-123"})
+        store.load_messages.return_value = [
+            {"role": "user", "content": "Remember marker MISSING-SESSION-MARKER"},
+            {"role": "assistant", "content": "Marker stored"},
+        ]
+        content, _, _, is_cli = await _call_plane(
+            "cli-fallback", "What marker did I give you?", "sess", store, "sys"
+        )
+
+        assert (content, is_cli) == ("recovered from server history", True)
+        assert len(captured["cmds"]) == 2
+        assert captured["cmds"][0][captured["cmds"][0].index("--resume") + 1] == "abc-123"
+        fresh_cmd = captured["cmds"][1]
+        assert "--resume" not in fresh_cmd
+        assert "--fork-session" not in fresh_cmd
+        uuid_module.UUID(fresh_cmd[fresh_cmd.index("--session-id") + 1])
+        retry_prompt = fresh_cmd[fresh_cmd.index("-p") + 1]
+        assert "MISSING-SESSION-MARKER" in retry_prompt
+        assert retry_prompt.count("What marker did I give you?") == 1
+        store.load_messages.assert_awaited_once()
+        store.save_session.assert_awaited_once_with(
+            "sess",
+            cli_session_id="fresh-cli-session",
+            model="grok-composer-2.5-fast",
+        )
+
+    @pytest.mark.asyncio
+    async def test_cli_forks_busy_session_with_fresh_mapping(self, monkeypatch):
         import json as json_module
         import uuid as uuid_module
 
@@ -3804,6 +3867,64 @@ class TestCliPlaneV2:
 
         payload = json_module.dumps({
             "text": "recovered",
+            "sessionId": "forked-cli-session",
+        }).encode()
+
+        async def fake_communicate(proc, timeout_sec, input_data=None):
+            if proc.returncode:
+                return b"", b"Error: Session ID abc-123 is already in use."
+            return payload, b""
+
+        monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+        monkeypatch.setattr("src.utils.communicate_with_timeout", fake_communicate)
+
+        store = self._fake_store(session_row={"cli_session_id": "abc-123"})
+        content, _, _, is_cli = await _call_plane(
+            "cli-fallback", "What marker did I give you?", "sess", store, "sys"
+        )
+
+        assert (content, is_cli) == ("recovered", True)
+        assert len(captured["cmds"]) == 2
+        assert captured["cmds"][0][captured["cmds"][0].index("--resume") + 1] == "abc-123"
+        assert "--session-id" not in captured["cmds"][0]
+        first_prompt = captured["cmds"][0][captured["cmds"][0].index("-p") + 1]
+        assert first_prompt == "What marker did I give you?"
+        fork_cmd = captured["cmds"][1]
+        assert fork_cmd[fork_cmd.index("--resume") + 1] == "abc-123"
+        assert "--fork-session" in fork_cmd
+        fork_id = fork_cmd[fork_cmd.index("--session-id") + 1]
+        uuid_module.UUID(fork_id)
+        assert fork_cmd[fork_cmd.index("-p") + 1] == "What marker did I give you?"
+        store.load_messages.assert_not_awaited()
+        store.save_session.assert_awaited_once_with(
+            "sess",
+            cli_session_id="forked-cli-session",
+            model="grok-composer-2.5-fast",
+        )
+        assert "grok-composer-2.5-fast" not in utils._BREAKER_STATE
+
+    @pytest.mark.asyncio
+    async def test_cli_replays_server_history_when_resume_and_fork_are_busy(
+        self, monkeypatch
+    ):
+        import json as json_module
+        import uuid as uuid_module
+
+        from src.utils import _call_plane
+
+        monkeypatch.setenv("UNIGROK_RUNTIME", "local")
+        captured = {"cmds": []}
+
+        class FakeProc:
+            def __init__(self, returncode):
+                self.returncode = returncode
+
+        async def fake_exec(*cmd, **kwargs):
+            captured["cmds"].append(list(cmd))
+            return FakeProc(1 if len(captured["cmds"]) < 3 else 0)
+
+        payload = json_module.dumps({
+            "text": "recovered from server history",
             "sessionId": "fresh-cli-session",
         }).encode()
 
@@ -3816,20 +3937,33 @@ class TestCliPlaneV2:
         monkeypatch.setattr("src.utils.communicate_with_timeout", fake_communicate)
 
         store = self._fake_store(session_row={"cli_session_id": "abc-123"})
-        content, _, _, is_cli = await _call_plane("cli-fallback", "hi", "sess", store, "sys")
+        store.load_messages.return_value = [
+            {"role": "user", "content": "Remember marker STALE-SESSION-MARKER"},
+            {"role": "assistant", "content": "Marker stored"},
+        ]
+        content, _, _, is_cli = await _call_plane(
+            "cli-fallback", "What marker did I give you?", "sess", store, "sys"
+        )
 
-        assert (content, is_cli) == ("recovered", True)
-        assert len(captured["cmds"]) == 2
-        assert captured["cmds"][0][captured["cmds"][0].index("-s") + 1] == "abc-123"
-        retry_id = captured["cmds"][1][captured["cmds"][1].index("-s") + 1]
-        assert retry_id != "abc-123"
-        uuid_module.UUID(retry_id)
+        assert (content, is_cli) == ("recovered from server history", True)
+        assert len(captured["cmds"]) == 3
+        assert captured["cmds"][0][captured["cmds"][0].index("--resume") + 1] == "abc-123"
+        assert "--fork-session" in captured["cmds"][1]
+        fresh_cmd = captured["cmds"][2]
+        assert "--resume" not in fresh_cmd
+        assert "--fork-session" not in fresh_cmd
+        uuid_module.UUID(fresh_cmd[fresh_cmd.index("--session-id") + 1])
+        retry_prompt = fresh_cmd[fresh_cmd.index("-p") + 1]
+        assert "# Server Conversation History" in retry_prompt
+        assert "STALE-SESSION-MARKER" in retry_prompt
+        assert "# Current User Request" in retry_prompt
+        assert retry_prompt.count("What marker did I give you?") == 1
+        store.load_messages.assert_awaited_once()
         store.save_session.assert_awaited_once_with(
             "sess",
             cli_session_id="fresh-cli-session",
             model="grok-composer-2.5-fast",
         )
-        assert "grok-composer-2.5-fast" not in utils._BREAKER_STATE
 
     @pytest.mark.asyncio
     async def test_keyless_cli_uses_server_history_without_native_session_id(self, monkeypatch):
@@ -3874,12 +4008,60 @@ class TestCliPlaneV2:
 
         assert (content, is_cli) == ("MCP-MARKER", True)
         cmd = captured["cmd"]
-        assert "-s" not in cmd
+        assert "--session-id" not in cmd
+        assert "--resume" not in cmd
         prompt_arg = cmd[cmd.index("-p") + 1]
         assert "Server Conversation History" in prompt_arg
         assert "MCP-MARKER" in prompt_arg
         assert "Current User Request" in prompt_arg
         store.get_session.assert_not_awaited()
+        store.save_session.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_cli_explicit_messages_override_native_session_mapping(self, monkeypatch):
+        import json as json_module
+
+        from src.utils import _call_plane
+
+        monkeypatch.setenv("UNIGROK_RUNTIME", "local")
+        captured = {}
+
+        class FakeProc:
+            returncode = 0
+
+        async def fake_exec(*cmd, **kwargs):
+            captured["cmd"] = list(cmd)
+            return FakeProc()
+
+        async def fake_communicate(proc, timeout_sec, input_data=None):
+            return json_module.dumps({"text": "explicit history used"}).encode(), b""
+
+        monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+        monkeypatch.setattr("src.utils.communicate_with_timeout", fake_communicate)
+
+        store = self._fake_store(session_row={"cli_session_id": "native-cli-session"})
+        content, _, _, is_cli = await _call_plane(
+            "cli-fallback",
+            "What marker did I give you?",
+            "sess",
+            store,
+            "sys",
+            input_messages=[
+                {"role": "user", "content": "Remember marker EXPLICIT-MARKER"},
+                {"role": "assistant", "content": "Marker stored"},
+                {"role": "user", "content": "What marker did I give you?"},
+            ],
+        )
+
+        assert (content, is_cli) == ("explicit history used", True)
+        cmd = captured["cmd"]
+        assert "--resume" not in cmd
+        assert "--session-id" not in cmd
+        prompt_arg = cmd[cmd.index("-p") + 1]
+        assert "EXPLICIT-MARKER" in prompt_arg
+        assert prompt_arg.count("What marker did I give you?") == 1
+        store.get_session.assert_not_awaited()
+        store.load_messages.assert_not_awaited()
         store.save_session.assert_not_awaited()
 
     @pytest.mark.asyncio
@@ -3928,7 +4110,8 @@ class TestCliPlaneV2:
 
         assert (content, is_cli) == ("context survived via native session", True)
         cmd = captured["cmd"]
-        assert cmd[cmd.index("-s") + 1] == "native-cli-session"
+        assert cmd[cmd.index("--resume") + 1] == "native-cli-session"
+        assert "--session-id" not in cmd
         prompt_arg = cmd[cmd.index("-p") + 1]
         assert prompt_arg == "What marker did I give you?"
         assert "Server Conversation History" not in prompt_arg
