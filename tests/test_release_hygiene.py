@@ -76,6 +76,7 @@ def test_public_setup_surfaces_use_the_grok_phoneword_endpoint():
         ROOT / "src" / "cli.py",
         ROOT / ".mcp.json",
         ROOT / "skills" / "using-unigrok" / "SKILL.md",
+        ROOT / ".github" / "skills" / "using-unigrok" / "SKILL.md",
         ROOT / ".agents" / "AGENTS.md",
         ROOT / ".agents" / "skills" / "uni-grok-mcp" / "SKILL.md",
     ]
@@ -92,6 +93,13 @@ def test_agent_guidance_preserves_workspace_and_credential_boundaries():
     assert 'fallback_policy="same_plane"' in using_unigrok
     assert "workspace-neutral" in using_unigrok
     assert "workspace-neutral" in gemini
+
+
+def test_copilot_project_skill_uses_a_supported_discovery_path():
+    skill_path = ROOT / ".github" / "skills" / "using-unigrok" / "SKILL.md"
+    assert skill_path.is_file()
+    assert not (ROOT / ".copilot" / "skills" / "using-unigrok" / "SKILL.md").exists()
+    assert "not a default project discovery path" in skill_path.read_text()
 
 
 def test_agent_rules_allow_draft_pr_submission_but_reserve_final_integration():

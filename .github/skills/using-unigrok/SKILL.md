@@ -58,6 +58,11 @@ reuse for follow-up questions.
 Use the workspace path for team defaults. Use the personal path for individual
 defaults across unrelated repositories.
 
+Do not duplicate this skill under a repository-root `.copilot/skills`
+directory; that is not a default project discovery path. VS Code can opt into
+additional paths through `chat.agentSkillsLocations` when a deliberate
+nonstandard location is required.
+
 ## MCP endpoint and identity
 
 Default endpoint: `http://localhost:4765/mcp`

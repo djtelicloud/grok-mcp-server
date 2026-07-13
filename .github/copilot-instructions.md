@@ -6,9 +6,6 @@ shared rules are authoritative.
 Use the shared workspace skill at `.github/skills/using-unigrok/SKILL.md` when
 the user asks for Grok usage, "@grok" queries, second-model review, or
 cross-repo UniGrok guidance in VS Code.
-The root `.copilot/skills/using-unigrok/SKILL.md` is Copilot-local tuning for
-this IDE; treat `.github/skills/using-unigrok/SKILL.md` as the team-shared
-default behavior.
 
 For normal feature work:
 
