@@ -2,73 +2,52 @@
 
 Last updated: 2026-07-12
 Owner: Codex
-Status: IntelligenceCapsule v1 landed; maintainer queue clean
+Status: CursorBench-aligned evaluation foundation landed; no active repository gate
 
 This is the project-scoped handoff for new Codex chats. Resolve drift-prone
-Git, CI, runtime, DNS, and cloud identifiers live before acting. Never record
-credentials, OAuth codes, tokens, or private keys here.
+Git, CI, runtime, DNS, cloud, and benchmark state live before acting. Never
+record credentials, OAuth codes, tokens, or private keys here.
 
-## Completed repository state
+## Completed state
 
-- PR #39 merged to protected `origin/main` as
-  `b52ed0f187a1969f522ce4bac75d6168afc75d7d`. The exact reviewed and locally
-  landed head was `5dbcac5078bdcfc75dba01f65e214baa17ff5848`.
-- IntelligenceCapsule v1 now has strict Python and TypeScript canonical byte
-  implementations, a shared cross-language golden vector, a published OKF
-  schema, and original-byte integrity verification.
-- The schema SHA-256 is pinned to
-  `10c2ec4638bd6c4e303b3e2c4c7d91ae582554f48aaa01fac2d9370062b98d4c`.
-  The deterministic SHA-1-format Git genesis is pinned to
-  `6dadda28ac4174bf227f36b45917e15c663987ce`.
-- The local-only bootstrap creates or repairs the five fixed
-  `refs/unigrok/*` heads transactionally. It reads the pinned schema from the
-  last-fetched public `origin/main`, rejects symbolic refs and invalid
-  ancestry, disables ref dereferencing and hooks, and never fetches or pushes.
-- Public MCP consumer SQLite remains unchanged and outside the Insider DAG.
-  Capsule code and bootstrap do not read, migrate, copy, export, or synchronize
-  `grok_sessions.db`.
-- The landing gate passed 1,118 tests. Python 3.11/3.12 CI, package checks,
-  CodeQL, Docker health, offline evals, Project Site, and the standalone control
-  image all passed on the exact reviewed head.
-- Two independent adversarial audits found no remaining capsule-protocol or
-  bootstrap security/concurrency blocker. Gemini returned no actionable review
-  thread. The repository's exact-head `Codex Approval` status passed.
+- PR #53 merged to protected `origin/main` as
+  `381a9fe0c5909cce0ec0565bbb91d190c0543f7f`. Its exact reviewed,
+  locally landed, and CI-green head was
+  `64d3aef4eb500cec2ecf81722ca5dd40f0f942aa`.
+- The eval harness now has a cassette-backed multi-file agent task, safe
+  structural tool-trace grading, explicit task-plane selection, and a
+  fail-closed `--require-pass` command-line gate.
+- Swarm has two versioned golden-target manifests and an opt-in sequential
+  live sweep. CLI generation is same-plane, tool-free, project/config-free,
+  exact-zero metered, cancellation-safe, and retains the CLI's durable OAuth
+  refresh path.
+- `docs/cursorbench-readiness.md` records the evidence boundary: these checks
+  are CursorBench-aligned internal capability/regression evidence, not an
+  official CursorBench score.
 
-## Runtime and Git state
+## Verification
 
-- The feature content entered protected `origin/main` at
-  `b52ed0f187a1969f522ce4bac75d6168afc75d7d`; the handoff update itself lands
-  in a later descendant merge, so do not treat that feature SHA as current
-  `main`.
-- `./scripts/land-status` is the canonical live check for visible `main` and the
-  contributor runtime marker. Both matched after closeout, and each closeout
-  merge tree was byte-identical to its certified task head.
-- Stable `127.0.0.1:4765` and contributor `127.0.0.1:4766` health checks pass.
-- No real `refs/unigrok/*` were created before the protocol landed. Bootstrap
-  remains an explicit local contributor action after pulling public main.
+- The landing gate printed
+  `LANDED TO MAIN: 64d3aef4eb500cec2ecf81722ca5dd40f0f942aa`
+  after 1,219 tests and a successful contributor-runtime restart/smoke test.
+- The offline eval baseline passed 13/13 with no regressions.
+- The final live Docker sweep completed both targets at exact `$0.0000`
+  metered cost: `nsquared_dedup` persisted 24 candidates with a 97.66% best
+  latency improvement; `slow_loop_optimize` persisted 5 candidates with a
+  99.82% best latency improvement.
+- Grok 4.5 API reasoning and the final human exact-diff review both found no
+  release blockers. Python 3.11/3.12 CI, Project Site, control image, Docker,
+  offline evals, CodeQL, and exact-head `Codex Approval` passed.
+- Protected `origin/main` and visible local `main` agreed at the PR merge
+  commit. Stable port 4765 and contributor port 4766 were both healthy.
 
-## Trust boundary
+## Remaining external gate
 
-- Bootstrap `ready` means structural validity only. It does not authenticate,
-  evaluate, or promote descendant intelligence.
-- The envelope `signatures` array is structural and reserved in v1. It must not
-  authorize work. Verified signed Git descendants or approved cloud
-  attestations remain the publication-authentication boundary.
-- Git is shared Insider truth. Any future Insider SQLite is only a disposable
-  materialized view. Public consumer SQLite remains private runtime truth.
-- No tunnel, cloud callback into localhost, shared database, or browser-held
-  xAI credential is part of this architecture.
-
-## Deliberately separate next phases
-
-- Define protected remote projection, quarantine fetch, signature verification,
-  and promotion policy for descendant intelligence.
-- Add capsule object storage and signed local/cloud publishers that emit the
-  same bytes without cross-calling local and cloud executors.
-- Add the disposable Insider materializer and prove delete-and-rebuild recovery
-  solely from trusted refs.
-- Build the single adaptive contributor/admin UI on top of those contracts;
-  keep public visitors read-only and public MCP consumers headless in their IDE.
-
-No release, production deployment, or remaining gate is attached to
-IntelligenceCapsule v1 itself.
+- CursorBench 3.2 uses Cursor's private/internal task suite and has no public
+  submission harness. An official leaderboard result or `#1` claim requires
+  Cursor to evaluate UniGrok or provide an accepted interface.
+- Until that happens, public claims must distinguish the reproducible internal
+  suite and live golden-target results from an official CursorBench ranking.
+- Broader held-out task coverage, repeated comparative runs, and confidence
+  intervals remain product work for a stronger internal proxy; they are not
+  retroactive evidence for the official leaderboard.

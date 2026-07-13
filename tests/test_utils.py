@@ -3627,6 +3627,61 @@ class TestCliPlaneV2:
         assert "GROK_API_KEY" not in child_env
         assert child_env["KEEP_ME"] == "yes"
 
+    def test_isolated_cli_runtime_has_empty_workspace_and_durable_oauth_path(
+        self, tmp_path, monkeypatch
+    ):
+        from src import utils
+
+        source_home = tmp_path / "source-home"
+        source_auth = source_home / ".grok" / "auth.json"
+        source_auth.parent.mkdir(parents=True)
+        source_auth.write_text(
+            '{"account":{"access_token":"test-only","expires_at":1}}',
+            encoding="utf-8",
+        )
+        (source_home / ".grok" / "settings.json").write_text(
+            '{"mcpServers":{"unsafe":{}}}', encoding="utf-8"
+        )
+        monkeypatch.setenv("HOME", str(source_home))
+        monkeypatch.setenv("XAI_API_KEY", "must-not-leak")
+        monkeypatch.setenv("UNRELATED_SECRET", "must-not-leak")
+
+        with utils._isolated_grok_cli_runtime() as (cwd, env):
+            isolated_root = cwd.parent
+            assert list(cwd.iterdir()) == []
+            assert env["GROK_AUTH_PATH"] == str(source_auth)
+            assert list(Path(env["GROK_HOME"]).iterdir()) == []
+            assert not (Path(env["HOME"]) / ".grok" / "auth.json").exists()
+            assert not (Path(env["HOME"]) / ".grok" / "settings.json").exists()
+            assert env["PWD"] == str(cwd)
+            assert "XAI_API_KEY" not in env
+            assert "UNRELATED_SECRET" not in env
+
+        assert not isolated_root.exists()
+
+    @pytest.mark.asyncio
+    async def test_isolated_agent_turn_skips_inherited_dynamic_context(self, monkeypatch):
+        from src import utils
+
+        dynamic = AsyncMock(return_value=("must not be inherited", True, "ctx-leak"))
+        routed = AsyncMock(return_value=utils.MetaLayer(generation="done"))
+        monkeypatch.setattr(utils, "get_dynamic_context", dynamic)
+        monkeypatch.setattr(utils, "orchestrate", routed)
+
+        await utils.run_agent_turn(
+            prompt="transform this",
+            system_prompt="ONLY CALLER SYSTEM",
+            enable_agentic=False,
+            cli_isolated=True,
+        )
+
+        dynamic.assert_not_awaited()
+        assert routed.await_args.kwargs["dynamic_sys_prompt"] == (
+            "\nAdditional Instructions:\nONLY CALLER SYSTEM"
+        )
+        assert routed.await_args.kwargs["context_id"] is None
+        assert routed.await_args.kwargs["cli_isolated"] is True
+
     def test_cli_plane_ready_uses_check_probe_outside_tests(self, monkeypatch):
         from src import utils
 

@@ -18,6 +18,7 @@ import asyncio
 import difflib
 import hashlib
 import json
+import math
 import random
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
@@ -116,10 +117,7 @@ class SwarmEngine:
         for generation in range(1, self.config.max_generations + 1):
             if self.cancelled and self.cancelled():
                 break
-            try:
-                outcome = await self._run_generation(generation)
-            except BudgetExceeded:
-                break
+            outcome = await self._run_generation(generation)
             outcomes.append(outcome)
             if outcome.new_front_point:
                 stagnant = 0
@@ -151,7 +149,18 @@ class SwarmEngine:
             async with semaphore:
                 return await self._generate_one(pick, generation)
 
-        generated = await asyncio.gather(*[_gen(p) for p in picks])
+        generation_tasks = [asyncio.create_task(_gen(p)) for p in picks]
+        try:
+            generated = await asyncio.gather(*generation_tasks)
+        except BaseException:
+            # asyncio.gather propagates the first failure without cancelling
+            # siblings. A plane/cost violation must not leave concurrent
+            # provider calls running after the durable task is marked failed.
+            for task in generation_tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*generation_tasks, return_exceptions=True)
+            raise
 
         candidates: List[Dict[str, Any]] = []
         # Funnel is sequential per candidate (shared work dir); generation was
@@ -224,7 +233,7 @@ class SwarmEngine:
         generator = self.generator or generate_mutation
         remaining = max(0.0, self.config.budget_usd - self._spent)
         result = await generator(prompt, system, remaining_budget_usd=remaining)
-        self._spent += float(getattr(result, "cost_usd", 0.0) or 0.0)
+        self._spent += self._validated_generation_cost(result)
         text = parse_mutation_output(getattr(result, "text", ""))
         if text is None:
             # One heal retry, restating the contract.
@@ -232,9 +241,23 @@ class SwarmEngine:
             healed = await generator(
                 prompt + HEAL_SUFFIX, system, remaining_budget_usd=remaining
             )
-            self._spent += float(getattr(healed, "cost_usd", 0.0) or 0.0)
+            self._spent += self._validated_generation_cost(healed)
             text = parse_mutation_output(getattr(healed, "text", ""))
         return text
+
+    @staticmethod
+    def _validated_generation_cost(result: Any) -> float:
+        """Fail closed before malformed accounting can poison durable spend."""
+        try:
+            cost = float(getattr(result, "cost_usd", 0.0) or 0.0)
+        except (TypeError, ValueError) as exc:
+            raise BudgetExceeded("swarm generation returned an invalid cost") from exc
+        if not math.isfinite(cost) or cost != 0.0:
+            raise BudgetExceeded(
+                "swarm generation violated the exact-zero CLI cost contract "
+                f"(cost={cost!r})"
+            )
+        return cost
 
     async def _funnel(
         self, pick: Dict[str, Any], replacement: Optional[str], generation: int

@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "target": "loop_opt.py",
+  "focus_node": "function:slow_accumulate",
+  "test_target": "test_loop_opt.py",
+  "bench_script": "bench_loop_opt.py"
+}

@@ -14,9 +14,16 @@ def test_control_center_avoids_dynamic_selector_and_guard_html() -> None:
 
 
 def test_markdown_renderer_does_not_apply_incomplete_scheme_filter() -> None:
-    source = (ROOT / "mcp_ui" / "app.js").read_text(encoding="utf-8")
+    # The renderer (and its href handling) now lives in markdown.js, so guard
+    # that file: no blocklist-style scheme stripping, and links go through the
+    # allowlist sanitizeHref instead.
+    renderer = (ROOT / "mcp_ui" / "markdown.js").read_text(encoding="utf-8")
+    app = (ROOT / "mcp_ui" / "app.js").read_text(encoding="utf-8")
 
-    assert ".replace(/javascript:/gi" not in source
+    assert ".replace(/javascript:/gi" not in renderer
+    assert ".replace(/javascript:/gi" not in app
+    assert "function sanitizeHref" in renderer
+    assert "sanitizeHref(url)" in renderer
 
 
 def test_land_status_does_not_log_runtime_exception_details() -> None:

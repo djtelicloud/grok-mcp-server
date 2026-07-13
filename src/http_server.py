@@ -1,6 +1,5 @@
 import asyncio
 import contextvars
-import hashlib
 import hmac
 import ipaddress
 import json
@@ -11,7 +10,7 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator, Dict, List, Literal, Optional
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 from .models.results import AgentResult
 from .metrics import build_metrics_snapshot, fetch_provider_api_usage
 from .semantic_evals import get_semantic_eval_stats
@@ -27,6 +26,18 @@ from starlette.responses import JSONResponse, Response, StreamingResponse
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
+from .identity import (
+    _ACTIVE_CLIENT_ID,
+    _ACTIVE_SESSION_ID,
+    normalize_caller,
+    normalize_principal,
+    reset_active_caller,
+    reset_active_principal,
+    scoped_session,
+    set_active_caller,
+    set_active_principal,
+    telemetry_row_caller,
+)
 from .utils import (
     FALLBACK_XAI_LANGUAGE_MODELS,
     CLI_AUTH_SETUP_COMMAND,
@@ -44,19 +55,12 @@ from .utils import (
     credential_plane_contract,
     is_cloudrun_runtime,
     new_request_id,
-    normalize_caller,
-    reset_active_caller,
     reset_request_id,
     redact_secrets,
     run_blocking,
     run_agent_turn,
-    set_active_caller,
     set_request_id,
     store,
-    telemetry_row_caller,
-    _ACTIVE_CLIENT_ID,
-    _ACTIVE_SESSION_ID,
-    scoped_session,
 )
 
 
@@ -628,29 +632,42 @@ def _caller_key_alias(token: Optional[str]) -> Optional[str]:
 
 def _derive_client_id(scope: Dict[str, Any]) -> Optional[str]:
     """The optional X-Client-ID header: an IDE self-identifying (vscode,
-    claude, codex, antigravity, ...). Distinct from X-Caller in that it also
-    scopes session names, so each IDE gets its own conversation namespace."""
+    claude, codex, antigravity, ...). This is an untrusted attribution label,
+    never an authenticated principal. It separates IDE namespaces only below
+    the request's principal."""
     return normalize_caller(_scope_header(scope, b"x-client-id"))
 
 
-def _derive_http_caller(scope: Dict[str, Any]) -> str:
-    """Caller identity for one gateway request: X-Client-ID wins (IDE
-    identity, also used for session scoping), then the X-Caller header (any
-    agent can self-identify), else the matched auth-key alias as
-    'http:key-<sha8>', else 'http:anon'."""
+def _derive_http_principal(scope: Dict[str, Any]) -> str:
+    """Authenticated namespace/budget owner for one gateway request.
+
+    OAuth subject wins. A configured static bearer maps to a server-derived
+    key alias. An unauthenticated request is the single local/anonymous trust
+    domain allowed by the loopback deployment contract. Caller-controlled
+    identity headers are deliberately excluded.
+    """
     oauth = scope.get("unigrok.oauth")
     if isinstance(oauth, dict):
-        subject = normalize_caller(oauth.get("sub"))
+        subject = normalize_principal(oauth.get("sub"))
         if subject:
             return f"oauth:{subject}"
-    client_id = _derive_client_id(scope)
-    if client_id:
-        return client_id
-    explicit = normalize_caller(_scope_header(scope, b"x-caller"))
-    if explicit:
-        return explicit
     alias = _caller_key_alias(_extract_bearer_token(_scope_header(scope, b"authorization")))
     return f"http:{alias}" if alias else "http:anon"
+
+
+def _derive_http_caller(scope: Dict[str, Any]) -> str:
+    """Reporting identity for telemetry; not a security principal.
+
+    OAuth subjects stay principal-attributed. Otherwise the IDE/client label
+    is useful for local observability, with the authenticated principal as the
+    final fallback. Session isolation and budgets use
+    :func:`_derive_http_principal` instead.
+    """
+    principal = _derive_http_principal(scope)
+    label = _derive_client_id(scope) or normalize_caller(
+        _scope_header(scope, b"x-caller")
+    )
+    return f"{principal}|{quote(label, safe='-._~')}" if label else principal
 
 
 def _scoped_session(session: Optional[str]) -> Optional[str]:
@@ -682,6 +699,7 @@ class CallerContextMiddleware:
             await self.app(scope, receive, send)
             return
         token = set_active_caller(_derive_http_caller(scope))
+        principal_token = set_active_principal(_derive_http_principal(scope))
         client_token = _ACTIVE_CLIENT_ID.set(_derive_client_id(scope))
         session_token = _ACTIVE_SESSION_ID.set(_derive_session_id(scope))
         try:
@@ -689,6 +707,7 @@ class CallerContextMiddleware:
         finally:
             _ACTIVE_SESSION_ID.reset(session_token)
             _ACTIVE_CLIENT_ID.reset(client_token)
+            reset_active_principal(principal_token)
             reset_active_caller(token)
 
 

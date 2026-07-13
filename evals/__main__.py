@@ -1,7 +1,8 @@
 # evals/__main__.py
 # CLI for the self-feeding eval harness.
 #
-#   python -m evals run [--live] [--check-baseline] [--task ID ...]
+#   python -m evals run [--live] [--check-baseline] [--require-pass]
+#                       [--task ID ...]
 #                       [--tasks-dir D] [--cassettes-dir D] [--out D]
 #                       [--baseline F] [--no-calibration] [--calibration-db F]
 #   python -m evals export-session NAME [--db F] [--task-id ID] [--category C]
@@ -84,6 +85,12 @@ async def _cmd_run(args) -> int:
                 )
                 return 1
             print("\nbaseline check: OK (no regressions)")
+        if args.require_pass and report["totals"]["failed"]:
+            print(
+                f"\nRUN FAILED: {report['totals']['failed']} task(s) did not pass",
+                file=sys.stderr,
+            )
+            return 1
         return 0
     finally:
         # Session seeding/persistence ran through the global store —
@@ -129,6 +136,8 @@ def main(argv=None) -> int:
                        help="run against the real xAI API (never in CI)")
     run_p.add_argument("--check-baseline", action="store_true",
                        help="exit 1 on any regression vs the expected-pass baseline")
+    run_p.add_argument("--require-pass", action="store_true",
+                       help="exit 1 when any selected task fails")
     run_p.add_argument("--task", action="append", metavar="ID",
                        help="run only these task id(s); repeatable")
     run_p.add_argument("--tasks-dir", type=Path, default=None)

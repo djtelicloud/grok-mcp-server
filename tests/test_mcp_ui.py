@@ -15,8 +15,8 @@ def test_mcp_ui_static_files_are_served(monkeypatch):
     assert index.status_code == 200
     assert "<title>UniGrok MCP v0.6.0 Control Center</title>" in index.text
     assert '<span class="version-badge">v0.6.0</span>' in index.text
-    assert 'script type="module" src="./app.js?v=grok-v0.6.0-r1"' in index.text
-    assert '<link rel="stylesheet" href="./styles.css?v=grok-v0.6.0-r1" />' in index.text
+    assert 'script type="module" src="./app.js?v=grok-v0.6.0-r2"' in index.text
+    assert '<link rel="stylesheet" href="./styles.css?v=grok-v0.6.0-r2" />' in index.text
     assert "Control Center" in index.text
     assert "Bearer token" not in index.text
     assert "Agent Playground" in index.text
@@ -312,6 +312,132 @@ def test_mcp_ui_large_okf_fallback():
     assert script.status_code == 200
     assert "Warning: Large file loaded" in script.text
     assert "50000" in script.text  # 50KB limit check
+
+
+def test_mcp_ui_markdown_renderer_is_shared_and_escape_first():
+    """One escape-first renderer (markdown.js) serves both the OKF viewer and
+    the agent transcript; the old fence-mangling inline renderer is gone."""
+    with TestClient(create_app(), base_url="http://localhost:8080") as client:
+        script = client.get("/ui/app.js")
+        renderer = client.get("/ui/markdown.js")
+    assert renderer.status_code == 200
+    assert "export function parseMarkdown" in renderer.text
+    assert "export function sanitizeHref" in renderer.text
+    # Escape-first stays the architecture: entities before any fixed tag.
+    assert '.replace(/&/g, "&amp;")' in renderer.text
+    # Fences are extracted before inline passes, so ``` blocks survive.
+    assert "FENCE_TOKEN" in renderer.text
+    # Links go through the allowlist (load-bearing regex + routing), not a
+    # comment: pin the allowlist source and that linkTag calls sanitizeHref.
+    assert "^(https?:" in renderer.text
+    assert "sanitizeHref(url)" in renderer.text
+    # C0 control chars are stripped from source so they cannot hide a scheme.
+    assert "\\u000E-\\u001F" in renderer.text
+    # app.js imports the shared renderer at the current cache-bust version and
+    # no longer defines its own.
+    assert 'from "./markdown.js?v=grok-v0.6.0-r2"' in script.text
+    assert "import { parseMarkdown" in script.text
+    assert "function parseMarkdown" not in script.text
+    assert "renderMarkdownInto" in script.text
+    # Agent bubbles render markdown; user/system/error bubbles stay plain.
+    assert 'sender === "agent"' in script.text
+
+
+def test_mcp_ui_error_surfaces_tell_the_truth():
+    """Failed tool runs must never show a green SUCCESS receipt, chat must not
+    swallow JSON-RPC errors, and a 503 /readyz names its failing checks."""
+    with TestClient(create_app(), base_url="http://localhost:8080") as client:
+        index = client.get("/ui/")
+        script = client.get("/ui/app.js")
+        styles = client.get("/ui/styles.css")
+    assert "TOOL ERROR" in script.text
+    assert "response.result?.isError" in script.text
+    assert "Gateway rejected the call" in script.text
+    assert 'addMessageBubble("error"' in script.text
+    assert ".msg-error" in styles.text
+    assert 'id="factFinishReason"' in index.text
+    assert 'id="factDegraded"' in index.text
+    assert "payload.finish_reason" in script.text
+    assert "failing checks" in script.text
+    assert "describeNotReady" in script.text
+    # The connection-lost wording is reserved for actual fetch failures.
+    assert "No connection detected" in script.text
+
+
+def test_mcp_ui_swarm_messages_tell_the_truth():
+    """The paste-swarm flow only claims success on completed runs, the privacy
+    line never denies an attempted upload, and valid Python without top-level
+    defs is not misreported as a parse error."""
+    with TestClient(create_app(), base_url="http://localhost:8080") as client:
+        script = client.get("/ui/swarm.js")
+    assert "source was not uploaded" in script.text  # still true browser-only
+    assert "the paste was submitted to the local gateway" in script.text
+    assert 'final.status === "completed"' in script.text
+    assert "Swarm ended with status" in script.text
+    assert "Run did not complete" in script.text
+    assert "!result.parse_ok && result.parse_error" in script.text
+    assert "approximate browser scanner" in script.text
+
+
+def test_mcp_ui_github_review_widget_is_marked_and_honest():
+    """The PR-review widget names itself as the live MCP resource template and
+    surfaces the server's degraded flag instead of always looking green."""
+    with TestClient(create_app(), base_url="http://localhost:8080") as client:
+        page = client.get("/ui/github-review-v1.html")
+    assert page.status_code == 200
+    assert "ui://widget/unigrok-github-review-v1.html" in page.text
+    assert "<title>UniGrok PR Review Widget</title>" in page.text
+    assert "degraded route" in page.text
+    assert "data.degraded" in page.text
+
+
+def test_mcp_ui_surfaces_receipts_and_session_honesty():
+    """Stage 3/5: the facts pane holds the agent receipt only (background calls
+    don't clobber it), citations and mode provenance are surfaced, workspace
+    context is exercisable, and the session id is per-browser."""
+    with TestClient(create_app(), base_url="http://localhost:8080") as client:
+        index = client.get("/ui/")
+        script = client.get("/ui/app.js")
+    # Only the agent call writes the routing receipt.
+    assert 'if (toolName === "agent")' in script.text
+    assert "renderCitations" in script.text
+    # Mode provenance rows.
+    for fid in ("factRequestedMode", "factModeSource", "factDialedPort"):
+        assert f'id="{fid}"' in index.text
+    assert "payload.requested_mode" in script.text
+    # Workspace context is wired to the agent tool arguments.
+    assert 'id="workspaceContextInput"' in index.text
+    assert "args.workspace_context" in script.text
+    assert "args.workspace_label" in script.text
+    # Per-browser session id, and the old shared default is gone.
+    assert "console-session-1" not in index.text
+    assert "genSessionId" in script.text
+    # Clear History is honest that the server session persists.
+    assert "clearConversation" in script.text
+    assert "server still holds the prior session" in script.text
+
+
+def test_mcp_ui_accessibility_and_dead_code_cleanup():
+    """Stage 6: live regions on the transcript and offline banner, keyboard-
+    operable OKF list, password token field, and removed dead code."""
+    with TestClient(create_app(), base_url="http://localhost:8080") as client:
+        index = client.get("/ui/")
+        script = client.get("/ui/app.js")
+        styles = client.get("/ui/styles.css")
+    assert 'id="conversation" class="transcript" role="log" aria-live="polite"' in index.text
+    assert 'id="dockerOfflineAlert" class="alert-banner hidden" role="alert"' in index.text
+    assert 'id="wizardTokenInput" type="password"' in index.text
+    # OKF list items are buttons, not click-only divs.
+    assert 'document.createElement("button")' in script.text
+    # Dead code is gone.
+    assert "updateActiveContext" not in script.text
+    assert "STORAGE_KEY" not in script.text
+    assert "legacyModeToggle" not in script.text
+    assert ".inspector-rail-btn" not in styles.text
+    assert ".toggle-label-legacy" not in styles.text
+    # The formerly-dead Prober Bridge button is now wired.
+    assert 'id="runWebMcpBridgeBtn"' in index.text
+    assert '$("runWebMcpBridgeBtn")?.addEventListener' in script.text
 
 
 def test_mcp_ui_security_csp_headers():

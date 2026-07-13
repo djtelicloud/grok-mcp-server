@@ -7,8 +7,8 @@ from typing import Any, Dict, Optional
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import ToolAnnotations
 
+from ..identity import caller_from_mcp_context
 from ..jobs import get_job_manager
-from ..utils import caller_from_mcp_context
 
 logger = logging.getLogger("GrokMCP")
 

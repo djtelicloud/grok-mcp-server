@@ -14,22 +14,29 @@ from src.http_server import (
     CallerContextMiddleware,
     _aggregate_telemetry_callers,
     _derive_http_caller,
+    _derive_http_principal,
     create_app,
 )
 from src.jobs import JobManager
+from src.identity import (
+    caller_from_mcp_context,
+    get_active_caller,
+    get_active_principal,
+    normalize_caller,
+    normalize_principal,
+    reset_active_caller,
+    reset_active_principal,
+    set_active_caller,
+    set_active_principal,
+    telemetry_row_caller,
+)
 from src.utils import (
     CallerBudgetExceeded,
     GrokSessionStore,
     MetaLayer,
-    caller_from_mcp_context,
     enforce_caller_budget,
-    get_active_caller,
-    normalize_caller,
     orchestrate,
-    reset_active_caller,
     run_agent_turn,
-    set_active_caller,
-    telemetry_row_caller,
 )
 
 
@@ -87,8 +94,23 @@ class TestCallerFromContext:
         assert normalize_caller(None) is None
         assert normalize_caller("   ") is None
 
+    def test_long_principals_keep_collision_resistant_suffixes(self):
+        left = "subject:" + ("x" * 300) + "left"
+        right = "subject:" + ("x" * 300) + "right"
+        assert normalize_principal(left) != normalize_principal(right)
+        assert len(normalize_principal(left)) == 240
+
 
 class TestActiveCallerContext:
+    def test_utils_compatibility_exports_share_identity_contextvars(self):
+        import src.identity as identity_module
+        import src.utils as utils_module
+
+        assert utils_module._ACTIVE_CALLER is identity_module._ACTIVE_CALLER
+        assert utils_module._ACTIVE_PRINCIPAL is identity_module._ACTIVE_PRINCIPAL
+        assert utils_module._ACTIVE_CLIENT_ID is identity_module._ACTIVE_CLIENT_ID
+        assert utils_module._ACTIVE_SESSION_ID is identity_module._ACTIVE_SESSION_ID
+
     def test_set_get_reset_roundtrip(self):
         token = set_active_caller("claude-code")
         try:
@@ -96,6 +118,14 @@ class TestActiveCallerContext:
         finally:
             reset_active_caller(token)
         assert get_active_caller() is None
+
+    def test_principal_set_get_reset_roundtrip(self):
+        token = set_active_principal("oauth:github:42")
+        try:
+            assert get_active_principal() == "oauth:github:42"
+        finally:
+            reset_active_principal(token)
+        assert get_active_principal() is None
 
 
 class TestAgentToolCapturesCaller:
@@ -178,6 +208,23 @@ class TestRunAgentTurnCaller:
             assert "caller" not in (assistant.get("metadata") or {})
         finally:
             await store.delete_session("ma-anon-sess")
+
+    @pytest.mark.asyncio
+    async def test_http_principal_attribution_overrides_explicit_mcp_label(self, monkeypatch):
+        """FastMCP clientInfo is caller-controlled and cannot replace the
+        identity bound by authenticated HTTP middleware."""
+        mock_orchestrate = AsyncMock(return_value=MetaLayer(generation="ok"))
+        monkeypatch.setattr("src.utils.orchestrate", mock_orchestrate)
+
+        caller_token = set_active_caller("http:key-1|vscode")
+        principal_token = set_active_principal("http:key-1")
+        try:
+            await run_agent_turn(prompt="hi", caller="spoofed-client-info")
+        finally:
+            reset_active_principal(principal_token)
+            reset_active_caller(caller_token)
+
+        assert mock_orchestrate.call_args.kwargs["caller"] == "http:key-1|vscode"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -334,10 +381,26 @@ class TestCallerCostToday:
         await cstore.save_telemetry("c", "API", 1, 0.1, 0.5, caller="claude-code")
         await cstore.save_telemetry("d", "API", 1, 0.1, 0.9)  # unattributed
 
-        assert await cstore.get_caller_cost_today("codex") == pytest.approx(0.05)
-        assert await cstore.get_caller_cost_today("claude") == pytest.approx(0.5)
+        assert await cstore.get_caller_cost_today("codex-cli") == pytest.approx(0.05)
+        assert await cstore.get_caller_cost_today("claude-code") == pytest.approx(0.5)
+        assert await cstore.get_caller_cost_today("codex") == 0.0
         assert await cstore.get_caller_cost_today("nobody") == 0.0
         assert await cstore.get_caller_cost_today("") == 0.0
+
+    @pytest.mark.asyncio
+    async def test_principal_cost_includes_its_labels_but_not_label_injection(self, cstore):
+        await cstore.save_telemetry(
+            "a", "API", 1, 0.1, 0.02, caller="http:key-1|vscode"
+        )
+        await cstore.save_telemetry(
+            "b", "API", 1, 0.1, 0.03, caller="http:key-1|http%3Akey-2"
+        )
+        await cstore.save_telemetry(
+            "c", "API", 1, 0.1, 0.50, caller="http:key-2|vscode"
+        )
+
+        assert await cstore.get_caller_cost_today("http:key-1") == pytest.approx(0.05)
+        assert await cstore.get_caller_cost_today("http:key-2") == pytest.approx(0.50)
 
     @pytest.mark.asyncio
     async def test_excludes_rows_from_earlier_days(self, cstore):
@@ -349,7 +412,7 @@ class TestCallerCostToday:
             )
             await cstore._conn.commit()
 
-        assert await cstore.get_caller_cost_today("codex") == 0.0
+        assert await cstore.get_caller_cost_today("codex-cli") == 0.0
 
 
 class TestBudgetEnforcement:
@@ -367,7 +430,7 @@ class TestBudgetEnforcement:
 
     @pytest.mark.asyncio
     async def test_under_at_over_boundary(self, cstore, monkeypatch):
-        monkeypatch.setenv("UNIGROK_CALLER_BUDGETS", json.dumps({"codex": 0.10}))
+        monkeypatch.setenv("UNIGROK_CALLER_BUDGETS", json.dumps({"codex-cli": 0.10}))
         import src.utils as utils_module
 
         # Under budget: passes.
@@ -392,18 +455,16 @@ class TestBudgetEnforcement:
         await enforce_caller_budget(cstore, "claude-code")  # no raise
 
     @pytest.mark.asyncio
-    async def test_longest_substring_entry_wins(self, cstore, monkeypatch):
-        """A specific entry ('codex-cli') beats a broad one ('codex')."""
+    async def test_budget_entries_match_exact_principals(self, cstore, monkeypatch):
         monkeypatch.setenv(
             "UNIGROK_CALLER_BUDGETS", json.dumps({"codex": 0.0, "codex-cli": 5.0})
         )
-        # Broad 'codex' entry alone would block ($0 budget); the more
-        # specific 'codex-cli' pot ($5) governs and lets this through.
+        # The broad partial key cannot govern a different principal.
         await enforce_caller_budget(cstore, "codex-cli")
 
     @pytest.mark.asyncio
     async def test_spend_is_cached_per_entry(self, monkeypatch):
-        monkeypatch.setenv("UNIGROK_CALLER_BUDGETS", json.dumps({"codex": 1.0}))
+        monkeypatch.setenv("UNIGROK_CALLER_BUDGETS", json.dumps({"codex-cli": 1.0}))
         import src.utils as utils_module
 
         counting_store = MagicMock()
@@ -414,14 +475,14 @@ class TestBudgetEnforcement:
         assert counting_store.get_caller_cost_today.await_count == 1
 
         # Expire the cache entry: the next check re-queries.
-        spent, fetched_at = utils_module._CALLER_SPEND_CACHE["codex"]
-        utils_module._CALLER_SPEND_CACHE["codex"] = (spent, fetched_at - 120.0)
+        spent, fetched_at = utils_module._CALLER_SPEND_CACHE["codex-cli"]
+        utils_module._CALLER_SPEND_CACHE["codex-cli"] = (spent, fetched_at - 120.0)
         await enforce_caller_budget(counting_store, "codex-cli")
         assert counting_store.get_caller_cost_today.await_count == 2
 
     @pytest.mark.asyncio
     async def test_store_failure_degrades_open(self, monkeypatch):
-        monkeypatch.setenv("UNIGROK_CALLER_BUDGETS", json.dumps({"codex": 1.0}))
+        monkeypatch.setenv("UNIGROK_CALLER_BUDGETS", json.dumps({"codex-cli": 1.0}))
         broken_store = MagicMock()
         broken_store.get_caller_cost_today = AsyncMock(side_effect=RuntimeError("db gone"))
 
@@ -436,7 +497,7 @@ class TestBudgetEnforcement:
     async def test_orchestrate_blocks_before_any_model_work(self, cstore, monkeypatch):
         """The gate runs at the top of orchestrate: an exhausted caller gets
         the catchable CallerBudgetExceeded and no client is ever touched."""
-        monkeypatch.setenv("UNIGROK_CALLER_BUDGETS", json.dumps({"codex": 0.05}))
+        monkeypatch.setenv("UNIGROK_CALLER_BUDGETS", json.dumps({"codex-cli": 0.05}))
         await cstore.save_telemetry("a", "API", 1, 0.1, 0.06, caller="codex-cli")
 
         mock_client = MagicMock()
@@ -447,6 +508,30 @@ class TestBudgetEnforcement:
         mock_client.chat.create.assert_not_called()
         # Only the seeded row exists — the blocked turn recorded nothing.
         assert len(await cstore.get_telemetry_stats()) == 1
+
+    @pytest.mark.asyncio
+    async def test_http_principal_owns_budget_not_client_label(self, cstore, monkeypatch):
+        """A caller-controlled IDE label cannot select or evade an HTTP
+        principal's budget pot."""
+        monkeypatch.setenv(
+            "UNIGROK_CALLER_BUDGETS", json.dumps({"http:key-1": 0.0, "victim-ide": 5.0})
+        )
+        import src.utils as utils_module
+
+        utils_module._CALLER_SPEND_CACHE.clear()
+        principal_token = set_active_principal("http:key-1")
+        try:
+            with pytest.raises(
+                CallerBudgetExceeded,
+                match=r"daily budget exhausted for http:key-1",
+            ):
+                await orchestrate(
+                    "hello there",
+                    store=cstore,
+                    caller="victim-ide",
+                )
+        finally:
+            reset_active_principal(principal_token)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -459,7 +544,7 @@ class TestHttpCallerDerivation:
             "type": "http",
             "headers": [(b"x-caller", b"codex-cli"), (b"authorization", b"Bearer k")],
         }
-        assert _derive_http_caller(scope) == "codex-cli"
+        assert _derive_http_caller(scope) == "http:anon|codex-cli"
 
     def test_auth_key_alias_when_no_header(self, monkeypatch):
         monkeypatch.setenv("UNIGROK_API_KEYS", "sekret-key")
@@ -475,6 +560,44 @@ class TestHttpCallerDerivation:
         monkeypatch.delenv("UNIGROK_API_KEYS", raising=False)
         assert _derive_http_caller({"type": "http", "headers": []}) == "http:anon"
 
+    def test_principal_ignores_self_asserted_identity_headers(self, monkeypatch):
+        monkeypatch.setenv("UNIGROK_API_KEYS", "first-key,second-key")
+        scope = {
+            "type": "http",
+            "headers": [
+                (b"authorization", b"Bearer second-key"),
+                (b"x-client-id", b"victim-ide"),
+                (b"x-caller", b"victim-user"),
+            ],
+        }
+        assert _derive_http_principal(scope) == "http:key-2"
+        assert _derive_http_caller(scope) == "http:key-2|victim-ide"
+
+    def test_oauth_subject_is_principal_even_with_spoofed_headers(self):
+        scope = {
+            "type": "http",
+            "headers": [
+                (b"x-client-id", b"victim-ide"),
+                (b"x-caller", b"victim-user"),
+            ],
+            "unigrok.oauth": {"sub": "github:42"},
+        }
+        assert _derive_http_principal(scope) == "oauth:github:42"
+        assert _derive_http_caller(scope) == "oauth:github:42|victim-ide"
+
+    def test_client_label_cannot_poison_another_principals_budget_key(self, monkeypatch):
+        monkeypatch.setenv("UNIGROK_API_KEYS", "first-key")
+        scope = {
+            "type": "http",
+            "headers": [
+                (b"authorization", b"Bearer first-key"),
+                (b"x-client-id", b"http:key-2"),
+            ],
+        }
+        caller = _derive_http_caller(scope)
+        assert caller == "http:key-1|http%3Akey-2"
+        assert "http:key-2" not in caller
+
     @pytest.mark.asyncio
     async def test_middleware_binds_and_resets_for_any_path(self):
         """The caller context middleware covers every HTTP path — including
@@ -483,13 +606,16 @@ class TestHttpCallerDerivation:
 
         async def inner_app(scope, receive, send):
             seen["caller"] = get_active_caller()
+            seen["principal"] = get_active_principal()
 
         middleware = CallerContextMiddleware(inner_app)
         scope = {"type": "http", "path": "/mcp", "headers": [(b"x-caller", b"gemini-agent")]}
         await middleware(scope, None, None)
 
-        assert seen["caller"] == "gemini-agent"
+        assert seen["caller"] == "http:anon|gemini-agent"
+        assert seen["principal"] == "http:anon"
         assert get_active_caller() is None
+        assert get_active_principal() is None
 
     def test_caller_middleware_is_pure_asgi(self):
         """Same tombstone as the other gateway middleware: BaseHTTPMiddleware
@@ -526,7 +652,7 @@ class TestGatewayCallerPropagation:
         monkeypatch.delenv("UNIGROK_API_KEYS", raising=False)
 
         caller = self._run_request(monkeypatch, {"X-Caller": "codex-cli"})
-        assert caller == "codex-cli"
+        assert caller == "http:anon|codex-cli"
 
     def test_auth_key_alias_propagates_without_header(self, monkeypatch):
         monkeypatch.delenv("UNIGROK_RUNTIME", raising=False)
@@ -580,7 +706,7 @@ class TestGatewayCallerPropagation:
             )
 
         assert res.status_code == 200
-        assert seen["caller"] == "gemini-agent"
+        assert seen["caller"] == "http:anon|gemini-agent"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -789,7 +915,7 @@ class TestClientIdDerivation:
                 (b"authorization", b"Bearer sekret-key"),
             ],
         }
-        assert _derive_http_caller(scope) == "vscode"
+        assert _derive_http_caller(scope) == "http:key-1|vscode"
 
     def test_scoped_session_prefixes_only_with_client_bound(self):
         import src.http_server as http_module
@@ -806,6 +932,21 @@ class TestClientIdDerivation:
         finally:
             http_module._ACTIVE_SESSION_ID.reset(session_token)
             http_module._ACTIVE_CLIENT_ID.reset(token)
+
+    def test_scoped_session_binds_principal_above_client_label(self):
+        import src.http_server as http_module
+
+        principal_token = set_active_principal("oauth:github:42")
+        client_token = http_module._ACTIVE_CLIENT_ID.set("vscode")
+        try:
+            assert http_module._scoped_session("main") == "oauth%3Agithub%3A42:vscode:main"
+            assert (
+                http_module._scoped_session("oauth%3Agithub%3A42:vscode:main")
+                == "oauth%3Agithub%3A42:vscode:main"
+            )
+        finally:
+            http_module._ACTIVE_CLIENT_ID.reset(client_token)
+            reset_active_principal(principal_token)
 
     def test_scoped_session_untouched_without_client(self):
         import src.http_server as http_module
@@ -843,16 +984,37 @@ class TestClientIdSessionScoping:
     def test_client_id_scopes_openai_facade_session(self, monkeypatch):
         monkeypatch.delenv("UNIGROK_RUNTIME", raising=False)
         monkeypatch.delenv("UNIGROK_API_KEYS", raising=False)
-        assert self._run_request(monkeypatch, {"X-Client-ID": "vscode"}) == "vscode:main"
+        assert (
+            self._run_request(monkeypatch, {"X-Client-ID": "vscode"})
+            == "http%3Aanon:vscode:main"
+        )
 
     def test_absent_header_keeps_shared_namespace(self, monkeypatch):
         monkeypatch.delenv("UNIGROK_RUNTIME", raising=False)
         monkeypatch.delenv("UNIGROK_API_KEYS", raising=False)
-        assert self._run_request(monkeypatch, {}) == "main"
+        assert self._run_request(monkeypatch, {}) == "http%3Aanon:main"
 
     def test_x_caller_alone_does_not_scope_sessions(self, monkeypatch):
         """X-Caller attributes telemetry but must not fragment the session
         namespace — only the explicit X-Client-ID does that."""
         monkeypatch.delenv("UNIGROK_RUNTIME", raising=False)
         monkeypatch.delenv("UNIGROK_API_KEYS", raising=False)
-        assert self._run_request(monkeypatch, {"X-Caller": "codex-cli"}) == "main"
+        assert (
+            self._run_request(monkeypatch, {"X-Caller": "codex-cli"})
+            == "http%3Aanon:main"
+        )
+
+    def test_static_keys_isolate_same_client_and_session(self, monkeypatch):
+        monkeypatch.delenv("UNIGROK_RUNTIME", raising=False)
+        monkeypatch.setenv("UNIGROK_API_KEYS", "first-key,second-key")
+        first = self._run_request(
+            monkeypatch,
+            {"Authorization": "Bearer first-key", "X-Client-ID": "vscode"},
+        )
+        second = self._run_request(
+            monkeypatch,
+            {"Authorization": "Bearer second-key", "X-Client-ID": "vscode"},
+        )
+        assert first == "http%3Akey-1:vscode:main"
+        assert second == "http%3Akey-2:vscode:main"
+        assert first != second

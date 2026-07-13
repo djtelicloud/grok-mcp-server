@@ -1,8 +1,12 @@
 <!doctype html>
+<!-- Live MCP widget template: served as the ui://widget/unigrok-github-review-v1.html
+     resource (registered in src/http_server.py) and also reachable statically at
+     /ui/github-review-v1.html. Do not delete as a stale v1 artifact. -->
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>UniGrok PR Review Widget</title>
   <style>
     :root { color-scheme: light dark; font-family: ui-sans-serif, system-ui, sans-serif; }
     body { margin: 0; padding: 14px; background: transparent; color: CanvasText; }
@@ -13,6 +17,7 @@
     .badge { border-radius: 999px; padding: 4px 8px; background: color-mix(in srgb, #16f0ae 14%, transparent); color: #0fa878; font-size: 11px; white-space: nowrap; }
     .meta { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0; }
     .chip { padding: 4px 7px; border-radius: 7px; background: color-mix(in srgb, CanvasText 7%, transparent); font: 11px ui-monospace, monospace; }
+    .chip.warn { background: color-mix(in srgb, #ffb02e 24%, transparent); color: #a96a00; font-weight: 600; }
     pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.55 ui-sans-serif, system-ui, sans-serif; }
     .loading { opacity: .65; }
   </style>
@@ -39,6 +44,9 @@
       meta.replaceChildren();
       for (const value of [`model: ${data.model}`, `plane: ${data.plane}`, `route: ${data.route}`, `cost: $${Number(data.cost_usd || 0).toFixed(5)}`]) {
         const chip = document.createElement("span"); chip.className = "chip"; chip.textContent = value; meta.appendChild(chip);
+      }
+      if (data.degraded) {
+        const warn = document.createElement("span"); warn.className = "chip warn"; warn.textContent = "degraded route"; meta.appendChild(warn);
       }
       review.textContent = data.review;
       review.classList.remove("loading");

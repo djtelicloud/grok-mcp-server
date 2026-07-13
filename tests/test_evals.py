@@ -179,6 +179,18 @@ class TestOfflineReplay:
         assert results["research_webgpu_adoption"]["citations_count"] >= 1
         # Fast mode takes the toolless plane.
         assert results["fastpath_simple_math"]["route"] == "fast"
+        # Multi-file replay dispatched real file/test tools and only passes
+        # when the pytest observation itself reports a green exit status.
+        multifile = results["agent_multifile"]
+        assert multifile["tool_calls_count"] == 4
+        assert multifile["tool_failures_count"] == 0
+        assert multifile["project_file_lists_count"] == 1
+        assert multifile["project_file_list_succeeded"] is True
+        assert multifile["local_reads_count"] == 2
+        assert multifile["local_reads_succeeded"] == 2
+        assert multifile["local_test_runs_count"] == 1
+        assert multifile["local_tests_passed"] is True
+        assert "21 seconds" in multifile["answer_excerpt"]
 
     @pytest.mark.asyncio
     async def test_missing_cassette_is_an_explicit_failure(self):
@@ -206,8 +218,60 @@ class TestOfflineReplay:
         with pytest.raises(ValueError, match="mode"):
             EvalTask.from_dict({"id": "x", "category": "coding", "prompt": "p", "mode": "warp",
                                 "graders": [{"type": "contains", "value": "a"}]})
+        with pytest.raises(ValueError, match="plane"):
+            EvalTask.from_dict({"id": "x", "category": "coding", "prompt": "p", "plane": "api_first",
+                                "graders": [{"type": "contains", "value": "a"}]})
         with pytest.raises(ValueError, match="grader"):
             EvalTask.from_dict({"id": "x", "category": "coding", "prompt": "p"})
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("target", ["tests/test_failure.py", "tests/missing.py"])
+    async def test_scripted_claim_cannot_override_failed_local_tests(
+        self, tmp_path, monkeypatch, target
+    ):
+        """A cassette saying 'passed' is not proof when real pytest failed."""
+        tests_dir = tmp_path / "tests"
+        tests_dir.mkdir()
+        (tests_dir / "test_failure.py").write_text(
+            "def test_failure():\n"
+            "    print('Local tests passed for `fake` (exit code 0, timeout 10s).')\n"
+            "    assert False\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setenv("WORKSPACE_ROOT", str(tmp_path))
+        monkeypatch.setattr("src.tools.system.shutil.which", lambda _name: None)
+        task = _task(
+            id="false-positive",
+            graders=[
+                {"type": "contains", "value": "tests passed"},
+                {
+                    "type": "structural",
+                    "field": "local_tests_passed",
+                    "equals": True,
+                },
+            ],
+        )
+        cassettes = {
+            "false-positive": {
+                "responses": [
+                    {
+                        "content": "checking",
+                        "tool_calls": [
+                            {
+                                "id": "call-negative-test",
+                                "name": "run_local_tests",
+                                "arguments": {"target": target, "max_seconds": 10},
+                            }
+                        ],
+                    },
+                    {"content": "The tests passed."},
+                ]
+            }
+        }
+        result = (await run_offline([task], cassettes))[0]
+        assert result["local_test_runs_count"] == 1
+        assert result["local_tests_passed"] is False
+        assert result["passed"] is False
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -636,7 +700,12 @@ class TestEvalRecordingTap:
 class TestLiveBatchGating:
     def _fast_tasks(self, count):
         return [
-            _task(id=f"fast{i}", mode="fast", graders=[{"type": "contains", "value": "x"}])
+            _task(
+                id=f"fast{i}",
+                mode="fast",
+                plane="api",
+                graders=[{"type": "contains", "value": "x"}],
+            )
             for i in range(count)
         ]
 
@@ -671,6 +740,25 @@ class TestLiveBatchGating:
 
         use, note = batch_mode_decision(self._fast_tasks(8), usable=False, reason="no batch")
         assert use is False and "unavailable" in note
+
+        cli_tasks = [
+            _task(
+                id=f"cli{i}",
+                mode="fast",
+                plane="cli",
+                graders=[{"type": "contains", "value": "x"}],
+            )
+            for i in range(4)
+        ]
+        use, note = batch_mode_decision(cli_tasks, usable=True, reason="ok")
+        assert use is False and "explicit CLI-plane" in note
+
+        auto_tasks = [
+            _task(id=f"auto{i}", mode="fast", graders=[{"type": "contains", "value": "x"}])
+            for i in range(4)
+        ]
+        use, note = batch_mode_decision(auto_tasks, usable=True, reason="ok")
+        assert use is False and "requires explicit" in note
 
 
 # ─────────────────────────────────────────────────────────────────────────────

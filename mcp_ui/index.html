@@ -5,11 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>UniGrok MCP v0.6.0 Control Center</title>
     <meta name="unigrok-ui-regions" content="navigation,workbench,rpc-inspector,rpc-logs,result-facts" />
-  <link rel="stylesheet" href="./styles.css?v=grok-v0.6.0-r1" />
+  <link rel="stylesheet" href="./styles.css?v=grok-v0.6.0-r2" />
   </head>
   <body>
     <main class="app-shell">
-      <div id="dockerOfflineAlert" class="alert-banner hidden">
+      <div id="dockerOfflineAlert" class="alert-banner hidden" role="alert" aria-live="assertive">
         <span id="offlineAlertMessage">⚠️ Local UniGrok Gateway Offline! No connection detected.</span>
         <div class="alert-actions" style="display: inline-flex; gap: 8px; align-items: center; flex-wrap: wrap;">
           <button id="dockerRestartBtn" type="button" class="small-btn-glow">Restart Container</button>
@@ -117,7 +117,7 @@
                 <h4>🔑 UniGrok Gateway Access</h4>
                 <p class="wizard-desc">This is the optional UniGrok client token, not your xAI API key. Never paste XAI_API_KEY into this page.</p>
                 <div class="wizard-inputs">
-                  <input id="wizardTokenInput" type="text" placeholder="Client token..." class="wizard-input" aria-label="Client token" />
+                  <input id="wizardTokenInput" type="password" autocomplete="off" spellcheck="false" placeholder="Client token..." class="wizard-input" aria-label="Client token" />
                   <button id="saveWizardTokenBtn" type="button" class="small-btn-glow">Save Token</button>
                 </div>
               </div>
@@ -189,7 +189,7 @@
                 <summary>Advanced RPC settings</summary>
                 <div class="advanced-grid">
                   <label>Session ID
-                    <input id="sessionInput" type="text" value="console-session-1" />
+                    <input id="sessionInput" type="text" placeholder="auto-generated per browser session" />
                   </label>
                   <label>Client ID
                     <input id="clientIdInput" type="text" value="uni-grok-console" />
@@ -206,6 +206,12 @@
                   <label>Injected System Rules
                     <textarea id="systemPromptInput" rows="3" placeholder="Additional system prompt instructions..."></textarea>
                   </label>
+                  <label>Workspace Context
+                    <textarea id="workspaceContextInput" rows="3" placeholder="Optional project material to ground this run (secrets are redacted server-side; over the char limit is rejected)."></textarea>
+                  </label>
+                  <label>Workspace Label
+                    <input id="workspaceLabelInput" type="text" placeholder="e.g. uni-grok-mcp @ HEAD" />
+                  </label>
                 </div>
               </details>
               <button id="copyConsoleCallBtn" type="button" class="small-btn-glow">Copy tool call</button>
@@ -215,7 +221,7 @@
             <!-- Scrollable Conversation Log -->
             <div class="conversation-wrapper">
               <div class="section-title">Playground session</div>
-              <div id="conversation" class="transcript"></div>
+              <div id="conversation" class="transcript" role="log" aria-live="polite" aria-label="Playground conversation"></div>
             </div>
           </div>
 
@@ -549,6 +555,8 @@
             <dl id="factsGrid" class="facts-grid">
               <dt>Method</dt><dd id="factMethod">-</dd>
               <dt>Status</dt><dd id="factStatus">-</dd>
+              <dt>Finish Reason</dt><dd id="factFinishReason">-</dd>
+              <dt>Degraded</dt><dd id="factDegraded">-</dd>
               <dt>Tokens</dt><dd id="factTokens">-</dd>
               <dt>Cost USD</dt><dd id="factCost">-</dd>
               <dt>Latency</dt><dd id="factLatency">-</dd>
@@ -558,6 +566,9 @@
               <dt>Requested Plane</dt><dd id="factRequestedPlane">-</dd>
               <dt>Model</dt><dd id="factModel">-</dd>
               <dt>Selected Because</dt><dd id="factSelection">-</dd>
+              <dt>Requested Mode</dt><dd id="factRequestedMode">-</dd>
+              <dt>Mode Source</dt><dd id="factModeSource">-</dd>
+              <dt>Dialed Port</dt><dd id="factDialedPort">-</dd>
             </dl>
           </div>
           </div>
@@ -565,6 +576,6 @@
 
       </section>
     </main>
-  <script type="module" src="./app.js?v=grok-v0.6.0-r1"></script>
+  <script type="module" src="./app.js?v=grok-v0.6.0-r2"></script>
   </body>
 </html>

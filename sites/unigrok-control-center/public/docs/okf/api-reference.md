@@ -307,6 +307,100 @@ Use this when ChatGPT or a GitHub workflow has already fetched a PR's
 metadata and needs a security-conscious Grok review for Codex to triage.
 The diff and comments are untrusted evidence and never grant tool authority.
 
+## identity.py {#identity}
+
+### Function: `scoped_session` {#identity-scoped_session}
+
+```python
+def scoped_session(session: Optional[str]) -> Optional[str]
+```
+
+**Keywords:** scoped, session
+
+Namespace a session by authenticated principal and client label.
+
+HTTP middleware always binds a principal (OAuth subject, static-key alias,
+or the loopback anonymous principal). ``X-Client-ID`` remains an untrusted
+subordinate label that separates one principal's IDEs; it never provides
+the security boundary by itself. Non-HTTP callers preserve the historical
+unscoped behavior unless their transport binds one of these context vars.
+
+### Function: `normalize_caller` {#identity-normalize_caller}
+
+```python
+def normalize_caller(value: Any) -> Optional[str]
+```
+
+**Keywords:** normalize, caller
+
+Sanitize a caller label and bound it for database/metrics use.
+
+### Function: `normalize_principal` {#identity-normalize_principal}
+
+```python
+def normalize_principal(value: Any) -> Optional[str]
+```
+
+**Keywords:** normalize, principal
+
+Normalize a principal without collision-prone prefix truncation.
+
+### Function: `set_active_caller` {#identity-set_active_caller}
+
+```python
+def set_active_caller(caller: Optional[str])
+```
+
+**Keywords:** set, active, caller
+
+Bind the request's reporting identity and return its reset token.
+
+### Function: `set_active_principal` {#identity-set_active_principal}
+
+```python
+def set_active_principal(principal: Optional[str])
+```
+
+**Keywords:** set, active, principal
+
+Bind the authenticated security principal for the current request.
+
+### Function: `resolve_request_caller` {#identity-resolve_request_caller}
+
+```python
+def resolve_request_caller(caller: Optional[str]) -> Optional[str]
+```
+
+**Keywords:** resolve, request, caller
+
+Resolve attribution without letting HTTP metadata replace principal.
+
+FastMCP handlers often pass ``clientInfo.name`` explicitly. On HTTP that
+value remains only a client label; the middleware's combined
+``principal|label`` attribution wins so budget accounting stays anchored
+to the principal. Stdio has no HTTP principal and preserves explicit
+caller behavior.
+
+### Function: `caller_from_mcp_context` {#identity-caller_from_mcp_context}
+
+```python
+def caller_from_mcp_context(ctx: Any) -> Optional[str]
+```
+
+**Keywords:** caller, from, mcp, context
+
+Read the MCP ``clientInfo.name`` label from a FastMCP context.
+
+### Function: `telemetry_row_caller` {#identity-telemetry_row_caller}
+
+```python
+def telemetry_row_caller(row: Dict[str, Any]) -> Optional[str]
+```
+
+**Keywords:** telemetry, row, caller
+
+Return the normalized caller from a telemetry metadata envelope.
+
 ## intelligence_capsule.py {#intelligence_capsule}
 
 ### Class: `CapsuleValidationError` {#intelligence_capsule-capsulevalidationerror}
@@ -392,6 +486,139 @@ def validate_body(value: Mapping[str, Any]) -> None
 **Keywords:** validate, body
 
 Validate the normative IntelligenceCapsule v1 body schema.
+
+## intelligence_payloads.py {#intelligence_payloads}
+
+### Function: `validate_known_payload_profile` {#intelligence_payloads-validate_known_payload_profile}
+
+```python
+def validate_known_payload_profile(body: Mapping[str, Any]) -> bool
+```
+
+**Keywords:** validate, known, payload, profile
+
+Validate a registered payload profile and return whether it was known.
+
+The caller must first apply the generic IntelligenceCapsule v1 validator.
+Unknown versioned payloads remain structurally valid capsules, but this
+function returns ``False`` so a materializer can quarantine them instead
+of executing or promoting semantics it does not understand.
+
+### Function: `payload_profile_schema_sha256` {#intelligence_payloads-payload_profile_schema_sha256}
+
+```python
+def payload_profile_schema_sha256(schema: str) -> str
+```
+
+**Keywords:** payload, profile, schema, sha, 256
+
+Return the pinned raw-schema digest for a registered payload profile.
+
+### Function: `validate_optibench_evidence` {#intelligence_payloads-validate_optibench_evidence}
+
+```python
+def validate_optibench_evidence(body: Mapping[str, Any], evidence_blobs: Mapping[str, bytes]) -> dict[str, tuple[int, ...]]
+```
+
+**Keywords:** validate, optibench, evidence
+
+Verify OptiBench receipts and recompute every published objective.
+
+This consistency verifier does not prove that hardware executed; signed
+publication identifies the runner that made that claim.  It does prove
+that the closed population, passing gates, raw samples, aggregation, and
+canonical body metrics agree byte-for-byte.
+
+### Function: `validate_optibench_population` {#intelligence_payloads-validate_optibench_population}
+
+```python
+def validate_optibench_population(benchmark_bodies: Mapping[str, Mapping[str, Any]], evidence_blobs: Mapping[str, Mapping[str, bytes]]) -> dict[str, dict[str, Any]]
+```
+
+**Keywords:** validate, optibench, population
+
+Verify one complete cohort and recompute exact NSGA-II fields.
+
+Individual counter receipts can prove a candidate's objective tuple, but
+Pareto rank and crowding are properties of a closed population.  This gate
+therefore requires exactly one benchmark capsule for every candidate in
+the shared population, verifies every evidence set, and recomputes both
+rank and exact rational crowding before any result is promotable.
+
+### Function: `validate_gno_dispatch_evidence` {#intelligence_payloads-validate_gno_dispatch_evidence}
+
+```python
+def validate_gno_dispatch_evidence(body: Mapping[str, Any], evidence_blobs: Mapping[str, bytes]) -> None
+```
+
+**Keywords:** validate, gno, dispatch, evidence
+
+Verify the declared GNO input manifest and every referenced input blob.
+
+### Function: `validate_gno_result_graph` {#intelligence_payloads-validate_gno_result_graph}
+
+```python
+def validate_gno_result_graph(result: Mapping[str, Any], dispatch: Mapping[str, Any], *, result_evidence_blobs: Mapping[str, bytes], dispatch_evidence_blobs: Mapping[str, bytes]) -> None
+```
+
+**Keywords:** validate, gno, result, graph
+
+Bind a GNO result to the exact verified dispatch it answers.
+
+### Function: `validate_dpo_preference_graph` {#intelligence_payloads-validate_dpo_preference_graph}
+
+```python
+def validate_dpo_preference_graph(body: Mapping[str, Any], graph_bodies: Mapping[str, Mapping[str, Any]], evidence_blobs: Mapping[str, bytes], graph_evidence_blobs: Mapping[str, Mapping[str, bytes]]) -> None
+```
+
+**Keywords:** validate, dpo, preference, graph
+
+Resolve a closed OptiBench cohort and prove one direct preference.
+
+The supplied graph closure must contain the task, every candidate in the
+population, and exactly one verified OptiBench result for every candidate.
+Ranks are recomputed from the final metrics; stored online Swarm reward or
+provisional rank is never accepted as preference evidence.
+
+### Function: `build_preference_example` {#intelligence_payloads-build_preference_example}
+
+```python
+def build_preference_example(body: Mapping[str, Any], evidence_blobs: Mapping[str, bytes], *, graph_bodies: Mapping[str, Mapping[str, Any]], graph_evidence_blobs: Mapping[str, Mapping[str, bytes]]) -> dict[str, str]
+```
+
+**Keywords:** build, preference, example
+
+Build one verified preference example for nested inference context.
+
+Blob bytes are resolved by evidence name, checked against the capsule's
+byte count and SHA-256 descriptor, and decoded as strict UTF-8.  The
+returned record can be nested into an executor's JSON context.  This is
+in-context conditioning, not a parameter update.
+
+### Function: `render_preference_jsonl` {#intelligence_payloads-render_preference_jsonl}
+
+```python
+def render_preference_jsonl(body: Mapping[str, Any], evidence_blobs: Mapping[str, bytes], *, graph_bodies: Mapping[str, Mapping[str, Any]], graph_evidence_blobs: Mapping[str, Mapping[str, bytes]]) -> bytes
+```
+
+**Keywords:** render, preference, jsonl
+
+Render one verified preference example as canonical JSONL.
+
+### Function: `build_needle_tools_context` {#intelligence_payloads-build_needle_tools_context}
+
+```python
+def build_needle_tools_context(query: str, examples: Sequence[Mapping[str, str]], *, tokenizer: str, token_counter: Callable[[str], int], max_encoder_tokens: int=1024, max_examples: int=8) -> dict[str, Any]
+```
+
+**Keywords:** build, needle, tools, context
+
+Fit whole verified examples into Needle's actual tools-JSON channel.
+
+``token_counter`` must use the pinned Needle tokenizer.  Selection is
+deterministic: examples are deduplicated and sorted by source capsule,
+then whole records are admitted while they fit beside the query and the
+``<tools>`` separator.  Records are never string-sliced.
 
 ## jobs.py {#jobs}
 
@@ -1293,6 +1520,30 @@ def SwarmRunner.cancel(self, task_id: str) -> None
 **Keywords:** swarm, runner, cancel
 
 Cooperative cancel — the engine checks between candidates.
+
+### Method: `SwarmRunner.wait` {#swarm-runner-swarmrunner-wait}
+
+```python
+async def SwarmRunner.wait(self, task_id: str, timeout: float=30.0) -> bool
+```
+
+**Keywords:** swarm, runner, wait
+
+Wait for an in-process task and report whether it completed.
+
+Returning a boolean keeps timeout distinct from completion. A missing
+task is already outside this runner's active set; callers must still
+read the durable row for its terminal status.
+
+### Method: `SwarmRunner.shutdown` {#swarm-runner-swarmrunner-shutdown}
+
+```python
+async def SwarmRunner.shutdown(self) -> None
+```
+
+**Keywords:** swarm, runner, shutdown
+
+Hard-cancel and drain every in-process task during CLI shutdown.
 
 ## swarm/sandbox.py {#swarm-sandbox}
 
@@ -2500,69 +2751,6 @@ Communicate with a subprocess and always reap it on timeout.
 cancel the coroutine, and operators can configure a real deadline when
 their deployment requires one.
 
-### Function: `scoped_session` {#utils-scoped_session}
-
-```python
-def scoped_session(session: Optional[str]) -> Optional[str]
-```
-
-**Keywords:** scoped, session
-
-Prefix an explicit session name with the requesting client id so each
-IDE keeps its own history ('vscode:main'). No client id, or no session,
-leaves the name untouched.
-
-### Function: `normalize_caller` {#utils-normalize_caller}
-
-```python
-def normalize_caller(value: Any) -> Optional[str]
-```
-
-**Keywords:** normalize, caller
-
-Sanitize a caller identity: strip control characters, trim, and bound
-to 80 chars (it lands in db rows and metrics keys). None/blank -> None.
-
-### Function: `set_active_caller` {#utils-set_active_caller}
-
-```python
-def set_active_caller(caller: Optional[str])
-```
-
-**Keywords:** set, active, caller
-
-Bind the caller identity to the current async context (the HTTP
-gateway middleware does this per request). Returns the reset token.
-
-### Function: `caller_from_mcp_context` {#utils-caller_from_mcp_context}
-
-```python
-def caller_from_mcp_context(ctx: Any) -> Optional[str]
-```
-
-**Keywords:** caller, from, mcp, context
-
-Caller identity from an injected FastMCP Context.
-
-Introspected against the installed mcp 1.26: ctx.session (the
-ServerSession) exposes client_params — the InitializeRequestParams the
-client sent — whose clientInfo (mcp.types.Implementation) carries
-name/version. Degrades to None for clients that never completed
-initialize, contexts used outside a request (both raise), or SDK layouts
-without client_params.
-
-### Function: `telemetry_row_caller` {#utils-telemetry_row_caller}
-
-```python
-def telemetry_row_caller(row: Dict[str, Any]) -> Optional[str]
-```
-
-**Keywords:** telemetry, row, caller
-
-Caller name from a telemetry row's metadata column (raw JSON text from
-the db, or an already-parsed dict from mocks). None for pre-v8 rows,
-unattributed traffic, and malformed metadata.
-
 ### Class: `CallerBudgetExceeded` {#utils-callerbudgetexceeded}
 
 ```python
@@ -2879,17 +3067,17 @@ created_at scan + Python-side JSON match as get_caller_cost_today
 ### Method: `GrokSessionStore.get_caller_cost_today` {#utils-groksessionstore-get_caller_cost_today}
 
 ```python
-async def GrokSessionStore.get_caller_cost_today(self, caller_substring: str) -> float
+async def GrokSessionStore.get_caller_cost_today(self, caller_principal: str) -> float
 ```
 
 **Keywords:** grok, session, store, get, caller, cost, today
 
-Today's total telemetry cost attributed to callers matching the
-(case-insensitive) substring — the per-caller budget pot.
+Today's total telemetry cost attributed to one exact principal.
 
 One indexed read: idx_telemetry_created_at bounds the scan to today's
-rows; the caller match runs in Python over that bounded slice so the
-query never depends on the optional json1 extension.
+rows; telemetry may append an encoded client label after ``|``, but
+labels cannot match or poison another principal's pot. The match runs
+in Python so the query never depends on optional json1.
 
 ### Method: `GrokSessionStore.get_caller_stats_today` {#utils-groksessionstore-get_caller_stats_today}
 
@@ -3601,7 +3789,7 @@ An unavailable reviewer accepts the answer as-is.
 ### Function: `orchestrate` {#utils-orchestrate}
 
 ```python
-async def orchestrate(prompt: str, session: Optional[str]=None, mode: Literal['auto', 'reasoning', 'research', 'composer']='auto', thinking_mode: bool=False, store: Any=None, dynamic_sys_prompt: str='', requested_model: Optional[str]=None, mcp_instance: Any=None, enable_agentic: bool=True, context_id: Optional[str]=None, agent_count: Optional[int]=None, input_messages: Optional[List[Dict[str, Any]]]=None, on_event: Optional[Callable]=None, include: Optional[List[str]]=None, caller: Optional[str]=None, require_reasoning_level: Optional[Literal['low', 'medium', 'high']]=None, requested_plane: Literal['auto', 'cli', 'api']='auto', fallback_policy: Literal['same_plane', 'cross_plane']='cross_plane') -> MetaLayer
+async def orchestrate(prompt: str, session: Optional[str]=None, mode: Literal['auto', 'reasoning', 'research', 'composer']='auto', thinking_mode: bool=False, store: Any=None, dynamic_sys_prompt: str='', requested_model: Optional[str]=None, mcp_instance: Any=None, enable_agentic: bool=True, context_id: Optional[str]=None, agent_count: Optional[int]=None, input_messages: Optional[List[Dict[str, Any]]]=None, on_event: Optional[Callable]=None, include: Optional[List[str]]=None, caller: Optional[str]=None, require_reasoning_level: Optional[Literal['low', 'medium', 'high']]=None, requested_plane: Literal['auto', 'cli', 'api']='auto', fallback_policy: Literal['same_plane', 'cross_plane']='cross_plane', cli_no_plan: bool=False, cli_verbatim: bool=False, cli_allowed_tools: Optional[str]=None, cli_isolated: bool=False) -> MetaLayer
 ```
 
 **Keywords:** orchestrate
@@ -3623,7 +3811,7 @@ Route a prompt through the layered execution planes:
 ### Function: `run_agent_turn` {#utils-run_agent_turn}
 
 ```python
-async def run_agent_turn(prompt: Optional[str]=None, session: Optional[str]=None, system_prompt: Optional[str]=None, messages: Optional[List[Dict[str, Any]]]=None, model: Optional[str]=None, mode: str='auto', thinking_mode: bool=False, enable_agentic: bool=True, on_event: Optional[Callable]=None, agent_count: Optional[int]=None, include: Optional[List[str]]=None, caller: Optional[str]=None, require_reasoning_level: Optional[Literal['low', 'medium', 'high']]=None, plane: Literal['auto', 'cli', 'api']='auto', fallback_policy: Literal['same_plane', 'cross_plane']='cross_plane') -> MetaLayer
+async def run_agent_turn(prompt: Optional[str]=None, session: Optional[str]=None, system_prompt: Optional[str]=None, messages: Optional[List[Dict[str, Any]]]=None, model: Optional[str]=None, mode: str='auto', thinking_mode: bool=False, enable_agentic: bool=True, on_event: Optional[Callable]=None, agent_count: Optional[int]=None, include: Optional[List[str]]=None, caller: Optional[str]=None, require_reasoning_level: Optional[Literal['low', 'medium', 'high']]=None, plane: Literal['auto', 'cli', 'api']='auto', fallback_policy: Literal['same_plane', 'cross_plane']='cross_plane', cli_no_plan: bool=False, cli_verbatim: bool=False, cli_allowed_tools: Optional[str]=None, cli_isolated: bool=False) -> MetaLayer
 ```
 
 **Keywords:** run, agent, turn
@@ -3643,6 +3831,12 @@ caller is the calling agent's identity (MCP clientInfo name or the HTTP
 gateway's X-Caller/auth-key alias); None falls back to whatever the
 transport bound to the current async context, and it flows into telemetry
 attribution, per-caller budgets, and session message metadata.
+cli_no_plan/cli_verbatim are narrow headless controls for deterministic
+internal generation workflows; cli_allowed_tools can additionally set the
+CLI's exact built-in tool allowlist (an empty string disables all tools).
+cli_isolated additionally removes inherited project/task context and runs
+with an OAuth-only temporary home, empty workspace, disabled memory,
+subagents, web search, and interactive prompts. Public calls keep defaults.
 
 ## workspace_memory.py {#workspace_memory}
 

@@ -64,6 +64,12 @@ def _get_runner() -> SwarmRunner:
     return _RUNNER
 
 
+async def _shutdown_runner() -> None:
+    """Drain the process-local runner for one-shot contributor scripts."""
+    if _RUNNER is not None:
+        await _RUNNER.shutdown()
+
+
 def _gate() -> Optional[str]:
     """Return a refusal string when the swarm may not run here, else None."""
     if swarm_config.swarm_mode() == "off":
@@ -184,6 +190,80 @@ async def analyze_code_for_swarm(code: str, language: str = "python") -> str:
         return json.dumps(payload, separators=(",", ":"))
 
 
+async def _launch_code_swarm(
+    target_path: str,
+    focus_node: str,
+    test_target: str,
+    bench_command: str,
+    budget_usd: Optional[float] = None,
+    allow_unstable_bench: bool = False,
+    search_strategy: str = "baseline_batch",
+    primary_goal: str = "balanced",
+) -> tuple[Optional[str], str]:
+    """Internal typed launch seam shared by the MCP tool and live sweeps."""
+    refusal = _gate()
+    if refusal:
+        return None, refusal
+    try:
+        target = _resolve_target(target_path)
+        source = target.read_bytes()
+        if not parse_ok(source):
+            return None, f"target {target_path!r} does not parse."
+        extract_node_span(source, focus_node)  # validate focus now, not mid-run
+        _validate_test_target(test_target)
+        bench_args = _parse_bench_command(bench_command)
+        strategy = swarm_config.validate_search_strategy(search_strategy)
+        goal = swarm_config.validate_primary_goal(primary_goal)
+        analytics = await analyze_python_source_full(source.decode("utf-8"))
+        analytics["source"] = "workspace"
+    except (ValueError, FileNotFoundError) as exc:
+        return None, f"cannot start swarm: {exc}"
+
+    budget = swarm_config.swarm_default_budget_usd() if budget_usd is None else float(budget_usd)
+    budget = max(0.0, min(budget, swarm_config.swarm_max_budget_usd()))
+    # Deterministic per-task seed (Date/random are unavailable to workflow
+    # scripts, but here a stable hash of the task identity suffices and keeps
+    # the run reproducible from its receipt).
+    task_id = uuid.uuid4().hex
+    seed = int(hashlib.sha256(task_id.encode()).hexdigest()[:8], 16)
+    workspace = PathResolver.get_workspace_root()
+    target_rel = str(target.relative_to(workspace.resolve()))
+
+    await store.create_swarm_task(
+        task_id,
+        target_path=target_rel,
+        focus_node=focus_node,
+        base_file_hash=_file_hash(target),
+        test_target=test_target,
+        bench_command=bench_command,
+        budget_usd=budget,
+        seed=seed,
+        search_strategy=strategy,
+        primary_goal=goal,
+        input_kind="workspace",
+        analytics_json=json.dumps(analytics, separators=(",", ":")),
+    )
+    _get_runner().launch(task_id, {
+        "workspace_root": workspace,
+        "target_rel": target_rel,
+        "focus_node": focus_node,
+        "test_target": test_target,
+        "bench_args": bench_args,
+        "budget_usd": budget,
+        "seed": seed,
+        "allow_unstable_bench": bool(allow_unstable_bench),
+        "goal": f"optimize {focus_node} in {target_rel} for {goal}",
+        "search_strategy": strategy,
+        "primary_goal": goal,
+    })
+    return task_id, (
+        f"Swarm `{task_id}` started on `{focus_node}` in `{target_rel}` "
+        f"(mode={swarm_config.swarm_mode()}, strategy={strategy}, goal={goal}, "
+        f"budget=${budget:.2f}). "
+        f"Poll with get_swarm_status('{task_id}')."
+    )
+
+
 async def start_code_swarm(
     target_path: str,
     focus_node: str,
@@ -201,67 +281,17 @@ async def start_code_swarm(
     benchmark (the command must print a single SWARM_BENCH JSON line —
     scripts/swarm_bench.py is the easy path)."""
     async with GrokInvocationContext("utility", logger, append_signature=False) as ctx:
-        refusal = _gate()
-        if refusal:
-            return ctx.format_output(refusal)
-        try:
-            target = _resolve_target(target_path)
-            source = target.read_bytes()
-            if not parse_ok(source):
-                return ctx.format_output(f"target {target_path!r} does not parse.")
-            extract_node_span(source, focus_node)  # validate focus now, not mid-run
-            _validate_test_target(test_target)
-            bench_args = _parse_bench_command(bench_command)
-            strategy = swarm_config.validate_search_strategy(search_strategy)
-            goal = swarm_config.validate_primary_goal(primary_goal)
-            analytics = await analyze_python_source_full(source.decode("utf-8"))
-            analytics["source"] = "workspace"
-        except (ValueError, FileNotFoundError) as exc:
-            return ctx.format_output(f"cannot start swarm: {exc}")
-
-        budget = swarm_config.swarm_default_budget_usd() if budget_usd is None else float(budget_usd)
-        budget = max(0.0, min(budget, swarm_config.swarm_max_budget_usd()))
-        # Deterministic per-task seed (Date/random are unavailable to workflow
-        # scripts, but here a stable hash of the task identity suffices and
-        # keeps the run reproducible from its receipt).
-        task_id = uuid.uuid4().hex
-        seed = int(hashlib.sha256(task_id.encode()).hexdigest()[:8], 16)
-        workspace = PathResolver.get_workspace_root()
-        target_rel = str(target.relative_to(workspace.resolve()))
-
-        await store.create_swarm_task(
-            task_id,
-            target_path=target_rel,
-            focus_node=focus_node,
-            base_file_hash=_file_hash(target),
-            test_target=test_target,
-            bench_command=bench_command,
-            budget_usd=budget,
-            seed=seed,
-            search_strategy=strategy,
-            primary_goal=goal,
-            input_kind="workspace",
-            analytics_json=json.dumps(analytics, separators=(",", ":")),
+        _task_id, message = await _launch_code_swarm(
+            target_path,
+            focus_node,
+            test_target,
+            bench_command,
+            budget_usd=budget_usd,
+            allow_unstable_bench=allow_unstable_bench,
+            search_strategy=search_strategy,
+            primary_goal=primary_goal,
         )
-        _get_runner().launch(task_id, {
-            "workspace_root": workspace,
-            "target_rel": target_rel,
-            "focus_node": focus_node,
-            "test_target": test_target,
-            "bench_args": bench_args,
-            "budget_usd": budget,
-            "seed": seed,
-            "allow_unstable_bench": bool(allow_unstable_bench),
-            "goal": f"optimize {focus_node} in {target_rel} for {goal}",
-            "search_strategy": strategy,
-            "primary_goal": goal,
-        })
-        return ctx.format_output(
-            f"Swarm `{task_id}` started on `{focus_node}` in `{target_rel}` "
-            f"(mode={swarm_config.swarm_mode()}, strategy={strategy}, goal={goal}, "
-            f"budget=${budget:.2f}). "
-            f"Poll with get_swarm_status('{task_id}')."
-        )
+        return ctx.format_output(message)
 
 
 async def start_paste_swarm(
