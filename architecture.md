@@ -341,11 +341,14 @@ with a bounded, cached, API-key-stripped `grok models` call that must report a
 grok.com login; calls use `--output-format json` or `streaming-json`, and
 forward structured-output and reasoning controls through `--json-schema`,
 `--effort`, and `--max-turns` when those are present on the internal request.
-For native CLI continuity, the server stores a deterministic CLI session id and
-resumes it with `-s`; the old post-hoc `grok sessions list` scrape and regex
-session sync are no longer part of the runtime. In keyless/non-native mode,
-server-side history can still be rendered into the prompt as a compatibility
-fallback, but native CLI sessions do not prompt-stuff stored history.
+For native CLI continuity, the server creates a deterministic id with
+`--session-id` and later continues it with `--resume`. A genuinely busy session
+is branched with `--fork-session`; bounded server-side history replay is the
+last compatibility fallback if both resume and fork are unavailable. The old
+post-hoc `grok sessions list` scrape and regex session sync are no longer part
+of the runtime. Explicit message arrays and keyless/non-native calls are
+rendered into a self-contained prompt instead of being mixed with a native CLI
+transcript.
 
 ---
 

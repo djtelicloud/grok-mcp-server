@@ -819,6 +819,7 @@ def _build_grok_cli_args(
     dynamic_sys_prompt: str,
     output_format: str,
     cli_session_id: Optional[str] = None,
+    cli_resume_session_id: Optional[str] = None,
     profile: Optional[Dict[str, Any]] = None,
     max_turns: Optional[int] = None,
     json_schema: Any = None,
@@ -828,10 +829,15 @@ def _build_grok_cli_args(
     isolated: bool = False,
 ) -> List[str]:
     args: List[str] = []
-    if cli_session_id:
-        # -s creates-or-resumes the CLI session under OUR id, so the session
-        # mapping is deterministic up front.
-        args.extend(["-s", cli_session_id])
+    if cli_resume_session_id:
+        args.extend(["--resume", cli_resume_session_id])
+        if cli_session_id:
+            # A busy native session can be continued safely by forking its
+            # full CLI transcript under a new deterministic session id.
+            args.extend(["--fork-session", "--session-id", cli_session_id])
+    elif cli_session_id:
+        # --session-id names a new conversation; it never resumes one.
+        args.extend(["--session-id", cli_session_id])
 
     args.extend(["--system-prompt-override", dynamic_sys_prompt])
 
@@ -950,6 +956,14 @@ def _cli_logical_session_lock(session: str) -> asyncio.Lock:
 def _is_cli_session_in_use_error(message: str) -> bool:
     text = str(message or "").lower()
     return "session id" in text and "already in use" in text
+
+
+def _is_cli_session_missing_error(message: str) -> bool:
+    text = str(message or "").lower()
+    return "session" in text and (
+        "not found locally" in text or "failed to restore session from remote" in text
+    )
+
 
 UNIGROK_SAFETY_POLICY = """# UniGrok Safety Policy
 
@@ -7474,21 +7488,56 @@ async def _call_plane(
 
         grok_path = PathResolver.get_grok_cli_path()
         check_circuit_breaker(model_name)
-        use_native_cli_session = bool(session and store and cli_native_session_ids_enabled())
-        cli_prompt = prompt
-        if session and not input_messages and not use_native_cli_session:
-            history_context = _format_cli_history_context(await load_history(session, store))
-            if history_context:
-                cli_prompt = f"{history_context}\n\n# Current User Request\n{prompt}"
+        # Explicit message arrays are authoritative conversation state. They
+        # use a self-contained prompt instead of mixing caller history with a
+        # possibly unrelated native CLI transcript.
+        use_native_cli_session = bool(
+            session
+            and store
+            and not input_messages
+            and cli_native_session_ids_enabled()
+        )
 
-        async def _invoke_cli(cli_session_id: Optional[str]) -> tuple[str, Optional[str]]:
+        async def _prompt_with_server_history() -> str:
+            if input_messages:
+                context_messages = list(input_messages)
+                for index in range(len(context_messages) - 1, -1, -1):
+                    message = context_messages[index]
+                    if (
+                        str(message.get("role") or "").lower() == "user"
+                        and _message_content_to_text(message.get("content", ""))
+                        == prompt.strip()
+                    ):
+                        context_messages.pop(index)
+                        break
+            elif session:
+                context_messages = await load_history(session, store)
+            else:
+                return prompt
+
+            history_context = _format_cli_history_context(context_messages)
+            if not history_context:
+                return prompt
+            return f"{history_context}\n\n# Current User Request\n{prompt}"
+
+        cli_prompt = prompt
+        if input_messages or (session and not use_native_cli_session):
+            cli_prompt = await _prompt_with_server_history()
+
+        async def _invoke_cli(
+            current_prompt: str,
+            *,
+            cli_session_id: Optional[str] = None,
+            cli_resume_session_id: Optional[str] = None,
+        ) -> tuple[str, Optional[str]]:
             output_format = "streaming-json" if on_event is not None else "json"
             args = _build_grok_cli_args(
-                cli_prompt=cli_prompt,
+                cli_prompt=current_prompt,
                 model_name=model_name,
                 dynamic_sys_prompt=dynamic_sys_prompt,
                 output_format=output_format,
                 cli_session_id=cli_session_id,
+                cli_resume_session_id=cli_resume_session_id,
                 profile=profile or load_grok_profile(model_name),
                 max_turns=max_turns,
                 json_schema=json_schema,
@@ -7565,17 +7614,56 @@ async def _call_plane(
                     stored_cli_id = session_data.get("cli_session_id")
                 cli_session_id = stored_cli_id or str(uuid.uuid4())
 
-            try:
-                text, returned_id = await _invoke_cli(cli_session_id)
-            except RuntimeError as exc:
-                if not (use_native_cli_session and _is_cli_session_in_use_error(str(exc))):
-                    raise
-                retry_cli_id = str(uuid.uuid4())
-                logging.getLogger("GrokMCP").warning(
-                    f"Grok CLI session mapping for '{session}' was busy/stale; retrying with a fresh CLI session id."
+            async def _start_fresh_from_server_history() -> tuple[
+                str, Optional[str], str
+            ]:
+                fresh_cli_id = str(uuid.uuid4())
+                retry_prompt = await _prompt_with_server_history()
+                fresh_text, fresh_returned_id = await _invoke_cli(
+                    retry_prompt,
+                    cli_session_id=fresh_cli_id,
                 )
-                text, returned_id = await _invoke_cli(retry_cli_id)
-                cli_session_id = retry_cli_id
+                return fresh_text, fresh_returned_id, fresh_cli_id
+
+            try:
+                text, returned_id = await _invoke_cli(
+                    cli_prompt,
+                    cli_session_id=None if stored_cli_id else cli_session_id,
+                    cli_resume_session_id=stored_cli_id,
+                )
+            except RuntimeError as exc:
+                if not use_native_cli_session:
+                    raise
+                if _is_cli_session_missing_error(str(exc)):
+                    logging.getLogger("GrokMCP").warning(
+                        f"Grok CLI session mapping for '{session}' was missing; retrying from server history."
+                    )
+                    text, returned_id, cli_session_id = (
+                        await _start_fresh_from_server_history()
+                    )
+                elif _is_cli_session_in_use_error(str(exc)):
+                    fork_cli_id = str(uuid.uuid4())
+                    logging.getLogger("GrokMCP").warning(
+                        f"Grok CLI session mapping for '{session}' was busy; retrying with a forked CLI session id."
+                    )
+                    try:
+                        text, returned_id = await _invoke_cli(
+                            prompt,
+                            cli_session_id=fork_cli_id,
+                            cli_resume_session_id=stored_cli_id,
+                        )
+                        cli_session_id = fork_cli_id
+                    except RuntimeError as fork_exc:
+                        if not _is_cli_session_in_use_error(str(fork_exc)):
+                            raise
+                        logging.getLogger("GrokMCP").warning(
+                            f"Grok CLI session fork for '{session}' was also busy; retrying from server history."
+                        )
+                        text, returned_id, cli_session_id = (
+                            await _start_fresh_from_server_history()
+                        )
+                else:
+                    raise
 
             return text, returned_id, cli_session_id if use_native_cli_session else None, stored_cli_id
 
