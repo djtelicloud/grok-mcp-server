@@ -61,7 +61,9 @@ def configure_fast_test(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(land, "reconcile_runtime", lambda repo, paths: "test skipped")
 
 
-def test_run_tests_checks_generated_okf_before_pytest(monkeypatch, tmp_path):
+def test_run_tests_checks_attribution_and_generated_okf_before_pytest(
+    monkeypatch, tmp_path
+):
     calls = []
 
     def fake_run(args, **kwargs):
@@ -74,8 +76,18 @@ def test_run_tests_checks_generated_okf_before_pytest(monkeypatch, tmp_path):
 
     land.run_tests(tmp_path, "abc123")
 
-    assert calls[0] == ["uv", "run", "python", "scripts/generate_okf.py", "--check"]
-    assert calls[1] == land.DEFAULT_TEST_ARGS
+    assert calls[0] == [
+        "uv",
+        "run",
+        "python",
+        "scripts/check_agent_attribution.py",
+        "--base-ref",
+        land.MAIN_REF,
+        "--head",
+        "abc123",
+    ]
+    assert calls[1] == ["uv", "run", "python", "scripts/generate_okf.py", "--check"]
+    assert calls[2] == land.DEFAULT_TEST_ARGS
 
 
 def test_runtime_action_is_minimal():

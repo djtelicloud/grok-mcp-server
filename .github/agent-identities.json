@@ -1,0 +1,108 @@
+{
+  "schema_version": 1,
+  "accountable_github_users": [
+    {
+      "account_id": 4994715,
+      "login": "djtelicloud",
+      "type": "User"
+    }
+  ],
+  "agent_credit_identities": [
+    {
+      "credit_name": "OpenAI Codex",
+      "github_identity": null,
+      "product": "Codex",
+      "provider": "OpenAI"
+    },
+    {
+      "credit_name": "Anthropic Claude",
+      "github_identity": null,
+      "product": "Claude",
+      "provider": "Anthropic"
+    },
+    {
+      "credit_name": "Google Gemini",
+      "github_identity": null,
+      "product": "Gemini",
+      "provider": "Google"
+    },
+    {
+      "credit_name": "xAI Grok",
+      "github_identity": null,
+      "product": "Grok",
+      "provider": "xAI"
+    },
+    {
+      "credit_name": "GitHub Copilot",
+      "github_identity": {
+        "account_id": 198982749,
+        "app_url": "https://github.com/apps/copilot-swe-agent",
+        "login": "Copilot",
+        "type": "Bot"
+      },
+      "product": "Copilot",
+      "provider": "GitHub"
+    }
+  ],
+  "agent_identity_markers": [
+    "anthropic",
+    "chatgpt",
+    "claude",
+    "codex",
+    "copilot",
+    "gemini",
+    "grok",
+    "openai",
+    "xai"
+  ],
+  "allowed_model_sources": [
+    "provider-session",
+    "runtime-receipt",
+    "unverified",
+    "user-reported"
+  ],
+  "allowed_roles": {
+    "agent-assisted-by": [
+      "architecture",
+      "data-design",
+      "documentation",
+      "implementation",
+      "integration",
+      "research",
+      "supplied-plan",
+      "testing"
+    ],
+    "agent-reviewed-by": [
+      "advisory-review",
+      "architecture-review",
+      "code-review",
+      "data-review",
+      "research-review"
+    ]
+  },
+  "verified_github_agent_identities": [
+    {
+      "account_id": 198982749,
+      "account_type": "Bot",
+      "author_identities": [
+        {
+          "email": "198982749+Copilot@users.noreply.github.com",
+          "name": "copilot-swe-agent[bot]"
+        }
+      ],
+      "coauthor_identities": [
+        {
+          "email": "198982749+Copilot@users.noreply.github.com",
+          "name": "Copilot"
+        },
+        {
+          "email": "198982749+Copilot@users.noreply.github.com",
+          "name": "copilot-swe-agent[bot]"
+        }
+      ],
+      "github_app_url": "https://github.com/apps/copilot-swe-agent",
+      "login": "Copilot",
+      "verified_at": "2026-07-13"
+    }
+  ]
+}

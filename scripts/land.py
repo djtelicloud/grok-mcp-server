@@ -138,6 +138,21 @@ def directory_lock(path: Path, *, timeout: float = 900.0) -> Iterator[None]:
 
 
 def run_tests(repo: Path, expected_head: str) -> None:
+    print("Checking human and agent attribution...", flush=True)
+    run(
+        [
+            "uv",
+            "run",
+            "python",
+            "scripts/check_agent_attribution.py",
+            "--base-ref",
+            MAIN_REF,
+            "--head",
+            expected_head,
+        ],
+        cwd=repo,
+        capture=False,
+    )
     print("Checking deterministic OKF bundle...", flush=True)
     run(
         ["uv", "run", "python", "scripts/generate_okf.py", "--check"],

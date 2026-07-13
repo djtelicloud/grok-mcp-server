@@ -47,9 +47,12 @@ curl -s http://localhost:4765/healthz
 Human contributors and coding agents use the same evidence contract: explain
 the intent, list changed paths, report exact verification commands and results,
 identify the accountable GitHub user and assisting IDE/model, and disclose known
-risks or generated files. Use `Agent-Assisted-By:` for agent provenance; use
-`Co-authored-by:` only for a real GitHub account whose linked email should receive
-contribution credit. Grok review comments are advisory;
+risks or generated files. Use the canonical `Agent-Assisted-By:` trailer for
+material agent work and `Agent-Reviewed-By:` for advisory review. Use
+`Co-authored-by:` only for a real person's linked GitHub email or an exact bot
+identity in `.github/agent-identities.json`; provider and model names are not
+accounts. See [the attribution policy](docs/agent-attribution.md) for the
+provider/model format and model-evidence rules. Grok review comments are advisory;
 they do not authorize a merge. The Codex/project-admin role reviews the current
 head and owns landing, merge, tag, release, and deployment decisions. That role
 may be performed from Codex Desktop, CLI, GitHub Copilot, or another authorized

@@ -92,8 +92,9 @@ After committing and verifying the intended changes, push only the task's own
 `claude/*` branch and open or update a draft pull request when GitHub credentials
 are available. Otherwise hand the exact commit SHA and verification results to
 an authorized Codex session for publication. Include changed paths, tests,
-risks, human sponsor, and `Agent-Assisted-By: Claude via <IDE>` provenance in
-the PR or handoff. Do not push shared `main`, run `scripts/land`, merge or rebase
+risks, human sponsor, and the canonical Anthropic Claude provider/model trailer
+defined in [docs/agent-attribution.md](docs/agent-attribution.md) in the PR or
+handoff. Do not push shared `main`, run `scripts/land`, merge or rebase
 shared `main`, publish tags/releases/deployments, or remove worktrees. A
 Codex/project-admin session—whether in Codex Desktop, CLI, GitHub Copilot, or
 another authorized Codex surface—reviews the exact head and runs the landing

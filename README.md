@@ -623,7 +623,10 @@ The multi-file and Swarm fixtures are a
 an official CursorBench reproduction or score.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution workflow and PR
-expectations. The staged public site, protected contributor control plane,
+expectations. [Contributors and AI assistance](CONTRIBUTORS.md) separates
+accountable GitHub identities from visibly credited providers and models; the
+[attribution policy](docs/agent-attribution.md) defines the canonical evidence
+trailers. The staged public site, protected contributor control plane,
 GitHub authorization, private OAuth MCP, hosted review, and landing governance are defined in
 [ADR 0001](docs/adr/0001-cloud-control-plane-governance.md). The ADR clearly
 separates the live read-only and receipt-verification services from the
