@@ -1,6 +1,6 @@
 ---
 name: using-unigrok
-description: Claude Code guidance for querying xAI Grok through the shared UniGrok MCP gateway. Activate when the user says "@grok", asks to query Grok, wants a Grok second opinion or peer review, needs web/X search grounding, or wants deferred research or Grok Imagine media.
+description: Claude Code guidance for querying xAI Grok through the shared UniGrok MCP gateway. Activate when the user says "@grok", asks to query Grok, wants a Grok second opinion or peer review, or needs web/X search grounding.
 ---
 
 # Using UniGrok from Claude Code
@@ -19,9 +19,10 @@ on how the MCP server was registered:
 - `mcp__grok__agent` — connected through a user-scope registration named
   `grok` (the Codex-compatible name).
 
-Use whichever is connected in the session. `.claude/settings.json` pre-allows
-`agent`, `grok_mcp_status`, and `grok_mcp_discover_self` under both namespaces,
-so calls should not raise permission prompts.
+Prefer the project-controlled `unigrok` registration. `.claude/settings.json`
+pre-allows its `agent`, `grok_mcp_status`, and `grok_mcp_discover_self` tools.
+A user-owned `grok` alias is not controlled by this repository; verify that it
+points to the expected UniGrok endpoint before approving or using its tools.
 
 ## Calling `agent`
 
@@ -29,9 +30,15 @@ so calls should not raise permission prompts.
   `thinking`, `research`.
 - `workspace_context`: the stable service is workspace-neutral and cannot see
   the open folder — attach selected excerpts, `git diff` output, or errors
-  yourself, with an optional `workspace_label`.
-- `session`: pass a stable per-task name; the server namespaces it by caller
-  (`claude-code:<name>`), and reuse lowers cost on follow-ups.
+  yourself. An optional `workspace_label` is descriptive metadata only; it does
+  not isolate sessions.
+- `session`: pass a stable, project-qualified key such as `owner-repo:task`.
+  The server namespaces it beneath a server-derived principal and the
+  caller-controlled `X-Client-ID` label (`plugin` in this repository's current
+  `.mcp.json`). A generic key can collide across repositories that reuse a
+  common label such as `claude-code`. Reuse preserves continuity and can reduce
+  repeated-context API input cost when caching hits, but savings are not
+  guaranteed and CLI provider cost remains unavailable.
 - `model`: pin only when asked; pins validate against the live catalog. An
   explicit `plane=cli|api` should pair with `fallback_policy="same_plane"`
   when billing planes must not cross.
@@ -60,8 +67,14 @@ claude mcp add --transport http unigrok http://localhost:4765/mcp \
   --header "X-Client-ID: claude-code"
 ```
 
-`X-Client-ID` attributes telemetry, budgets, and `/metrics` per IDE and keeps
-session namespaces separate. Control Center: `http://localhost:4765/ui/`.
+`X-Client-ID` is a caller-controlled attribution and session label, not an
+authenticated identity. The server derives the principal; the default
+unauthenticated loopback service derives the shared `http:anon` principal for
+one local budget/security trust domain. There is no cross-user isolation without
+configured auth. Because many repositories can reuse
+`X-Client-ID: claude-code`, always project-qualify the `session` key;
+`workspace_label` remains descriptive only. Control Center:
+`http://localhost:4765/ui/`.
 
 ## Safety
 
