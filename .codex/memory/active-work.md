@@ -2,7 +2,7 @@
 
 Last updated: 2026-07-13
 Owner: Codex
-Status: PR #58 draft updated; runtime implementation has not started
+Status: PR #58 draft published; exact-head review and merge remain pending
 
 This is the project-scoped handoff for new Codex chats. Resolve drift-prone
 Git, CI, runtime, DNS, cloud, and benchmark state live before acting. Never
@@ -24,9 +24,10 @@ record credentials, OAuth codes, tokens, or private keys here.
 - Exact amended wording passed `git diff --check` and the full suite with
   `1220 passed`. Independent review found no remaining distribution-design
   contradiction after the Gordon and browser/core boundaries were corrected.
-- Remaining gates: push the updated branch, wait for exact-head CI, then perform
-  the normal exact-head Codex review before changing draft/merge state. Do not
-  begin runtime removal from this handoff.
+- The updated branch is published at PR #58. Verify its current head and checks
+  live because this handoff is a locator, not proof. Remaining gates are the
+  normal exact-head Codex disposition, ready-for-review transition, landing,
+  and protected merge. Do not begin runtime removal from this handoff.
 
 ## Completed state
 
