@@ -1,0 +1,14 @@
+{
+  "stage": "1_live_smoke_run",
+  "objective": "Validate transport, batching, receipts, quarantine, disagreement handling, and reproducibility.",
+  "target_roots_per_pack": 5,
+  "variants_per_root": 4,
+  "total_expected_examples": 120,
+  "required_gates": [
+    "100% schema validation",
+    "Grok 4.5 seed author execution",
+    "Gemini mutation execution",
+    "Blinded Grok 4.5 critic execution",
+    "Gemini adjudicator execution"
+  ]
+}

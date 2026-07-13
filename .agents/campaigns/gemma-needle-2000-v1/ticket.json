@@ -1,0 +1,59 @@
+{
+  "campaign_id": "gemma-needle-2000-v1",
+  "status": "proposal",
+  "stage": "research_dev",
+  "codex_status": "pending_codex_acceptance",
+  "issue_number": 65,
+  "objective": "Create a high-quality candidate dataset for Gemma planner and Needle specialist experiments",
+  "target_accepted_roots": 2000,
+  "variants_per_root": {
+    "min": 8,
+    "max": 16
+  },
+  "packs": [
+    {
+      "name": "tool_selection",
+      "target_roots": 800
+    },
+    {
+      "name": "gemma_plan_state",
+      "target_roots": 500,
+      "long_chain_transitions": {
+        "min": 8,
+        "max": 50
+      }
+    },
+    {
+      "name": "recovery_selection",
+      "target_roots": 250
+    },
+    {
+      "name": "resource_selection",
+      "target_roots": 200
+    },
+    {
+      "name": "memory_selection",
+      "target_roots": 150
+    },
+    {
+      "name": "observation_typing",
+      "target_roots": 100
+    }
+  ],
+  "balance_requirements": {
+    "abstain_clarify_wait_denied": 0.25,
+    "ttl_boundaries": 0.20,
+    "catalog_schema_drift": 0.20,
+    "retry_duplicate_ambiguous": 0.20,
+    "authority_privacy_secrets": 0.15,
+    "false_completion_missing_receipt": 0.15
+  },
+  "hard_gates": [
+    "100% schema validation",
+    "100% secret/PII scanning",
+    "Zero exact duplicates",
+    "No accepted positive label without executable mechanical oracle",
+    "No semantic effect duplication allowed",
+    "Post-TTL and missing receipt are hard failures"
+  ]
+}

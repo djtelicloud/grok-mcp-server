@@ -1,0 +1,13 @@
+{
+  "stage": "2_10_percent_pilot",
+  "objective": "Generate a proportional 200-root pilot using the final 8-16 variants per root.",
+  "packs": {
+    "tool_selection": 80,
+    "gemma_plan_state": 50,
+    "recovery_selection": 25,
+    "resource_selection": 20,
+    "memory_selection": 15,
+    "observation_typing": 10
+  },
+  "pre_requisite": "Stage 1 must pass all hard gates."
+}
