@@ -1,6 +1,33 @@
+from html.parser import HTMLParser
+
 from starlette.testclient import TestClient
 
 from src.http_server import create_app
+
+
+class _AnchorHrefParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.hrefs: list[str] = []
+        self.hrefs_by_id: dict[str, str] = {}
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag != "a":
+            return
+        values = dict(attrs)
+        href = values.get("href")
+        if href is None:
+            return
+        self.hrefs.append(href)
+        anchor_id = values.get("id")
+        if anchor_id is not None:
+            self.hrefs_by_id[anchor_id] = href
+
+
+def _parse_anchor_hrefs(markup: str) -> _AnchorHrefParser:
+    parser = _AnchorHrefParser()
+    parser.feed(markup)
+    return parser
 
 
 def test_mcp_ui_static_files_are_served(monkeypatch):
@@ -474,14 +501,15 @@ def test_mcp_ui_assets_are_never_heuristically_cached():
 def test_mcp_ui_asset_version_is_single_sourced():
     """Every copy of the cache-bust token must agree: src/version.py, the
     index.html meta/link/script pins, the markdown.js import inside app.js,
-    the app.js handshake constant, and the swarm.html tokens link. A skewed
-    pair is exactly the failure the version handshake exists to catch."""
+    app.js handshake constant, and the Swarm stylesheet/script/sample chain.
+    A skewed pair is exactly the failure the version contract exists to catch."""
     from src.version import UI_ASSET_VERSION
 
     with TestClient(create_app(), base_url="http://localhost:8080") as client:
         index = client.get("/ui/").text
         script = client.get("/ui/app.js").text
         swarm = client.get("/ui/swarm.html").text
+        swarm_script = client.get("/ui/swarm.js").text
         runtime = client.get("/runtimez").json()
 
     assert f'<meta name="unigrok-ui-version" content="{UI_ASSET_VERSION}" />' in index
@@ -491,6 +519,12 @@ def test_mcp_ui_asset_version_is_single_sourced():
     assert f'const UI_ASSET_VERSION = "{UI_ASSET_VERSION}"' in script
     assert f'from "./markdown.js?v={UI_ASSET_VERSION}"' in script
     assert f'href="./tokens.css?v={UI_ASSET_VERSION}"' in swarm
+    assert f'src="./swarm.js?v={UI_ASSET_VERSION}"' in swarm
+    assert f'const UI_ASSET_VERSION = "{UI_ASSET_VERSION}"' in swarm_script
+    assert (
+        'fetch(`./swarm-sample.json?v=${encodeURIComponent(UI_ASSET_VERSION)}`)'
+        in swarm_script
+    )
     assert runtime["ui_asset_version"] == UI_ASSET_VERSION
     # The handshake self-heals a stale cached page with one reload, then warns.
     assert "enforceUiVersionHandshake" in script
@@ -539,10 +573,10 @@ def test_mcp_ui_local_surfaces_link_the_project_site():
         index = client.get("/ui/").text
         swarm = client.get("/ui/swarm.html").text
 
-    assert 'id="nav-link-site"' in index
-    assert 'https://grokmcp.org' in index
-    assert 'https://grokmcp.org' in swarm
-    assert 'href="./index.html"' in swarm
+    index_anchors = _parse_anchor_hrefs(index)
+    swarm_anchors = _parse_anchor_hrefs(swarm)
+    assert index_anchors.hrefs_by_id["nav-link-site"] == "https://grokmcp.org"
+    assert swarm_anchors.hrefs[:2] == ["./index.html", "https://grokmcp.org"]
 
 
 def test_mcp_ui_layout_limits_come_from_css():

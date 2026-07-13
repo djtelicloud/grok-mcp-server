@@ -71,6 +71,28 @@ const ownerBinding = JSON.stringify([
   },
 ]);
 
+const githubModePrivateKey = [
+  "-----BEGIN",
+  "PRIVATE KEY-----\n",
+  "A".repeat(256),
+  "\n-----END",
+  "PRIVATE KEY-----",
+].join(" ").replaceAll("  ", " ");
+
+const githubModeEnvironment = {
+  APP_BASE_URL: "https://control.grokmcp.org",
+  AUTH_SESSION_SECRET: "s".repeat(48),
+  CONTROL_CENTER_MODE: "github",
+  GITHUB_APP_CLIENT_ID: "Iv23exampleClient",
+  GITHUB_APP_CLIENT_SECRET: "c".repeat(40),
+  GITHUB_APP_ID: "4273343",
+  GITHUB_APP_INSTALLATION_ID: "12345",
+  GITHUB_APP_PRIVATE_KEY: githubModePrivateKey,
+  GITHUB_REPOSITORY: "djtelicloud/grok-mcp-server",
+  GITHUB_REPOSITORY_ID: "1295814352",
+  NODE_ENV: "production",
+};
+
 async function request(worker, path, headers = {}) {
   return worker.fetch(
     new Request(`http://localhost${path}`, { headers }),
@@ -134,6 +156,30 @@ test("redirects anonymous control visitors to dispatch-owned ChatGPT sign-in", a
   assert.equal(location.origin, "http://localhost");
   assert.equal(location.pathname, "/signin-with-chatgpt");
   assert.equal(location.search, "?return_to=%2Fcontrol");
+});
+
+test("renders GitHub-mode signed-out control context without protected data", async () => {
+  const restore = replaceEnvironment(githubModeEnvironment);
+  try {
+    const response = await request(await loadWorker(), "/control", {
+      accept: "text/html",
+      host: "control.grokmcp.org",
+    });
+
+    assert.equal(response.status, 200);
+    const html = await response.text();
+    assert.match(html, /Live project operations, for contributors\./);
+    assert.match(html, /Who gets in, and how it is checked\./);
+    const loginAction =
+      '<a class="public-primary" href="/auth/github/login?return_to=%2Fcontrol">Sign in with GitHub</a>';
+    assert.equal(html.split(loginAction).length - 1, 1);
+    assert.doesNotMatch(
+      html,
+      /Pull-request status|Grok review results|Two checks passed|installer-github/,
+    );
+  } finally {
+    restore();
+  }
 });
 
 test("denies a signed-in viewer when project authorization is unconfigured", async () => {
