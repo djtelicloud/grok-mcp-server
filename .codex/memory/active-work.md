@@ -1,8 +1,8 @@
 # Codex Active Work
 
-Last updated: 2026-07-12
+Last updated: 2026-07-13
 Owner: Codex
-Status: CursorBench-aligned evaluation foundation landed; no active repository gate
+Status: PR #56 integration landed; no active repository gate
 
 This is the project-scoped handoff for new Codex chats. Resolve drift-prone
 Git, CI, runtime, DNS, cloud, and benchmark state live before acting. Never
@@ -10,6 +10,14 @@ record credentials, OAuth codes, tokens, or private keys here.
 
 ## Completed state
 
+- PR #56 merged to protected `origin/main` as
+  `228c0c37db0211f245e92a0943823c2febd121bf`. Its exact reviewed and locally
+  landed head was `b54b8d21fc9d3af78aa9465a2fd3014f6e822a2e`.
+- GitHub Copilot and VS Code now share the supported repository skill at
+  `.github/skills/using-unigrok/SKILL.md`. The unsupported repository-root
+  `.copilot/skills` duplicate was removed during integration review.
+- Click is locked at 8.4.2, clearing `PYSEC-2026-2132`, with release-hygiene
+  coverage for project-skill discovery and the public UniGrok endpoint.
 - PR #53 merged to protected `origin/main` as
   `381a9fe0c5909cce0ec0565bbb91d190c0543f7f`. Its exact reviewed,
   locally landed, and CI-green head was
@@ -27,6 +35,12 @@ record credentials, OAuth codes, tokens, or private keys here.
 
 ## Verification
 
+- The PR #56 landing gate printed
+  `LANDED TO MAIN: b54b8d21fc9d3af78aa9465a2fd3014f6e822a2e`
+  after 1,220 tests; the dependency audit reported no known vulnerabilities.
+- Fresh PR #56 Python 3.11/3.12 CI, Project Site, control image, Docker,
+  offline evals, CodeQL, and exact-head `Codex Approval` passed. Local `main`
+  and `origin/main` agreed at the protected squash merge commit.
 - The landing gate printed
   `LANDED TO MAIN: 64d3aef4eb500cec2ecf81722ca5dd40f0f942aa`
   after 1,219 tests and a successful contributor-runtime restart/smoke test.
