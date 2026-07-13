@@ -951,6 +951,29 @@ class TestTier2ToolsRegistered:
         assert ".claude/worktrees/task" not in obs.content
 
     @pytest.mark.asyncio
+    async def test_list_project_files_shallow_files_survive_deep_bundles(
+        self, tmp_path, monkeypatch
+    ):
+        """A large deep data bundle must not crowd the workspace skeleton
+        out of the bounded listing (shallow-first ordering)."""
+        (tmp_path / "pyproject.toml").write_text("[project]\n")
+        (tmp_path / "src").mkdir()
+        (tmp_path / "src" / "app.py").write_text("pass\n")
+        bundle = tmp_path / "aaa_bundle" / "deep" / "data"
+        bundle.mkdir(parents=True)
+        for index in range(300):
+            (bundle / f"row-{index:03}.jsonl").write_text("{}\n")
+        monkeypatch.setenv("WORKSPACE_ROOT", str(tmp_path))
+
+        obs = await dispatch_internal_tool(
+            "list_project_files", {"max_results": 200}
+        )
+
+        assert obs.success is True
+        assert "`pyproject.toml`" in obs.content
+        assert "`src/app.py`" in obs.content
+
+    @pytest.mark.asyncio
     async def test_read_local_file_blocks_traversal(self):
         """raw_read_local_file must block paths escaping the project root."""
         obs = await dispatch_internal_tool(

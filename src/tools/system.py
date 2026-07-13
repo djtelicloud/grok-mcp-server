@@ -664,7 +664,14 @@ async def list_project_files(extensions: Optional[str] = None, max_results: int 
             input_limit("UNIGROK_MAX_PROJECT_FILES", 1_000, 1, 10_000),
             max(int(max_results or 200), 1),
         )
-        sorted_files = sorted(found_files)
+        # Shallow-first ordering: the bounded listing must surface the
+        # workspace skeleton (top-level configs, src/) before deep leaves
+        # such as data or docs bundles, or a large committed dataset would
+        # crowd the project's own source out of the default budget.
+        sorted_files = sorted(
+            found_files,
+            key=lambda f: (len(f.relative_to(proj_root).parts), str(f)),
+        )
         shown = sorted_files[:safe_max]
         lines = [f"# Workspace files in `{proj_root}`\n"]
         for f in shown:
