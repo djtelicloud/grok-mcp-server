@@ -99,7 +99,7 @@ def test_copilot_project_skill_uses_a_supported_discovery_path():
     skill_path = ROOT / ".github" / "skills" / "using-unigrok" / "SKILL.md"
     assert skill_path.is_file()
     assert not (ROOT / ".copilot" / "skills" / "using-unigrok" / "SKILL.md").exists()
-    assert "not a default project discovery path" in skill_path.read_text()
+    assert "not a default project discovery path" in skill_path.read_text(encoding="utf-8")
 
 
 def test_agent_rules_allow_draft_pr_submission_but_reserve_final_integration():
