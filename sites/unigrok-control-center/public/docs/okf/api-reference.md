@@ -203,6 +203,24 @@ class CSPMiddleware
 ASGI middleware that injects a strict Content-Security-Policy (CSP) header
 into all HTTP responses.
 
+### Class: `StaticAssetCacheMiddleware` {#http_server-staticassetcachemiddleware}
+
+```python
+class StaticAssetCacheMiddleware
+```
+
+**Keywords:** static, asset, cache, middleware
+
+ASGI middleware that stamps ``Cache-Control: no-cache`` on /ui and /docs
+responses.
+
+Starlette's ``StaticFiles`` emits ETag/Last-Modified but no Cache-Control,
+so browsers apply heuristic freshness and can pair a stale cached
+``index.html`` with freshly fetched ``app.js`` — the skew that made the
+Control Center discard rendered agent answers. ``no-cache`` keeps caching
+(conditional requests answer 304 via the existing ETags) but forces
+revalidation, so HTML and JS always come from the same release.
+
 ### Function: `unigrok_public_discovery` {#http_server-unigrok_public_discovery}
 
 ```python

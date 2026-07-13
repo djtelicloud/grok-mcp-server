@@ -1,13 +1,28 @@
-import { parseMarkdown, sanitizeHref } from "./markdown.js?v=grok-v0.6.0-r2";
+import { parseMarkdown, sanitizeHref } from "./markdown.js?v=grok-v0.6.0-r3";
+
+// Must match the <meta name="unigrok-ui-version"> baked into index.html and
+// src/version.py UI_ASSET_VERSION; a mismatch means the browser paired a
+// cached page with a different script build (the stale-skew failure class).
+const UI_ASSET_VERSION = "grok-v0.6.0-r3";
 
 const LAYOUT_KEY = "unigrok.mcp.console.layout.v2";
+
+// Panel bounds are authored once in styles.css (:root --nav-min/max,
+// --inspector-min/max); the JS fallbacks only cover a stylesheet that failed
+// to load, where layout precision no longer matters.
+function cssPx(name, fallback) {
+  const raw = getComputedStyle(document.documentElement).getPropertyValue(name);
+  const value = Number.parseFloat(raw);
+  return Number.isFinite(value) ? value : fallback;
+}
+
 const LAYOUT_LIMITS = {
-  nav: [148, 340],
-  inspector: [210, 460],
-  workbench: 300,
+  nav: [cssPx("--nav-min", 148), cssPx("--nav-max", 340)],
+  inspector: [cssPx("--inspector-min", 210), cssPx("--inspector-max", 460)],
+  workbench: cssPx("--workbench-min", 300),
   workbenchComfort: 360,
-  rail: 44,
-  splitter: 4,
+  rail: cssPx("--rail-width", 44),
+  splitter: cssPx("--splitter-width", 4),
 };
 
 const defaultLayout = {
@@ -228,6 +243,15 @@ const state = {
 // --- DOM Selector Helper ---
 const $ = (id) => document.getElementById(id);
 
+// Null-safe text writer. A stale-cached page can lack elements this build
+// writes to; a missing diagnostics row must never throw inside the response
+// path and discard a paid agent answer.
+function setText(id, value) {
+  const el = $(id);
+  if (el) el.innerText = value;
+  return el;
+}
+
 // --- CSS Tooltip/Copy Helper ---
 function copyTextToClipboard(text, btnElement) {
   navigator.clipboard.writeText(text).then(() => {
@@ -409,12 +433,8 @@ function setupSchemaExplorer() {
 
 function renderActiveSchema() {
   const schema = enforcedSchemas[state.activeSchema];
-  $("schemaNameTitle").innerText = `${state.activeSchema}.json`;
-  if (schema) {
-    $("schemaCodeBlock").innerText = JSON.stringify(schema, null, 2);
-  } else {
-    $("schemaCodeBlock").innerText = "Schema not found.";
-  }
+  setText("schemaNameTitle", `${state.activeSchema}.json`);
+  setText("schemaCodeBlock", schema ? JSON.stringify(schema, null, 2) : "Schema not found.");
 }
 
 // --- Reasoning Guard Simulator ---
@@ -600,8 +620,8 @@ function checkWebMcpBridge() {
 
 // --- Telemetry & Metrics Dashboard ---
 async function fetchLiveMetrics() {
-  $("rawMetricsReport").innerText = "Polling structured MCP metrics...";
-  $("metricsStatus").innerText = "Refreshing local usage ledger…";
+  setText("rawMetricsReport", "Polling structured MCP metrics...");
+  setText("metricsStatus", "Refreshing local usage ledger…");
   try {
     const res = await fetchMcpCall("grok_mcp_status", { view: "json" });
     const payload = extractToolPayload(res);
@@ -611,8 +631,8 @@ async function fetchLiveMetrics() {
     state.metricsSnapshot = payload;
     renderMetricsSnapshot();
   } catch (err) {
-    $("rawMetricsReport").innerText = `Failed to fetch telemetry report: ${err.message}`;
-    $("metricsStatus").innerText = "Metrics unavailable — the MCP status call failed.";
+    setText("rawMetricsReport", `Failed to fetch telemetry report: ${err.message}`);
+    setText("metricsStatus", "Metrics unavailable — the MCP status call failed.");
   }
 }
 
@@ -881,6 +901,12 @@ async function runStartupCheck() {
 }
 
 function renderSetupStatus(data, ready = true, detailText = null) {
+  // The quick-start card is the onboarding action for a machine where the
+  // gateway is NOT REACHABLE. A reachable gateway failing a readiness check
+  // (detailText names it) is already installed and running — reinstall
+  // instructions would be the wrong remedy, so the card stays hidden and the
+  // named failing checks plus the credential alert carry the fix.
+  $("quickStartCard")?.classList.toggle("hidden", Boolean(ready) || Boolean(detailText));
   const target = $("setupStatusSummary");
   if (!target) return;
   const contract = data?.credential_planes || {};
@@ -962,7 +988,7 @@ async function fetchMcpListTools() {
     const headers = {
       "Content-Type": "application/json",
       "Accept": "application/json, text/event-stream",
-      "X-Client-ID": $("clientIdInput").value || "mcp-ui-client",
+      "X-Client-ID": $("clientIdInput")?.value || "mcp-ui-client",
     };
     if (state.clientToken) {
       headers["Authorization"] = `Bearer ${state.clientToken}`;
@@ -1048,6 +1074,7 @@ function updatePlaneControls() {
   const plane = $("planeInput")?.value || "auto";
   const hint = $("planeHint");
   const fallback = $("fallbackPolicyInput");
+  if (!hint || !fallback) return;
   if (plane === "cli") {
     hint.innerText = "Subscription only · no developer API billing";
     hint.classList.remove("metered");
@@ -1212,6 +1239,7 @@ async function loadPlaneModelCatalog() {
 
 function setStatus(kind, label) {
   const pill = $("connectionState");
+  if (!pill) return;
   pill.className = `status-pill status-${kind}`;
   pill.innerText = label;
 }
@@ -1339,15 +1367,15 @@ async function fetchMcpCall(toolName, args) {
     const endpoint = "/mcp";
     const headers = {
       "Content-Type": "application/json",
-      "X-Client-ID": $("clientIdInput").value || "mcp-ui-client",
-      "X-Session-ID": $("sessionInput").value || "mcp-ui-session",
+      "X-Client-ID": $("clientIdInput")?.value || "mcp-ui-client",
+      "X-Session-ID": $("sessionInput")?.value || "mcp-ui-session",
     };
 
     if (state.clientToken) {
       headers["Authorization"] = `Bearer ${state.clientToken}`;
     }
 
-    const caller = $("callerInput").value.trim();
+    const caller = $("callerInput")?.value.trim() || "";
     if (caller) {
       headers["X-Caller"] = caller;
     }
@@ -1374,7 +1402,7 @@ async function fetchMcpCall(toolName, args) {
     }
 
     const elapsed = Date.now() - start;
-    $("lastLatency").innerText = `${elapsed} ms`;
+    setText("lastLatency", `${elapsed} ms`);
 
     if (res.status === 401 || res.status === 429) {
       const wizard = $("apiKeyWizard");
@@ -1401,9 +1429,15 @@ async function fetchMcpCall(toolName, args) {
 
     // The facts pane holds the agent routing receipt; background tool calls
     // (status, discovery, models, metrics) carry no such receipt and must not
-    // clobber it, so only the agent call updates the pane.
+    // clobber it, so only the agent call updates the pane. The pane is
+    // diagnostics: if rendering it throws, the answer must still be returned
+    // and displayed — never re-throw from here.
     if (toolName === "agent") {
-      renderFactsPane(toolName, responsePayload, elapsed);
+      try {
+        renderFactsPane(toolName, responsePayload, elapsed);
+      } catch (paneError) {
+        console.error("Receipt pane render failed:", paneError);
+      }
     }
 
     return responsePayload;
@@ -1434,43 +1468,47 @@ function extractToolPayload(jsonRpcResponse) {
 }
 
 function renderFactsPane(method, response, elapsed) {
-  $("factMethod").innerText = method;
-  $("factLatency").innerText = `${elapsed}ms`;
+  setText("factMethod", method);
+  setText("factLatency", `${elapsed}ms`);
 
   if (response.error) {
-    $("factStatus").innerText = "ERROR";
-    $("factStatus").style.color = "var(--red)";
+    const status = setText("factStatus", "ERROR");
+    if (status) status.style.color = "var(--red)";
     return;
   }
 
   // A FastMCP tool exception arrives as result.isError with the message in
   // content[0].text — that is a failed run, never a SUCCESS receipt.
   if (response.result?.isError) {
-    $("factStatus").innerText = "TOOL ERROR";
-    $("factStatus").style.color = "var(--red)";
+    const status = setText("factStatus", "TOOL ERROR");
+    if (status) status.style.color = "var(--red)";
   } else {
-    $("factStatus").innerText = "SUCCESS";
-    $("factStatus").style.color = "var(--teal)";
+    const status = setText("factStatus", "SUCCESS");
+    if (status) status.style.color = "var(--teal)";
   }
 
   const payload = extractToolPayload(response);
-  $("factTokens").innerText = payload.tokens || "-";
-  $("factCost").innerText = payload.cost_usd ? `$${payload.cost_usd.toFixed(5)}` : "-";
-  $("factRoute").innerText = payload.route || "-";
-  $("factPlane").innerText = payload.plane || "-";
-  $("factBilling").innerText = payload.billing_class || payload.routing?.billing_class || "-";
-  $("factRequestedPlane").innerText = payload.requested_plane || payload.routing?.requested_plane || "-";
-  $("factModel").innerText = payload.model || "-";
-  $("factSelection").innerText = routingLabel(payload.routing?.why_detail || payload.why || "-");
+  setText("factTokens", payload.tokens || "-");
+  // The wire may deliver cost as a number or a serialized string; only a
+  // finite value renders as currency.
+  const rawCost = payload.cost_usd;
+  const cost = typeof rawCost === "string" && rawCost.trim() !== "" ? Number(rawCost) : rawCost;
+  setText("factCost", typeof cost === "number" && Number.isFinite(cost) && cost !== 0 ? `$${cost.toFixed(5)}` : "-");
+  setText("factRoute", payload.route || "-");
+  setText("factPlane", payload.plane || "-");
+  setText("factBilling", payload.billing_class || payload.routing?.billing_class || "-");
+  setText("factRequestedPlane", payload.requested_plane || payload.routing?.requested_plane || "-");
+  setText("factModel", payload.model || "-");
+  setText("factSelection", routingLabel(payload.routing?.why_detail || payload.why || "-"));
   const finishReason = payload.finish_reason || "-";
-  $("factFinishReason").innerText = finishReason;
-  $("factFinishReason").style.color = finishReason !== "-" && finishReason !== "final_answer" ? "var(--red)" : "";
-  $("factDegraded").innerText = payload.degraded === undefined ? "-" : String(payload.degraded);
-  $("factDegraded").style.color = payload.degraded === true ? "var(--red)" : "";
+  const finishEl = setText("factFinishReason", finishReason);
+  if (finishEl) finishEl.style.color = finishReason !== "-" && finishReason !== "final_answer" ? "var(--red)" : "";
+  const degradedEl = setText("factDegraded", payload.degraded === undefined ? "-" : String(payload.degraded));
+  if (degradedEl) degradedEl.style.color = payload.degraded === true ? "var(--red)" : "";
   // Mode provenance: confirms a phoneword port dial actually changed the mode.
-  $("factRequestedMode").innerText = payload.requested_mode || "-";
-  $("factModeSource").innerText = payload.mode_source || "-";
-  $("factDialedPort").innerText = payload.dialed_port || "-";
+  setText("factRequestedMode", payload.requested_mode || "-");
+  setText("factModeSource", payload.mode_source || "-");
+  setText("factDialedPort", payload.dialed_port || "-");
 }
 
 async function callAgent(prompt) {
@@ -1524,6 +1562,7 @@ async function callAgent(prompt) {
 function renderCitations(citations) {
   if (!Array.isArray(citations) || citations.length === 0) return;
   const container = $("conversation");
+  if (!container) return;
   const footer = document.createElement("div");
   footer.className = "message-bubble msg-citations";
   const heading = document.createElement("strong");
@@ -1554,6 +1593,11 @@ function renderCitations(citations) {
 
 function addMessageBubble(sender, text) {
   const container = $("conversation");
+  if (!container) {
+    // Last resort on a broken page: never silently drop a message.
+    console.error(`Transcript container missing; ${sender} message:`, text);
+    return;
+  }
   const bubble = document.createElement("div");
   bubble.className = `message-bubble msg-${sender}`;
   if (sender === "agent") {
@@ -1581,7 +1625,8 @@ function genSessionId() {
 }
 
 function resetConversation() {
-  $("conversation").innerHTML = "";
+  const conversation = $("conversation");
+  if (conversation) conversation.innerHTML = "";
   const sessionInput = $("sessionInput");
   if (sessionInput && !sessionInput.value.trim()) sessionInput.value = genSessionId();
   addMessageBubble("system", "Session started. Ready to execute prompts.");
@@ -1593,7 +1638,8 @@ function clearConversation() {
   const sessionInput = $("sessionInput");
   const previous = sessionInput?.value.trim();
   if (sessionInput) sessionInput.value = genSessionId();
-  $("conversation").innerHTML = "";
+  const conversation = $("conversation");
+  if (conversation) conversation.innerHTML = "";
   addMessageBubble(
     "system",
     previous
@@ -1855,6 +1901,32 @@ function isFilePreview() {
   return window.location.protocol === "file:";
 }
 
+// Detects the stale-cache skew that once discarded rendered answers: the page
+// HTML and this script came from different releases. One reload revalidates
+// the document (reloads bypass heuristic freshness for the main resource);
+// the per-pair flag stops a loop if the server itself keeps serving the skew.
+function enforceUiVersionHandshake() {
+  const htmlVersion = document.querySelector('meta[name="unigrok-ui-version"]')?.content || "missing";
+  if (htmlVersion === UI_ASSET_VERSION) return false;
+  const flag = `unigrok.ui.reloaded.${htmlVersion}->${UI_ASSET_VERSION}`;
+  try {
+    if (!sessionStorage.getItem(flag)) {
+      sessionStorage.setItem(flag, "1");
+      window.location.reload();
+      return true;
+    }
+  } catch (_) {
+    // Storage blocked: fall through to the visible banner.
+  }
+  const message = $("offlineAlertMessage");
+  const banner = $("dockerOfflineAlert");
+  if (message && banner) {
+    message.textContent = "⚠️ This page is out of date (browser cache). Hard refresh — Cmd/Ctrl+Shift+R — to load the current Control Center.";
+    banner.classList.remove("hidden");
+  }
+  return true;
+}
+
 function renderFilePreviewNotice() {
   const alertBanner = $("dockerOfflineAlert");
   const message = $("offlineAlertMessage");
@@ -2054,6 +2126,9 @@ function init() {
     window.location.replace(LIVE_UI_URL);
     return;
   }
+  // A version-skewed page is about to reload (or has been told to hard
+  // refresh); wiring the rest of the UI against mismatched DOM is pointless.
+  if (enforceUiVersionHandshake()) return;
   document.querySelectorAll(".tab-panel").forEach((panel) => {
     panel.setAttribute("role", "tabpanel");
     panel.setAttribute("data-region", panel.dataset.region || panel.id);
@@ -2078,8 +2153,11 @@ function init() {
 
   $("refreshModelsBtn").addEventListener("click", loadPlaneModelCatalog);
 
-  // Onboarding action
+  // Onboarding actions
   $("copyDiscoverBtn").addEventListener("click", runDiscoverSelfOnboarding);
+  $("copyQuickStartBtn")?.addEventListener("click", function () {
+    copyTextToClipboard($("quickStartCommands")?.innerText || "", this);
+  });
   $("setupRecheckBtn")?.addEventListener("click", async () => {
     const ready = await runStartupCheck();
     const runtime = await fetchRuntimeStatus();

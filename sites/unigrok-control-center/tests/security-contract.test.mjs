@@ -62,9 +62,25 @@ test("keeps the connection wizard instructional", async () => {
 });
 
 test("publishes Swarm as a client-only showcase", async () => {
-  const publicPage = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
-  const swarmScript = await readFile(new URL("../../../mcp_ui/swarm.js", import.meta.url), "utf8");
-  const syncScript = await readFile(new URL("../scripts/sync-swarm-playground.mjs", import.meta.url), "utf8");
+  const [
+    publicPage,
+    swarmHtml,
+    swarmScript,
+    publicSwarmHtml,
+    publicSwarmScript,
+    syncScript,
+    versionSource,
+  ] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../../../mcp_ui/swarm.html", import.meta.url), "utf8"),
+    readFile(new URL("../../../mcp_ui/swarm.js", import.meta.url), "utf8"),
+    readFile(new URL("../public/swarm/index.html", import.meta.url), "utf8"),
+    readFile(new URL("../public/swarm/swarm.js", import.meta.url), "utf8"),
+    readFile(new URL("../scripts/sync-swarm-playground.mjs", import.meta.url), "utf8"),
+    readFile(new URL("../../../src/version.py", import.meta.url), "utf8"),
+  ]);
+  const uiVersion = /UI_ASSET_VERSION = "([^"]+)"/.exec(versionSource)?.[1];
+  assert.ok(uiVersion);
 
   assert.match(publicPage, /href="\/swarm\/"/);
   assert.match(swarmScript, /state\.runtimeMode === "contributor"/);
@@ -72,6 +88,11 @@ test("publishes Swarm as a client-only showcase", async () => {
   assert.match(swarmScript, /Public showcase — client-side analysis only/);
   assert.doesNotMatch(swarmScript, /localStorage|sessionStorage/);
   assert.match(syncScript, /mcp_ui/);
+  assert.ok(swarmHtml.includes(`src="./swarm.js?v=${uiVersion}"`));
+  assert.ok(swarmScript.includes(`const UI_ASSET_VERSION = "${uiVersion}"`));
+  assert.ok(swarmScript.includes("swarm-sample.json?v=${encodeURIComponent(UI_ASSET_VERSION)}"));
+  assert.ok(publicSwarmHtml.includes(`src="./swarm.js?v=${uiVersion}"`));
+  assert.equal(publicSwarmScript, swarmScript);
 });
 
 test("requires adapters to separate PR review state from release impact", async () => {

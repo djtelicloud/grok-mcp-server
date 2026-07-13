@@ -7,6 +7,11 @@
 
 "use strict";
 
+// Must match src/version.py UI_ASSET_VERSION and the query token on the
+// swarm.js reference in swarm.html. The sample uses the same token so a
+// revalidated page cannot pair new logic with a heuristically cached payload.
+const UI_ASSET_VERSION = "grok-v0.6.0-r3";
+
 const $ = (id) => document.getElementById(id);
 const SVG_NS = "http://www.w3.org/2000/svg";
 const COLORS = {
@@ -111,9 +116,15 @@ function setPayload(payload, sourceLabel, source) {
   const badge = $("sourceBadge");
   badge.textContent = source === "live" ? "live gateway data" : sourceLabel;
   badge.className = source === "live" ? "source-badge live" : "source-badge";
-  renderScorecard();
-  renderTradeoffSummary();
-  renderChart();
+  // Each render step is independent diagnostics; one failing panel must not
+  // blank the rest of the page.
+  for (const step of [renderScorecard, renderTradeoffSummary, renderChart]) {
+    try {
+      step();
+    } catch (err) {
+      console.error(`${step.name} failed:`, err);
+    }
+  }
   const candidates = (payload.generations || []).flatMap((generation) => generation.candidates || []);
   const leadingFrontId = payload.pareto_front?.[0];
   const firstUseful = candidates.find((candidate) => candidate.candidate_id === leadingFrontId && candidate.code)
@@ -478,7 +489,7 @@ const TERMINAL_STATUSES = new Set(
 async function loadSample() {
   setMsg("loading sample…");
   try {
-    const res = await fetch("./swarm-sample.json");
+    const res = await fetch(`./swarm-sample.json?v=${encodeURIComponent(UI_ASSET_VERSION)}`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const payload = await res.json();
     if (!STATUS_FORMATS.has(payload.format)) {

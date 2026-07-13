@@ -4,7 +4,43 @@ All notable changes to UniGrok MCP will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- **Control Center answers survive stale browser caches**: `/ui` and `/docs`
+  responses now carry `Cache-Control: no-cache` (Starlette's `StaticFiles`
+  sends only ETag/Last-Modified, so browsers heuristically cached
+  `index.html` and paired it with a newer `app.js`), every receipt-pane DOM
+  write is null-safe via a shared `setText` helper, and the receipt pane
+  renders inside its own try/catch so a diagnostics failure can never turn an
+  already-received agent answer into "Invocation failed". A version
+  handshake (`<meta name="unigrok-ui-version">` vs the `app.js` build
+  constant, mirrored as `ui_asset_version` in `/runtimez`) self-heals a
+  skewed page with one revalidating reload and otherwise shows a hard-refresh
+  banner. The cache-bust token is single-sourced in `src/version.py` and a
+  pytest asserts every copy agrees.
+
 ### Added
+- **One product across surfaces**: shared design tokens (`mcp_ui/tokens.css`)
+  now drive both the Control Center and the Swarm Optimizer (which previously
+  carried its own divergent palette), both local pages cross-link each other
+  and grokmcp.org, the public-site sync copies the tokens with the swarm
+  bundle, and the hosted `/control` shows signed-out visitors a
+  plain-language explainer with one GitHub sign-in action instead of a naked
+  redirect to github.com.
+- **Fluid, container-driven layout**: the Control Center's content grids
+  reflow on the workbench container's own width instead of viewport media
+  queries (a narrow workbench beside a wide inspector now stacks correctly),
+  fixed pixel heights on the transcript/OKF preview/receipt JSON became
+  viewport-relative clamps, the schema and OKF sidebars are natively
+  resizable with min/max clamps, panel bounds are authored once as CSS custom
+  properties that the JS layout controller reads, and the swarm page's fixed
+  1280px cap and 340px detail column became fluid tracks. Verified
+  in-browser at 1280px, 500px, and 375x812.
+- **Chat-first playground with one-action onboarding**: the transcript sits
+  directly under the composer and presets, run options and the setup check
+  moved below it, "Usage & Telemetry"/"OKF Browser" were renamed to the human
+  "Usage & Costs"/"Knowledge (OKF)", and a not-ready gateway now shows a
+  copyable four-line quick-start card on Setup & Status instead of a dead
+  end.
 - **Control Center markdown rendering**: agent answers in the Playground
   transcript now render as formatted markdown instead of raw markup text.
   A new shared escape-first renderer (`mcp_ui/markdown.js`) replaces the old

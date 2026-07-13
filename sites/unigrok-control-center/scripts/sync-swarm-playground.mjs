@@ -23,6 +23,12 @@ await Promise.all([
     resolve(targetDir, "swarm-sample.json"),
     await readFile(resolve(sourceDir, "swarm-sample.json"), "utf8"),
   ),
+  // Shared design tokens: the page links ./tokens.css so the public copy
+  // renders with the same UniGrok identity as the local surfaces.
+  writeFile(
+    resolve(targetDir, "tokens.css"),
+    await readFile(resolve(sourceDir, "tokens.css"), "utf8"),
+  ),
 ]);
 
 console.log("Synchronized public Swarm Playground assets.");
