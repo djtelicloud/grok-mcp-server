@@ -12,7 +12,8 @@ For normal feature work:
 1. Keep the shared checkout on `main`; work in an isolated agent-prefixed
    worktree and branch such as `copilot/task-name` or `codex/task-name`.
 2. Implement and run the relevant local tests. Commit with the accountable
-   human sponsor and an accurate `Agent-Assisted-By:` trailer.
+   human sponsor and the canonical GitHub Copilot provider/model trailer from
+   `docs/agent-attribution.md`.
 3. Push only your own task branch and open or update a draft pull request. The
    PR must include the exact head SHA, changed paths, test results, known risks,
    generated files, sponsor, and agent provenance.

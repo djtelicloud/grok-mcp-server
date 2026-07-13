@@ -101,7 +101,9 @@ After local verification, each authorized IDE agent may push only its own
 agent-prefixed task branch and open or update a draft PR. If it lacks GitHub
 credentials, it hands the exact commit to a Codex session for publication.
 Every draft PR or handoff must name the full commit SHA, changed paths, tests,
-risks, human sponsor, and `Agent-Assisted-By:` provenance. A Codex/project-admin
+risks, human sponsor, and canonical provider/model provenance from
+[docs/agent-attribution.md](docs/agent-attribution.md). Material work uses
+`Agent-Assisted-By:` and advisory review uses `Agent-Reviewed-By:`. A Codex/project-admin
 session reviews the exact current head, binds approval to that head, alone runs
 `./scripts/land` from a `codex/*` integration branch, completes the protected
 merge, and synchronizes local `main`. Contributor agents must not push shared

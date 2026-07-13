@@ -11,11 +11,23 @@
 <!--
 Exact head SHA reviewed/tested:
 Accountable GitHub contributor:
-Assisting IDE/model (`Agent-Assisted-By`):
 Submitting agent-prefixed branch:
 Changed paths:
 Known risks, generated files, or follow-up work:
 -->
+
+### Agent and model provenance
+
+<!--
+Keep human accountability separate from tool/model credit. Add one row per
+material assistant or advisory reviewer. Use `unverified` when the exact model
+is unknown; do not infer it from a product name. Canonical commit trailers and
+allowed values: docs/agent-attribution.md.
+-->
+
+| Role | Provider product | Model | Model source | Surface | Evidence |
+| --- | --- | --- | --- | --- | --- |
+| <!-- implementation/review/etc. --> | <!-- OpenAI Codex/etc. --> | <!-- exact or unverified --> | <!-- receipt/session/user-reported/unverified --> | <!-- IDE/gateway --> | <!-- optional receipt/comment --> |
 
 ## Fact-check checklist (required for docs & config changes)
 
