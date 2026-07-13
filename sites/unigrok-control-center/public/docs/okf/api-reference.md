@@ -3106,7 +3106,7 @@ async def GrokSessionStore.get_caller_stats_today(self, limit: int=10) -> List[D
 **Keywords:** grok, session, store, get, caller, stats, today
 
 Per-caller aggregate over TODAY's telemetry rows, busiest first:
-{caller, requests, success_rate, total_cost_usd}. Unattributed rows
+{caller, requests, verified_outcomes, success_rate, total_cost_usd}. Unattributed rows
 (pre-v8 or anonymous) are excluded. Same bounded created_at-indexed
 read as get_caller_cost_today — consumed by grok_mcp_status.
 
@@ -3152,7 +3152,7 @@ the jobs-staleness convention).
 ### Method: `GrokSessionStore.get_similar_task_memories` {#utils-groksessionstore-get_similar_task_memories}
 
 ```python
-async def GrokSessionStore.get_similar_task_memories(self, prompt: str, context_id: Optional[str]=None, limit: int=3) -> List[Dict[str, Any]]
+async def GrokSessionStore.get_similar_task_memories(self, prompt: str, context_id: Optional[str]=None, limit: int=3, verified_only: bool=False) -> List[Dict[str, Any]]
 ```
 
 **Keywords:** grok, session, store, get, similar, task, memories
@@ -3178,7 +3178,7 @@ async def GrokSessionStore.reset_task_memory_sync(self) -> int
 
 **Keywords:** grok, session, store, reset, task, memory, sync
 
-Re-queue EVERY task memory for mirroring (rag backfill
+Re-queue every VERIFIED task memory for mirroring (rag backfill
 --force-reupload): deterministic document names keep the re-upload
 idempotent on the collection side. Returns the row count.
 

@@ -53,6 +53,9 @@ _LOGGER = "GrokMCP"
 
 _VALID_MODES = ("off", "mirror", "shadow", "active")
 _MODE_WARNED = False
+_COLLECTION_WARNED = False
+_DEFAULT_TASK_RAG_COLLECTION = "unigrok-task-memories-v2"
+_LEGACY_TASK_RAG_COLLECTIONS = frozenset({"unigrok-task-memories-v1"})
 
 
 def _env_float(name: str, default: float, lo: float, hi: float) -> float:
@@ -92,7 +95,19 @@ def task_rag_mode() -> str:
 def task_rag_collection_name() -> str:
     # Versioned default so a future payload/schema change can roll to a new
     # collection without breaking find-or-create against the old one.
-    return os.environ.get("UNIGROK_TASK_RAG_COLLECTION", "").strip() or "unigrok-task-memories-v1"
+    global _COLLECTION_WARNED
+    configured = os.environ.get("UNIGROK_TASK_RAG_COLLECTION", "").strip()
+    if configured in _LEGACY_TASK_RAG_COLLECTIONS:
+        if not _COLLECTION_WARNED:
+            _COLLECTION_WARNED = True
+            logging.getLogger(_LOGGER).warning(
+                "legacy task-RAG collection %r is incompatible with verified-only "
+                "evidence; using %r instead",
+                configured,
+                _DEFAULT_TASK_RAG_COLLECTION,
+            )
+        return _DEFAULT_TASK_RAG_COLLECTION
+    return configured or _DEFAULT_TASK_RAG_COLLECTION
 
 
 def has_management_key() -> bool:
@@ -226,7 +241,12 @@ class TaskMemoryMirror:
             {"memory_id": int(row["id"]), "task_hash": str(row.get("task_hash") or "")},
             separators=(",", ":"),
         )
-        outcome = "succeeded" if row.get("success") else "failed"
+        raw_outcome = row.get("success")
+        outcome = (
+            "succeeded" if raw_outcome == 1
+            else "failed" if raw_outcome == 0
+            else "has an unverified outcome"
+        )
         prose = (
             f"UniGrok task memory {int(row['id'])}: model "
             f"{row.get('model') or 'unknown'} on the {row.get('plane') or 'unknown'} "
@@ -430,7 +450,7 @@ class TaskMemoryMirror:
         summary = {"synced": 0, "failed": 0}
         try:
             rows = await store.list_unsynced_task_memories(
-                limit=limit, max_attempts=max_attempts
+                limit=limit, max_attempts=max_attempts, verified_only=True
             )
         except Exception as exc:
             logging.getLogger(_LOGGER).warning(f"Task-RAG outbox read failed: {exc}")
@@ -568,6 +588,10 @@ def semantic_route_signal(
         weight = float(row.get("fused_score") or 0.0)
         if weight <= 0:
             continue
+        if row.get("success") not in (0, 1):
+            # A provider stop is not success evidence. Unknown outcomes stay
+            # retrievable as context but never calibrate semantic routing.
+            continue
         model = str(row.get("model") or "")
         success = 1.0 if row.get("success") else 0.0
         if model == planning_model:
@@ -671,8 +695,9 @@ async def gather_semantic_evidence(
     verdict: Optional[SemanticVerdict] = None
     try:
         local = await store.get_similar_task_memories(
-            prompt, context_id=context_id, limit=10
+            prompt, context_id=context_id, limit=10, verified_only=True
         )
+        local = [row for row in local if row.get("success") in (0, 1)]
         # Keyless setups (no XAI_MANAGEMENT_API_KEY — the common case) run
         # pure local evidence: fusion and the decision signal work the same
         # with an empty remote component.
@@ -680,6 +705,7 @@ async def gather_semantic_evidence(
         if has_management_key():
             remote_hits = await get_task_memory_mirror().search(prompt, task_rag_top_k())
         mapped = await _map_remote_hits(store, remote_hits, local)
+        mapped = [row for row in mapped if row.get("success") in (0, 1)]
         local_weight, remote_weight = task_rag_fusion_weights()
         fused = fuse_task_evidence(
             local,
@@ -803,7 +829,7 @@ async def _rag_status(store: Any, out: TextIO) -> int:
         print("cloud mirror: enabled but unreachable", file=out)
         print(f"ready: no ({reason})", file=out)
     try:
-        unsynced = await store.count_unsynced_task_memories()
+        unsynced = await store.count_unsynced_task_memories(verified_only=True)
         print(f"unsynced: {unsynced}", file=out)
     except Exception as exc:
         print(f"unsynced: unavailable ({exc})", file=out)
@@ -846,11 +872,13 @@ async def _rag_backfill(
 
     max_attempts = None if retry_failed else 5
     total = len(
-        await store.list_unsynced_task_memories(limit=200, max_attempts=max_attempts)
+        await store.list_unsynced_task_memories(
+            limit=200, max_attempts=max_attempts, verified_only=True
+        )
     )
     if dry_run:
         preview = await store.list_unsynced_task_memories(
-            limit=5, max_attempts=max_attempts
+            limit=5, max_attempts=max_attempts, verified_only=True
         )
         print(f"dry-run: {total} row(s) pending (window of 200)", file=out)
         for row in preview:
@@ -880,7 +908,7 @@ async def _rag_backfill(
             # A whole batch failed: stop instead of hammering the same rows
             # (with --retry-failed they would never leave the window).
             break
-    remaining = await store.count_unsynced_task_memories()
+    remaining = await store.count_unsynced_task_memories(verified_only=True)
     print(f"done: {synced} synced, {failed} failed, {remaining} remaining", file=out)
     return 0
 

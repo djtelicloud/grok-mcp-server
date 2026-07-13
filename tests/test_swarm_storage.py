@@ -76,19 +76,19 @@ async def _create_task(store, task_id="task-1", **overrides):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Migration v13
+# Migration head
 # ─────────────────────────────────────────────────────────────────────────────
 
 class TestSwarmMigration:
     @pytest.mark.asyncio
-    async def test_fresh_db_reaches_v13_and_reopen_is_idempotent(self, tmp_path):
+    async def test_fresh_db_reaches_head_and_reopen_is_idempotent(self, tmp_path):
         db_path = tmp_path / "migrate.db"
         s = GrokSessionStore(db_path=db_path)
         await s._ensure_initialized()
         async with s._read_conn() as conn:
             async with conn.execute("PRAGMA user_version;") as cursor:
                 version = (await cursor.fetchone())[0]
-        assert version == 13
+        assert version == 14
         await s.close()
 
         # Reopen: migration gates must all no-op and the tables survive.
@@ -97,7 +97,7 @@ class TestSwarmMigration:
         assert (await s2.get_swarm_task("task-reopen"))["status"] == "queued"
         async with s2._read_conn() as conn:
             async with conn.execute("PRAGMA user_version;") as cursor:
-                assert (await cursor.fetchone())[0] == 13
+                assert (await cursor.fetchone())[0] == 14
         await s2.close()
 
 

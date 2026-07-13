@@ -18,6 +18,7 @@ import httpx
 
 _PROVIDER_CACHE: Dict[str, Any] = {"key": None, "at": 0.0, "value": None}
 _PROVIDER_CACHE_TTL_SEC = 300.0
+_AUXILIARY_TELEMETRY_INTENTS = frozenset({"history-compaction"})
 
 
 def _safe_int(value: Any) -> int:
@@ -61,6 +62,10 @@ def _plane_name(value: Any) -> str:
     return text or "unknown"
 
 
+def _is_auxiliary_telemetry(row: Dict[str, Any]) -> bool:
+    return str(row.get("intent") or "").strip() in _AUXILIARY_TELEMETRY_INTENTS
+
+
 def _created_at(row: Dict[str, Any]) -> Optional[datetime]:
     raw = str(row.get("created_at") or "").strip()
     if not raw:
@@ -81,8 +86,10 @@ def _today_rows(rows: List[Dict[str, Any]], now: Optional[datetime] = None) -> L
 
 def _aggregate(rows: List[Dict[str, Any]], plane: Optional[str] = None) -> Dict[str, Any]:
     selected = [row for row in rows if plane is None or _plane_name(row.get("chosen_plane")) == plane]
-    latencies = sorted(_safe_float(row.get("latency")) for row in selected)
-    successes = sum(1 for row in selected if _safe_int(row.get("success")) == 1)
+    outcome_rows = [row for row in selected if not _is_auxiliary_telemetry(row)]
+    latencies = sorted(_safe_float(row.get("latency")) for row in outcome_rows)
+    verified = [row for row in outcome_rows if row.get("success") in (0, 1)]
+    successes = sum(1 for row in verified if row.get("success") == 1)
     api_cost = sum(
         _safe_float(row.get("cost"))
         for row in selected
@@ -101,7 +108,7 @@ def _aggregate(rows: List[Dict[str, Any]], plane: Optional[str] = None) -> Dict[
     semantic_judge_cost = 0.0
     for row in selected:
         meta = telemetry_metadata(row)
-        if str(meta.get("caller") or "").strip():
+        if not _is_auxiliary_telemetry(row) and str(meta.get("caller") or "").strip():
             caller_attributed_rows += 1
         semantic = meta.get("semantic")
         if isinstance(semantic, dict):
@@ -132,12 +139,14 @@ def _aggregate(rows: List[Dict[str, Any]], plane: Optional[str] = None) -> Dict[
             if reason:
                 selection_reasons[reason] = selection_reasons.get(reason, 0) + 1
 
-    request_count = len(selected)
+    request_count = len(outcome_rows)
     p95_index = min(int(request_count * 0.95), request_count - 1) if request_count else 0
     return {
         "requests": request_count,
+        "verified_outcomes": len(verified),
+        "unverified_requests": request_count - len(verified),
         "successful_requests": successes,
-        "success_rate": successes / request_count if request_count else None,
+        "success_rate": successes / len(verified) if verified else None,
         "avg_latency_sec": sum(latencies) / request_count if request_count else None,
         "p95_latency_sec": latencies[p95_index] if request_count else None,
         "api_cost_usd": api_cost,
@@ -176,11 +185,14 @@ def _recent_routes(rows: List[Dict[str, Any]], limit: int = 12) -> List[Dict[str
         routing = meta.get("routing")
         if not isinstance(routing, dict):
             continue
+        raw_success = row.get("success")
         result.append({
             "created_at": row.get("created_at"),
             "caller": meta.get("caller"),
             "plane": _plane_name(row.get("chosen_plane")),
-            "success": _safe_int(row.get("success")) == 1,
+            "success": (
+                None if raw_success not in (0, 1) else raw_success == 1
+            ),
             "latency_sec": _safe_float(row.get("latency")),
             "cost_usd": _safe_float(row.get("cost")) if _plane_name(row.get("chosen_plane")) == "API" else None,
             "tokens": max(0, _safe_int(meta.get("tokens"))),
@@ -202,7 +214,9 @@ def aggregate_telemetry_planes(rows: List[Dict[str, Any]]) -> Dict[str, Dict[str
         summary = _aggregate(plane_rows)
         result[plane] = {
             "requests": summary["requests"],
-            "success_rate": summary["success_rate"] or 0.0,
+            "verified_outcomes": summary["verified_outcomes"],
+            "unverified_requests": summary["unverified_requests"],
+            "success_rate": summary["success_rate"],
             "avg_latency_sec": summary["avg_latency_sec"] or 0.0,
             "p95_latency_sec": summary["p95_latency_sec"] or 0.0,
             "total_cost_usd": summary["api_cost_usd"],
@@ -218,13 +232,27 @@ def aggregate_telemetry_callers(
         caller = str(telemetry_metadata(row).get("caller") or "").strip()
         if caller:
             grouped.setdefault(caller, []).append(row)
-    ranked = sorted(grouped.items(), key=lambda item: (-len(item[1]), item[0]))[:limit]
+    ranked = sorted(
+        grouped.items(),
+        key=lambda item: (
+            -sum(not _is_auxiliary_telemetry(row) for row in item[1]),
+            item[0],
+        ),
+    )[:limit]
     result: Dict[str, Dict[str, Any]] = {}
     for caller, caller_rows in ranked:
-        successes = sum(1 for row in caller_rows if _safe_int(row.get("success")) == 1)
+        request_rows = [
+            row for row in caller_rows if not _is_auxiliary_telemetry(row)
+        ]
+        if not request_rows:
+            continue
+        verified = [row for row in request_rows if row.get("success") in (0, 1)]
+        successes = sum(1 for row in verified if row.get("success") == 1)
         result[caller] = {
-            "requests": len(caller_rows),
-            "success_rate": successes / len(caller_rows),
+            "requests": len(request_rows),
+            "verified_outcomes": len(verified),
+            "unverified_requests": len(request_rows) - len(verified),
+            "success_rate": successes / len(verified) if verified else None,
             "total_cost_usd": sum(_safe_float(row.get("cost")) for row in caller_rows),
         }
     return result
@@ -324,7 +352,7 @@ def build_metrics_snapshot(
     lifetime_planes = sorted({_plane_name(row.get("chosen_plane")) for row in rows})
     return {
         "format": "unigrok-json-v1",
-        "schema_version": 2,
+        "schema_version": 3,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "planes": aggregate_telemetry_planes(rows),
         "callers": aggregate_telemetry_callers(rows, limit=caller_limit),

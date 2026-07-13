@@ -225,6 +225,23 @@ class TestTaskMemoryFTSRetrieval:
         assert len(results) == 1
         assert results[0]["score"] >= 2.0
 
+    @pytest.mark.asyncio
+    async def test_verified_only_query_cannot_be_crowded_by_unverified_rows(self, tstore):
+        await _save_memory(tstore, "routing planner verified evidence", success=1)
+        for i in range(20):
+            await _save_memory(
+                tstore,
+                f"routing planner unverified evidence {i}",
+                success=None,
+            )
+
+        results = await tstore.get_similar_task_memories(
+            "routing planner evidence", limit=10, verified_only=True
+        )
+
+        assert len(results) == 1
+        assert results[0]["success"] == 1
+
 
 class TestTaskMemoryFallbackParity:
     @pytest.mark.asyncio
@@ -296,7 +313,24 @@ class TestTaskRagConfig:
 
     def test_collection_name_versioned_default(self, monkeypatch):
         monkeypatch.delenv("UNIGROK_TASK_RAG_COLLECTION", raising=False)
-        assert rag.task_rag_collection_name() == "unigrok-task-memories-v1"
+        assert rag.task_rag_collection_name() == "unigrok-task-memories-v2"
+
+    def test_legacy_default_override_is_safely_migrated(self, monkeypatch, caplog):
+        monkeypatch.setenv(
+            "UNIGROK_TASK_RAG_COLLECTION", "unigrok-task-memories-v1"
+        )
+        monkeypatch.setattr(rag, "_COLLECTION_WARNED", False)
+
+        with caplog.at_level("WARNING", logger="GrokMCP"):
+            assert rag.task_rag_collection_name() == "unigrok-task-memories-v2"
+            assert rag.task_rag_collection_name() == "unigrok-task-memories-v2"
+
+        warnings = [
+            record
+            for record in caplog.records
+            if "incompatible with verified-only evidence" in record.message
+        ]
+        assert len(warnings) == 1
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -320,6 +354,12 @@ def _memory_row(memory_id=1, **overrides):
 
 
 class TestTaskMemoryMirror:
+    def test_document_body_preserves_unverified_outcome(self):
+        body = TaskMemoryMirror().document_body(_memory_row(success=None))
+
+        assert "has an unverified outcome" in body
+        assert " failed " not in body
+
     @pytest.mark.asyncio
     async def test_off_mode_never_touches_client(self, monkeypatch):
         monkeypatch.delenv("UNIGROK_TASK_RAG", raising=False)
@@ -480,6 +520,21 @@ class TestTaskMemoryMirror:
         # Exhausted rows drop out of the automatic drain window.
         assert await tstore.list_unsynced_task_memories(max_attempts=1) == []
 
+    @pytest.mark.asyncio
+    async def test_sync_pending_never_uploads_unverified_rows(self, monkeypatch, tstore):
+        monkeypatch.setenv("UNIGROK_TASK_RAG", "mirror")
+        await _save_memory(tstore, "provider-only completion", success=None)
+        client, service = _fake_collections_client()
+        mirror = get_task_memory_mirror()
+
+        with patch("src.rag.get_xai_client", return_value=client):
+            summary = await mirror.sync_pending(tstore, limit=10)
+
+        assert summary == {"synced": 0, "failed": 0}
+        service.upload_document.assert_not_called()
+        assert await tstore.count_unsynced_task_memories() == 1
+        assert await tstore.count_unsynced_task_memories(verified_only=True) == 0
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Fusion + decision signal (pure functions)
@@ -589,6 +644,21 @@ class TestSemanticRouteSignal:
             fused, PLANNING, CODING, margin=0.15, min_evidence=3
         )
         assert verdict.evidence_count == 3
+
+    def test_unverified_rows_do_not_count_or_lower_signal(self):
+        fused = self._fused([
+            (1.0, PLANNING, 1),
+            (0.9, CODING, 0),
+            (10.0, PLANNING, None),
+            (10.0, CODING, None),
+        ])
+        verdict = semantic_route_signal(
+            fused, PLANNING, CODING, margin=0.15, min_evidence=2
+        )
+
+        assert verdict.evidence_count == 2
+        assert verdict.planning_signal == pytest.approx(1.0)
+        assert verdict.coding_signal == pytest.approx(0.0)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

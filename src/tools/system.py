@@ -193,24 +193,37 @@ async def grok_mcp_status(view: Literal["text", "json"] = "text") -> str:
         total_cost = 0.0
         cli_count = 0
         api_count = 0
-        success_rate = 0.0
+        success_rate: Optional[float] = None
+        verified_outcomes = 0
+        unverified_requests = 0
         latest_context_id = "none"
 
         stats: List[Dict[str, Any]] = []
         try:
             stats = await store.get_telemetry_stats()
             if stats:
-                latencies = sorted([s["latency"] for s in stats if s.get("latency") is not None])
+                task_stats = [
+                    s
+                    for s in stats
+                    if str(s.get("intent") or "") != "history-compaction"
+                ]
+                latencies = sorted([
+                    s["latency"] for s in task_stats if s.get("latency") is not None
+                ])
                 if latencies:
                     avg_latency = sum(latencies) / len(latencies)
                     p95_idx = int(len(latencies) * 0.95)
                     p95_latency = latencies[min(p95_idx, len(latencies) - 1)]
 
                 total_cost = sum([s["cost"] for s in stats if s.get("cost") is not None])
-                cli_count = sum(1 for s in stats if s.get("chosen_plane", "").lower().startswith("cli"))
-                api_count = sum(1 for s in stats if s.get("chosen_plane", "").lower() == "api")
-                successes = sum(1 for s in stats if s.get("success") == 1)
-                success_rate = (successes / len(stats)) * 100.0
+                cli_count = sum(1 for s in task_stats if s.get("chosen_plane", "").lower().startswith("cli"))
+                api_count = sum(1 for s in task_stats if s.get("chosen_plane", "").lower() == "api")
+                verified_stats = [s for s in task_stats if s.get("success") in (0, 1)]
+                verified_outcomes = len(verified_stats)
+                unverified_requests = len(task_stats) - verified_outcomes
+                successes = sum(1 for s in verified_stats if s.get("success") == 1)
+                if verified_stats:
+                    success_rate = (successes / len(verified_stats)) * 100.0
                 latest_context_id = next((s.get("context_id") for s in stats if s.get("context_id")), "none")
         except Exception:
             pass
@@ -222,11 +235,25 @@ async def grok_mcp_status(view: Literal["text", "json"] = "text") -> str:
         try:
             caller_rows = await store.get_caller_stats_today(limit=5)
             if caller_rows:
-                top_callers = "; ".join(
-                    f"`{row['caller']}`: {row['requests']} reqs, "
-                    f"{row['success_rate'] * 100:.0f}% success, ${row['total_cost_usd']:.4f}"
-                    for row in caller_rows
-                )
+                caller_parts = []
+                for row in caller_rows:
+                    caller_rate = row.get("success_rate")
+                    rate_text = (
+                        f"{caller_rate * 100:.0f}% success"
+                        if caller_rate is not None
+                        else "success unverified"
+                    )
+                    caller_verified = int(
+                        row.get("verified_outcomes")
+                        if row.get("verified_outcomes") is not None
+                        else row["requests"] if caller_rate is not None else 0
+                    )
+                    caller_parts.append(
+                        f"`{row['caller']}`: {row['requests']} reqs, "
+                        f"{rate_text} ({caller_verified} verified), "
+                        f"${row['total_cost_usd']:.4f}"
+                    )
+                top_callers = "; ".join(caller_parts)
         except Exception:
             pass
 
@@ -291,6 +318,13 @@ async def grok_mcp_status(view: Literal["text", "json"] = "text") -> str:
             snapshot["credential_planes"] = credential_planes
             return json.dumps(snapshot, separators=(",", ":"))
 
+        success_rate_text = (
+            f"{success_rate:.1f}%" if success_rate is not None else "unverified"
+        )
+        success_rate_text += (
+            f" ({verified_outcomes} verified / "
+            f"{unverified_requests} unverified)"
+        )
         status_text = (
             "# UniGrok MCP Server Status\n\n"
             f"**Server Version:** `{server_version}`\n"
@@ -335,7 +369,7 @@ async def grok_mcp_status(view: Literal["text", "json"] = "text") -> str:
             f"- **P95 Query Latency:** `{p95_latency:.2f}s`\n"
             f"- **Total Cost (Developer API):** `${total_cost:.5f}`\n"
             f"- **CLI vs API Routing Split:** `{cli_count} CLI calls / {api_count} API calls`\n"
-            f"- **Success Rate:** `{success_rate:.1f}%`\n"
+            f"- **Success Rate:** `{success_rate_text}`\n"
             f"- **Top Callers Today:** {top_callers}\n"
             f"- **Semantic Evals:** {semantic_summary}\n"
             f"- **Latest Context Snapshot:** `{latest_context_id}`\n"

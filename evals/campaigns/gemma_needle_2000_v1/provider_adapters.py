@@ -52,10 +52,31 @@ _SECRET_VALUE_PATTERNS = (
         re.IGNORECASE,
     ),
     re.compile(
-        r'''(?:^|[^A-Za-z0-9_])["']?[A-Z0-9_-]*(?:API[_-]?KEY|SESSION[_-]?TOKEN|ACCESS[_-]?TOKEN|AUTH[_-]?TOKEN|PASSWORD|PRIVATE[_-]?KEY|CLIENT[_-]?SECRET)["']?\s*[:=]\s*(?!["']?(?:<|\$\{|\[))(?:"[^"\r\n]{8,}"|'[^'\r\n]{8,}'|[A-Za-z0-9._~+/=@!#$%^&*()-]{8,})''',
+        r"""(?:^|[^A-Za-z0-9_])["']?[A-Z0-9_-]*(?:API[_-]?KEY|SESSION[_-]?TOKEN|ACCESS[_-]?TOKEN|AUTH[_-]?TOKEN|PASSWORD|PRIVATE[_-]?KEY|CLIENT[_-]?SECRET)["']?\s*[:=]\s*(?!["']?(?:<|\$\{|\[))(?:"[^"\r\n]{8,}"|'[^'\r\n]{8,}'|[A-Za-z0-9._~+/=@!#$%^&*()-]{8,})""",
         re.IGNORECASE,
     ),
 )
+_PII_VALUE_PATTERNS = (
+    re.compile(r"\b[A-Za-z0-9+_.-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"),
+    re.compile(
+        r"(?<!\d)(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}(?!\d)"
+    ),
+    re.compile(r"(?:^|[\s\"'])(?:/Users/|/home/)[^\s\"']+"),
+    re.compile(r"(?:^|[\s\"'])[A-Za-z]:\\Users\\[^\s\"']+", re.IGNORECASE),
+)
+
+
+def _reject_non_finite_json(value: str) -> None:
+    raise ValueError(f"non-finite JSON number {value!r}")
+
+
+def _reject_duplicate_object_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate JSON object key {key!r}")
+        result[key] = value
+    return result
 
 
 class RunMode(str, Enum):
@@ -80,7 +101,9 @@ def default_cache_root() -> Path:
     """Return a user-private cache root outside every repository worktree."""
 
     if os.name == "posix" and Path.home().joinpath("Library").is_dir():
-        return Path.home() / "Library" / "Caches" / "UniGrok" / "campaigns" / CAMPAIGN_ID
+        return (
+            Path.home() / "Library" / "Caches" / "UniGrok" / "campaigns" / CAMPAIGN_ID
+        )
     return Path.home() / ".cache" / "unigrok" / "campaigns" / CAMPAIGN_ID
 
 
@@ -98,7 +121,9 @@ def _is_within(path: Path, parent: Path) -> bool:
 
 def _is_in_git_workspace(path: Path) -> bool:
     absolute = Path(os.path.abspath(path))
-    return any((candidate / ".git").exists() for candidate in (absolute, *absolute.parents))
+    return any(
+        (candidate / ".git").exists() for candidate in (absolute, *absolute.parents)
+    )
 
 
 def _reject_symlink_components(path: Path) -> None:
@@ -130,7 +155,9 @@ def _private_directory(path: Path) -> None:
     _reject_symlink_components(path)
     if path.exists():
         if not _is_owner_private_directory(path):
-            raise ValueError("Existing campaign cache directories must be owner-only (0700).")
+            raise ValueError(
+                "Existing campaign cache directories must be owner-only (0700)."
+            )
         return
 
     missing: list[Path] = []
@@ -148,7 +175,9 @@ def _private_directory(path: Path) -> None:
 def _segment(value: str) -> str:
     cleaned = value.strip()
     if not _SAFE_IDENTITY.fullmatch(cleaned):
-        raise ValueError("Provider cache identity fields must be safe opaque identifiers.")
+        raise ValueError(
+            "Provider cache identity fields must be safe opaque identifiers."
+        )
     _reject_secret_like_payload(cleaned)
     return cleaned
 
@@ -160,7 +189,9 @@ def _reject_secret_setting_names(value: Any, *, path: str = "settings") -> None:
         for raw_key, child in value.items():
             key = str(raw_key).casefold().replace("-", "_")
             if any(name in key for name in _SECRET_SETTING_NAMES):
-                raise ValueError(f"Secret or credential setting is forbidden at {path}.{raw_key}.")
+                raise ValueError(
+                    f"Secret or credential setting is forbidden at {path}.{raw_key}."
+                )
             _reject_secret_setting_names(child, path=f"{path}.{raw_key}")
     elif isinstance(value, (list, tuple)):
         for index, child in enumerate(value):
@@ -171,11 +202,41 @@ def _reject_secret_like_payload(value: Any) -> None:
     """Reject provider output containing recognizable credential material."""
 
     try:
-        serialized = json.dumps(value, ensure_ascii=False, sort_keys=True)
+        serialized = json.dumps(
+            value,
+            ensure_ascii=False,
+            sort_keys=True,
+            allow_nan=False,
+        )
     except (TypeError, ValueError) as exc:
-        raise ValueError("Provider response must contain deterministic JSON values.") from exc
+        raise ValueError(
+            "Provider response must contain deterministic JSON values."
+        ) from exc
     if any(pattern.search(serialized) for pattern in _SECRET_VALUE_PATTERNS):
-        raise ValueError("Provider response contains secret-like content and was not cached.")
+        raise ValueError(
+            "Provider response contains secret-like content and was not cached."
+        )
+
+
+def _iter_text_values(value: Any):
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for key, child in value.items():
+            yield str(key)
+            yield from _iter_text_values(child)
+    elif isinstance(value, (list, tuple)):
+        for child in value:
+            yield from _iter_text_values(child)
+
+
+def _reject_pii_like_payload(value: Any) -> None:
+    if any(
+        pattern.search(text)
+        for text in _iter_text_values(value)
+        for pattern in _PII_VALUE_PATTERNS
+    ):
+        raise ValueError("Provider artifact contains PII or a private user path.")
 
 
 def _canonical_json_bytes(value: Any) -> bytes:
@@ -185,9 +246,12 @@ def _canonical_json_bytes(value: Any) -> bytes:
             ensure_ascii=True,
             separators=(",", ":"),
             sort_keys=True,
+            allow_nan=False,
         ).encode("utf-8")
     except (TypeError, ValueError) as exc:
-        raise ValueError("Provider data must contain deterministic JSON values.") from exc
+        raise ValueError(
+            "Provider data must contain deterministic JSON values."
+        ) from exc
 
 
 def _sha256_json(value: Any) -> str:
@@ -229,11 +293,17 @@ class ProviderAdapter:
             except ValueError as exc:
                 raise ValueError(f"{label} must be a safe opaque identifier.") from exc
 
-        root = Path(cache_root).expanduser() if cache_root is not None else default_cache_root()
+        root = (
+            Path(cache_root).expanduser()
+            if cache_root is not None
+            else default_cache_root()
+        )
         _reject_symlink_components(root)
         resolved = root.resolve(strict=False)
         if _is_within(resolved, _repo_root()) or _is_in_git_workspace(resolved):
-            raise ValueError("Campaign cache root must remain outside the repository workspace.")
+            raise ValueError(
+                "Campaign cache root must remain outside the repository workspace."
+            )
         self.cache_root = resolved
         _private_directory(self.cache_root)
 
@@ -392,8 +462,12 @@ class ProviderAdapter:
         if not isinstance(content, str) or not content.strip():
             return None
         try:
-            artifact = json.loads(content)
-        except json.JSONDecodeError:
+            artifact = json.loads(
+                content,
+                parse_constant=_reject_non_finite_json,
+                object_pairs_hook=_reject_duplicate_object_pairs,
+            )
+        except (json.JSONDecodeError, ValueError):
             return None
         return artifact if isinstance(artifact, dict) else None
 
@@ -413,9 +487,12 @@ class ProviderAdapter:
             try:
                 validated = response_schema.model_validate(artifact)
             except ValidationError as exc:
-                raise ValueError("Provider response failed the requested schema.") from exc
+                raise ValueError(
+                    "Provider response failed the requested schema."
+                ) from exc
             artifact = validated.model_dump(mode="json")
         _reject_secret_like_payload(response)
+        _reject_pii_like_payload(artifact)
         if require_transport_receipt:
             self._validate_transport_receipt(response)
         return artifact
@@ -435,17 +512,23 @@ class ProviderAdapter:
         if receipt.get("provider") != self.provider:
             raise ValueError("Provider transport receipt has the wrong provider.")
         if receipt.get("configured_model") != self.model:
-            raise ValueError("Provider transport receipt has the wrong configured model.")
+            raise ValueError(
+                "Provider transport receipt has the wrong configured model."
+            )
         if not str(receipt.get("resolved_model") or "").strip():
             raise ValueError("Provider transport receipt has no resolved model.")
         if str(receipt.get("resolved_plane") or "").casefold() != self.plane.casefold():
-            raise ValueError("Provider transport receipt has the wrong credential plane.")
+            raise ValueError(
+                "Provider transport receipt has the wrong credential plane."
+            )
         if self.provider == "vertex" and (
             receipt.get("auth_kind") != "google_adc"
             or receipt.get("total_attempt_limit") != 1
             or str(receipt.get("resolved_plane") or "").casefold() != "api"
         ):
-            raise ValueError("Vertex transport receipt violates the ADC attempt contract.")
+            raise ValueError(
+                "Vertex transport receipt violates the ADC attempt contract."
+            )
         if self.provider == "unigrok" and (
             receipt.get("auth_kind") != "server_managed"
             or receipt.get("fallback_policy") != "same_plane"
@@ -453,7 +536,9 @@ class ProviderAdapter:
             or receipt.get("resolved_model") != self.model
             or str(receipt.get("resolved_plane") or "").casefold() != "cli"
         ):
-            raise ValueError("UniGrok transport receipt violates the pinned-plane contract.")
+            raise ValueError(
+                "UniGrok transport receipt violates the pinned-plane contract."
+            )
 
     def validate_response(
         self,
@@ -480,7 +565,9 @@ class ProviderAdapter:
         settings: dict[str, Any],
         response_schema: ResponseSchema | None = None,
     ) -> dict[str, Any]:
-        key = self._compute_cache_key(schema_version, template_digest, settings, request)
+        key = self._compute_cache_key(
+            schema_version, template_digest, settings, request
+        )
         provenance = self._cache_provenance(
             schema_version,
             template_digest,
@@ -495,7 +582,9 @@ class ProviderAdapter:
                 response_schema,
                 require_transport_receipt=response_schema is not None,
             ):
-                raise ValueError("Replay cache miss or invalid cached provider response.")
+                raise ValueError(
+                    "Replay cache miss or invalid cached provider response."
+                )
             return {**cached, "_cache_hit": True}
 
         if self.mode == RunMode.MOCK:
@@ -508,9 +597,13 @@ class ProviderAdapter:
             return {**response, "_cache_hit": False}
 
         if self.transport is None:
-            raise RuntimeError("Live provider execution requires an injected transport.")
+            raise RuntimeError(
+                "Live provider execution requires an injected transport."
+            )
         if response_schema is None:
-            raise ValueError("Live provider execution requires an explicit response schema.")
+            raise ValueError(
+                "Live provider execution requires an explicit response schema."
+            )
 
         # LIVE deliberately does not read a previous cache row.  Every live call
         # produces fresh transport evidence; REPLAY is the only zero-call reuse.

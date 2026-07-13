@@ -2,7 +2,7 @@
   "campaign_id": "gemma-needle-2000-v1",
   "status": "proposal",
   "stage": "research_dev",
-  "codex_status": "stage0_5_passed_pending_git_integration",
+  "codex_status": "stage1_mock_safety_gate_passed_live_generation_blocked",
   "issue_number": 65,
   "stage0_5_provider_wiring": {
     "status": "passed",
@@ -12,6 +12,18 @@
     "live_receipt_digest": "sha256:d784e49ab87d891c44985f326072191cb51fce87b9edc10c013b21a236568a54",
     "replay_status": "mechanical_pass_origin_unverified",
     "replay_receipt_digest": "sha256:b9c34b95aeea2bbd1c9df62c040528af52b763779b3ce0ead4ea6fefe2833a34"
+  },
+  "stage1_mock_safety_gate": {
+    "status": "passed",
+    "accepted_roots": 30,
+    "accepted_variants": 120,
+    "candidate_artifacts": 150,
+    "logical_role_attempts": 120,
+    "provider_transport_attempts": 0,
+    "training_writes": 0,
+    "live_generation_authorized": false,
+    "sealed_evaluation_authorized": false,
+    "next_gate": "separate exact-head Codex approval of a bounded live Stage 1 manifest"
   },
   "objective": "Create a high-quality candidate dataset for Gemma planner and Needle specialist experiments",
   "target_accepted_roots": 2000,

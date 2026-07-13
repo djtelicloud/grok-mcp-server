@@ -85,6 +85,8 @@ def test_json_artifact_parser_accepts_only_one_pure_json_object(tmp_path: Path):
         f"```json\n{json.dumps(expected)}\n```",
         f"{json.dumps(expected)}\nFinished.",
         json.dumps([expected]),
+        '{"probe":"provider-contract-v1","nonce":NaN}',
+        '{"probe":"provider-contract-v1","nonce":"first","nonce":"second"}',
         "{not-json}",
         "",
     ]
@@ -124,15 +126,13 @@ def test_live_rejects_prose_wrapped_or_wrong_schema_responses_before_caching(
         [
             {
                 "content": (
-                    "Here it is:\n"
-                    '{"probe":"provider-contract-v1","nonce":"wrapped"}'
+                    'Here it is:\n{"probe":"provider-contract-v1","nonce":"wrapped"}'
                 ),
                 "transport_receipt": _transport_receipt(),
             },
             {
                 "content": (
-                    '{"probe":"provider-contract-v1","nonce":"extra",'
-                    '"unexpected":true}'
+                    '{"probe":"provider-contract-v1","nonce":"extra","unexpected":true}'
                 ),
                 "transport_receipt": _transport_receipt(),
             },
@@ -149,6 +149,28 @@ def test_live_rejects_prose_wrapped_or_wrong_schema_responses_before_caching(
     with pytest.raises((RuntimeError, ValueError), match="(?i)(json|schema|response)"):
         _execute(adapter)
 
+    assert not list((tmp_path / "provider-cache" / "live").rglob("*.json"))
+
+
+@pytest.mark.parametrize(
+    "unsafe_nonce",
+    ["reviewer@example.test", "+1 212-555-0198", "/Users/example/private.json"],
+)
+def test_live_rejects_pii_and_private_paths_before_caching(
+    tmp_path: Path, unsafe_nonce: str
+):
+    def transport(*args, **kwargs):
+        return {
+            "content": json.dumps(
+                {"probe": "provider-contract-v1", "nonce": unsafe_nonce}
+            ),
+            "transport_receipt": _transport_receipt(),
+        }
+
+    adapter = _adapter(tmp_path, mode=RunMode.LIVE, transport=transport)
+
+    with pytest.raises(ValueError, match="PII|private user path"):
+        _execute(adapter)
     assert not list((tmp_path / "provider-cache" / "live").rglob("*.json"))
 
 
@@ -253,7 +275,9 @@ def test_secret_like_settings_are_rejected_before_cache_write(
     cache_root = tmp_path / "provider-cache"
     adapter = _adapter(tmp_path, cache_root=cache_root, mode=RunMode.MOCK)
 
-    with pytest.raises((RuntimeError, ValueError), match="(?i)(secret|credential|setting)"):
+    with pytest.raises(
+        (RuntimeError, ValueError), match="(?i)(secret|credential|setting)"
+    ):
         _execute(adapter, settings=settings, response_schema=None)
 
     assert not list(cache_root.rglob("*.json"))
@@ -314,9 +338,7 @@ def test_live_requires_matching_provider_provenance_before_caching(
     cache_root = tmp_path / "provider-cache"
 
     def transport(*args, **kwargs):
-        response = {
-            "content": '{"probe":"provider-contract-v1","nonce":"live"}'
-        }
+        response = {"content": '{"probe":"provider-contract-v1","nonce":"live"}'}
         if receipt is not None:
             response["transport_receipt"] = receipt
         return response
@@ -372,7 +394,9 @@ def test_cache_root_inside_repository_is_rejected_without_creating_it():
     cache_root = REPO_ROOT / ".provider-cache-contract-test"
     assert not cache_root.exists()
 
-    with pytest.raises((RuntimeError, ValueError), match="(?i)(cache|repository|workspace)"):
+    with pytest.raises(
+        (RuntimeError, ValueError), match="(?i)(cache|repository|workspace)"
+    ):
         ProviderAdapter(
             provider="provider-a",
             model="model-a",

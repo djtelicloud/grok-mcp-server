@@ -9,5 +9,11 @@
     "memory_selection": 15,
     "observation_typing": 10
   },
-  "pre_requisite": "Stage 1 must pass all hard gates."
+  "execution_authorized": false,
+  "pre_requisites": [
+    "The exact reviewed Stage 1 mock structural gate must pass with zero provider transports, zero training writes, and a replayable immutable report.",
+    "A separate live Stage 1 manifest with explicit call, cost, time, privacy, and provider bounds must be approved by Codex at its exact head.",
+    "The separately authorized live Stage 1 run must pass its mechanical gates and exact-head Codex review before this Stage 2 pilot is enabled."
+  ],
+  "blocked_reason": "Mock structural success does not authorize provider calls, dataset generation, training, or sealed evaluation."
 }

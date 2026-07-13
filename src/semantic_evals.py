@@ -1,13 +1,15 @@
 """Shadow semantic evals: sampled LLM-judge grading of live agent turns.
 
-Telemetry's `success` column is binary (finish_reason == "final_answer") and
-says nothing about whether the answer was any *good*. This module samples a
+Telemetry's `success` column is tri-state: NULL means unverified, while 0/1
+require an explicit verifier outcome. A provider stop alone is never success.
+This module samples a
 deterministic fraction of live turns, grades each trajectory (prompt → tool
 trace → final answer) with one cheap tool-free structured-parse call, and
 attaches the scores to the turn's already-written telemetry row.
 
 OBSERVATIONAL ONLY by contract: routing (RoutingAdvisor, routing calibration)
-never reads these scores — they exist so humans can validate the judge via
+never reads these scores, and they do not promote telemetry success. They exist
+so humans can validate the judge via
 /metrics and `grok_mcp_status` before any closed loop is considered. Rollout
 follows the UNIGROK_TASK_RAG idiom: UNIGROK_SEMANTIC_EVALS is `off` (default)
 or `shadow`; an unknown value warns once and reads as off.

@@ -2,51 +2,48 @@
 
 Last updated: 2026-07-13
 Owner: Codex
-Status: Stage 0.5 wiring is in stacked draft PR #67; parent CI and integration remain
+Status: Stage 1 mock safety gate complete; all live generation and training blocked
 
 This is the project-scoped handoff for new Codex chats. Verify drift-prone Git,
 CI, runtime, DNS, cloud, and benchmark state live before acting. Never record
 credentials, OAuth codes, tokens, or private keys here.
 
-## Exact verified state
+## Verified campaign state
 
-- Campaign Issue #65 and Gemini draft PR #66 remain the parent proposal. Codex
-  published stacked draft PR #67 from functional code commit
-  `634ffd75d1a1488262139740563330ce1d34cb44`, based directly on Gemini head
-  `8d99427d2719da286cb24245adbdedf656464070`. It is not landed on `main`.
-- Stage 0.5 securely binds Vertex through standard Google ADC and Grok through
-  the loopback UniGrok MCP. No ADC file, API key, OAuth file, CLI auth, `.env`,
-  Gemini config, Claude auth, or Codex auth was copied into a worktree.
-- The owner-only non-secret provider profile lives under
-  `~/Library/Application Support/UniGrok/campaigns/gemma-needle-2000-v1/`.
-  Provider caches and receipts are external, mode `0700`/`0600`, schema- and
-  provenance-validated, and digest-bound for integrity.
-- Final live smoke passed with exactly two transport attempts, two verified
-  provider responses, and zero dataset writes. Receipt digest:
-  `sha256:d784e49ab87d891c44985f326072191cb51fce87b9edc10c013b21a236568a54`.
-- Disconnected replay passed with dead ADC/network settings, two cache hits,
-  zero transport attempts, zero provider responses, and zero dataset writes.
-  Receipt digest:
-  `sha256:b9c34b95aeea2bbd1c9df62c040528af52b763779b3ce0ead4ea6fefe2833a34`.
-- Exact final local verification: 1,287 full-suite tests on Python 3.11; 65
-  focused campaign/release tests on Python 3.12; Ruff and `git diff --check`
-  green; Docker build green with only `.grok/prompts` and `.grok/hyperparams`
-  present in the image.
-- GitHub reports PR #67 clean and mergeable. It has no check rollout because
-  `.github/workflows/ci.yml` runs pull-request CI only when the base is `main`;
-  the integrated parent PR #66 head must therefore carry the GitHub CI gate.
+- The Stage 1 gate is a deterministic, transport-free structural exercise: 30
+  roots, 120 variants, 150 mechanically evaluated candidates, and 120 bounded
+  mock role attempts across the six declared packs.
+- Every prediction input carries its own TTL context. Exact request payloads,
+  trusted scenarios, executable oracle results, effect receipts, terminal
+  evidence, and confusion matrices are persisted in owner-private,
+  content-addressed artifacts and reconstruct cleanly in a fresh process.
+- Provider output cannot assign authority. Proposal validity, episode outcome,
+  TTL validity, effect observation, and completion are derived mechanically.
+- The attempt ledger is fail-closed under lease expiry, crash takeover,
+  duplicate work, missing artifacts, and exact-boundary completion. Started or
+  indeterminate work is never retried silently.
+- Executor code and every callable dependency are bound before execution;
+  post-bind injection is rejected before an attempt or injected call occurs.
+- Promise-only and unsolicited plan-shaped completions fail closed as errors;
+  unverified terminal text persists as `NULL`, explicit gateway failures as
+  `0`, and only a future receipt-bound verifier may write `1`. Schema v14
+  quarantines unsupported historical positives.
+- Routing, local semantic evidence, the v2 cloud mirror, caller metrics, and
+  status output all preserve the tri-state contract. Auxiliary history
+  compaction is excluded from task outcome rates, and an existing explicit v1
+  collection setting is safely redirected to v2.
+- Local verification passed 150 campaign tests and 1,480 repository tests,
+  plus Ruff, repository generation checks, JSON validation, and diff hygiene.
+- No live provider call, dataset write, model download, training run, or sealed
+  evaluation occurred while repairing or validating this gate.
 
-## Remaining gates
+## Remaining authorization gates
 
-- Review the current head of draft PR #67, then integrate it into
-  `gemini/campaign-gemma-needle-2000-v1` through the normal Codex gate. Require
-  the resulting exact parent PR #66 head to pass the GitHub CI checks against
-  `main` before any training campaign proceeds.
-- Do not start Stage 1 generation until the stacked repair is integrated into
-  the Gemini campaign branch and its exact head passes CI/Codex review.
-- Do not represent the replay cache as authenticated against a malicious
-  process already running as the same OS user. It is owner-private and
-  digest-bound; stronger same-user resistance would require a Keychain-backed
-  signing key.
-- Local Gemma weights were not downloaded. Model acquisition remains a
-  separately authorized, digest-pinned experiment.
+- Stage 2 is fail-closed. A new, bounded live Stage 1 manifest must separately
+  specify provider, call, cost, time, privacy, retry, and artifact limits and
+  receive Codex approval at its exact head before any live generation.
+- Any generated dataset must pass the mechanical gates and another exact-head
+  Codex review before training. Training and sealed evaluation require their
+  own later authorization and must remain structurally separate.
+- Stage 0.5 provider wiring uses Google ADC and the loopback UniGrok gateway;
+  never copy user credential files or secrets into the repository.

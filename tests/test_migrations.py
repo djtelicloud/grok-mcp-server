@@ -18,7 +18,7 @@ from src.utils import GrokSessionStore
 # The current schema head. Bump this alongside any new migration — the
 # sequential-chain test below will fail loudly if the source and this pin
 # ever disagree.
-SCHEMA_HEAD = 13
+SCHEMA_HEAD = 14
 
 # Every table a fully migrated store must carry (sqlite internals and the
 # optional knowledge_fts shadow tables excluded — FTS5 availability is a
@@ -133,6 +133,14 @@ def _build_v5_db(path):
             "VALUES ('coding', 'API', 1, 0.5, 0.01, 'ctx-legacy');"
         )
         conn.execute(
+            "INSERT INTO telemetry (intent, chosen_plane, success, latency, cost, context_id) "
+            "VALUES ('history-compaction', 'API', 1, 0.1, 0.0, 'ctx-fold');"
+        )
+        conn.execute(
+            "INSERT INTO telemetry (intent, chosen_plane, success, latency, cost, context_id) "
+            "VALUES ('broken-route', 'API', 0, 0.1, 0.0, 'ctx-failure');"
+        )
+        conn.execute(
             "INSERT INTO messages (session_name, role, content, timestamp) "
             "VALUES ('legacy-sess', 'user', 'hello from v5', '2026-01-01T00:00:01');"
         )
@@ -221,7 +229,9 @@ class TestMigrationChain:
                 "idx_telemetry_created_at",
             } <= indexes
 
-            # Pre-upgrade data survived.
+            # Pre-upgrade content survived. Unsupported legacy outcome labels
+            # are deliberately withdrawn by v14; verified failures and the
+            # mechanical compaction operation remain.
             messages = await store.load_messages("legacy-sess")
             assert [m["content"] for m in messages] == ["hello from v5"]
             job = await store.get_job("job-legacy")
@@ -230,6 +240,13 @@ class TestMigrationChain:
             rows = await store.get_telemetry_stats()
             legacy = [r for r in rows if r["context_id"] == "ctx-legacy"]
             assert legacy and legacy[0]["metadata"] is None
+            assert legacy[0]["success"] is None
+            assert next(r for r in rows if r["context_id"] == "ctx-fold")["success"] == 1
+            assert next(r for r in rows if r["context_id"] == "ctx-failure")["success"] == 0
+            async with store._conn.execute(
+                "SELECT success FROM task_memory WHERE task_hash = 'h1';"
+            ) as cursor:
+                assert (await cursor.fetchone())[0] is None
 
             # Post-v5 surfaces are live on the upgraded db.
             await store.upsert_routing_calibration(
