@@ -2,84 +2,56 @@
 
 Last updated: 2026-07-13
 Owner: Codex
-Status: PR #58 integration landed; no active repository gate
+Status: Conditional closeout for PR #61; verify live reachability on protected main
 
 This is the project-scoped handoff for new Codex chats. Resolve drift-prone
 Git, CI, runtime, DNS, cloud, and benchmark state live before acting. Never
 record credentials, OAuth codes, tokens, or private keys here.
 
-## Completed state
+## Completed integration state
 
-- PR #58 merged to protected `origin/main` as
-  `5de42b31077dbacf0016460a6194ffbb896f191f`. Its exact reviewed and locally
-  landed head was `d0b6cd4f7ddf788437c3d0fcb6600bf99f416a72`.
-- The accepted target is Grok first, typed Needle reflexes second, and
-  versioned code floors third. Distribution is a supervised native `uv` Python
-  core with optional HTMX/WebMCP/WASM, Mojo, Docker, and Docker Agent layers;
-  Gordon remains an external handoff until a supported machine contract exists.
-- PR #58 changed documentation only. Current Docker-facing runtime,
-  onboarding, auth, status/restart controls, and public documentation remain
-  operational truth until the native lifecycle and parity gates land. Do not
-  interpret the design merge as authorization to rip out working runtime paths.
-- PR #56 merged to protected `origin/main` as
-  `228c0c37db0211f245e92a0943823c2febd121bf`. Its exact reviewed and locally
-  landed head was `b54b8d21fc9d3af78aa9465a2fd3014f6e822a2e`.
-- GitHub Copilot and VS Code now share the supported repository skill at
-  `.github/skills/using-unigrok/SKILL.md`. The unsupported repository-root
-  `.copilot/skills` duplicate was removed during integration review.
-- Click is locked at 8.4.2, clearing `PYSEC-2026-2132`, with release-hygiene
-  coverage for project-skill discovery and the public UniGrok endpoint.
-- PR #53 merged to protected `origin/main` as
-  `381a9fe0c5909cce0ec0565bbb91d190c0543f7f`. Its exact reviewed,
-  locally landed, and CI-green head was
-  `64d3aef4eb500cec2ecf81722ca5dd40f0f942aa`.
-- The eval harness now has a cassette-backed multi-file agent task, safe
-  structural tool-trace grading, explicit task-plane selection, and a
-  fail-closed `--require-pass` command-line gate.
-- Swarm has two versioned golden-target manifests and an opt-in sequential
-  live sweep. CLI generation is same-plane, tool-free, project/config-free,
-  exact-zero metered, cancellation-safe, and retains the CLI's durable OAuth
-  refresh path.
-- `docs/cursorbench-readiness.md` records the evidence boundary: these checks
-  are CursorBench-aligned internal capability/regression evidence, not an
-  official CursorBench score.
+- PR #60 merged to protected `origin/main` as
+  `faa69801d90a7783571ccc675a5d60ce6481f984`. Its exact reviewed and locally
+  landed head was `d7edfc6c1faa471581d5c0785b0b95474b23b57e`.
+- PR #60 preserves the useful Gemini and Claude contributions from drafts #42
+  and #43, with corrected discovery, permissions, session, identity, cost, and
+  supported-tool contracts. Drafts #42 and #43 are closed as superseded.
+- PR #61 integrates draft #55's unified Control Center at contributor head
+  `1ea5f72c560325cacd8f44532baa5107635df2fe`. The reviewed implementation is
+  preserved by commits `a71bb6320d7f14349073cae8863c44d852650885` and
+  `abdf871c124125d339ea212e3702c35c95e1a703`.
+- PR #61 prevents stale cached UI assets from discarding completed Grok
+  answers, version-locks Control Center and Swarm assets, improves responsive
+  layout and onboarding, and keeps hosted protected data behind GitHub-backed
+  authorization while rendering public signed-out context.
+- No contributor worktree or untracked user file was removed.
 
-## Verification
+## Verification evidence
 
-- The PR #58 landing gate printed
-  `LANDED TO MAIN: d0b6cd4f7ddf788437c3d0fcb6600bf99f416a72`
-  after 1,220 tests and reported `Runtime: unchanged`.
-- Fresh exact-head Python 3.11/3.12 CI, Project Site, control image, Docker,
-  offline evals, CodeQL, and `Codex Approval` passed. Protected `origin/main`
-  and visible local `main` agreed at `5de42b31077dbacf0016460a6194ffbb896f191f`;
-  stable port 4765 and contributor port 4766 were healthy.
-- The PR #56 landing gate printed
-  `LANDED TO MAIN: b54b8d21fc9d3af78aa9465a2fd3014f6e822a2e`
-  after 1,220 tests; the dependency audit reported no known vulnerabilities.
-- Fresh PR #56 Python 3.11/3.12 CI, Project Site, control image, Docker,
-  offline evals, CodeQL, and exact-head `Codex Approval` passed. Local `main`
-  and `origin/main` agreed at the protected squash merge commit.
-- The landing gate printed
-  `LANDED TO MAIN: 64d3aef4eb500cec2ecf81722ca5dd40f0f942aa`
-  after 1,219 tests and a successful contributor-runtime restart/smoke test.
-- The offline eval baseline passed 13/13 with no regressions.
-- The final live Docker sweep completed both targets at exact `$0.0000`
-  metered cost: `nsquared_dedup` persisted 24 candidates with a 97.66% best
-  latency improvement; `slow_loop_optimize` persisted 5 candidates with a
-  99.82% best latency improvement.
-- Grok 4.5 API reasoning and the final human exact-diff review both found no
-  release blockers. Python 3.11/3.12 CI, Project Site, control image, Docker,
-  offline evals, CodeQL, and exact-head `Codex Approval` passed.
-- Protected `origin/main` and visible local `main` agreed at the PR merge
-  commit. Stable port 4765 and contributor port 4766 were both healthy.
+- The PR #60 landing gate printed
+  `LANDED TO MAIN: d7edfc6c1faa471581d5c0785b0b95474b23b57e`
+  after 1,222 tests. All 11 exact-head GitHub checks passed.
+- PR #61's reviewed implementation passed 1,228 Python tests, 127 focused
+  UI/HTTP tests, 21 relevant hosted-site tests, and 59 canonical deployment
+  tests. Independent exact-head review found no blocker.
+- Live browser checks covered Control Center and Swarm at 1,280, 500, and 375
+  pixels with no horizontal overflow or console errors. A live zero-config
+  Grok sample completed on the CLI plane with a routing receipt.
 
-## Remaining external gate
+## Live completion rule
+
+- If this handoff commit is not yet reachable from `origin/main`, PR #61's only
+  remaining gates are exact-head CI and Codex Approval, `./scripts/land`, the
+  protected merge, closing superseded draft #55, and synchronizing local main.
+- If this handoff is reachable from `origin/main`, PR #61 is merged, draft #55
+  should be closed, and local main should match `origin/main`; verify those
+  drift-prone facts live. Once they agree, this sweep has no active repository
+  gate.
+
+## Existing external evidence boundary
 
 - CursorBench 3.2 uses Cursor's private/internal task suite and has no public
-  submission harness. An official leaderboard result or `#1` claim requires
-  Cursor to evaluate UniGrok or provide an accepted interface.
-- Until that happens, public claims must distinguish the reproducible internal
-  suite and live golden-target results from an official CursorBench ranking.
-- Broader held-out task coverage, repeated comparative runs, and confidence
-  intervals remain product work for a stronger internal proxy; they are not
-  retroactive evidence for the official leaderboard.
+  submission harness. An official leaderboard result or `#1` claim still
+  requires Cursor to evaluate UniGrok or provide an accepted interface.
+- Public claims must distinguish the reproducible internal suite and live
+  golden-target results from an official CursorBench ranking.
