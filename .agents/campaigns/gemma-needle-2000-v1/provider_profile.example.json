@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "campaign_id": "gemma-needle-2000-v1",
+  "max_live_calls": 2,
+  "orchestrator_retry_limit": 0,
+  "vertex_max_output_tokens": 64,
+  "bindings": [
+    {
+      "provider": "vertex",
+      "credential_binding_id": "google-adc-default",
+      "auth_kind": "google_adc",
+      "project": "your-google-cloud-project",
+      "location": "global",
+      "model": "gemini-2.5-flash",
+      "role": "mutation-adjudication-smoke"
+    },
+    {
+      "provider": "unigrok",
+      "credential_binding_id": "unigrok-mcp-local",
+      "auth_kind": "server_managed",
+      "endpoint": "http://127.0.0.1:4765/mcp",
+      "model": "grok-4.5",
+      "plane": "cli",
+      "fallback_policy": "same_plane",
+      "role": "seed-critic-smoke"
+    }
+  ]
+}

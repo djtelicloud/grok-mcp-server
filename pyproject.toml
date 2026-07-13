@@ -37,6 +37,12 @@ forge = [
     "pytest>=9.1.1",
     "ruff>=0.9",
 ]
+# Source-checkout synthetic-data campaign runners use Vertex through standard
+# Google ADC. The eval runner is intentionally not shipped in the wheel; keep
+# this SDK outside the stable UniGrok runtime dependency set.
+campaign = [
+    "google-genai>=1.25,<2",
+]
 
 [project.scripts]
 unigrok-mcp = "src.cli:main"
@@ -60,12 +66,14 @@ packages = ["src"]
 # package. Keep the wheel behavior aligned with source and Docker checkouts.
 "mcp_ui" = "mcp_ui"
 "docs/okf" = "docs/okf"
-".grok" = ".grok"
+".grok/hyperparams" = ".grok/hyperparams"
+".grok/prompts" = ".grok/prompts"
 "example.env" = "example.env"
 
 [tool.hatch.build.targets.sdist]
 exclude = [
     "/.codex",
+    "/.grok/auth.json",
     "/.pytest_cache",
     "/.ruff_cache",
     "/.venv",

@@ -25,6 +25,17 @@ venv/
 .venv
 env/
 .env
+.env.*
+secrets/
+.agents/
+.claude/
+.codex/
+.gemini/
+.gcloud/
+.google/
+.vertex/
+.openai/
+.anthropic/
 
 # IDE
 .vscode/
@@ -48,9 +59,12 @@ docs/
 !docs/okf/
 !docs/okf/**
 
-# Runtime adapter configuration is required by the bare image.
-!.grok/
-!.grok/**
+# Runtime adapter configuration is required by the bare image, but OAuth is not.
+.grok/**
+!.grok/hyperparams/
+!.grok/hyperparams/**
+!.grok/prompts/
+!.grok/prompts/**
 
 # Test files
 test_*.py

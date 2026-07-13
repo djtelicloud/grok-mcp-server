@@ -1,12 +1,12 @@
 import pytest
 from datetime import datetime, timezone, timedelta
-import json
 from pydantic import ValidationError
 
 from evals.campaigns.gemma_needle_2000_v1.schemas import (
-    ToolSelectionPack, GemmaPlanStatePack, BaseRootEnvelope, EpisodeOutcome, 
-    ProposalVerdict, TTLState, OracleRegistryContract, ActionProposal, 
-    AbstentionProposal, RequestVerificationProposal, Receipt
+    EpisodeOutcome,
+    GemmaPlanStatePack,
+    ToolSelectionPack,
+    TTLState,
 )
 from evals.campaigns.gemma_needle_2000_v1.validators import MechanicalValidators
 from evals.campaigns.gemma_needle_2000_v1.mechanical_mutators import MechanicalMutators
@@ -110,11 +110,11 @@ def test_secret_pii_unsafe_path():
     
     # Legit vocabulary (should pass)
     env.objective = "Parse the user password and security token."
-    assert MechanicalValidators.scan_unsafe_credentials(env) == True
+    assert MechanicalValidators.scan_unsafe_credentials(env)
     
     # Real credentials (should fail)
     env.objective = "My secret is AIzaSyB_mockKey123456789012345678901234"
-    assert MechanicalValidators.scan_unsafe_credentials(env) == False
+    assert not MechanicalValidators.scan_unsafe_credentials(env)
 
 def test_ttl_validation_timezone_aware():
     data = get_valid_base_fixture()
@@ -135,17 +135,30 @@ def test_evaluate_episode_outcome():
     env.observed_receipts = []
     assert MechanicalValidators.evaluate_episode_outcome(env, now) == EpisodeOutcome.VERIFIED_FAILURE
 
-def test_provider_adapter_strict_validation():
-    adapter = ProviderAdapter("test", "test", "test", "test", RunMode.MOCK)
+def test_provider_adapter_strict_validation(tmp_path):
+    adapter = ProviderAdapter(
+        "test",
+        "test",
+        "test",
+        "test",
+        RunMode.MOCK,
+        cache_root=tmp_path / "provider-cache",
+    )
     
     # Reject empty
-    assert adapter.validate_response({"content": ""}) == False
+    assert not adapter.validate_response({"content": ""})
     # Reject promise-only
-    assert adapter.validate_response({"content": "I'll do that."}) == False
-    # Accept promise-preface with valid JSON artifact
-    assert adapter.validate_response({"content": "I'll do that.\n{ \"test\": \"valid\" }"}) == True
+    assert not adapter.validate_response({"content": "I'll do that."})
+    # Reject promise-preface even when it includes a JSON artifact
+    assert not adapter.validate_response(
+        {"content": "I'll do that.\n{ \"test\": \"valid\" }"}
+    )
+    # Accept exactly one pure JSON artifact
+    assert adapter.validate_response({"content": "{ \"test\": \"valid\" }"})
     # Reject malformed
-    assert adapter.validate_response({"content": "I'll do that.\n{ \"test\": \"valid\" "}) == False
+    assert not adapter.validate_response(
+        {"content": "I'll do that.\n{ \"test\": \"valid\" "}
+    )
 
 def test_mechanical_mutator_lineage():
     data = get_valid_base_fixture()
