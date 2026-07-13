@@ -222,9 +222,11 @@ def test_docker_image_copies_mcp_ui_assets():
 
     assert "COPY mcp_ui/ ./mcp_ui/" in dockerfile
     assert "COPY docs/okf/ ./docs/okf/" in dockerfile
-    assert "COPY .grok/ ./.grok/" in dockerfile
+    assert "COPY .grok/prompts/ ./.grok/prompts/" in dockerfile
+    assert "COPY .grok/hyperparams/ ./.grok/hyperparams/" in dockerfile
     assert "!docs/okf/**" in dockerignore
-    assert "!.grok/**" in dockerignore
+    assert "!.grok/prompts/**" in dockerignore
+    assert "!.grok/hyperparams/**" in dockerignore
 
 
 def test_cloudrun_requires_api_keys(monkeypatch):

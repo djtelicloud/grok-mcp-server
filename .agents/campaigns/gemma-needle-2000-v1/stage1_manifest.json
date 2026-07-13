@@ -11,5 +11,5 @@
     "Blinded Grok 4.5 critic execution",
     "Gemini adjudicator execution"
   ],
-  "pre_requisite": "Complete Stage 0 pass."
+  "pre_requisite": "Complete Stage 0 and the bounded Stage 0.5 live/replay provider wiring gate."
 }

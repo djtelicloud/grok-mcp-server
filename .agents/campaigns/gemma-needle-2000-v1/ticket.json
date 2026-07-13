@@ -2,8 +2,17 @@
   "campaign_id": "gemma-needle-2000-v1",
   "status": "proposal",
   "stage": "research_dev",
-  "codex_status": "pending_codex_acceptance",
+  "codex_status": "stage0_5_passed_pending_git_integration",
   "issue_number": 65,
+  "stage0_5_provider_wiring": {
+    "status": "passed",
+    "dataset_writes": 0,
+    "vertex_auth": "google_adc_reference_only",
+    "grok_auth": "unigrok_server_managed_reference_only",
+    "live_receipt_digest": "sha256:d784e49ab87d891c44985f326072191cb51fce87b9edc10c013b21a236568a54",
+    "replay_status": "mechanical_pass_origin_unverified",
+    "replay_receipt_digest": "sha256:b9c34b95aeea2bbd1c9df62c040528af52b763779b3ce0ead4ea6fefe2833a34"
+  },
   "objective": "Create a high-quality candidate dataset for Gemma planner and Needle specialist experiments",
   "target_accepted_roots": 2000,
   "variants_per_root": {

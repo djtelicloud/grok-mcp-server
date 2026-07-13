@@ -122,6 +122,8 @@ celerybeat.pid
 
 # Environments
 .env
+.env.*
+!.env.example
 .venv
 env/
 venv/
@@ -137,6 +139,23 @@ chats/
 logs/
 .unigrok-state/
 artifacts/
+.agents/data_shards/
+
+# Local provider credentials and private agent overrides. Runtime code resolves
+# credentials in place (ADC, Keychain, or UniGrok); these files are never copied.
+.codex/auth.json
+.codex/config.toml
+.gemini/config/
+.gemini/settings.local.json
+.claude/.credentials.json
+.claude/settings.local.json
+.grok/auth.json
+.google/
+.gcloud/
+.vertex/
+.openai/
+.anthropic/
+secrets/
 
 # Spyder project settings
 .spyderproject

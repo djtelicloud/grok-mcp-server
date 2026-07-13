@@ -1,0 +1,33 @@
+{
+  "stage": "0_5_provider_wiring",
+  "objective": "Prove credential-safe Vertex ADC and loopback UniGrok connectivity before any dataset generation.",
+  "dataset_writes": 0,
+  "max_live_calls": 2,
+  "orchestrator_retry_limit": 0,
+  "providers": [
+    {
+      "provider": "vertex",
+      "auth_kind": "google_adc",
+      "call_limit": 1
+    },
+    {
+      "provider": "unigrok",
+      "auth_kind": "server_managed",
+      "plane": "cli",
+      "fallback_policy": "same_plane",
+      "call_limit": 1
+    }
+  ],
+  "required_gates": [
+    "Explicit --confirm-live opt-in",
+    "One pure JSON object accepted against an exact schema",
+    "No promise-only or prose-wrapped completion accepted",
+    "Private external cache and receipt permissions",
+    "No raw credential copied, logged, cached, or committed",
+    "Offline replay succeeds with zero provider calls"
+  ],
+  "known_limitations": [
+    "The public UniGrok agent contract does not expose a hard output-token cap; this smoke bounds live call count, uses fast mode, and accepts only the tiny exact schema.",
+    "The owner-private replay cache is identity- and digest-bound for integrity, not authenticated against a malicious process already running as the same OS user."
+  ]
+}
