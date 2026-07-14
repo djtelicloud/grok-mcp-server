@@ -1,8 +1,8 @@
 # Hosted Grok PR review — P0 operator plan
 
-- **Status:** Execution checklist (Wave following Console Health glass + docs policy)
+- **Status:** In progress — repository **vars set** (2026-07-14); Control UI grokReview un-hardcode in flight; Actions client secret may still be missing
 - **Date:** 2026-07-14
-- **Decision owner:** Human sponsor; Codex owns land/deploy gates
+- **Decision owner:** Human sponsor; Codex owns land/deploy gates (Grok may land when human authorizes and Codex is stalled)
 - **North star:** Production review never depends on a developer Mac, Docker, or tunnel.
 
 ## Live evidence (re-verify before each step)
@@ -59,13 +59,15 @@ Local self-hosted + CLI plane stays a **lab** path only.
 
 Set on `djtelicloud/grok-mcp-server`:
 
-| Variable | Value |
-| --- | --- |
-| `UNIGROK_REVIEW_RUNNER_JSON` | `"ubuntu-latest"` (JSON string) |
-| `UNIGROK_REVIEW_MCP_URL` | `https://mcp.grokmcp.org/mcp` |
-| `UNIGROK_REVIEW_PLANE` | `api` |
+| Variable | Value | Status (2026-07-14) |
+| --- | --- | --- |
+| `UNIGROK_REVIEW_RUNNER_JSON` | `"ubuntu-latest"` (JSON string) | **SET** |
+| `UNIGROK_REVIEW_MCP_URL` | `https://mcp.grokmcp.org/mcp` | **SET** |
+| `UNIGROK_REVIEW_PLANE` | `api` | **SET** |
 
 Optional kill-switch later: workflow `if` gated on `vars.UNIGROK_REVIEW_ENABLED != '0'`.
+
+**Remaining bridge:** repository secret `UNIGROK_CLIENT_TOKEN` (narrow gateway client; never `XAI_API_KEY`) **or** P1 OIDC mint. Without one of these, Actions cannot authenticate to the twin.
 
 ### 3. Client credential for Actions (temporary bridge)
 
@@ -102,12 +104,13 @@ Hard token budgets on the twin (`UNIGROK_CALLER_BUDGETS`) should be set in Cloud
 - Twin 5xx → no invented score on Control.
 - Outside contributor `@grok review` → workflow does not run (association gate).
 
-## P1 (next, not this PR)
+## P1 (next)
 
 1. GitHub OIDC → Control short-lived `unigrok:review` mint (retire static client).
-2. Un-hardcode Control `grokReview` snapshot from real broker/probe state.
+2. ~~Un-hardcode Control `grokReview` snapshot from real broker/probe state.~~ → PR `grok/hosted-review-ui-truth` derives state from MCP OAuth config + UniGrok review check runs (no invented scores).
 3. Per-subject budgets + spend log in Control.
 4. Optional: workflow default in-repo once vars proven (still var-driven).
+5. Set or rotate `UNIGROK_CLIENT_TOKEN` (break-glass) until OIDC lands; smoke `@grok review` Mac-off.
 
 ## Explicit NO-GOs
 

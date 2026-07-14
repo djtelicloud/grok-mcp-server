@@ -7,6 +7,11 @@ import type {
   GitHubWorkflowRun,
   PullRequestSummary,
 } from "./control-center-contract";
+import {
+  deriveGrokReviewSurface,
+  mcpOAuthConfigured,
+  type GrokReviewCheckEvidence,
+} from "./grok-review-surface";
 
 type OptionalResult =
   | { ok: true; value: unknown }
@@ -65,6 +70,7 @@ export async function fetchGitHubControlSnapshot(
     },
   );
 
+  const reviewChecks = collectUnigrokReviewChecks(pullRequestEvidence);
   return sanitizeGitHubControlSnapshot(
     config,
     {
@@ -76,6 +82,10 @@ export async function fetchGitHubControlSnapshot(
       workflowRuns,
     },
     now,
+    {
+      oauthConfigured: mcpOAuthConfigured(),
+      reviewChecks,
+    },
   );
 
   async function optionalRequest(path: string, token: string, fetcher: typeof fetch): Promise<OptionalResult> {
@@ -92,6 +102,10 @@ export function sanitizeGitHubControlSnapshot(
   config: Pick<GitHubAuthConfig, "repository">,
   input: unknown,
   now = new Date(),
+  grokReviewInput: {
+    oauthConfigured: boolean;
+    reviewChecks: GrokReviewCheckEvidence[];
+  } = { oauthConfigured: false, reviewChecks: [] },
 ): ControlCenterSnapshot {
   const raw = readRecord(input);
   if (!raw || !isOptionalResult(raw.workflowRuns) || !isOptionalResult(raw.deployments) || !isOptionalResult(raw.rulesets)) {
@@ -144,13 +158,7 @@ export function sanitizeGitHubControlSnapshot(
           }
         : { items: [], message: "GitHub ruleset data could not be refreshed.", state: "error" },
     },
-    grokReview: {
-      findings: [],
-      message: "Hosted UniGrok review is not connected yet.",
-      score: null,
-      state: "unconfigured",
-      verdict: null,
-    },
+    grokReview: deriveGrokReviewSurface(grokReviewInput),
     pullRequests: {
       items: pullRequests,
       message: pullRequests.length
@@ -159,6 +167,32 @@ export function sanitizeGitHubControlSnapshot(
       state: "ready",
     },
   };
+}
+
+function collectUnigrokReviewChecks(
+  pullRequestEvidence: RawPullRequestEvidence[],
+): GrokReviewCheckEvidence[] {
+  const checks: GrokReviewCheckEvidence[] = [];
+  for (const evidence of pullRequestEvidence) {
+    const pullNumber = readPositiveInteger(readRecord(evidence.pullRequest)?.number);
+    if (!pullNumber) continue;
+    const checkRuns = readArray(readRecord(evidence.checks)?.check_runs).slice(0, 100);
+    for (const entry of checkRuns) {
+      const record = readRecord(entry);
+      const name = safeText(record?.name, 120);
+      if (!name) continue;
+      const conclusion =
+        typeof record?.conclusion === "string" && record.conclusion.trim()
+          ? record.conclusion.trim().toLowerCase()
+          : null;
+      const status =
+        typeof record?.status === "string" && record.status.trim()
+          ? record.status.trim().toLowerCase()
+          : null;
+      checks.push({ conclusion, name, pullNumber, status });
+    }
+  }
+  return checks;
 }
 
 function sanitizePullRequest(
