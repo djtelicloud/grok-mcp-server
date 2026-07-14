@@ -27,7 +27,7 @@ tool availability.
 |---|---|---|
 | **Audience** | End user / IDE agent | Contributor developing UniGrok |
 | **HTTP surface** | One primary endpoint `http://localhost:4765/mcp` | Stable Core `:4765` + contributor Forge `:4766` |
-| **Credential plane** | API key **or** SuperGrok CLI (or both) — **public-critical** | Same dual planes + management key for Collections admin |
+| **Provider authority** | Two Grok inference planes: API key **or** SuperGrok CLI (or both) — **public-critical** | The same two inference planes, plus separate optional non-inference management authority for operation-scoped administration such as Collections |
 | **Transport** | Loopback Streamable HTTP MCP primary | Also trusted stdio for full contributor tool surface |
 
 Phoneword mode-dial ports (if enabled) are **aliases of the same Core service**,
@@ -51,10 +51,13 @@ contributor gates — that is not the public product.
 
 **LIVE:**
 
-- MCP `agent`, status, discovery, optional PR review tool
+- MCP `agent`, `grok_mcp_status`, `grok_mcp_discover_self`, and optional
+  `review_pull_request`
 - Workspace-neutral (no automatic browse of the user’s app repo)
-- Loopback Control Center at `/ui/` for **this machine’s** health, cost ledger,
-  and optional playground
+- Trusted-loopback Control Center at `http://localhost:4765/ui/` for **this
+  machine’s** health, cost ledger, and optional agent playground. The
+  playground can invoke providers and spend metered credits; IDE MCP remains
+  the primary chat path.
 - Credentials stay in server env / CLI OAuth volume — never in IDE MCP JSON
 
 **TARGET Console (local Core UI):**
@@ -89,7 +92,7 @@ closed; short cache; never long-lived “is_insider” without recheck.
 Cloud must **never** accept, store, or proxy `XAI_API_KEY`, CLI OAuth material,
 or gateway secrets.
 
-### 4.4 IDE MCP chat — sole primary chat path
+### 4.4 IDE MCP chat — primary chat path
 
 **PRIMARY product chat** for PUBLIC and INSIDER daily work:
 
