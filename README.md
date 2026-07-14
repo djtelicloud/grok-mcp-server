@@ -128,7 +128,17 @@ Optional status UI (this machine only): open
    console.
 5. Do not paste secrets into chat.
 
-## 7. Next steps
+## 7. Project site (optional)
+
+The public site at [https://grokmcp.org](https://grokmcp.org) is **bound to the
+existing project** repository. It is not an idless installer template. For the
+optional contributor control surface, **GitHub App OAuth establishes identity**
+and each privileged request performs a **fresh installation-token lookup** of
+repo role; a **Sites rollback fallback** remains only for the legacy identity
+binding path. That control plane does not replace local UniGrok MCP on
+`localhost:4765`, and it never holds your xAI key.
+
+## 8. Next steps
 
 | I want… | Go here |
 |---|---|
