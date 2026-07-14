@@ -1,8 +1,8 @@
 # Codex Active Work
 
-Last updated: 2026-07-13
+Last updated: 2026-07-14
 Owner: Codex
-Status: Stage 1 mock safety gate complete; all live generation and training blocked
+Status: Maintainer sweep complete; Stage 1 live generation and training remain blocked
 
 This is the project-scoped handoff for new Codex chats. Verify drift-prone Git,
 CI, runtime, DNS, cloud, and benchmark state live before acting. Never record
@@ -47,3 +47,15 @@ credentials, OAuth codes, tokens, or private keys here.
   own later authorization and must remain structurally separate.
 - Stage 0.5 provider wiring uses Google ADC and the loopback UniGrok gateway;
   never copy user credential files or secrets into the repository.
+
+## Latest maintainer sweep
+
+- Local `main` and `origin/main` are synchronized at
+  `5e5d921a0bc6f102df4469f4ce9cc7a37b2bde7e`.
+- The landing receipt printed `LANDED TO MAIN` after 1,564 tests. Main CI and
+  CodeQL are green at that exact commit.
+- The landed repair prevents release-hygiene tests from scanning ignored local
+  IDE worktree metadata. The pre-existing untracked `scratch_swarm/` remains
+  untouched.
+- Open draft PRs #64 and #73-#76 remain review-required. PR #73, #75, and #76
+  have current unresolved review feedback; no external thread was changed.
