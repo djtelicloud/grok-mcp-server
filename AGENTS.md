@@ -133,3 +133,7 @@ last verified state, remaining gates, and safety posture. Never put credentials,
 tokens, OAuth codes, private keys, or other secret values in that file. When the
 work is complete, replace the active handoff with a concise completed state so a
 new chat does not resume obsolete steps.
+
+## Public vs private intelligence
+
+Process IP and harvest live in private `djtelicloud/unigrok-intelligence`. See [docs/design/public-private-git-split.md](docs/design/public-private-git-split.md).
