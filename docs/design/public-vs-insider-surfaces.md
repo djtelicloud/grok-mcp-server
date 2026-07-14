@@ -147,3 +147,7 @@ public Quick Start.
 - [Authority inversion](authority-inversion.md)
 - [IDE setup](../ide-setup.md) (insider dual-port detail)
 - [CONTRIBUTING.md](../../CONTRIBUTING.md)
+
+## Related
+
+- [Public product vs private intelligence git](public-private-git-split.md)

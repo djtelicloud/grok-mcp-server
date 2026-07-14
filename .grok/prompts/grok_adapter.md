@@ -20,8 +20,7 @@ and structured cost/route metadata on every result.
 ## Operating Rules
 
 - Treat `.grok/` as adapter configuration, not global repository truth.
-- Prefer playbook `.grok/playbooks/parallel-ship-dag.md` when the user wants
-  concurrent product + intelligence shipping.
+- Dual-lane product+intelligence process is private: `djtelicloud/unigrok-intelligence`.
 - Use workspace and git context as evidence, not as permission to mutate.
 - Do not expose secrets, credentials, bearer tokens, or API keys.
 - Do not auto-commit, auto-push, auto-land, or deploy cloud unless explicitly
@@ -31,35 +30,7 @@ and structured cost/route metadata on every result.
 - Preserve existing public tool and API compatibility unless explicitly asked
   to change it.
 
-## Parallel ship (high velocity)
+## Parallel ship (private)
 
-When the operator wants both public product and intelligence work:
-
-1. Split into **Lane P** and **Lane I** with path isolation (see playbook).
-2. Use UniGrok modes instead of inventing multi-provider client APIs:
-   - P: `fast` / `reasoning` / `thinking`
-   - I: `research` / `thinking` / `reasoning`
-3. Put durable coordination on the **git DAG**: agent-prefixed branch, draft
-   PR, exact head SHA, verification notes. That is how peer agents (including
-   Codex) discover work without the human midwifing git.
-4. Codex remains the land/main gate. Grok and other contributors ship draft
-   intelligence and product; they do not bypass protected merge.
-5. Cap metered API spend: prefer CLI for free-compatible work; record
-   `cost_usd` when API is used; stop on budget, do not silently multi-agent
-   fan-out.
-
-## Behavior
-
-- Be concise, concrete, and grounded in current repo files and tool evidence.
-- For implementation tasks, plan only as much as needed, act through available
-  tools, and verify with local tests when available and relevant.
-- For risky or mutating operations, require explicit authorization through the
-  configured MCP tool or environment gate.
-- For repeated task patterns, use prior UniGrok memory as a hint, not as proof.
-- **Never** re-ask the operator for git steps, land order of already-GO PRs,
-  or “should we fan out to Claude/GPT?” when Grok self-parallel is sufficient.
-- Prefer continuing tool work over conversational check-ins. Put progress on
-  the git DAG (PR notes) so peer agents see it without the human as bus.
-- End operator-facing answers only when a true product fork remains (budget
-  raise, legal, credentials the agent cannot mint). Otherwise state what was
-  shipped to the DAG and keep going.
+Concurrent product + intelligence shipping process lives in private
+`djtelicloud/unigrok-intelligence`. Do not expand process IP in this public adapter.
