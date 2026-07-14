@@ -48,12 +48,24 @@ from .contracts import (
     transport_resource_identity,
 )
 from .errors import (
+    ProviderAuthorizationInvariantError,
     ProviderConfigurationError,
     ProviderError,
     ProviderProtocolError,
     ProviderTransportError,
 )
 from .gemini import GeminiAdapter
+from .mcp_sampling import (
+    MAX_MCP_SAMPLING_EFFECT_CLAIMS,
+    MCP_PROVIDER_GRANTS_SCOPE_KEY,
+    MCP_SESSION_AUTHORIZATION_SCOPE_KEY,
+    MCP_SESSION_RUNTIME_SCOPE_KEY,
+    MCPSessionAuthorization,
+    MCPSamplingSessionRuntime,
+    StatefulMCPSamplingLease,
+    TrustedMCPProviderGrant,
+    create_stateful_mcp_sampling_lease,
+)
 from .openai import OpenAIAdapter
 from .registry import build_provider_registry
 from .subscription import (
@@ -64,14 +76,13 @@ from .subscription import (
     ClientSamplingRequest,
     ClientSamplingResult,
     MCPClientSamplingAdapter,
-    SamplingCallback,
     SamplingCapability,
-    SamplingClientBinding,
     SamplingMessage,
     SamplingModelHint,
     SamplingModelPreferences,
     SamplingTextContent,
     build_subscription_registry,
+    provider_request_digest,
 )
 from .vertex import ADCIdentity, VertexADCAdapter, load_google_adc_identity
 
@@ -99,9 +110,16 @@ __all__ = [
     "GrokWorkerBrokerResult",
     "GrokWorkerDelegation",
     "GrokWorkerLaneAuthorization",
+    "MCP_PROVIDER_GRANTS_SCOPE_KEY",
+    "MCP_SESSION_AUTHORIZATION_SCOPE_KEY",
+    "MCP_SESSION_RUNTIME_SCOPE_KEY",
+    "MAX_MCP_SAMPLING_EFFECT_CLAIMS",
+    "MCPSessionAuthorization",
+    "MCPSamplingSessionRuntime",
     "OpenAIAdapter",
     "MCPClientSamplingAdapter",
     "ProviderAdapter",
+    "ProviderAuthorizationInvariantError",
     "ProviderAttemptHarvestTrigger",
     "ProviderAttemptResult",
     "ProviderAttemptStart",
@@ -122,20 +140,22 @@ __all__ = [
     "ProviderTokenUsage",
     "ProviderTransportError",
     "RouteClass",
-    "SamplingCallback",
     "SamplingCapability",
-    "SamplingClientBinding",
     "SamplingMessage",
     "SamplingModelHint",
     "SamplingModelPreferences",
     "SamplingTextContent",
+    "StatefulMCPSamplingLease",
+    "TrustedMCPProviderGrant",
     "VertexADCAdapter",
     "build_provider_registry",
     "build_subscription_registry",
+    "create_stateful_mcp_sampling_lease",
     "DISABLED_SUBSCRIPTION_SURFACES",
     "load_google_adc_identity",
     "model_visible_messages",
     "provider_result_matches_start",
+    "provider_request_digest",
     "transport_resource_identity",
     "WorkerAuthority",
     "WorkerFallbackPolicy",

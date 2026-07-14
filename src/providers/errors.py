@@ -26,3 +26,14 @@ class ProviderTransportError(ProviderError):
 
 class ProviderProtocolError(ProviderError):
     pass
+
+
+class ProviderAuthorizationInvariantError(ProviderError):
+    """A server-owned authorization invariant failed after routing.
+
+    This is deliberately neither a configuration, transport, nor protocol
+    failure.  In particular, a consumed one-shot delegation must never make a
+    broker eligible to repeat the effect through an API fallback.
+    """
+
+    pass
