@@ -217,6 +217,7 @@ def test_stable_and_contributor_compose_files_are_separate():
     for phoneword_port in (2886, 3278, 7327, 8465, 7724):
         assert str(phoneword_port) in dials
 
+
 @pytest.mark.asyncio
 async def test_stable_discover_self_has_no_forge_connect_recipes(monkeypatch):
     """Public/stable discover prose must not coach Forge 4766 or land workflows."""
@@ -250,3 +251,17 @@ async def test_public_mcp_instructions_prefer_core_endpoint_and_plan_critique():
     assert "4766" not in text
     assert "scripts/land" not in text
 
+
+def test_using_unigrok_skill_variants_preserve_plan_critique_opt_in():
+    variants = (
+        Path("skills/using-unigrok/SKILL.md"),
+        Path(".agents/skills/using-unigrok/SKILL.md"),
+        Path(".claude/skills/using-unigrok/SKILL.md"),
+        Path(".github/skills/using-unigrok/SKILL.md"),
+    )
+
+    for path in variants:
+        text = path.read_text(encoding="utf-8").lower()
+        assert "only when the user wants a grok second opinion" in text or (
+            "when the user wants a grok second opinion" in text
+        ), f"{path} lost the explicit user opt-in condition"
