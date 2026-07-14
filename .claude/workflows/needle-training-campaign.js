@@ -3,11 +3,11 @@ export const meta = {
   description: 'Confusion-driven Needle training campaign with mechanical gates (mock-first; live requires a Codex-approved training manifest)',
   whenToUse: 'Run the Needle training-experiment loop from an immutable training packet: corpus vetoes, arm lanes, Pareto/retention gates, evidence bundle. Default mode=mock replays committed research_dev artifacts and trains nothing.',
   phases: [
-    { title: 'Preflight', detail: 'authorization, packet hashes, frozen split policy, env pins' },
-    { title: 'Corpus veto', detail: 'grouped-split, leakage, dedup, balance — hard gates' },
-    { title: 'Arm lanes', detail: 'per-arm train+eval+retention (mock: replay committed artifacts)' },
-    { title: 'Cross-arm gate', detail: 'trivial baselines, Pareto/forgetting, multi-seed rules' },
-    { title: 'Evidence', detail: 'manifest regen, report draft, adversarial claim verification' },
+    { title: 'Preflight', detail: 'digest-sealed validator receipt: packet hashes, frozen split policy, env pins' },
+    { title: 'Corpus veto', detail: 'digest-sealed validator receipt: leakage, dedup, balance, secrets — hard gates' },
+    { title: 'Arm lanes', detail: 'frozen arm records + mechanical lane vitals from validator receipts (mock: replay)' },
+    { title: 'Cross-arm gate', detail: 'control comparison, retention, multi-seed rules — computed here from verified payloads' },
+    { title: 'Evidence', detail: 'report draft, adversarial claim verification, typed next_harvest_request (request-only)' },
   ],
 }
 
@@ -17,21 +17,47 @@ export const meta = {
 // mode=mock (default): transport-free discipline. NO training run, NO dataset
 //   generation, NO sealed evaluation. Inputs are the committed research_dev
 //   bundle (evals/needle_lab/); arm records are REPLAYED from
-//   data/arm_candidates.json + logs, never invented. Purpose: prove the
-//   orchestration, veto, gate, ledger, and evidence contracts end-to-end —
-//   the same pattern as the campaign's stage1 mock safety gate.
+//   data/arm_candidates.json + logs, never invented.
 //
 // mode=live: requires args.manifest — a Codex-approved training manifest
 //   (exact-head approval, separate PR) with explicit bounds:
 //   { training_enabled: true, packet: <immutable packet path OUTSIDE
 //     research_dev>, max_lanes, seeds, max_iterations, wall_budget_min,
-//     sealed_evaluation_enabled }. The script throws before any work if the
-//   manifest is missing or does not authorize training. The sealed set path
-//   is never given to any agent except the single final sealed evaluation,
-//   and only when sealed_evaluation_enabled === true.
+//     sealed_evaluation_enabled, receipt_digest_pins: { preflight, corpus_veto,
+//     arm_records } }. The script throws before any work if the manifest is
+//   missing or does not authorize training. The sealed set path is never given
+//   to any agent except the single final sealed evaluation, and only when
+//   sealed_evaluation_enabled === true.
 //
-// The script is the mechanical authority: agents diagnose and draft; only
-// this control flow decides pass/fail, and every gate rule is code below.
+// MECHANICAL AUTHORITY — HOW GATE TRUTH IS ESTABLISHED
+//
+// Gate decisions are made by deterministic validators that live in executable
+// repository code: `evals/needle_gates` (Python, tested by
+// tests/test_needle_gates.py). Each validator emits a digest-sealed receipt:
+//
+//   { schema: "needle-gate-receipt/v1", validator, payload_b64,
+//     payload_sha256 }
+//
+// where payload_sha256 = SHA-256 over the exact base64-decoded payload bytes.
+// Agents in this workflow only RUN the validator CLI and TRANSCRIBE the
+// receipt back; they return no pass booleans and no measurements of their
+// own. This script base64-decodes the payload, recomputes SHA-256 with the
+// embedded implementation below, and derives every gate decision from the
+// verified typed payload. Any decode/digest/schema mismatch throws — fail
+// closed, never fall back to agent prose.
+//
+// Because this workflow runtime cannot execute the Python validators
+// directly, transcription alone cannot prove the receipt was produced by the
+// committed code. Two layers close that gap:
+//   • mock: receipts are written to disk (--out) so any reviewer can rerun
+//     `python -m evals.needle_gates verify --receipt <file> --expect-digest`
+//     and rerun the validators; the digest in this run's result binds the
+//     audit trail. Mock trains nothing, so the residual risk is bounded.
+//   • live: the Codex-approved manifest MUST pin the expected
+//     payload_sha256 for each gate receipt (receipt_digest_pins), computed
+//     by running the validators out-of-band during approval. A presented
+//     receipt whose digest does not match its pin throws. No pins → refuse
+//     to start. Agent prose can therefore never become gate truth.
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Tolerate args arriving JSON-encoded as a string (observed in practice).
@@ -40,6 +66,9 @@ const MODE = A.mode || 'mock'
 const STOP_AFTER = A.stop_after || 'full' // preflight|veto|lanes|gate|full
 const RUN_STAMP = A.run_stamp || 'unstamped-run' // caller supplies; no Date.now in workflows
 const MAX_ITER = A.max_iterations || 1
+const CAMPAIGN_ID = A.campaign_id || 'needle-campaign'
+const SOURCE_DATASET = A.source_dataset_id || 'D0001'
+const TARGET_DATASET = A.target_dataset_id || 'D0002'
 
 let manifest = null
 if (MODE === 'live') {
@@ -54,6 +83,15 @@ if (MODE === 'live') {
   if (String(manifest.packet).includes('needle_lab')) {
     throw new Error('live mode refused: research_dev quarantine data can never be a live training packet.')
   }
+  const pins = manifest.receipt_digest_pins
+  if (!pins || !pins.preflight || !pins.corpus_veto || !pins.arm_records) {
+    throw new Error(
+      'live mode refused: manifest.receipt_digest_pins must pin the expected ' +
+      'payload_sha256 for preflight, corpus_veto, and arm_records receipts ' +
+      '(computed by running evals.needle_gates during Codex approval). ' +
+      'Without pins this runtime cannot verify validator provenance — fail closed.'
+    )
+  }
 } else if (MODE !== 'mock') {
   throw new Error(`unknown mode "${MODE}" — use mock or live`)
 }
@@ -66,55 +104,128 @@ if (MODE === 'mock' && !String(PACKET).includes('needle_lab')) {
   throw new Error('mock mode refused: packet must be a research_dev needle_lab bundle.')
 }
 const SEEDS = MODE === 'mock' ? [42] : (manifest.seeds || [42, 43, 44])
+const RECEIPTS_DIR = `/tmp/needle-gates-${RUN_STAMP}`
 const LEDGER = [] // attempt-ledger discipline: one row per agent call
 
-const GATE_SCHEMA = {
-  type: 'object',
-  properties: {
-    pass: { type: 'boolean' },
-    violations: { type: 'array', items: { type: 'string' } },
-    facts: { type: 'string' },
-  },
-  required: ['pass', 'violations', 'facts'],
+// ── Embedded receipt verification (base64 + SHA-256, no runtime deps) ───────
+// Receipts payloads are canonical ASCII JSON, so byte handling is exact.
+
+const B64_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+function b64decode(s) {
+  const clean = String(s).replace(/=+$/, '')
+  if (/[^A-Za-z0-9+/]/.test(clean)) throw new Error('receipt payload_b64 contains non-base64 characters')
+  const bytes = []
+  let buffer = 0
+  let bits = 0
+  for (const ch of clean) {
+    buffer = (buffer << 6) | B64_ALPHABET.indexOf(ch)
+    bits += 6
+    if (bits >= 8) {
+      bits -= 8
+      bytes.push((buffer >> bits) & 0xff)
+    }
+  }
+  return bytes
 }
 
-const LANE_SCHEMA = {
-  type: 'object',
-  properties: {
-    arm: { type: 'string' },
-    seed: { type: 'integer' },
-    trained: { type: 'boolean' },
-    vitals_veto: { type: 'string', description: 'ok | the exact F7-class violation observed' },
-    in_template: { type: 'number' },
-    dev_ood: { type: 'number' },
-    secondary_ood: { type: 'number' },
-    worst_class: { type: 'string' },
-    retention: { type: 'string' },
-    wall_seconds: { type: 'number' },
-    evidence_paths: { type: 'array', items: { type: 'string' } },
-    facts: { type: 'string' },
-  },
-  required: ['arm', 'seed', 'trained', 'vitals_veto', 'in_template', 'dev_ood', 'retention', 'evidence_paths', 'facts'],
+const SHA256_K = [
+  0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+  0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+  0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+  0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+  0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+  0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+  0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+  0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+]
+function rotr(x, n) { return ((x >>> n) | (x << (32 - n))) >>> 0 }
+function sha256Hex(bytes) {
+  const h = [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19]
+  const msg = bytes.slice()
+  const bitLenHi = Math.floor(bytes.length / 0x20000000)
+  const bitLenLo = (bytes.length << 3) >>> 0
+  msg.push(0x80)
+  while (msg.length % 64 !== 56) msg.push(0)
+  for (let i = 3; i >= 0; i--) msg.push((bitLenHi >>> (8 * i)) & 0xff)
+  for (let i = 3; i >= 0; i--) msg.push((bitLenLo >>> (8 * i)) & 0xff)
+  const w = new Array(64)
+  for (let off = 0; off < msg.length; off += 64) {
+    for (let i = 0; i < 16; i++) {
+      w[i] = ((msg[off + 4 * i] << 24) | (msg[off + 4 * i + 1] << 16) | (msg[off + 4 * i + 2] << 8) | msg[off + 4 * i + 3]) >>> 0
+    }
+    for (let i = 16; i < 64; i++) {
+      const s0 = rotr(w[i - 15], 7) ^ rotr(w[i - 15], 18) ^ (w[i - 15] >>> 3)
+      const s1 = rotr(w[i - 2], 17) ^ rotr(w[i - 2], 19) ^ (w[i - 2] >>> 10)
+      w[i] = (w[i - 16] + s0 + w[i - 7] + s1) >>> 0
+    }
+    let [a, b, c, d, e, f, g, hh] = h
+    for (let i = 0; i < 64; i++) {
+      const S1 = rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25)
+      const ch = (e & f) ^ (~e & g)
+      const t1 = (hh + S1 + ch + SHA256_K[i] + w[i]) >>> 0
+      const S0 = rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22)
+      const maj = (a & b) ^ (a & c) ^ (b & c)
+      const t2 = (S0 + maj) >>> 0
+      hh = g; g = f; f = e
+      e = (d + t1) >>> 0
+      d = c; c = b; b = a
+      a = (t1 + t2) >>> 0
+    }
+    h[0] = (h[0] + a) >>> 0; h[1] = (h[1] + b) >>> 0; h[2] = (h[2] + c) >>> 0; h[3] = (h[3] + d) >>> 0
+    h[4] = (h[4] + e) >>> 0; h[5] = (h[5] + f) >>> 0; h[6] = (h[6] + g) >>> 0; h[7] = (h[7] + hh) >>> 0
+  }
+  return h.map(x => x.toString(16).padStart(8, '0')).join('')
 }
 
-const BASELINE_SCHEMA = {
+// Verify a transcribed receipt envelope and return its typed payload.
+// Throws on ANY mismatch — fail closed; agent prose never becomes gate truth.
+function verifyReceipt(rawText, expectedValidator) {
+  let receipt
+  try {
+    receipt = typeof rawText === 'string' ? JSON.parse(rawText) : rawText
+  } catch (e) {
+    throw new Error(`gate failure: ${expectedValidator} receipt is not JSON (${e.message})`)
+  }
+  if (!receipt || receipt.schema !== 'needle-gate-receipt/v1') {
+    throw new Error(`gate failure: ${expectedValidator} receipt has wrong schema ${receipt && receipt.schema}`)
+  }
+  if (receipt.validator !== expectedValidator) {
+    throw new Error(`gate failure: receipt validator ${receipt.validator} != expected ${expectedValidator}`)
+  }
+  if (typeof receipt.payload_b64 !== 'string' || typeof receipt.payload_sha256 !== 'string') {
+    throw new Error(`gate failure: ${expectedValidator} receipt missing payload_b64/payload_sha256`)
+  }
+  const payloadBytes = b64decode(receipt.payload_b64)
+  const digest = sha256Hex(payloadBytes)
+  if (digest !== receipt.payload_sha256) {
+    throw new Error(`gate failure: ${expectedValidator} receipt digest mismatch (computed ${digest}, declared ${receipt.payload_sha256})`)
+  }
+  if (MODE === 'live') {
+    const pinned = manifest.receipt_digest_pins[expectedValidator]
+    if (pinned && pinned !== digest) {
+      throw new Error(`gate failure: ${expectedValidator} receipt digest ${digest} does not match Codex-pinned ${pinned}`)
+    }
+  }
+  let payload
+  try {
+    payload = JSON.parse(payloadBytes.map(b => String.fromCharCode(b)).join(''))
+  } catch (e) {
+    throw new Error(`gate failure: ${expectedValidator} receipt payload is not JSON (${e.message})`)
+  }
+  if (!payload || typeof payload !== 'object') {
+    throw new Error(`gate failure: ${expectedValidator} receipt payload is not an object`)
+  }
+  return { payload, digest }
+}
+
+// Agents transcribe receipts; they never return pass booleans or metrics.
+const RECEIPT_AGENT_SCHEMA = {
   type: 'object',
   properties: {
-    baselines: {
-      type: 'array',
-      items: {
-        type: 'object',
-        properties: {
-          name: { type: 'string' },
-          metric: { type: 'string' },
-          score: { type: 'number' },
-        },
-        required: ['name', 'metric', 'score'],
-      },
-    },
-    facts: { type: 'string' },
+    receipt: { type: 'string', description: 'the EXACT receipt JSON emitted by the validator CLI, transcribed byte-for-byte' },
+    facts: { type: 'string', description: 'one-line summary of what you ran (advisory only; carries no gate authority)' },
   },
-  required: ['baselines', 'facts'],
+  required: ['receipt', 'facts'],
 }
 
 const CLAIMCHECK_SCHEMA = {
@@ -137,7 +248,13 @@ const CLAIMCHECK_SCHEMA = {
   required: ['claims', 'facts'],
 }
 
-const COMMON = `You are one stage of the needle-training-campaign workflow (run ${RUN_STAMP}, mode=${MODE}) in the uni-grok-mcp repository (work from the repository root of the current session). The workflow script — not you — decides pass/fail; your job is to run EXACT commands, read ONLY the files named in your task, and return precisely the structured result requested. Never touch, cite, or read any sealed evaluation set. Never generate training examples. Report measured values only; if something cannot be verified, say so in a violation/facts entry instead of guessing.`
+const DRAFT_SCHEMA = {
+  type: 'object',
+  properties: { facts: { type: 'string' } },
+  required: ['facts'],
+}
+
+const COMMON = `You are one stage of the needle-training-campaign workflow (run ${RUN_STAMP}, mode=${MODE}) in the uni-grok-mcp repository (work from the repository root of the current session). Deterministic validators in evals/needle_gates — not you, not this prompt — decide every gate; your job is to run EXACT commands and transcribe their receipt output byte-for-byte. Never touch, cite, or read any sealed evaluation set. Never generate training examples. If a command fails, transcribe whatever it printed and say what failed in facts — do not fabricate a receipt.`
 
 async function call(label, phase, prompt, schema, effort) {
   const res = await agent(prompt, { label, phase, schema, effort: effort || 'low' })
@@ -146,87 +263,164 @@ async function call(label, phase, prompt, schema, effort) {
   return res
 }
 
+// Run one validator through an agent and return its digest-verified payload.
+async function gateReceipt(label, phaseName, validator, cliArgs, effort) {
+  const outPath = `${RECEIPTS_DIR}/${validator}.json`
+  const res = await call(label, phaseName, `${COMMON}
+
+Run EXACTLY this command from the repository root (read-only on the packet; the receipt goes to /tmp):
+
+  uv run python -m evals.needle_gates ${cliArgs} --out ${outPath}
+
+Then return:
+- receipt: the full JSON text printed by the command (identical to ${outPath}), transcribed EXACTLY — no edits, no reformatting, no commentary inside the JSON.
+- facts: one line noting the command ran and where the receipt file is.
+You do not decide pass/fail; the workflow verifies the receipt digest itself.`, RECEIPT_AGENT_SCHEMA, effort)
+  const { payload, digest } = verifyReceipt(res.receipt, validator)
+  LEDGER.push({ phase: phaseName, label: `${label}:receipt-verified`, ok: true, payload_sha256: digest })
+  return { payload, digest, receipt_path: outPath }
+}
+
 // ── Phase 1: Preflight ───────────────────────────────────────────────────────
 phase('Preflight')
-const preflight = await call('preflight', 'Preflight', `${COMMON}
-
-Verify the training packet and environment WITHOUT modifying anything:
-1. Packet ${PACKET}: data manifest exists (data/manifest.json for mock; packet manifest for live) and EVERY listed sha256 matches the file bytes on disk (shasum -a 256). List every mismatch or unlisted data file as a violation.
-2. Split policy: confirm the split convention is recorded BEFORE corpus assembly (mock: needle _per_tool_split seed 42 pinned in the packet README/report; live: manifest.split_policy digest matches the packet). Violation if absent.
-3. Base checkpoint pin present (mock: sha256 prefix 40a32e91d1d4197b recorded in README). Do NOT download anything in mock mode.
-4. Env pins recorded (python/jax/flax versions). Violation only if unrecorded, not if the local env differs — record the difference in facts.
-Return pass=false if ANY violation.`, GATE_SCHEMA)
-
-if (!preflight.pass) return { verdict: 'REFUSED_PREFLIGHT', mode: MODE, violations: preflight.violations, ledger: LEDGER }
-if (STOP_AFTER === 'preflight') return { verdict: 'STOPPED_AFTER_PREFLIGHT', mode: MODE, preflight, ledger: LEDGER }
-
-// ── Phase 2: Corpus veto (hard gates — any violation kills the run) ─────────
-phase('Corpus veto')
-const veto = await call('corpus-veto', 'Corpus veto', `${COMMON}
-
-Run the mechanical corpus vetoes on ${PACKET}/data (READ-ONLY):
-1. Grouped-split/leakage: run \`python ${PACKET}/check_combined_contamination.py\` (or the packet's equivalent) and report the counts. In mock mode the committed combined.jsonl is a KNOWN-CONTAMINATED research control: expect nonzero counts and record them as facts, with the single violation string "combined.jsonl contaminated (known research control — excluded from any training corpus)". In live mode ANY nonzero count is a fatal violation.
-2. Exact-duplicate scan across every family JSONL (normalize each row to (query, answers); report duplicate counts per family). Known-voided families (mock: abstention 20/40, next_step prefix leakage) are recorded as violations with the marker "(known, quarantined)".
-3. Class balance per enum family (report counts; imbalance is a fact, not a violation).
-4. Secret/PII grep over all data files (any hit is fatal).
-pass=false only for NEW violations — i.e. anything not carrying a "(known" marker in mock mode; in live mode every violation is fatal.`, GATE_SCHEMA, 'medium')
-
-const newViolations = veto.violations.filter(v => MODE === 'live' || !v.includes('(known'))
-if (!veto.pass || newViolations.length > 0) {
-  return { verdict: 'REFUSED_CORPUS_VETO', mode: MODE, violations: veto.violations, ledger: LEDGER }
+const preflight = await gateReceipt(
+  'preflight', 'Preflight', 'preflight', `preflight --packet ${PACKET}`
+)
+// Gate truth: the verified typed payload — never the agent's words.
+if (preflight.payload.ok !== true || preflight.payload.violations.length > 0) {
+  return {
+    verdict: 'REFUSED_PREFLIGHT', mode: MODE,
+    violations: preflight.payload.violations,
+    receipt_sha256: preflight.digest, ledger: LEDGER,
+  }
 }
-if (STOP_AFTER === 'veto') return { verdict: 'STOPPED_AFTER_VETO', mode: MODE, preflight, veto, ledger: LEDGER }
+if (STOP_AFTER === 'preflight') {
+  return { verdict: 'STOPPED_AFTER_PREFLIGHT', mode: MODE, preflight: preflight.payload, receipt_sha256: preflight.digest, ledger: LEDGER }
+}
+
+// ── Phase 2: Corpus veto (hard gates — any NEW violation kills the run) ─────
+phase('Corpus veto')
+const veto = await gateReceipt(
+  'corpus-veto', 'Corpus veto', 'corpus_veto', `corpus-veto --packet ${PACKET}`, 'medium'
+)
+// The validator computes new_violations mechanically (known-quarantine markers
+// come from the committed packet manifest, never from prose). Recompute here
+// as defense in depth; live mode treats EVERY violation as fatal.
+const vetoViolations = veto.payload.violations || []
+const newViolations = MODE === 'live'
+  ? vetoViolations
+  : vetoViolations.filter(v => !v.includes('(known'))
+const validatorNew = veto.payload.new_violations || []
+if (veto.payload.ok !== true || newViolations.length > 0 || (MODE !== 'live' && validatorNew.length > 0)) {
+  return {
+    verdict: 'REFUSED_CORPUS_VETO', mode: MODE,
+    violations: vetoViolations, new_violations: MODE === 'live' ? vetoViolations : validatorNew,
+    receipt_sha256: veto.digest, ledger: LEDGER,
+  }
+}
+if (STOP_AFTER === 'veto') {
+  return { verdict: 'STOPPED_AFTER_VETO', mode: MODE, preflight: preflight.payload, veto: veto.payload, ledger: LEDGER }
+}
 
 // ── Phase 3+4: iteration loop — arm lanes, then cross-arm gate ──────────────
 const iterations = []
-let arms
+let armsPayload
+let metricsReceipt
 for (let iter = 1; iter <= MAX_ITER; iter++) {
   phase('Arm lanes')
-  if (MODE === 'mock') {
-    // Replay ONLY committed candidate records — never invent data in mock.
-    const rec = await call('arm-records', 'Arm lanes', `${COMMON}
+  // Arm records are FROZEN, manifest-declared data replayed through the
+  // validator — in every mode. No agent is ever asked to invent an arm or a
+  // dataset (they are only asked to run the CLI and transcribe its receipt).
+  const armRecords = await gateReceipt(
+    'arm-records', 'Arm lanes', 'arm_records', `arm-records --packet ${PACKET}`
+  )
+  if (armRecords.payload.ok !== true || armRecords.payload.arms.length === 0) {
+    return {
+      verdict: 'REFUSED_ARM_RECORDS', mode: MODE,
+      violations: armRecords.payload.violations,
+      receipt_sha256: armRecords.digest, ledger: LEDGER,
+    }
+  }
+  armsPayload = armRecords.payload.arms
 
-Read ${PACKET}/data/arm_candidates.json and return facts as a compact JSON string of the array [{arm, dataset_hash, n, recipe}] — every committed record, nothing added. pass=true unless the file is missing/unparseable.`, GATE_SCHEMA)
-    arms = JSON.parse(rec.facts)
-  } else {
-    // Live arm design happens ONLY under the Codex manifest's bounds and is
-    // deliberately not implemented until that manifest exists. Fail loudly.
-    throw new Error('live arm design is blocked until a Codex-approved training manifest defines its bounds (confusion-cell inputs, generator diversity rules, per-arm budgets).')
+  if (MODE === 'live') {
+    // Live lane TRAINING stays blocked until a Codex-approved manifest defines
+    // its bounds (per-arm budgets, generator diversity, confusion-cell
+    // inputs). The frozen arm records above are the only permitted inputs.
+    throw new Error('live lane training is blocked until a Codex-approved training manifest defines its bounds (confusion-cell inputs, generator diversity rules, per-arm budgets). Frozen arm records were loaded and verified; nothing was trained.')
   }
 
-  const laneInputs = arms.flatMap(a => SEEDS.map(seed => ({ ...a, seed })))
-  const lanes = (await pipeline(
-    laneInputs,
-    lane => call(`lane:${lane.arm}/s${lane.seed}`, 'Arm lanes', `${COMMON}
+  // Mock lanes: one arm-metrics receipt replays committed results and runs
+  // the F7 vitals checks (steps > 0, completed, no NaN) mechanically against
+  // the committed logs. The legacy field map (results "sealed" -> dev_ood,
+  // results "dev_ood" -> secondary_ood, "forgetting" -> retention) lives in
+  // the validator, in code.
+  metricsReceipt = await gateReceipt(
+    'arm-metrics', 'Arm lanes', 'arm_metrics', `arm-metrics --packet ${PACKET}`, 'medium'
+  )
+  if (metricsReceipt.payload.ok !== true) {
+    return {
+      verdict: 'REFUSED_ARM_METRICS', mode: MODE,
+      violations: metricsReceipt.payload.violations,
+      receipt_sha256: metricsReceipt.digest, ledger: LEDGER,
+    }
+  }
 
-Arm lane ${lane.arm} seed ${lane.seed} (${MODE}).
-MOCK: do not train. Reconstruct this lane's result from committed artifacts ONLY: ${PACKET}/data/arm_results.json and the matching ${PACKET}/logs/ft-arm-*.log. NAMING: arm_candidates.json uses "arm_B/arm_C/arm_D/arm_E"; arm_results.json names the SAME arms "B_hardneg/C_metamorphic/D_balanced/E_worstcell" and the control "A_control" — match by the letter. FIELD MAP (legacy keys): results key "sealed" -> report as dev_ood (it is the adaptive OOD dev set); results key "dev_ood" -> report as secondary_ood; "in_template" as-is; "forgetting" -> retention. From the log take wall seconds and run the F7 vitals check (Total steps > 0, training completed, no NaN schedule) -> vitals_veto "ok" or the violation. trained=false. List the exact evidence paths used. Every arm B-E has a committed result row and log; return in_template=-1 ONLY if a read genuinely fails, and say why in facts.
-LIVE (never reached without a manifest): run the packet's ft driver wrapped with the vitals veto, then eval + retention.`, LANE_SCHEMA)
-  )).filter(Boolean)
+  // Build lane rows from the VERIFIED payload only (mock: replay, trained=false).
+  const metricsByLetter = {}
+  for (const armMetric of metricsReceipt.payload.arms) {
+    metricsByLetter[armMetric.arm_letter] = armMetric
+  }
+  const lanes = []
+  for (const record of armsPayload) {
+    const letterMatch = /(?:^|_)([A-Z])(?:_|$)/.exec(record.arm)
+    const letter = letterMatch ? letterMatch[1] : ''
+    const metric = metricsByLetter[letter]
+    for (const seed of SEEDS) {
+      if (!metric) {
+        lanes.push({ arm: record.arm, seed, trained: false, vitals_veto: `no committed result row for ${record.arm}`, in_template: -1, dev_ood: -1, secondary_ood: -1, retention: '', wall_seconds: null })
+        continue
+      }
+      lanes.push({
+        arm: record.arm,
+        results_name: metric.results_name,
+        seed,
+        trained: false,
+        vitals_veto: metric.vitals.vitals_veto,
+        in_template: metric.in_template,
+        dev_ood: metric.dev_ood,
+        secondary_ood: metric.secondary_ood,
+        retention: metric.retention,
+        wall_seconds: metric.vitals.wall_seconds,
+        log_sha256: metric.vitals.log_sha256,
+      })
+    }
+  }
 
   if (STOP_AFTER === 'lanes' && iter === MAX_ITER) {
-    return { verdict: 'STOPPED_AFTER_LANES', mode: MODE, arms, lanes, ledger: LEDGER }
+    return { verdict: 'STOPPED_AFTER_LANES', mode: MODE, arms: armsPayload, lanes, receipt_sha256: metricsReceipt.digest, ledger: LEDGER }
   }
 
-  // ── Cross-arm gate: needs ALL lanes together (legitimate barrier) ─────────
+  // ── Cross-arm gate: mechanical rules computed HERE from verified payloads ──
   phase('Cross-arm gate')
-  const baselines = await call('trivial-baselines', 'Cross-arm gate', `${COMMON}
-
-Run the trivial-baseline comparison that every learned candidate must beat (audit standing rule). Mock: run \`python ${PACKET}/tfidf_baseline.py\` and return each printed variant as {name, metric:"top1", score in [0,1]}. Also read the control arm A_control from ${PACKET}/data/arm_results.json and return {name:"control-arm-A", metric:"dev_ood", score:<A_control's legacy "sealed" key — the adaptive OOD dev metric, the SAME field lanes report as dev_ood>}.`, BASELINE_SCHEMA)
-
-  // Mechanical gate rules — CODE, not agent judgment:
-  const controlDev = (baselines.baselines.find(b => b.name === 'control-arm-A') || { score: 0 }).score
-  const judged = arms.map(a => {
-    const armLanes = lanes.filter(l => l.arm === a.arm && l.in_template >= 0)
+  // The control comparison uses the verified control row from the arm-metrics
+  // receipt (control dev_ood = legacy "sealed" — the adaptive OOD dev metric).
+  const control = metricsReceipt.payload.control
+  if (!control) {
+    return { verdict: 'REFUSED_NO_CONTROL', mode: MODE, receipt_sha256: metricsReceipt.digest, ledger: LEDGER }
+  }
+  const controlDev = control.dev_ood
+  const judged = armsPayload.map(record => {
+    const armLanes = lanes.filter(l => l.arm === record.arm && l.in_template >= 0)
     const seedsRun = new Set(armLanes.map(l => l.seed)).size
     const vitalsOk = armLanes.length > 0 && armLanes.every(l => l.vitals_veto === 'ok')
-    const retentionOk = armLanes.every(l => /^3\/3$|^full$/i.test(l.retention))
+    const retentionOk = armLanes.length > 0 && armLanes.every(l => /^3\/3$|^full$/i.test(l.retention))
     const devScores = armLanes.map(l => l.dev_ood)
     const minDev = devScores.length ? Math.min(...devScores) : -1
     const beatsControl = minDev > controlDev
     const multiSeedOk = seedsRun >= (MODE === 'mock' ? 1 : 3)
     return {
-      arm: a.arm,
+      arm: record.arm,
       seeds_run: seedsRun,
       vitals_ok: vitalsOk,
       retention_ok: retentionOk,
@@ -239,7 +433,7 @@ Run the trivial-baseline comparison that every learned candidate must beat (audi
       promotion_candidate: vitalsOk && retentionOk && beatsControl && multiSeedOk && MODE === 'live',
     }
   })
-  iterations.push({ iter, arms: judged, baselines: baselines.baselines })
+  iterations.push({ iter, arms: judged, control: { name: control.results_name, dev_ood: controlDev } })
 
   if (STOP_AFTER === 'gate' && iter === MAX_ITER) break
   // Iterate only when live, authorized, and something is still improving.
@@ -251,16 +445,36 @@ if (STOP_AFTER === 'gate') {
   return { verdict: 'STOPPED_AFTER_GATE', mode: MODE, iterations, ledger: LEDGER }
 }
 
-// ── Phase 5: Evidence — draft, then adversarially verify every claim ────────
+// ── Phase 5: Evidence — harvest request, draft, adversarial claim check ─────
 phase('Evidence')
+
+// Typed next_harvest_request: derived by the validator from the SAME verified
+// evidence (weak confusion cells, retention cells, exact digests). It is a
+// REQUEST ONLY — it authorizes no generation and no training; acting on it
+// requires a separate Codex-approved harvesting manifest.
+const harvest = await gateReceipt(
+  'harvest-request', 'Evidence', 'harvest_request',
+  `harvest-request --packet ${PACKET} --campaign ${CAMPAIGN_ID} --source-dataset ${SOURCE_DATASET} --target-dataset ${TARGET_DATASET}`
+)
+if (harvest.payload.request_only !== true || harvest.payload.authorizes_generation !== false || harvest.payload.authorizes_training !== false) {
+  throw new Error('gate failure: next_harvest_request must be request-only (authorizes_generation=false, authorizes_training=false)')
+}
+
 const last = iterations[iterations.length - 1]
+const gateSummary = {
+  preflight: { ok: preflight.payload.ok, violations: preflight.payload.violations, receipt_sha256: preflight.digest },
+  corpus_veto: { ok: veto.payload.ok, violations: veto.payload.violations, receipt_sha256: veto.digest },
+  arms: last.arms,
+  control: last.control,
+}
+
 const draft = await call('report-draft', 'Evidence', `${COMMON}
 
-Draft (in facts, as markdown) a concise campaign result summary for run ${RUN_STAMP}: mode; gate outcomes from PREFLIGHT ${JSON.stringify({ pass: preflight.pass, violations: preflight.violations })} and CORPUS VETO ${JSON.stringify({ pass: veto.pass, violations: veto.violations })}; per-arm table from this JSON: ${JSON.stringify(last.arms)}; baselines: ${JSON.stringify(last.baselines)}. State plainly that mock mode trains nothing and that promotion authority belongs to the Codex gate. Every sentence must restate the JSON above or cite a committed artifact by path — no claims about your own process or about anything not in the JSON.`, GATE_SCHEMA)
+Draft (in facts, as markdown) a concise campaign result summary for run ${RUN_STAMP}: mode; gate outcomes and per-arm table from this verified JSON: ${JSON.stringify(gateSummary)}. State plainly that mock mode trains nothing, that every gate decision came from a digest-verified evals.needle_gates receipt, and that promotion authority belongs to the Codex gate. Every sentence must restate the JSON above or cite a committed artifact by path — no claims about your own process or about anything not in the JSON.`, DRAFT_SCHEMA)
 
 const check = await call('claim-verify', 'Evidence', `${COMMON}
 
-Adversarially verify the draft below. For EVERY numeric or factual claim, name the committed artifact (file path) that backs it and verdict CONFIRMED, or REFUTED (artifact contradicts), or NO_ARTIFACT (nothing backs it). A claim sourced only from the workflow's own JSON is CONFIRMED with artifact "workflow-state" ONLY if it matches that JSON exactly.
+Adversarially verify the draft below. For EVERY numeric or factual claim, name the committed artifact (file path) that backs it and verdict CONFIRMED, or REFUTED (artifact contradicts), or NO_ARTIFACT (nothing backs it). A claim sourced only from the workflow's own verified JSON is CONFIRMED with artifact "workflow-state" ONLY if it matches that JSON exactly. The verified JSON: ${JSON.stringify(gateSummary)}
 
 DRAFT:
 ${draft.facts}`, CLAIMCHECK_SCHEMA, 'medium')
@@ -272,6 +486,13 @@ return {
   run: RUN_STAMP,
   promotion: 'NONE — candidates + evidence only; promotion belongs to the Codex landing gate',
   iterations,
+  gate_receipts: {
+    preflight: preflight.digest,
+    corpus_veto: veto.digest,
+    arm_metrics: metricsReceipt ? metricsReceipt.digest : null,
+    harvest_request: harvest.digest,
+  },
+  next_harvest_request: harvest.payload,
   report_draft: draft.facts,
   claim_check: { unbacked, total: check.claims.length },
   ledger: LEDGER,
