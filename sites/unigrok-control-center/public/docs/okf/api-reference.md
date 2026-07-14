@@ -3807,13 +3807,13 @@ def get_xai_management_client()
 
 **Keywords:** get, xai, management, client
 
-Return the cached xAI Collections/admin client.
+Return the cached, Collections-only xAI management facade.
 
 The installed SDK requires the inference key alongside the management key
 when constructing its Collections service.  This factory is therefore the
-only place where both credentials may enter one SDK client, and callers are
-restricted to the RAG, knowledge, task-memory, and provider-harvest admin
-surfaces.
+only place where both credentials may enter one SDK client.  The returned
+facade exposes only ``collections`` and ``close`` so that management call
+sites cannot accidentally invoke inference through that raw SDK object.
 
 ### Function: `close_xai_inference_client` {#utils-close_xai_inference_client}
 

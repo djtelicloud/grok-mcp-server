@@ -384,6 +384,7 @@ async def test_missing_credentials_or_client_leave_rows_pending_without_cloud_ca
         raise AssertionError("client must not be constructed without management auth")
 
     monkeypatch.delenv("XAI_MANAGEMENT_API_KEY", raising=False)
+    monkeypatch.delenv("XAI_MANAGEMENT_KEY", raising=False)
     monkeypatch.setattr(provider_utils, "XAI_API_KEY", "xai-inference-test-value")
     missing_management = XAIWorkerEpisodeUploader(client_factory=forbidden_factory)
     result = await ProviderAttemptHarvester(uploader=missing_management).run_once(store)

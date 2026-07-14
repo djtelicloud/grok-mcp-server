@@ -40,6 +40,7 @@ from .credentials import (
     build_credential_plane_contract,
     credential_plane_policy,
 )
+from .xai_credentials import _require_xai_management_key
 from .identity import (
     _ACTIVE_CALLER,
     _ACTIVE_CLIENT_ID,
@@ -1868,8 +1869,8 @@ async def build_model_catalog(include_cli: bool = True) -> Dict[str, Any]:
     }
 
 # Global xAI client connection pools.  The inference client is intentionally
-# incapable of carrying management authority; Collections/admin call sites use
-# the separately named management factory below.
+# incapable of carrying management authority; Collections call sites receive
+# the operation-scoped management facade below.
 _client = None
 _management_client = None
 # Both factories are called from executor threads — guard each check-then-set
@@ -1899,22 +1900,41 @@ class _InferenceOnlyXAIClient:
         self._delegate.close()
 
 
+class _CollectionsOnlyXAIManagementClient:
+    """Expose only the operation-scoped Collections management surface."""
+
+    __slots__ = ("_close_callback", "_collections")
+
+    def __init__(self, delegate: Any) -> None:
+        collections = getattr(delegate, "collections", None)
+        close = getattr(delegate, "close", None)
+        if collections is None or not callable(close):
+            raise RuntimeError("xAI management client interface changed")
+        object.__setattr__(self, "_collections", collections)
+        object.__setattr__(self, "_close_callback", close)
+
+    def __getattribute__(self, name: str) -> Any:
+        if name in {"close", "collections"} or name.startswith("__"):
+            return object.__getattribute__(self, name)
+        raise AttributeError(
+            "xAI management facade exposes only Collections operations"
+        )
+
+    def __dir__(self) -> list[str]:
+        return ["close", "collections"]
+
+    @property
+    def collections(self) -> Any:
+        return object.__getattribute__(self, "_collections")
+
+    def close(self) -> None:
+        object.__getattribute__(self, "_close_callback")()
+
+
 def _resolve_xai_management_key() -> str:
     """Resolve canonical/SDK management-key aliases without exposing a value."""
 
-    canonical = os.getenv("XAI_MANAGEMENT_API_KEY", "").strip()
-    sdk_alias = os.getenv("XAI_MANAGEMENT_KEY", "").strip()
-    if canonical and sdk_alias and canonical != sdk_alias:
-        raise ValueError(
-            "XAI_MANAGEMENT_API_KEY and XAI_MANAGEMENT_KEY are both configured "
-            "with different values."
-        )
-    resolved = canonical or sdk_alias
-    if not resolved:
-        raise ValueError(
-            "XAI_MANAGEMENT_API_KEY or XAI_MANAGEMENT_KEY must be configured."
-        )
-    return resolved
+    return _require_xai_management_key()
 
 
 def xai_management_key_configured() -> bool:
@@ -1965,13 +1985,13 @@ def get_xai_client():
 
 
 def get_xai_management_client():
-    """Return the cached xAI Collections/admin client.
+    """Return the cached, Collections-only xAI management facade.
 
     The installed SDK requires the inference key alongside the management key
     when constructing its Collections service.  This factory is therefore the
-    only place where both credentials may enter one SDK client, and callers are
-    restricted to the RAG, knowledge, task-memory, and provider-harvest admin
-    surfaces.
+    only place where both credentials may enter one SDK client.  The returned
+    facade exposes only ``collections`` and ``close`` so that management call
+    sites cannot accidentally invoke inference through that raw SDK object.
     """
 
     global _management_client
@@ -1985,9 +2005,11 @@ def get_xai_management_client():
                 management_key = _resolve_xai_management_key()
                 from xai_sdk import Client
 
-                _management_client = Client(
-                    api_key=XAI_API_KEY,
-                    management_api_key=management_key,
+                _management_client = _CollectionsOnlyXAIManagementClient(
+                    Client(
+                        api_key=XAI_API_KEY,
+                        management_api_key=management_key,
+                    )
                 )
     return _management_client
 

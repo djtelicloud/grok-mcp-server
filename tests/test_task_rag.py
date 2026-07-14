@@ -1061,6 +1061,8 @@ class TestManagementKeyWiring:
 
         class FakeClient:
             def __init__(self, **kwargs):
+                self.collections = object()
+                self.close = MagicMock()
                 created.append(kwargs)
 
         monkeypatch.setattr("xai_sdk.Client", FakeClient)
@@ -1106,6 +1108,7 @@ class TestKeylessOperation:
     async def test_spawn_skipped_without_management_key(self, monkeypatch):
         monkeypatch.setenv("UNIGROK_TASK_RAG", "mirror")
         monkeypatch.delenv("XAI_MANAGEMENT_API_KEY", raising=False)
+        monkeypatch.delenv("XAI_MANAGEMENT_KEY", raising=False)
         assert rag.spawn_sync_task(None) is None
         assert rag._BG_TASKS == set()
 
@@ -1113,6 +1116,7 @@ class TestKeylessOperation:
     async def test_ready_keyless_reports_reason_without_probe(self, monkeypatch):
         monkeypatch.setenv("UNIGROK_TASK_RAG", "mirror")
         monkeypatch.delenv("XAI_MANAGEMENT_API_KEY", raising=False)
+        monkeypatch.delenv("XAI_MANAGEMENT_KEY", raising=False)
         mirror = get_task_memory_mirror()
         with patch("src.rag.get_xai_management_client") as mock_client:
             assert await mirror.ready() is False
@@ -1126,6 +1130,7 @@ class TestKeylessOperation:
     ):
         monkeypatch.setenv("UNIGROK_TASK_RAG", "shadow")
         monkeypatch.delenv("XAI_MANAGEMENT_API_KEY", raising=False)
+        monkeypatch.delenv("XAI_MANAGEMENT_KEY", raising=False)
         await _save_memory(
             tstore, "plan the sprint retro notes", model=PLANNING, success=1
         )
@@ -1148,6 +1153,7 @@ class TestKeylessOperation:
     def test_backfill_keyless_explains_and_exits_1(self, monkeypatch, tmp_path):
         monkeypatch.setenv("UNIGROK_TASK_RAG", "mirror")
         monkeypatch.delenv("XAI_MANAGEMENT_API_KEY", raising=False)
+        monkeypatch.delenv("XAI_MANAGEMENT_KEY", raising=False)
         out = io.StringIO()
         code = rag.rag_cli(
             ["backfill"], stream=out,
@@ -1161,6 +1167,7 @@ class TestKeylessOperation:
     def test_status_keyless_reports_local_first(self, monkeypatch, tmp_path):
         monkeypatch.setenv("UNIGROK_TASK_RAG", "shadow")
         monkeypatch.delenv("XAI_MANAGEMENT_API_KEY", raising=False)
+        monkeypatch.delenv("XAI_MANAGEMENT_KEY", raising=False)
         db = tmp_path / "keyless-status.db"
         _seed_db(db, ["one task"])
         out = io.StringIO()

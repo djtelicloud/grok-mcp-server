@@ -179,6 +179,7 @@ def test_semantic_eval_scores_aggregate_and_null_at_zero_rows():
 @pytest.mark.asyncio
 async def test_provider_usage_is_explicitly_not_configured(monkeypatch):
     monkeypatch.delenv("XAI_MANAGEMENT_API_KEY", raising=False)
+    monkeypatch.delenv("XAI_MANAGEMENT_KEY", raising=False)
     monkeypatch.delenv("UNIGROK_XAI_TEAM_ID", raising=False)
     monkeypatch.setenv("UNIGROK_PROVIDER_USAGE", "auto")
 
@@ -187,6 +188,60 @@ async def test_provider_usage_is_explicitly_not_configured(monkeypatch):
     assert result["state"] == "not_configured"
     assert result["usage_usd"] is None
     assert result["scope"] == "xai_api_team"
+
+
+@pytest.mark.asyncio
+async def test_provider_usage_accepts_sdk_management_alias(monkeypatch):
+    captured = {}
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"timeSeries": []}
+
+    class FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url, *, headers, json):
+            captured.update(url=url, headers=headers, json=json)
+            return FakeResponse()
+
+    monkeypatch.setattr("src.metrics.httpx.AsyncClient", lambda **kwargs: FakeClient())
+    monkeypatch.delenv("XAI_MANAGEMENT_API_KEY", raising=False)
+    monkeypatch.setenv("XAI_MANAGEMENT_KEY", "sdk-management-test-key")
+    monkeypatch.setenv("UNIGROK_XAI_TEAM_ID", "team-test")
+    monkeypatch.setenv("UNIGROK_PROVIDER_USAGE", "auto")
+
+    result = await fetch_provider_api_usage()
+
+    assert result["state"] == "ready"
+    assert captured["headers"] == {
+        "Authorization": "Bearer sdk-management-test-key"
+    }
+
+
+@pytest.mark.asyncio
+async def test_provider_usage_rejects_conflicting_management_aliases(monkeypatch):
+    def forbidden_client(**kwargs):
+        raise AssertionError("conflicting management authority must not make a call")
+
+    monkeypatch.setattr("src.metrics.httpx.AsyncClient", forbidden_client)
+    monkeypatch.setenv("XAI_MANAGEMENT_API_KEY", "canonical-test-key")
+    monkeypatch.setenv("XAI_MANAGEMENT_KEY", "different-sdk-test-key")
+    monkeypatch.setenv("UNIGROK_XAI_TEAM_ID", "team-test")
+    monkeypatch.setenv("UNIGROK_PROVIDER_USAGE", "auto")
+
+    result = await fetch_provider_api_usage()
+
+    assert result["state"] == "error"
+    assert result["usage_usd"] is None
+    assert "conflict" in result["detail"].lower()
 
 
 @pytest.mark.asyncio

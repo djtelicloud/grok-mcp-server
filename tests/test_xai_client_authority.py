@@ -19,6 +19,8 @@ def test_inference_factory_constructs_with_only_inference_authority(monkeypatch)
 
     class FakeClient:
         def __init__(self, **kwargs):
+            self.collections = object()
+            self.close = MagicMock()
             calls.append(kwargs)
 
     monkeypatch.setattr("xai_sdk.Client", FakeClient)
@@ -74,6 +76,8 @@ def test_management_factory_constructs_with_both_sdk_credentials(monkeypatch):
 
     class FakeClient:
         def __init__(self, **kwargs):
+            self.collections = object()
+            self.close = MagicMock()
             calls.append(kwargs)
 
     monkeypatch.setattr("xai_sdk.Client", FakeClient)
@@ -139,6 +143,8 @@ def test_management_factory_resolves_aliases_deterministically(
 
     class FakeClient:
         def __init__(self, **kwargs):
+            self.collections = object()
+            self.close = MagicMock()
             calls.append(kwargs)
 
     monkeypatch.setattr("xai_sdk.Client", FakeClient)
@@ -179,6 +185,8 @@ def test_eval_recording_wraps_inference_but_never_management(monkeypatch):
     class FakeClient:
         def __init__(self, **kwargs):
             self.kwargs = kwargs
+            self.collections = object()
+            self.close = MagicMock()
             clients.append(self)
 
     monkeypatch.setattr("xai_sdk.Client", FakeClient)
@@ -194,7 +202,14 @@ def test_eval_recording_wraps_inference_but_never_management(monkeypatch):
 
     assert isinstance(inference, utils._EvalRecordingClient)
     assert inference._client._delegate is clients[0]
-    assert management is clients[1]
+    assert management.collections is clients[1].collections
+    with pytest.raises(AttributeError):
+        management.chat
+    with pytest.raises(AttributeError):
+        management._delegate
+    with pytest.raises(AttributeError):
+        management._close_callback
+    assert dir(management) == ["close", "collections"]
     assert not isinstance(management, utils._EvalRecordingClient)
 
 
@@ -238,6 +253,8 @@ def test_management_factory_is_thread_safe_and_separate_from_inference(monkeypat
         def __init__(self, **kwargs):
             time.sleep(0.01)
             self.kwargs = kwargs
+            self.collections = object()
+            self.close = MagicMock()
             calls.append(self)
 
     monkeypatch.setattr("xai_sdk.Client", SlowClient)
@@ -255,7 +272,7 @@ def test_management_factory_is_thread_safe_and_separate_from_inference(monkeypat
 
     assert len(calls) == 2
     assert all(client is management_clients[0] for client in management_clients)
-    assert management_clients[0].kwargs == {
+    assert calls[0].kwargs == {
         "api_key": "inference-test-key",
         "management_api_key": "management-test-key",
     }
@@ -264,6 +281,10 @@ def test_management_factory_is_thread_safe_and_separate_from_inference(monkeypat
         "management_api_key": utils._XAI_INFERENCE_MANAGEMENT_ISOLATION_KEY,
     }
     assert inference is not management_clients[0]
+    with pytest.raises(AttributeError):
+        management_clients[0].chat
+    with pytest.raises(AttributeError):
+        management_clients[0]._delegate
 
 
 def test_management_factory_is_confined_to_approved_admin_modules():
