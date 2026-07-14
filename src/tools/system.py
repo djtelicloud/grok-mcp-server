@@ -1061,8 +1061,9 @@ async def grok_mcp_discover_self(include_models: bool = False) -> SystemResult:
 
         doc_text = (
             "# UniGrok MCP Discovery & Self-Description\n\n"
-            "Zero-configuration onboarding for IDE agents. Primary product chat is the UniGrok "
-            "`agent` tool over MCP — not a browser chat client.\n\n"
+            "Zero-configuration onboarding for IDE agents. The primary product chat path is the "
+            "UniGrok `agent` tool over MCP. The trusted-loopback UI is an optional test and control "
+            "surface, not the primary daily chat path.\n\n"
             "## Service and Project Boundary\n"
             "- UniGrok is a standalone MCP service; the caller's project needs no UniGrok namespace files.\n"
             f"- Service mode: `{'contributor' if contributor else 'stable'}`. "
@@ -1071,7 +1072,8 @@ async def grok_mcp_discover_self(include_models: bool = False) -> SystemResult:
             "## Public product path\n"
             "- Canonical endpoint: `http://localhost:4765/mcp` (`4765` spells GROK).\n"
             "- Health: `GET /healthz`. Readiness: `GET /readyz`. Optional local Core UI: "
-            "`http://localhost:4765/ui/` (machine-owner loopback status; not GitHub-gated).\n"
+            "`http://localhost:4765/ui/` (trusted machine-owner test/control surface with an "
+            "agent playground that can invoke providers and spend metered credits; not GitHub-gated).\n"
             f"{dial_extra}"
             "- An explicit `agent.mode` always overrides a dialed-port default.\n\n"
             "## Credential Planes (public-critical)\n"
