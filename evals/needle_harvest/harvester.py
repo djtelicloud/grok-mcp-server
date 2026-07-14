@@ -13,13 +13,23 @@ Safety properties enforced here:
   reviewed head SHA; mock mode performs zero network I/O by construction.
 - The active training dataset and any approved (frozen) dataset can never
   be a harvest target.
-- Work keys are deterministic, and completed work keys found in the ledger
-  are skipped on resume — a resumed harvest cannot duplicate provider calls
-  or effects.
-- Retries and adjudication calls charge the same hard budget meter as
-  first attempts.
-- Provider/model/plane receipt mismatches against the runtime-discovered
-  catalog (and, live, the manifest allowlists) quarantine the candidate.
+- Authorization precedes effects: authorized_effects, the donor catalog,
+  and the provider/plane allowlists are all checked *before* any transport
+  call, ledger write, or shard write happens for a work item.
+- Work keys hash the complete request semantics and are deterministic;
+  completed work keys found in the ledger are skipped on resume, and the
+  builder is rehydrated from persisted candidate content — a resumed
+  harvest reproduces the same dataset without duplicating a single
+  provider call or effect.
+- One wave = one campaign, one source dataset, one target dataset, one
+  function pack; each root binds to exactly one leakage group.
+- The effective budget is the elementwise minimum of request, session, and
+  manifest ceilings; retries and adjudication charge the same meter.
+- Returned work keys and receipt provider/model/plane/runtime are validated
+  against the runtime-discovered catalog (and, live, the manifest
+  allowlists); any mismatch fails closed.
+- Donor allocation weights become bounded discrete sample counts, and every
+  donor/sample slot gets its own deterministic seed.
 - Lanes are bounded: work is dispatched in deterministic batches of at most
   ``max_concurrent_lanes`` items.
 """
@@ -32,7 +42,13 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from evals.needle_harvest.contracts import Ceilings, HarvestManifest, HarvestRequest
+from evals.needle_harvest.contracts import (
+    Ceilings,
+    HarvestManifest,
+    HarvestRequest,
+    allocate_samples,
+    min_ceilings,
+)
 from evals.needle_harvest.dataset import CandidateSample, DatasetBuilder
 from evals.needle_harvest.ledger import AttemptLedger
 from evals.needle_harvest.proposer import ShadowProposer, WaveObservation
@@ -126,6 +142,8 @@ class HarvestSession:
         current_head_sha: str | None = None,
         ceilings: Ceilings | None = None,
         approved_dataset_ids: tuple[str, ...] = (),
+        provider_allowlist: tuple[str, ...] | None = None,
+        plane_allowlist: tuple[str, ...] | None = None,
         verifier_fn: VerifierFn | None = None,
         judge_fn: JudgeFn | None = None,
         adjudicate_fn: JudgeFn | None = None,
@@ -156,11 +174,24 @@ class HarvestSession:
                 )
             self.ceilings = manifest.ceilings
             self.approved_dataset_ids = tuple(manifest.approved_dataset_ids)
+            # Live allowlists come from the approved manifest, nowhere else.
+            self.provider_allowlist: tuple[str, ...] | None = tuple(
+                manifest.provider_allowlist
+            )
+            self.plane_allowlist: tuple[str, ...] | None = tuple(
+                manifest.plane_allowlist
+            )
         else:
             if ceilings is None:
                 raise HarvestAuthorizationError("mock mode requires explicit ceilings")
             self.ceilings = ceilings
             self.approved_dataset_ids = tuple(approved_dataset_ids)
+            self.provider_allowlist = (
+                tuple(provider_allowlist) if provider_allowlist is not None else None
+            )
+            self.plane_allowlist = (
+                tuple(plane_allowlist) if plane_allowlist is not None else None
+            )
         if not (1 <= max_concurrent_lanes <= 64):
             raise HarvestAuthorizationError("max_concurrent_lanes must be in [1, 64]")
         self.mode = mode
@@ -189,6 +220,15 @@ class HarvestSession:
                 f"dataset {request.target_dataset_id} is approved/frozen; "
                 "harvest into the next candidate generation instead"
             )
+        # Effects are checked before anything happens: a request that does
+        # not authorize provider calls or ledger appends cannot be run at
+        # all — there is no partially-authorized execution path.
+        for effect in ("provider_call", "ledger_append"):
+            if effect not in request.authorized_effects:
+                raise HarvestAuthorizationError(
+                    f"request for root {request.semantic_root_id} does not "
+                    f"authorize {effect!r} — refusing before any effect"
+                )
         if self.mode == "live" and self.manifest is not None:
             if request.campaign_id != self.manifest.campaign_id:
                 raise HarvestAuthorizationError(
@@ -211,20 +251,56 @@ class HarvestSession:
     ) -> dict:
         if not requests:
             raise HarvestAuthorizationError("no harvest requests supplied")
+        # Wave consistency: one campaign, one source dataset, one target
+        # dataset, one function pack per wave — and one leakage group for
+        # each root and all its siblings.
+        for label, values in (
+            ("campaign", {r.campaign_id for r in requests}),
+            ("source dataset", {r.source_dataset_id for r in requests}),
+            ("target dataset", {r.target_dataset_id for r in requests}),
+        ):
+            if len(values) > 1:
+                raise HarvestAuthorizationError(
+                    f"wave consistency violated: one wave, one {label} "
+                    f"(got {sorted(values)})"
+                )
         packs = {r.function_pack_id for r in requests}
         if len(packs) > 1:
             raise HarvestAuthorizationError(
                 f"cross-function mixing rejected: one wave, one pack (got {sorted(packs)})"
             )
-        if len(requests) > self.ceilings.max_roots:
+        root_groups: dict[str, str] = {}
+        for request in requests:
+            bound = root_groups.setdefault(
+                request.semantic_root_id, request.leakage_group_id
+            )
+            if bound != request.leakage_group_id:
+                raise HarvestAuthorizationError(
+                    f"root {request.semantic_root_id} appears with two leakage "
+                    f"groups ({bound!r}, {request.leakage_group_id!r}) — a root "
+                    "and its siblings share exactly one group"
+                )
+        if shard_dir is not None:
+            for request in requests:
+                if "shard_write" not in request.authorized_effects:
+                    raise HarvestAuthorizationError(
+                        f"request for root {request.semantic_root_id} does not "
+                        "authorize shard_write — refusing before any effect"
+                    )
+        # Effective ceilings: the elementwise minimum of the session (live:
+        # manifest) budget and every request's own budget.
+        effective_ceilings = min_ceilings(
+            self.ceilings, *[r.ceilings for r in requests]
+        )
+        if len(requests) > effective_ceilings.max_roots:
             raise HarvestAuthorizationError(
                 f"{len(requests)} roots exceed the max_roots ceiling "
-                f"({self.ceilings.max_roots})"
+                f"({effective_ceilings.max_roots})"
             )
         for request in requests:
             self._guard_request(request)
 
-        meter = BudgetMeter(self.ceilings)
+        meter = BudgetMeter(effective_ceilings)
         catalog = {model.donor_key: model for model in self.transport.discover()}
         completed = self.ledger.completed_work_keys()
         builder = DatasetBuilder(
@@ -232,19 +308,25 @@ class HarvestSession:
             target_dataset_id=requests[0].target_dataset_id,
             approved_dataset_ids=self.approved_dataset_ids,
         )
+        # Resume rehydration: rebuild the dataset from candidate content
+        # persisted in the ledger, in original ledger order, so a resumed
+        # run reproduces identical nonempty shards.
+        self._rehydrate_builder(builder, completed, requests[0].target_dataset_id)
 
         work_items = self._plan_work(requests)
         counts = {
             "planned": len(work_items),
             "skipped_resume": 0,
             "accepted": 0,
+            "provisional": 0,
             "verified_failure": 0,
             "quarantined": 0,
+            "refused_unauthorized": 0,
             "transport_failure": 0,
             "expired": 0,
             "budget_stopped": 0,
         }
-        failed_cells: list[str] = []
+        failed: list[tuple[str, HarvestRequest]] = []
         donor_accepts: dict[str, list[int]] = {}
         budget_stop = False
 
@@ -294,23 +376,27 @@ class HarvestSession:
                 )
                 if outcome == "ACCEPTED":
                     counts["accepted"] += 1
+                elif outcome == "PROVISIONAL":
+                    counts["provisional"] += 1
                 elif outcome == "REJECTED":
                     counts["verified_failure"] += 1
                 elif outcome == "QUARANTINED":
                     counts["quarantined"] += 1
+                elif outcome == "REFUSED_UNAUTHORIZED":
+                    counts["refused_unauthorized"] += 1
                 elif outcome == "TRANSPORT_FAILURE":
                     counts["transport_failure"] += 1
                 elif outcome == "EXPIRED":
                     counts["expired"] += 1
                 if outcome == "REJECTED" and cell:
-                    failed_cells.append(cell)
+                    failed.append((cell, item.request))
 
         report = self._build_report(
             requests=list(requests),
             counts=counts,
             meter=meter,
             builder=builder,
-            failed_cells=failed_cells,
+            failed=failed,
             donor_accepts=donor_accepts,
             shard_dir=shard_dir,
             validation_score=validation_score,
@@ -318,12 +404,40 @@ class HarvestSession:
         )
         return report
 
+    def _rehydrate_builder(
+        self,
+        builder: DatasetBuilder,
+        completed_work_keys: set[str],
+        target_dataset_id: str,
+    ) -> None:
+        """Rebuild the dataset from candidate content persisted in the
+        ledger, in original ledger order, for work that will be skipped."""
+        for row in self.ledger.rows():
+            candidate = row.get("candidate")
+            if not candidate or not candidate.get("ingested"):
+                continue
+            if row.get("work_key") not in completed_work_keys:
+                continue
+            if (
+                candidate.get("function_pack_id") != builder.function_pack_id
+                or candidate.get("target_dataset_id") != target_dataset_id
+            ):
+                continue
+            builder.ingest(CandidateSample.from_payload(candidate))
+
     def _plan_work(self, requests: Sequence[HarvestRequest]) -> list[_WorkItem]:
         items: list[_WorkItem] = []
         for request in requests:
-            # The same exact root goes to every allocated donor.
-            for donor_key in sorted(request.recipe.donor_allocation):
-                for sample_index in range(request.recipe.samples_per_donor):
+            # The same exact root goes to the allocated donors. Allocation
+            # weights become bounded discrete counts (largest remainder), so
+            # a 99/1 weighting yields genuinely unequal call counts.
+            donor_counts = allocate_samples(
+                request.recipe.donor_allocation,
+                total=request.recipe.samples_per_donor
+                * len(request.recipe.donor_allocation),
+            )
+            for donor_key in sorted(donor_counts):
+                for sample_index in range(donor_counts[donor_key]):
                     items.append(
                         _WorkItem(
                             request=request,
@@ -348,18 +462,47 @@ class HarvestSession:
         attempt_id = request.attempt_id(donor_key, item.sample_index)
         effect_id = request.effect_id(donor_key, item.sample_index)
 
-        meter.charge_call()
-        result = self.transport.call(
-            TransportRequest(
-                work_key=item.work_key,
-                donor_key=donor_key,
-                objective=request.model_visible_objective,
-                temperature=request.recipe.temperature,
-                top_p=request.recipe.top_p,
-                seed=request.seed,
-                max_tokens=min(request.ceilings.max_tokens, 4096),
+        # Authorization precedes effects: the donor must exist in the
+        # runtime-discovered catalog and its provider/plane must be on the
+        # allowlist BEFORE any transport call is attempted.
+        model = catalog.get(donor_key)
+        refusal = ""
+        if model is None:
+            refusal = f"donor {donor_key!r} is not in the discovered catalog"
+        elif (
+            self.provider_allowlist is not None
+            and model.provider not in self.provider_allowlist
+        ):
+            refusal = (
+                f"provider {model.provider!r} is not in the approved allowlist"
             )
+        elif (
+            self.plane_allowlist is not None
+            and model.plane not in self.plane_allowlist
+        ):
+            refusal = f"plane {model.plane!r} is not in the approved allowlist"
+        if refusal:
+            self.ledger.append(
+                work_key=item.work_key,
+                attempt_id=attempt_id,
+                effect_id=effect_id,
+                status="REFUSED_UNAUTHORIZED",
+                detail=f"refused before transport call: {refusal}",
+            )
+            return "REFUSED_UNAUTHORIZED", ""
+
+        sample_seed = request.sample_seed(donor_key, item.sample_index)
+        transport_request = TransportRequest(
+            work_key=item.work_key,
+            donor_key=donor_key,
+            objective=request.model_visible_objective,
+            temperature=request.recipe.temperature,
+            top_p=request.recipe.top_p,
+            seed=sample_seed,
+            max_tokens=min(meter.ceilings.max_tokens, 4096),
         )
+        meter.charge_call()
+        result = self.transport.call(transport_request)
 
         retry_index = 0
         while result.transport_status in _RETRYABLE and meter.can_retry():
@@ -373,17 +516,8 @@ class HarvestSession:
                 transport_status=result.transport_status,
                 detail=f"transport {result.transport_status}; retry {retry_index}",
             )
-            result = self.transport.call(
-                TransportRequest(
-                    work_key=item.work_key,
-                    donor_key=donor_key,
-                    objective=request.model_visible_objective,
-                    temperature=request.recipe.temperature,
-                    top_p=request.recipe.top_p,
-                    seed=request.seed,
-                    max_tokens=min(request.ceilings.max_tokens, 4096),
-                )
-            )
+            # Retry keeps the same work identity, effect ID, and seed.
+            result = self.transport.call(transport_request)
 
         transport_status = TransportStatus(result.transport_status)
         if transport_status is not TransportStatus.OK:
@@ -399,18 +533,30 @@ class HarvestSession:
             return "TRANSPORT_FAILURE", ""
 
         # Receipt validation against the runtime-discovered catalog and, in
-        # live mode, the manifest allowlists. Mismatch fails closed.
+        # live mode, the manifest allowlists. The transport must echo the
+        # exact work key it executed. Mismatch fails closed.
         receipt = result.receipt
-        model = catalog.get(donor_key)
         receipt_problem = ""
-        if receipt is None or model is None:
-            receipt_problem = "missing provider receipt or unknown donor"
+        if result.work_key != item.work_key:
+            receipt_problem = "returned work_key mismatch fails closed"
+        elif receipt is None:
+            receipt_problem = "missing provider receipt"
         elif (
             receipt.provider != model.provider
             or receipt.model_id != model.model_id
             or receipt.plane != model.plane
         ):
             receipt_problem = "receipt does not match discovered catalog identity"
+        elif self.mode == "mock" and receipt.runtime != "mock":
+            receipt_problem = (
+                f"receipt runtime {receipt.runtime!r} is not the mock runtime"
+            )
+        elif self.mode == "live" and (
+            not receipt.runtime or receipt.runtime == "mock"
+        ):
+            receipt_problem = (
+                f"receipt runtime {receipt.runtime!r} is not a live runtime"
+            )
         elif self.mode == "live" and self.manifest is not None:
             if receipt.provider not in self.manifest.provider_allowlist:
                 receipt_problem = "provider not in approved allowlist"
@@ -452,6 +598,7 @@ class HarvestSession:
 
         # Judge disagreement gets one bounded adjudication round; the
         # adjudication call charges the same meter as any provider call.
+        combined_votes = judge_votes
         if (
             evaluation.proposal_verdict is ProposalVerdict.INDETERMINATE
             and judge_votes
@@ -462,6 +609,7 @@ class HarvestSession:
             extra_votes = self.adjudicate_fn(
                 request.model_visible_objective, result.text
             )
+            combined_votes = judge_votes + extra_votes
             evaluation = evaluate_candidate(
                 transport_status=transport_status,
                 now=self.now_fn(),
@@ -469,7 +617,7 @@ class HarvestSession:
                 required_artifact_present=check.artifact_present,
                 oracle=check.oracle,
                 verifier=verifier,
-                judge_votes=judge_votes + extra_votes,
+                judge_votes=combined_votes,
             )
 
         receipt_dict = {
@@ -491,19 +639,6 @@ class HarvestSession:
                 provider_receipt=receipt_dict,
             )
             return "EXPIRED", check.confusion_cell
-        if evaluation.episode_outcome is EpisodeOutcome.QUARANTINED:
-            self.ledger.append(
-                work_key=item.work_key,
-                attempt_id=attempt_id,
-                effect_id=effect_id,
-                status="QUARANTINED",
-                transport_status=transport_status.value,
-                proposal_verdict=evaluation.proposal_verdict.value,
-                episode_outcome=evaluation.episode_outcome.value,
-                detail=evaluation.reason,
-                provider_receipt=receipt_dict,
-            )
-            return "QUARANTINED", check.confusion_cell
 
         sample = CandidateSample(
             function_pack_id=request.function_pack_id,
@@ -518,33 +653,67 @@ class HarvestSession:
             text=result.text,
             transport_status=transport_status,
             proposal_verdict=evaluation.proposal_verdict,
+            episode_outcome=evaluation.episode_outcome,
+            model_visible_objective=request.model_visible_objective,
+            ttl_seconds=request.ttl_seconds,
+            issued_at=request.issued_at,
+            expires_at=request.expires_at,
             score=check.score,
             confusion_cell=check.confusion_cell,
             provenance_receipt=receipt_dict,
+            judge_votes=tuple(
+                (vote.judge_key, vote.approves) for vote in combined_votes
+            ),
         )
+
+        def _candidate_payload(ingested: bool) -> dict:
+            payload = sample.to_payload()
+            payload["ingested"] = ingested
+            payload["target_dataset_id"] = request.target_dataset_id
+            return payload
+
+        if evaluation.episode_outcome is EpisodeOutcome.QUARANTINED:
+            # Substantive but unresolved answers keep their full content in
+            # the ledger so future waves can build hard negatives from them.
+            self.ledger.append(
+                work_key=item.work_key,
+                attempt_id=attempt_id,
+                effect_id=effect_id,
+                status="QUARANTINED",
+                transport_status=transport_status.value,
+                proposal_verdict=evaluation.proposal_verdict.value,
+                episode_outcome=evaluation.episode_outcome.value,
+                detail=evaluation.reason,
+                provider_receipt=receipt_dict,
+                candidate=_candidate_payload(False),
+            )
+            return "QUARANTINED", check.confusion_cell
+
         ingested = builder.ingest(sample)
-        accepted = (
-            ingested
-            and evaluation.proposal_verdict is ProposalVerdict.VERIFIED_SUCCESS
-        )
+        if not ingested:
+            status = "QUARANTINED"
+        elif evaluation.proposal_verdict is ProposalVerdict.VERIFIED_SUCCESS:
+            status = "ACCEPTED"
+        elif evaluation.proposal_verdict is ProposalVerdict.JUDGE_PROVISIONAL:
+            # Unanimous judge approval stays provisional: retained for the
+            # opt-in provisional training view, never verified, never
+            # converted into a rejection.
+            status = "PROVISIONAL"
+        else:
+            status = "REJECTED"
         self.ledger.append(
             work_key=item.work_key,
             attempt_id=attempt_id,
             effect_id=effect_id,
-            status=(
-                "ACCEPTED"
-                if accepted
-                else ("REJECTED" if ingested else "QUARANTINED")
-            ),
+            status=status,
             transport_status=transport_status.value,
             proposal_verdict=evaluation.proposal_verdict.value,
             episode_outcome=evaluation.episode_outcome.value,
             detail=evaluation.reason if ingested else "rejected by dataset rules",
             provider_receipt=receipt_dict,
+            candidate=_candidate_payload(ingested),
         )
-        if not ingested:
-            return "QUARANTINED", check.confusion_cell
-        return ("ACCEPTED" if accepted else "REJECTED"), check.confusion_cell
+        return status, check.confusion_cell
 
     # ------------------------------------------------------------- report
 
@@ -555,7 +724,7 @@ class HarvestSession:
         counts: dict[str, int],
         meter: BudgetMeter,
         builder: DatasetBuilder,
-        failed_cells: list[str],
+        failed: list[tuple[str, HarvestRequest]],
         donor_accepts: dict[str, list[int]],
         shard_dir: Path | None,
         validation_score: float,
@@ -565,6 +734,7 @@ class HarvestSession:
         if shard_dir is not None:
             dataset_manifest = builder.write_shards(shard_dir)
 
+        failed_cells = [cell for cell, _ in failed]
         stop_decision = {"stop": True, "reason": "single-wave session complete"}
         proposed_recipe_ids: list[str] = []
         if self.proposer is not None:
@@ -587,27 +757,37 @@ class HarvestSession:
             stop_decision = {"stop": decision.stop, "reason": decision.reason}
             proposed_recipe_ids = [r.recipe_id for r in self.proposer.propose()]
 
-        # Targeted variant *requests* from aggregated failures. Request-only:
-        # nothing here executes them; they await review / the next wave.
+        # Targeted variant *requests* from aggregated failures. Each variant
+        # derives from the ORIGINATING request, so a weak root produces
+        # variants of that root — never clones of the first request.
+        # Request-only: nothing here executes them; they await review.
         variant_requests = []
-        base = requests[0]
         now = self.now_fn()
-        for cell in sorted(set(failed_cells)):
-            variant = base.model_copy(
+        seen_variants: set[tuple[str, str]] = set()
+        for cell, origin in sorted(
+            failed, key=lambda pair: (pair[0], pair[1].semantic_root_id)
+        ):
+            key = (cell, origin.semantic_root_id)
+            if key in seen_variants:
+                continue
+            seen_variants.add(key)
+            variant = origin.model_copy(
                 update={
-                    "recipe": base.recipe.model_copy(
+                    "recipe": origin.recipe.model_copy(
                         update={
-                            "recipe_id": f"{base.recipe.recipe_id}-variant-{cell}",
+                            "recipe_id": f"{origin.recipe.recipe_id}-variant-{cell}",
                             "prompt_surface": "confusion-targeted",
                         }
                     ),
                     "issued_at": now,
-                    "expires_at": now + base.ttl_seconds,
+                    "expires_at": now + origin.ttl_seconds,
                 }
             )
             variant_requests.append(
                 {
                     "confusion_cell": cell,
+                    "root_id": variant.semantic_root_id,
+                    "leakage_group_id": variant.leakage_group_id,
                     "recipe_id": variant.recipe.recipe_id,
                     "work_key_root": variant.work_key(
                         sorted(variant.recipe.donor_allocation)[0], 0

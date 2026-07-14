@@ -20,6 +20,8 @@ from evals.needle_harvest.contracts import (
     GenerationRecipe,
     HarvestManifest,
     HarvestRequest,
+    allocate_samples,
+    min_ceilings,
 )
 from evals.needle_harvest.dataset import (
     CandidateSample,
@@ -33,11 +35,17 @@ from evals.needle_harvest.harvester import (
     MechanicalCheck,
 )
 from evals.needle_harvest.ledger import AttemptLedger
+from evals.needle_harvest.planning import (
+    WavePlanError,
+    WaveTemplate,
+    plan_wave_from_harvest_request,
+)
 from evals.needle_harvest.transport import (
     MockTransport,
     ProviderModel,
 )
 from evals.needle_harvest.truth import (
+    EpisodeOutcome,
     JudgeVote,
     OracleResult,
     ProposalVerdict,
@@ -162,9 +170,19 @@ def make_sample(**overrides) -> CandidateSample:
         text="the answer is 42",
         transport_status=TransportStatus.OK,
         proposal_verdict=ProposalVerdict.VERIFIED_SUCCESS,
+        model_visible_objective="resolve the root task",
+        ttl_seconds=3600.0,
+        issued_at=1000.0,
+        expires_at=10000.0,
         score=1.0,
     )
     values.update(overrides)
+    values.setdefault(
+        "episode_outcome",
+        EpisodeOutcome.SUCCESS
+        if values["proposal_verdict"] is ProposalVerdict.VERIFIED_SUCCESS
+        else EpisodeOutcome.FAILURE,
+    )
     return CandidateSample(**values)
 
 
@@ -336,9 +354,10 @@ def test_05_receipt_mismatch_fails_closed(tmp_path):
     report2 = session2.run([make_request()])
     assert report2["counts"]["quarantined"] == 4
 
-    # Live mode: provider outside the approved allowlist is quarantined.
+    # Live mode: provider outside the approved allowlist is refused BEFORE
+    # any transport call is made.
     manifest = make_manifest(provider_allowlist=("prov-y",))
-    session3, _, ledger3 = make_session(
+    session3, transport3, ledger3 = make_session(
         tmp_path,
         mode="live",
         manifest=manifest,
@@ -348,7 +367,8 @@ def test_05_receipt_mismatch_fails_closed(tmp_path):
     report3 = session3.run(
         [make_request(recipe=make_recipe(donor_allocation={"donor-a": 1.0}))]
     )
-    assert report3["counts"]["quarantined"] == 2
+    assert report3["counts"]["refused_unauthorized"] == 2
+    assert transport3.calls == []  # refusal precedes the provider call
     assert any("allowlist" in row["detail"] for row in ledger3.rows())
 
 
@@ -748,3 +768,452 @@ def test_variant_requests_are_request_only(tmp_path):
     assert report["counts"]["verified_failure"] == 1
     assert [v["confusion_cell"] for v in report["variant_requests"]] == ["cell-a-vs-b"]
     assert report["next_step"] == "codex review and dataset freeze"
+
+
+# ---------------------------------------------------------------------------
+# Codex re-review regression proofs (round 2)
+# ---------------------------------------------------------------------------
+
+
+def test_work_identity_covers_complete_request_semantics():
+    base = make_request()
+    variations = dict(
+        model_visible_objective="a different objective entirely",
+        ttl_seconds=60.0,
+        issued_at=1_500.0,
+        leakage_group_id="lg-999",
+        response_type="decision_summary",
+        authorized_effects=("provider_call", "ledger_append"),
+        source_dataset_id="D0000",
+        recipe=make_recipe(prompt_surface="adversarial"),
+    )
+    for field_name, value in variations.items():
+        changed = make_request(**{field_name: value})
+        assert changed.work_key("donor-a", 0) != base.work_key("donor-a", 0), (
+            f"changing {field_name} must change the work identity"
+        )
+    # Identical semantics → identical identity (retry keeps the same key).
+    assert make_request().work_key("donor-a", 0) == base.work_key("donor-a", 0)
+    # Ceilings are budgets, not semantics: raising a budget must not orphan
+    # already-completed work on resume.
+    richer = make_request(ceilings=make_ceilings(max_provider_calls=999))
+    assert richer.work_key("donor-a", 0) == base.work_key("donor-a", 0)
+
+
+def test_sft_and_dpo_rows_carry_model_input_and_target_output(tmp_path):
+    cassette = {
+        "donor-a": [
+            {"status": "OK", "text": "mock-answer-learnable"},
+            {"status": "OK", "text": "a substantive but wrong answer"},
+        ]
+    }
+    transport = MockTransport(CATALOG, cassette=cassette)
+    session, _, _ = make_session(tmp_path, transport=transport)
+    shard_dir = tmp_path / "shards"
+    report = session.run(
+        [make_request(recipe=make_recipe(donor_allocation={"donor-a": 1.0}))],
+        shard_dir=shard_dir,
+    )
+    manifest = report["dataset_manifest"]
+    assert manifest["shards"]["sft"]["rows"] >= 1
+    assert manifest["shards"]["dpo"]["rows"] >= 1
+
+    sft_rows = [
+        json.loads(line)
+        for line in (shard_dir / manifest["shards"]["sft"]["path"])
+        .read_text()
+        .splitlines()
+    ]
+    for row in sft_rows:
+        assert row["input"]["objective"] == "resolve the root task"
+        assert row["input"]["ttl_seconds"] == 3_600.0
+        assert row["input_digest"]
+        assert row["text"]  # the target response
+
+    dpo_rows = [
+        json.loads(line)
+        for line in (shard_dir / manifest["shards"]["dpo"]["path"])
+        .read_text()
+        .splitlines()
+    ]
+    for pair in dpo_rows:
+        for side in ("chosen", "rejected"):
+            assert pair[side]["input"]["objective"] == "resolve the root task"
+            assert pair[side]["input_digest"]
+            assert pair[side]["text"]
+
+
+def test_judge_approved_provisional_survives_into_provisional_view(tmp_path):
+    def no_oracle(request, text):
+        return MechanicalCheck(artifact_present=True, oracle=None, score=0.5)
+
+    def approving_judges(objective, text):
+        return (JudgeVote("judge-1", True), JudgeVote("judge-2", True))
+
+    session, _, ledger = make_session(
+        tmp_path, mechanical_fn=no_oracle, judge_fn=approving_judges
+    )
+    shard_dir = tmp_path / "shards"
+    report = session.run([make_request()], shard_dir=shard_dir)
+
+    assert report["counts"]["provisional"] == 4
+    assert report["counts"]["verified_failure"] == 0  # never becomes REJECTED
+    statuses = {row["status"] for row in ledger.rows()}
+    assert statuses == {"PROVISIONAL"}
+    verdicts = {row["proposal_verdict"] for row in ledger.rows()}
+    assert verdicts == {"JUDGE_PROVISIONAL"}  # judges cannot mint VERIFIED_SUCCESS
+
+    manifest = report["dataset_manifest"]
+    assert manifest["shards"]["sft"]["rows"] == 0  # not verified → not in sft
+    assert manifest["shards"]["sft_provisional"]["rows"] == 4
+    rows = [
+        json.loads(line)
+        for line in (shard_dir / manifest["shards"]["sft_provisional"]["path"])
+        .read_text()
+        .splitlines()
+    ]
+    for row in rows:
+        assert row["label"] == "JUDGE_PROVISIONAL"
+        assert row["view"] == "sft_provisional"
+        assert {j["judge_key"] for j in row["judges"]} == {"judge-1", "judge-2"}
+        assert row["text"]
+
+
+def test_resume_reproduces_identical_nonempty_shards(tmp_path):
+    cassette = {
+        "donor-a": [
+            {"status": "OK", "text": "mock-answer-kept"},
+            {"status": "OK", "text": "a substantive but wrong answer"},
+        ]
+    }
+    ledger_path = tmp_path / "ledger.jsonl"
+    request = make_request(recipe=make_recipe(donor_allocation={"donor-a": 1.0}))
+
+    session1, transport1, _ = make_session(
+        tmp_path,
+        transport=MockTransport(CATALOG, cassette=cassette),
+        ledger=AttemptLedger(ledger_path),
+    )
+    report1 = session1.run([request], shard_dir=tmp_path / "shards1")
+    manifest1 = report1["dataset_manifest"]
+    assert sum(s["rows"] for s in manifest1["shards"].values()) > 0
+    assert len(transport1.calls) == 2
+
+    # Fresh session, same ledger: zero new calls, identical nonempty shards.
+    session2, transport2, _ = make_session(
+        tmp_path,
+        transport=MockTransport(CATALOG, cassette=cassette),
+        ledger=AttemptLedger(ledger_path),
+    )
+    report2 = session2.run([request], shard_dir=tmp_path / "shards2")
+    manifest2 = report2["dataset_manifest"]
+    assert transport2.calls == []
+    assert report2["counts"]["skipped_resume"] == 2
+    assert {k: v["sha256"] for k, v in manifest2["shards"].items()} == {
+        k: v["sha256"] for k, v in manifest1["shards"].items()
+    }
+    assert sum(s["rows"] for s in manifest2["shards"].values()) == sum(
+        s["rows"] for s in manifest1["shards"].values()
+    )
+
+    # An empty builder can never silently replace a populated manifest.
+    empty = DatasetBuilder(function_pack_id="pack-alpha", target_dataset_id="D0002")
+    with pytest.raises(DatasetBuildError, match="refusing to replace"):
+        empty.write_shards(tmp_path / "shards1")
+
+
+def test_weak_cells_generate_variants_of_the_failing_root(tmp_path):
+    # Root-2 fails; root-1 succeeds. Variants must derive from root-2.
+    def mech(request, text):
+        good = request.semantic_root_id == "root-001"
+        return MechanicalCheck(
+            artifact_present=True,
+            oracle=OracleResult(passed=good, receipt_digest="c" * 40),
+            score=1.0 if good else 0.0,
+            confusion_cell="" if good else "cell-2",
+        )
+
+    session, _, _ = make_session(tmp_path, mechanical_fn=mech)
+    report = session.run(
+        [
+            make_request(),
+            make_request(
+                semantic_root_id="root-002",
+                leakage_group_id="lg-002",
+                recipe=make_recipe(recipe_id="recipe-two"),
+            ),
+        ]
+    )
+    variants = report["variant_requests"]
+    assert variants, "failing cells must produce variant requests"
+    assert {v["root_id"] for v in variants} == {"root-002"}
+    assert {v["leakage_group_id"] for v in variants} == {"lg-002"}
+    assert all(v["recipe_id"].startswith("recipe-two-variant-") for v in variants)
+
+
+def make_wave_template(**overrides) -> WaveTemplate:
+    values = dict(
+        function_pack_id="pack-alpha",
+        function_contract_digest="a" * 40,
+        tool_catalog_digest="b" * 40,
+        base_recipe=make_recipe(),
+        seed=7,
+        ttl_seconds=3_600.0,
+        issued_at=1_000.0,
+        ceilings=make_ceilings(),
+        root_objectives={
+            "root-001": "objective for root one",
+            "root-002": "objective for root two",
+        },
+        root_leakage_groups={"root-001": "lg-001", "root-002": "lg-002"},
+    )
+    values.update(overrides)
+    return WaveTemplate(**values)
+
+
+def make_harvest_request_doc(**overrides) -> dict:
+    doc = {
+        "schema": "needle-next-harvest-request/v1",
+        "campaign_id": "needle-campaign-1",
+        "source_dataset_id": "D0001",
+        "target_dataset_id": "D0002",
+        "weak_confusion_cells": [
+            {"arm": "B", "cell": "cell-2", "recall": 0.4, "root_ids": ["root-002"]}
+        ],
+        "retention_cells": [
+            {"arm": "B", "cell": "cell-1", "recall": 0.97, "root_ids": ["root-001"]}
+        ],
+        "evidence_digests": {"results": "d" * 64},
+        "request_only": True,
+        "authorizes_generation": False,
+        "authorizes_training": False,
+    }
+    doc.update(overrides)
+    return doc
+
+
+def test_planning_consumes_typed_next_harvest_request():
+    template = make_wave_template()
+    requests = plan_wave_from_harvest_request(make_harvest_request_doc(), template)
+
+    weak = [r for r in requests if r.recipe.prompt_surface == "confusion-targeted"]
+    retention = [
+        r for r in requests if r.recipe.prompt_surface == "retention-controlled"
+    ]
+    # Weak-cell variants come from the failing root, with its own objective
+    # and leakage group — never cloned from the first request.
+    assert weak and all(r.semantic_root_id == "root-002" for r in weak)
+    assert all(r.leakage_group_id == "lg-002" for r in weak)
+    assert all(r.model_visible_objective == "objective for root two" for r in weak)
+    # Successful retention cells produce controlled variants of their root.
+    assert retention and all(r.semantic_root_id == "root-001" for r in retention)
+    assert all(r.leakage_group_id == "lg-001" for r in retention)
+    # The whole wave stays consistent.
+    assert {r.campaign_id for r in requests} == {"needle-campaign-1"}
+    assert {r.target_dataset_id for r in requests} == {"D0002"}
+
+    # Fail closed on anything that is not genuinely request-only.
+    with pytest.raises(WavePlanError, match="request-only"):
+        plan_wave_from_harvest_request(
+            make_harvest_request_doc(request_only=False), template
+        )
+    with pytest.raises(WavePlanError, match="request-only"):
+        plan_wave_from_harvest_request(
+            make_harvest_request_doc(authorizes_generation=True), template
+        )
+    with pytest.raises(WavePlanError, match="schema"):
+        plan_wave_from_harvest_request({"schema": "something-else"}, template)
+    # A referenced root with no committed binding is an error, not a skip.
+    with pytest.raises(WavePlanError, match="fail closed"):
+        plan_wave_from_harvest_request(
+            make_harvest_request_doc(
+                weak_confusion_cells=[
+                    {"arm": "B", "cell": "cell-9", "recall": 0.1, "root_ids": ["root-unknown"]}
+                ]
+            ),
+            template,
+        )
+
+
+def test_donor_allocation_produces_unequal_bounded_counts(tmp_path):
+    counts = allocate_samples({"donor-a": 99.0, "donor-b": 1.0}, total=4)
+    assert counts == {"donor-a": 4, "donor-b": 0}
+    assert sum(counts.values()) == 4
+    counts_even = allocate_samples({"donor-a": 1.0, "donor-b": 1.0}, total=4)
+    assert counts_even == {"donor-a": 2, "donor-b": 2}
+
+    session, transport, _ = make_session(tmp_path)
+    report = session.run(
+        [
+            make_request(
+                recipe=make_recipe(donor_allocation={"donor-a": 99.0, "donor-b": 1.0})
+            )
+        ]
+    )
+    assert report["counts"]["planned"] == 4
+    donors_called = [call.donor_key for call in transport.calls]
+    assert donors_called.count("donor-a") == 4
+    assert donors_called.count("donor-b") == 0
+
+
+def test_per_sample_seeds_differ_deterministically(tmp_path):
+    request = make_request()
+    seeds = {
+        (donor, index): request.sample_seed(donor, index)
+        for donor in ("donor-a", "donor-b")
+        for index in range(2)
+    }
+    assert len(set(seeds.values())) == 4  # all distinct
+    # …and stable across reconstruction of the same request.
+    again = make_request()
+    for (donor, index), seed in seeds.items():
+        assert again.sample_seed(donor, index) == seed
+
+    session, transport, _ = make_session(tmp_path)
+    session.run([request])
+    called_seeds = [call.seed for call in transport.calls]
+    assert len(set(called_seeds)) == len(called_seeds) == 4
+
+
+def test_wave_consistency_is_enforced(tmp_path):
+    session, _, _ = make_session(tmp_path)
+    with pytest.raises(HarvestAuthorizationError, match="one target dataset"):
+        session.run(
+            [
+                make_request(),
+                make_request(
+                    semantic_root_id="root-002",
+                    leakage_group_id="lg-002",
+                    target_dataset_id="D0003",
+                ),
+            ]
+        )
+    with pytest.raises(HarvestAuthorizationError, match="one campaign"):
+        session.run(
+            [
+                make_request(),
+                make_request(
+                    semantic_root_id="root-002",
+                    leakage_group_id="lg-002",
+                    campaign_id="needle-campaign-9",
+                ),
+            ]
+        )
+    with pytest.raises(HarvestAuthorizationError, match="one group"):
+        session.run(
+            [
+                make_request(),
+                make_request(leakage_group_id="lg-777"),
+            ]
+        )
+
+
+def test_disallowed_provider_refused_before_transport_call(tmp_path):
+    session, transport, ledger = make_session(
+        tmp_path, provider_allowlist=("prov-x",)
+    )
+    report = session.run([make_request()])
+    assert report["counts"]["refused_unauthorized"] == 2  # donor-b's items
+    assert report["counts"]["accepted"] == 2  # donor-a still runs
+    assert all(call.donor_key == "donor-a" for call in transport.calls)
+    refused = [r for r in ledger.rows() if r["status"] == "REFUSED_UNAUTHORIZED"]
+    assert len(refused) == 2
+    assert all("allowlist" in r["detail"] for r in refused)
+
+    # Plane allowlists gate identically.
+    session2, transport2, _ = make_session(
+        tmp_path,
+        plane_allowlist=("some-other-plane",),
+        ledger=AttemptLedger(tmp_path / "l2.jsonl"),
+    )
+    report2 = session2.run([make_request()])
+    assert report2["counts"]["refused_unauthorized"] == 4
+    assert transport2.calls == []
+
+
+def test_authorized_effects_checked_before_any_effect(tmp_path):
+    # Missing shard_write with a shard_dir refuses before any call.
+    session, transport, ledger = make_session(tmp_path)
+    with pytest.raises(HarvestAuthorizationError, match="shard_write"):
+        session.run(
+            [
+                make_request(
+                    authorized_effects=("provider_call", "ledger_append")
+                )
+            ],
+            shard_dir=tmp_path / "shards",
+        )
+    assert transport.calls == []
+    assert ledger.rows() == []
+
+    # Missing provider_call / ledger_append refuse in the request guard.
+    for missing, kept in (
+        ("provider_call", ("ledger_append", "shard_write")),
+        ("ledger_append", ("provider_call", "shard_write")),
+    ):
+        with pytest.raises(HarvestAuthorizationError, match=missing):
+            session.run([make_request(authorized_effects=kept)])
+    assert transport.calls == []
+
+
+class WrongWorkKeyTransport:
+    def __init__(self, inner: MockTransport) -> None:
+        self.inner = inner
+        self.calls = inner.calls
+
+    def discover(self):
+        return self.inner.discover()
+
+    def call(self, request):
+        result = self.inner.call(request)
+        return result.model_copy(update={"work_key": "not-the-requested-key"})
+
+
+class WrongRuntimeTransport:
+    def __init__(self, inner: MockTransport) -> None:
+        self.inner = inner
+        self.calls = inner.calls
+
+    def discover(self):
+        return self.inner.discover()
+
+    def call(self, request):
+        result = self.inner.call(request)
+        if result.receipt is None:
+            return result
+        return result.model_copy(
+            update={"receipt": result.receipt.model_copy(update={"runtime": "prod"})}
+        )
+
+
+def test_returned_work_key_and_receipt_runtime_are_validated(tmp_path):
+    session, _, ledger = make_session(
+        tmp_path, transport=WrongWorkKeyTransport(MockTransport(CATALOG))
+    )
+    report = session.run([make_request()])
+    assert report["counts"]["quarantined"] == 4
+    assert all("work_key mismatch" in row["detail"] for row in ledger.rows())
+
+    session2, _, ledger2 = make_session(
+        tmp_path,
+        transport=WrongRuntimeTransport(MockTransport(CATALOG)),
+        ledger=AttemptLedger(tmp_path / "l2.jsonl"),
+    )
+    report2 = session2.run([make_request()])
+    assert report2["counts"]["quarantined"] == 4
+    assert all("runtime" in row["detail"] for row in ledger2.rows())
+
+
+def test_effective_budget_is_min_of_request_and_session_ceilings(tmp_path):
+    lo = make_ceilings(max_provider_calls=3, max_tokens=64)
+    hi = make_ceilings(max_provider_calls=200, max_tokens=2048)
+    merged = min_ceilings(hi, lo)
+    assert merged.max_provider_calls == 3
+    assert merged.max_tokens == 64
+
+    session, transport, _ = make_session(tmp_path)  # session ceiling: 200 calls
+    report = session.run([make_request(ceilings=lo)])
+    assert report["budget"]["max_provider_calls"] == 3
+    assert report["counts"]["budget_stopped"] == 1  # 4 planned, 3 allowed
+    assert len(transport.calls) == 3
+    assert all(call.max_tokens <= 64 for call in transport.calls)

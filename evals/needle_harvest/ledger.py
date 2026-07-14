@@ -1,10 +1,12 @@
 """Append-only, resumable attempt ledger.
 
-Every attempt — success, failure, timeout, empty response, invalid schema,
-judge disagreement, quarantine — becomes one immutable JSONL row keyed by
-its deterministic work key. Resuming a harvest replays the ledger first and
-skips any work key that already reached a terminal state, so a resume can
-never duplicate a provider call or an effect.
+Every attempt — success, provisional judge approval, failure, timeout,
+empty response, invalid schema, judge disagreement, quarantine — becomes
+one immutable JSONL row keyed by its deterministic work key. Rows for
+evaluated candidates carry the full candidate content (or an immutable
+artifact reference), so a resumed harvest can reconstruct the complete
+dataset — accepted, provisional, and semantically failed examples alike —
+without a single duplicate provider call or effect.
 """
 
 from __future__ import annotations
@@ -18,8 +20,10 @@ LEDGER_SCHEMA = "needle-harvest-ledger/v1"
 TERMINAL_STATUSES = frozenset(
     {
         "ACCEPTED",
+        "PROVISIONAL",
         "REJECTED",
         "QUARANTINED",
+        "REFUSED_UNAUTHORIZED",
         "EXPIRED",
         "BUDGET_EXHAUSTED",
         "TRANSPORT_FAILURE",
@@ -55,6 +59,7 @@ class AttemptLedger:
         episode_outcome: str = "",
         detail: str = "",
         provider_receipt: dict[str, str] | None = None,
+        candidate: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         row = {
             "schema": LEDGER_SCHEMA,
@@ -68,6 +73,9 @@ class AttemptLedger:
             "episode_outcome": episode_outcome,
             "detail": detail,
             "provider_receipt": provider_receipt or {},
+            # Full candidate content (or immutable artifact reference) for
+            # evaluated responses — resume rebuilds the dataset from these.
+            "candidate": candidate,
         }
         # Append-only: open in "a" every time; rows are never rewritten.
         with open(self._path, "a", encoding="utf-8") as handle:

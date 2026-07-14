@@ -29,9 +29,15 @@ from evals.needle_harvest.contracts import (
     GenerationRecipe,
     HarvestManifest,
     HarvestRequest,
+    allocate_samples,
+    min_ceilings,
 )
 from evals.needle_harvest.harvester import HarvestSession
 from evals.needle_harvest.ledger import AttemptLedger
+from evals.needle_harvest.planning import (
+    WaveTemplate,
+    plan_wave_from_harvest_request,
+)
 from evals.needle_harvest.transport import (
     MockTransport,
     ProviderModel,
@@ -58,4 +64,8 @@ __all__ = [
     "TransportRequest",
     "TransportResult",
     "TransportStatus",
+    "WaveTemplate",
+    "allocate_samples",
+    "min_ceilings",
+    "plan_wave_from_harvest_request",
 ]

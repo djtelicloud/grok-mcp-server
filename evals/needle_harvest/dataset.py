@@ -27,11 +27,11 @@ import hashlib
 import json
 import re
 import unicodedata
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-from evals.needle_harvest.truth import ProposalVerdict, TransportStatus
+from evals.needle_harvest.truth import EpisodeOutcome, ProposalVerdict, TransportStatus
 
 DATASET_MANIFEST_SCHEMA = "needle-harvest-dataset/v1"
 
@@ -98,7 +98,13 @@ def split_for_leakage_group(leakage_group_id: str) -> str:
 
 @dataclass(frozen=True)
 class CandidateSample:
-    """One evaluated candidate response bound to its request context."""
+    """One evaluated candidate response bound to its request context.
+
+    Carries the exact model-visible input (objective + TTL envelope), not
+    just the response: a training example is unlearnable without its
+    prompt. Provenance (provider receipt, judge votes) lives in separate
+    fields that never enter model-visible text.
+    """
 
     function_pack_id: str
     semantic_root_id: str
@@ -112,10 +118,16 @@ class CandidateSample:
     text: str
     transport_status: TransportStatus
     proposal_verdict: ProposalVerdict
+    episode_outcome: EpisodeOutcome
+    model_visible_objective: str
+    ttl_seconds: float
+    issued_at: float
+    expires_at: float
     score: float = 0.0
     confusion_cell: str = ""
     visible_fields: tuple[str, ...] = ("answer",)
     provenance_receipt: dict[str, str] = field(default_factory=dict)
+    judge_votes: tuple[tuple[str, bool], ...] = ()
 
     @property
     def content_id(self) -> str:
@@ -124,6 +136,67 @@ class CandidateSample:
             self.semantic_root_id,
             self.function_contract_digest,
             self.text,
+        )
+
+    @property
+    def input_digest(self) -> str:
+        """Digest of the exact model-visible input for this candidate."""
+        canonical = json.dumps(
+            {
+                "objective": self.model_visible_objective,
+                "ttl_seconds": self.ttl_seconds,
+                "issued_at": self.issued_at,
+                "expires_at": self.expires_at,
+                "function_contract_digest": self.function_contract_digest,
+                "tool_catalog_digest": self.tool_catalog_digest,
+                "response_type": self.response_type,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    def to_payload(self) -> dict[str, Any]:
+        """JSON-safe dict carrying the complete candidate content."""
+        payload = asdict(self)
+        payload["transport_status"] = self.transport_status.value
+        payload["proposal_verdict"] = self.proposal_verdict.value
+        payload["episode_outcome"] = self.episode_outcome.value
+        payload["visible_fields"] = list(self.visible_fields)
+        payload["judge_votes"] = [
+            [judge_key, approves] for judge_key, approves in self.judge_votes
+        ]
+        return payload
+
+    @classmethod
+    def from_payload(cls, payload: dict[str, Any]) -> CandidateSample:
+        """Reconstruct the exact candidate persisted by :meth:`to_payload`."""
+        return cls(
+            function_pack_id=payload["function_pack_id"],
+            semantic_root_id=payload["semantic_root_id"],
+            leakage_group_id=payload["leakage_group_id"],
+            function_contract_digest=payload["function_contract_digest"],
+            tool_catalog_digest=payload["tool_catalog_digest"],
+            ttl_condition=payload["ttl_condition"],
+            response_type=payload["response_type"],
+            donor_key=payload["donor_key"],
+            recipe_id=payload["recipe_id"],
+            text=payload["text"],
+            transport_status=TransportStatus(payload["transport_status"]),
+            proposal_verdict=ProposalVerdict(payload["proposal_verdict"]),
+            episode_outcome=EpisodeOutcome(payload["episode_outcome"]),
+            model_visible_objective=payload["model_visible_objective"],
+            ttl_seconds=payload["ttl_seconds"],
+            issued_at=payload["issued_at"],
+            expires_at=payload["expires_at"],
+            score=payload.get("score", 0.0),
+            confusion_cell=payload.get("confusion_cell", ""),
+            visible_fields=tuple(payload.get("visible_fields", ("answer",))),
+            provenance_receipt=dict(payload.get("provenance_receipt", {})),
+            judge_votes=tuple(
+                (str(judge_key), bool(approves))
+                for judge_key, approves in payload.get("judge_votes", [])
+            ),
         )
 
 
@@ -204,6 +277,25 @@ class DatasetBuilder:
         rows.sort(key=lambda r: r["content_id"])
         return rows
 
+    def provisional_sft_view(self) -> list[dict[str, Any]]:
+        """Judge-approved provisional SFT targets — an explicit opt-in view.
+
+        Unanimous ``JUDGE_PROVISIONAL`` approvals are imperfect but
+        learnable research data. They never enter the verified ``sft`` view
+        and are never relabeled ``VERIFIED_SUCCESS``; training recipes that
+        want them must opt into this view deliberately. Judge provenance is
+        preserved on every row.
+        """
+        rows = []
+        for sample in self._samples:
+            if sample.proposal_verdict is not ProposalVerdict.JUDGE_PROVISIONAL:
+                continue
+            if sample.episode_outcome is not EpisodeOutcome.SUCCESS:
+                continue
+            rows.append(self._row(sample, view="sft_provisional"))
+        rows.sort(key=lambda r: r["content_id"])
+        return rows
+
     def dpo_view(self) -> list[dict[str, Any]]:
         """DPO preference pairs under the same-contract rule.
 
@@ -274,6 +366,13 @@ class DatasetBuilder:
                 ProposalVerdict.JUDGE_PROVISIONAL,
             ):
                 return False
+            # A judge-approved provisional answer is (provisionally) good;
+            # it must not be spent as a preference negative.
+            if (
+                sample.proposal_verdict is ProposalVerdict.JUDGE_PROVISIONAL
+                and sample.episode_outcome is EpisodeOutcome.SUCCESS
+            ):
+                return False
             if sample.response_type != chosen.response_type:
                 return False
             return True
@@ -331,12 +430,29 @@ class DatasetBuilder:
             "split": split_for_leakage_group(sample.leakage_group_id),
             "ttl_condition": sample.ttl_condition,
             "response_type": sample.response_type,
+            # The exact model-visible input: without it a row is not a
+            # learnable example. ``text`` below is the target response.
+            "input": {
+                "objective": sample.model_visible_objective,
+                "ttl_seconds": sample.ttl_seconds,
+                "issued_at": sample.issued_at,
+                "expires_at": sample.expires_at,
+                "function_contract_digest": sample.function_contract_digest,
+                "tool_catalog_digest": sample.tool_catalog_digest,
+                "response_type": sample.response_type,
+            },
+            "input_digest": sample.input_digest,
             "text": sample.text,
             "label": sample.proposal_verdict.value,
+            "episode_outcome": sample.episode_outcome.value,
             "confusion_cell": sample.confusion_cell,
             # Provenance receipts stay out of model-visible text; the donor
             # key is neutral and the provider identity lives only here.
             "provenance": dict(sorted(sample.provenance_receipt.items())),
+            "judges": [
+                {"judge_key": judge_key, "approves": approves}
+                for judge_key, approves in sample.judge_votes
+            ],
             "donor_key": sample.donor_key,
             "recipe_id": sample.recipe_id,
         }
@@ -368,12 +484,32 @@ class DatasetBuilder:
         """Content-addressed shards + digest-only manifest.
 
         Massive data lives in the artifact store (``out_dir``); git is meant
-        to carry only the manifest (schemas, digests, counts).
+        to carry only the manifest (schemas, digests, counts). An existing
+        populated manifest can never be replaced by an empty build — that
+        would silently destroy a dataset on a broken resume.
         """
         out_dir = Path(out_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
+        views = (
+            ("sft", self.sft_view()),
+            ("sft_provisional", self.provisional_sft_view()),
+            ("dpo", self.dpo_view()),
+        )
+        new_total = sum(len(rows) for _, rows in views)
+        manifest_path = out_dir / "manifest.json"
+        if manifest_path.exists():
+            existing = json.loads(manifest_path.read_text())
+            existing_total = sum(
+                int(info.get("rows", 0))
+                for info in existing.get("shards", {}).values()
+            )
+            if existing_total > 0 and new_total == 0:
+                raise DatasetBuildError(
+                    "refusing to replace a populated dataset manifest with an "
+                    "empty build — resume must reconstruct candidates first"
+                )
         shards: dict[str, dict[str, Any]] = {}
-        for name, rows in (("sft", self.sft_view()), ("dpo", self.dpo_view())):
+        for name, rows in views:
             payload = "\n".join(json.dumps(r, sort_keys=True) for r in rows)
             payload += "\n" if rows else ""
             digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
@@ -392,7 +528,7 @@ class DatasetBuilder:
         manifest["manifest_sha256"] = hashlib.sha256(
             manifest_bytes.encode("utf-8")
         ).hexdigest()
-        (out_dir / "manifest.json").write_text(
+        manifest_path.write_text(
             json.dumps(manifest, sort_keys=True, indent=2) + "\n"
         )
         return manifest

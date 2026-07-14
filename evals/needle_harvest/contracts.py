@@ -11,6 +11,7 @@ calls or effects.
 from __future__ import annotations
 
 import hashlib
+import json
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -46,6 +47,45 @@ class Ceilings(StrictModel):
     max_seconds: float = Field(gt=0)
     max_cost_usd: float = Field(gt=0)
     max_roots: int = Field(gt=0)
+
+
+def min_ceilings(first: Ceilings, *rest: Ceilings) -> Ceilings:
+    """Elementwise minimum across request/session/manifest ceilings.
+
+    The effective budget for a wave is never looser than any party's
+    declared ceiling: the request, the session, and (live) the manifest all
+    bound it simultaneously.
+    """
+    values = first.model_dump()
+    for other in rest:
+        for name, value in other.model_dump().items():
+            values[name] = min(values[name], value)
+    return Ceilings(**values)
+
+
+def allocate_samples(allocation: dict[str, float], total: int) -> dict[str, int]:
+    """Deterministic largest-remainder conversion of donor weights into
+    bounded discrete sample counts summing to ``total``.
+
+    A 99/1 weighting therefore produces unequal call counts (possibly zero
+    for a starved donor) rather than being silently flattened into equal
+    per-donor sampling. Equal weights still divide evenly. Ties in the
+    fractional remainders break on the sorted donor key, so identical
+    inputs always allocate identically.
+    """
+    if total < 0:
+        raise ValueError("total samples must be non-negative")
+    donors = sorted(allocation)
+    if not donors:
+        raise ValueError("allocation needs at least one donor")
+    weight_sum = float(sum(allocation.values()))
+    quotas = {donor: allocation[donor] / weight_sum * total for donor in donors}
+    counts = {donor: int(quotas[donor]) for donor in donors}
+    remainder = total - sum(counts.values())
+    by_fraction = sorted(donors, key=lambda d: (-(quotas[d] - counts[d]), d))
+    for donor in by_fraction[:remainder]:
+        counts[donor] += 1
+    return counts
 
 
 class GenerationRecipe(StrictModel):
@@ -112,20 +152,30 @@ class HarvestRequest(StrictModel):
             raise ValueError("request authorizes no effects")
         return self
 
+    def canonical_semantics(self) -> str:
+        """Canonical JSON of the complete request semantics.
+
+        Everything that changes what example this request produces is in
+        here: objective, TTL facts (ttl_seconds/issued_at/expires_at),
+        leakage group, response type, authorized effects, source/target
+        datasets, and the full generation recipe — not just its id.
+        ``ceilings`` are deliberately excluded: budgets bound enforcement,
+        not example identity, so tightening a budget on resume cannot
+        orphan already-completed work.
+        """
+        payload = self.model_dump(mode="json", exclude={"ceilings"})
+        return json.dumps(payload, sort_keys=True, separators=(",", ":"))
+
     def work_key(self, donor: str, sample_index: int) -> str:
-        """Stable key for one provider call — identical across resumes."""
+        """Stable key for one provider call — identical across resumes.
+
+        Hashes the canonical complete request semantics, so materially
+        different examples (different objective, TTL window, leakage group,
+        recipe, …) can never collide, while a retry of the same work keeps
+        the same identity.
+        """
         return deterministic_id(
-            "work",
-            self.campaign_id,
-            self.target_dataset_id,
-            self.function_pack_id,
-            self.semantic_root_id,
-            self.function_contract_digest,
-            self.tool_catalog_digest,
-            self.recipe.recipe_id,
-            str(self.seed),
-            donor,
-            str(sample_index),
+            "work", self.canonical_semantics(), donor, str(sample_index)
         )
 
     def attempt_id(self, donor: str, sample_index: int) -> str:
@@ -133,6 +183,13 @@ class HarvestRequest(StrictModel):
 
     def effect_id(self, donor: str, sample_index: int) -> str:
         return deterministic_id("effect", self.work_key(donor, sample_index))
+
+    def sample_seed(self, donor: str, sample_index: int) -> int:
+        """Distinct deterministic seed for each donor/sample slot."""
+        digest = hashlib.sha256(
+            f"sample-seed\x1f{self.seed}\x1f{self.work_key(donor, sample_index)}".encode()
+        ).digest()
+        return int.from_bytes(digest[:8], "big")
 
     def expired(self, now: float) -> bool:
         return now >= self.expires_at
