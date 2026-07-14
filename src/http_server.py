@@ -1071,6 +1071,9 @@ async def readyz(_: Request) -> JSONResponse:
         logger.warning(f"readyz CLI-plane probe failed: {exc}")
         cli_plane = {"ready": False}
     checks: Dict[str, bool] = {
+        # Compatibility note: this public key predates the dual-plane runtime.
+        # API credentials are checked for presence only; the CLI branch is a
+        # live OAuth probe.
         "model_auth": bool(os.environ.get("XAI_API_KEY", "").strip())
         or bool(cli_plane.get("ready")),
         "state_dir_writable": False,
@@ -2199,8 +2202,16 @@ async def webmcp_manifest(_: Request) -> JSONResponse:
         "description": "Agent-callable documentation and verification helper tools for the UniGrok MCP gateway.",
         "tools": [
             {
+                "name": "unigrok_ui_layout_get",
+                "description": "Returns Control Center layout metadata for browser clients."
+            },
+            {
+                "name": "get_result_shape_example",
+                "description": "Returns a non-authoritative example of selected result fields. Live tools/list is authoritative."
+            },
+            {
                 "name": "get_schema",
-                "description": "Returns the Pydantic/JSON schema of a given UniGrok tool."
+                "description": "Deprecated compatibility alias for get_result_shape_example; it returns examples, not authoritative schemas."
             },
             {
                 "name": "example_call",
@@ -2208,7 +2219,7 @@ async def webmcp_manifest(_: Request) -> JSONResponse:
             },
             {
                 "name": "simulate_reasoning_guard",
-                "description": "Simulates checking if a model meets the required reasoning level."
+                "description": "Previews a local reasoning-level check without calling a provider."
             },
             {
                 "name": "fetch_okf_bundle",

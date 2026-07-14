@@ -18,7 +18,7 @@ Deploy the repository `Dockerfile` to a dedicated Cloud Run service and set:
 | `UNIGROK_OAUTH_SCOPES` | `unigrok:connect,unigrok:invoke,unigrok:review,unigrok:chat,unigrok:status` |
 | `UNIGROK_ALLOWED_ORIGINS` | Exact reviewed browser origins only; omit when no browser client is approved |
 | `UNIGROK_CALLER_BUDGETS` | JSON daily cost caps keyed by authenticated OAuth subject |
-| `UNIGROK_STATE_DIR` | `/tmp/unigrok` unless a durable store is deliberately attached |
+| `UNIGROK_STATE_DIR` | `/tmp/uni-grok` unless a durable store is deliberately attached |
 
 Inject `XAI_API_KEY` from a version-pinned Secret Manager resource. Do not set
 `UNIGROK_API_KEYS` on the production OAuth service; a static bearer must not

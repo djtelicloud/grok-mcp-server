@@ -1,9 +1,9 @@
-import { parseMarkdown, sanitizeHref } from "./markdown.js?v=grok-v0.6.0-r3";
+import { parseMarkdown, sanitizeHref } from "./markdown.js?v=grok-v0.6.0-r4";
 
 // Must match the <meta name="unigrok-ui-version"> baked into index.html and
 // src/version.py UI_ASSET_VERSION; a mismatch means the browser paired a
 // cached page with a different script build (the stale-skew failure class).
-const UI_ASSET_VERSION = "grok-v0.6.0-r3";
+const UI_ASSET_VERSION = "grok-v0.6.0-r4";
 
 const LAYOUT_KEY = "unigrok.mcp.console.layout.v2";
 
@@ -336,10 +336,12 @@ function switchTab(tabId) {
   }
 }
 
-// --- Hardcoded Pydantic schemas (from results.py) ---
-const enforcedSchemas = {
+// --- Illustrative result shapes (not wire schemas) ---
+// Live MCP tools/list output is authoritative. These compact examples exist
+// only to make common response fields easier to browse in the console.
+const resultShapeExamples = {
   AgentResult: {
-    description: "Enforced response model for unified agent actions.",
+    description: "Illustrative fields commonly returned by unified agent actions.",
     properties: {
       response: { type: "string", description: "Core generated text content." },
       text: { type: "string", description: "Formatted markdown string with citation footers." },
@@ -357,10 +359,9 @@ const enforcedSchemas = {
       degraded: { type: "boolean", description: "True if model fallback triggered." },
       trace: { type: "array", description: "Structured multi-step execution trace." }
     },
-    required: ["response", "finish_reason", "cost_usd"]
   },
   ChatResult: {
-    description: "Response model returned by completions (chat, stateful_chat).",
+    description: "Illustrative fields commonly returned by chat completions.",
     properties: {
       response: { type: "string" },
       text: { type: "string" },
@@ -372,10 +373,9 @@ const enforcedSchemas = {
       response_id: { type: "string", description: "xAI upstream conversation turn identifier." },
       session: { type: "string", description: "Local persistent session name." }
     },
-    required: ["response", "response_id"]
   },
   ReflectionResult: {
-    description: "Critique review structure returned by grok_reflect.",
+    description: "Illustrative critique fields returned by grok_reflect.",
     properties: {
       ok: { type: "boolean", description: "True if reflection succeeded." },
       critique: {
@@ -390,10 +390,9 @@ const enforcedSchemas = {
         }
       }
     },
-    required: ["ok", "critique"]
   },
   MediaResult: {
-    description: "Enforced structure for Grok Imagine image and video tools.",
+    description: "Illustrative Grok Imagine image and video result fields.",
     properties: {
       response: { type: "string" },
       text: { type: "string" },
@@ -402,7 +401,6 @@ const enforcedSchemas = {
       duration_sec: { type: "number" },
       imagine_params: { type: "object", description: "Prompt parameters context for reproducibility." }
     },
-    required: ["response"]
   },
   SystemResult: {
     description: "Payload format for search execution and system checks.",
@@ -411,7 +409,6 @@ const enforcedSchemas = {
       text: { type: "string" },
       data: { type: "object", description: "Raw structured JSON outputs (citations, environment variables)." }
     },
-    required: ["response"]
   }
 };
 
@@ -432,9 +429,9 @@ function setupSchemaExplorer() {
 }
 
 function renderActiveSchema() {
-  const schema = enforcedSchemas[state.activeSchema];
-  setText("schemaNameTitle", `${state.activeSchema}.json`);
-  setText("schemaCodeBlock", schema ? JSON.stringify(schema, null, 2) : "Schema not found.");
+  const schema = resultShapeExamples[state.activeSchema];
+  setText("schemaNameTitle", `${state.activeSchema}.example.json`);
+  setText("schemaCodeBlock", schema ? JSON.stringify({ authoritative: false, ...schema }, null, 2) : "Result shape not found.");
 }
 
 // --- Reasoning Guard Simulator ---
@@ -444,10 +441,17 @@ function setupReasoningGuard() {
     const level = $("guardLevel").value;
 
     const weights = { none: 0, low: 1, medium: 2, high: 3 };
+    // Current bundled profiles omit reasoning_effort. The runtime normalizes
+    // omission to "none"; never infer capability from a model slug.
+    const modelEfforts = {
+      "grok-build-0.1": "none",
+      "grok-4.3": "none",
+      "grok-4.5": "none",
+    };
     const modelWeights = {
       "grok-build-0.1": 0,
-      "grok-4.3": 2,
-      "grok-4.5": 3,
+      "grok-4.3": 0,
+      "grok-4.5": 0,
     };
 
     const requiredWeight = weights[level];
@@ -459,28 +463,28 @@ function setupReasoningGuard() {
     if (modelWeight < requiredWeight) {
       card.classList.add("block");
       $("simStatus").innerText = "BLOCKED BY GUARD";
-      renderGuardExplanation({ blocked: true, model, modelWeight, level, requiredWeight });
+      renderGuardExplanation({ blocked: true, model, modelEffort: modelEfforts[model], modelWeight, level, requiredWeight });
     } else {
       card.classList.add("pass");
       $("simStatus").innerText = "PASS";
-      renderGuardExplanation({ blocked: false, model, modelWeight, level, requiredWeight });
+      renderGuardExplanation({ blocked: false, model, modelEffort: modelEfforts[model], modelWeight, level, requiredWeight });
     }
   });
 }
 
-function renderGuardExplanation({ blocked, model, modelWeight, level, requiredWeight }) {
+function renderGuardExplanation({ blocked, model, modelEffort, modelWeight, level, requiredWeight }) {
   const explanation = $("simExplanation");
   const lead = document.createElement("strong");
   lead.textContent = blocked ? "Error:" : "Success:";
   const modelCode = document.createElement("code");
   modelCode.textContent = model;
   const detail = document.createTextNode(blocked
-    ? ` provides reasoning level weight ${modelWeight}, which falls below your required threshold of '${level}' (weight ${requiredWeight}).`
-    : ` (weight ${modelWeight}) satisfies the required guard threshold of '${level}' (weight ${requiredWeight}).`);
+    ? ` has bundled profile effort '${modelEffort}' (weight ${modelWeight}), which falls below your required threshold of '${level}' (weight ${requiredWeight}).`
+    : ` has bundled profile effort '${modelEffort}' (weight ${modelWeight}), which satisfies the required guard threshold of '${level}' (weight ${requiredWeight}).`);
   const outcome = document.createElement("p");
   outcome.textContent = blocked
-    ? "The gateway will throw a ValueError and abort the request before hitting the API."
-    : "The orchestrator will safely route this call.";
+    ? "The profile gate will abort before inference execution; model discovery may already have occurred."
+    : "The profile gate would not block this request. This does not prove route availability or answer quality.";
   explanation.replaceChildren(lead, document.createTextNode(blocked ? " The target model " : " Model "), modelCode, detail, outcome);
 }
 
@@ -1766,26 +1770,38 @@ async function registerWebMcpTools() {
       }),
     });
 
+    const resultShapeInputSchema = {
+      type: "object",
+      properties: {
+        tool_name: { type: "string", enum: ["agent", "chat", "grok_reflect", "generate_image"] }
+      },
+      required: ["tool_name"]
+    };
+    const getResultShapeExample = async ({ tool_name }) => {
+      const schemaName = tool_name === "agent" ? "AgentResult" : tool_name === "chat" ? "ChatResult" : tool_name === "grok_reflect" ? "ReflectionResult" : tool_name === "generate_image" ? "MediaResult" : "AgentResult";
+      const schema = resultShapeExamples[schemaName];
+      return {
+        content: [{
+          type: "text",
+          text: schema
+            ? JSON.stringify({ authoritative: false, source: "ui_example", ...schema }, null, 2)
+            : `Tool '${tool_name}' not found.`
+        }]
+      };
+    };
+
+    await ctx.registerTool({
+      name: "get_result_shape_example",
+      description: "Returns an illustrative result field map. Live MCP tools/list schemas are authoritative.",
+      inputSchema: resultShapeInputSchema,
+      execute: getResultShapeExample
+    });
+
     await ctx.registerTool({
       name: "get_schema",
-      description: "Returns the Pydantic/JSON schema of a given UniGrok tool.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          tool_name: { type: "string", enum: ["agent", "chat", "grok_reflect", "generate_image"] }
-        },
-        required: ["tool_name"]
-      },
-      execute: async ({ tool_name }) => {
-        const schemaName = tool_name === "agent" ? "AgentResult" : tool_name === "chat" ? "ChatResult" : tool_name === "grok_reflect" ? "ReflectionResult" : tool_name === "generate_image" ? "MediaResult" : "AgentResult";
-        const schema = enforcedSchemas[schemaName];
-        return {
-          content: [{
-            type: "text",
-            text: schema ? JSON.stringify(schema, null, 2) : `Tool '${tool_name}' not found.`
-          }]
-        };
-      }
+      description: "Deprecated compatibility alias. Returns a non-authoritative result example; live MCP tools/list schemas are authoritative.",
+      inputSchema: resultShapeInputSchema,
+      execute: getResultShapeExample
     });
 
     await ctx.registerTool({
@@ -1800,11 +1816,11 @@ async function registerWebMcpTools() {
       },
       execute: async ({ mode }) => {
         const examples = {
-          auto: { task: "Describe quantum computing.", mode: "auto" },
-          fast: { prompt: "Hello!", enable_agentic: false },
-          reasoning: { task: "Design a relational database backup schema.", mode: "reasoning" },
-          thinking: { task: "Perform deep multi-step verification of our endpoints.", mode: "thinking" },
-          research: { task: "Compare WebMCP vs custom IETF discovery protocols.", mode: "research" }
+          auto: { prompt: "Describe quantum computing.", mode: "auto" },
+          fast: { prompt: "Hello!", mode: "fast" },
+          reasoning: { prompt: "Design a relational database backup schema.", mode: "reasoning" },
+          thinking: { prompt: "Perform deep multi-step verification of our endpoints.", mode: "thinking" },
+          research: { prompt: "Compare WebMCP vs custom IETF discovery protocols.", mode: "research" }
         };
         return {
           content: [{
@@ -1817,7 +1833,7 @@ async function registerWebMcpTools() {
 
     await ctx.registerTool({
       name: "simulate_reasoning_guard",
-      description: "Simulates checking if a model meets the required reasoning level.",
+      description: "Inspects guard behavior against this release's bundled profile effort declarations.",
       inputSchema: {
         type: "object",
         properties: {
@@ -1830,8 +1846,8 @@ async function registerWebMcpTools() {
         const levels = { none: 0, low: 1, medium: 2, high: 3 };
         const modelLevels = {
           "grok-build-0.1": 0,
-          "grok-4.3": 2,
-          "grok-4.5": 3
+          "grok-4.3": 0,
+          "grok-4.5": 0
         };
         const requiredWeight = levels[required_level];
         const modelWeight = modelLevels[model] || 0;
@@ -1840,7 +1856,7 @@ async function registerWebMcpTools() {
           return {
             content: [{
               type: "text",
-              text: `ERROR: Model '${model}' has reasoning level weight ${modelWeight}, which fails the required guard threshold of '${required_level}' (${requiredWeight}). Pre-flight abort triggered!`
+              text: `ERROR: Model '${model}' has no declared reasoning_effort in this release's bundled profile (normalized weight ${modelWeight}), which fails the required guard threshold of '${required_level}' (${requiredWeight}). Pre-flight abort triggered!`
             }],
             isError: true
           };
@@ -1849,7 +1865,7 @@ async function registerWebMcpTools() {
         return {
           content: [{
             type: "text",
-            text: `SUCCESS: Model '${model}' (weight ${modelWeight}) satisfies required reasoning level '${required_level}' (weight ${requiredWeight}). Guard passed.`
+            text: `SUCCESS: Model '${model}' has no declared reasoning_effort in this release's bundled profile (normalized weight ${modelWeight}) and satisfies required level '${required_level}' (weight ${requiredWeight}). Guard passed.`
           }]
         };
       }

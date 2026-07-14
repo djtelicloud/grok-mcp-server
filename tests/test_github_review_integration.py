@@ -357,6 +357,9 @@ def test_chatgpt_github_operator_guide_keeps_credentials_separate():
     assert "There is no switch that permits outside contributors" in guide
     assert "standalone GitHub OAuth control" in guide
     assert "Ed25519 receipt verifier" in guide
+    assert "Opening or updating a PR" in guide
+    assert "does not trigger this workflow" in guide
+    assert "never uses `pull_request` or `pull_request_target`" in guide
 
 
 def test_codex_approval_workflow_is_owner_only_and_exact_head_bound():

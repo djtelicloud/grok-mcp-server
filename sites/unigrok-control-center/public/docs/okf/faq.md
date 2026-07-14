@@ -257,8 +257,9 @@ Check the gateway health endpoint with:
 curl -s http://localhost:4765/healthz
 ```
 
-Use `/readyz` when you also need readiness checks for model authentication,
-state storage, and SQLite. Inspect the non-secret CLI state with:
+Use `/readyz` when you also need readiness checks for API credential presence
+or a live CLI OAuth probe, state storage, and SQLite. It does not spend a
+request to validate an API key. Inspect the non-secret CLI state with:
 
 ```bash
 curl -s http://localhost:4765/runtimez

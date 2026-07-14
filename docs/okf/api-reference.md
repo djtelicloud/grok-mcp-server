@@ -8,6 +8,10 @@ description: "Auto-generated API reference from the UniGrok codebase."
 # API Reference
 
 This deterministic reference is generated from documented public Python symbols.
+It is a source-code inventory, not the MCP `tools/list` contract: a Python
+symbol appearing here does not mean it is exposed by the stable HTTP service.
+Use live MCP discovery for the deployed surface. Topic guides label stable
+HTTP, contributor Forge, and trusted stdio capabilities explicitly.
 Run `uv run python scripts/generate_okf.py --write` after changing the public API.
 
 ## cli.py {#cli}

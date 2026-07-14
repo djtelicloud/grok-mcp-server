@@ -2,7 +2,7 @@
   "okf_version": "0.1",
   "name": "uni-grok-mcp",
   "title": "UniGrok MCP Knowledge Bundle",
-  "description": "Agent-readable documentation for the UniGrok Grok-native Model Context Protocol (MCP) server.",
+  "description": "Surface-scoped documentation for UniGrok stable HTTP, contributor Forge, and trusted stdio capabilities.",
   "root": "index.md",
   "files": [
     "index.md",

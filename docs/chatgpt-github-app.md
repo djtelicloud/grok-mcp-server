@@ -24,13 +24,14 @@ ChatGPT connects to a remote HTTPS MCP URL, not directly to localhost. For a
 private local server, prefer OpenAI's Secure MCP Tunnel. For temporary
 development, an HTTPS tunnel may forward to `http://127.0.0.1:4765`.
 
-1. Confirm `http://localhost:4765/healthz` is healthy.
+1. Confirm `http://localhost:4765/readyz` returns ready.
 2. Establish a trusted HTTPS tunnel to host port `4765` without exposing the
    Docker-internal port `8080`.
 3. In ChatGPT Developer Mode, create a private app using
    `https://<trusted-host>/mcp`.
-4. Configure the app's authentication to send a UniGrok client token when
-   `UNIGROK_API_KEYS` protects the endpoint.
+4. For the private remote service, configure the app through UniGrok's OAuth
+   discovery flow. For a temporary local tunnel protected by
+   `UNIGROK_API_KEYS`, send only that narrowly scoped gateway client token.
 5. Scan tools and confirm `review_pull_request` is read-only.
 6. Refresh the app after tool metadata or widget URI changes.
 
@@ -53,8 +54,9 @@ does not need to operate Git or babysit the runner):
 3. Ensure workflow permissions allow pull-request reads and timeline comments;
    the checked-in workflow uses `contents: read` and `pull-requests: write`
    without contents, actions, deployments, or administration write access.
-4. Open or update a PR, manually dispatch the workflow, or comment
-   `@grok review` on a PR.
+4. Manually dispatch the workflow with a PR number, or have an owner, member,
+   or collaborator comment `@grok review` on a PR. Opening or updating a PR
+   does not trigger this workflow.
 
 The checked-in defaults intentionally preserve this local path:
 
@@ -66,16 +68,17 @@ The checked-in defaults intentionally preserve this local path:
 ## Security contract
 
 - PR diffs and comments are untrusted evidence, not instructions.
-- The workflow uses `pull_request_target` only to execute the trusted workflow
-  and script from the default branch.
-- Because this is a public repository, automatic and comment-triggered runs
-  are restricted to the owner, members, and collaborators. Outside
-  contributors cannot schedule work on the Mac runner themselves.
+- The workflow has only `issue_comment` and `workflow_dispatch` triggers. It
+  never uses `pull_request` or `pull_request_target`; every run checks out the
+  trusted default branch rather than contributor code.
+- Because this is a public repository, comment-triggered runs require an
+  owner, member, or collaborator. Outside contributors cannot schedule work on
+  the Mac runner themselves.
 - It never checks out, builds, imports, or runs code from the reviewed PR.
 - GitHub API responses are bounded before sending them to UniGrok.
-- An automatic `pull_request_target` run must match the event base and head
-  SHAs. Review evidence comes from the immutable compare endpoint for those
-  commits, and both are checked again before a comment is written.
+- The runner resolves the PR's current base and head, fetches evidence from the
+  immutable `base...head` compare endpoint, and checks both commits again
+  before writing a comment.
 - The tool and workflow cannot merge, push, tag, release, or change protection.
 - The review comment explicitly hands authority back to Codex.
 

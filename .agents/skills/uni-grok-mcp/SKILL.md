@@ -28,8 +28,11 @@ http://localhost:4765/mcp
 Start or refresh the service from the primary checkout with:
 ```bash
 docker compose up --build -d
-curl -s http://localhost:4765/healthz
+curl --fail -s http://localhost:4765/healthz
 ```
+
+After at least one Grok credential plane is configured, use `/readyz` as the
+model-access gate.
 
 For IDE setup, use [docs/ide-setup.md](../../../docs/ide-setup.md) as the source of truth. Each IDE should use the same endpoint and set a stable `X-Client-ID` header (`codex`, `claude-code`, `vscode`, `antigravity`, etc.) so sessions and telemetry stay separated.
 
@@ -71,15 +74,21 @@ uv run python main.py --http
 
 ## 3. Specialized Tools & Resources
 
-When querying Grok or using this server, take advantage of the following custom capabilities:
+Capability names are surface-specific. Treat the connected server's live
+`tools/list`, `resources/list`, and `prompts/list` responses as authoritative:
 
-- **Unified Agent (`agent` tool)**: The core entry point for complex tasks. It handles multi-step reasoning, tool routing, and returns structured metadata.
-- **Deferred Research Jobs**:
+- **Stable HTTP (`:4765/mcp`)**: `agent`, read-only PR review, status,
+  discovery, and the disabled-by-default restart helper. This service is
+  workspace-neutral.
+- **Contributor Forge HTTP (`:4766/mcp`)**: the stable surface plus
+  repository-scoped workspace-memory and Swarm tools.
+- **Trusted stdio**: the full source registry, including deferred research:
   - `submit_research_job`: Start a deferred research job in xAI's infrastructure.
   - `get_research_job`: Check the status/polling updates of a deferred job.
   - `list_research_jobs`: List recently submitted jobs.
-- **MCP Resources**: The server exposes system state as resources under the `grok://` scheme (e.g. `grok://models`, `grok://status`, `grok://sessions`, `grok://jobs/{id}`).
-- **MCP Prompts**: Common workflows are exposed as prompts (e.g. `research_topic`, `fix_and_test`).
+  Trusted stdio also registers `grok://` resources and reusable prompts such
+  as `research_topic` and `fix_and_test`. Their presence in source does not
+  imply that stable HTTP exposes them.
 
 ---
 

@@ -30,10 +30,13 @@ a GitHub Security Advisory and request a CVE when appropriate.
 ## Deployment Boundary
 
 UniGrok binds Docker Compose to `127.0.0.1` by default. Before binding to a LAN
-or public interface, configure `UNIGROK_API_KEYS`, terminate TLS at a trusted
-proxy, restrict allowed origins, and rotate any credential that may have been
-exposed. Keep local git mutation and container restart capabilities disabled
-unless the process is running in a trusted local environment.
+or public interface, terminate TLS at a trusted proxy, restrict allowed
+origins, and configure one reviewed client-authentication boundary: static
+deployments may use `UNIGROK_API_KEYS`; the private remote deployment uses
+scoped OAuth with `UNIGROK_OAUTH_INTROSPECTION_URL`. Do not keep a static-key
+bypass on the production OAuth service. Rotate any credential that may have
+been exposed. Keep local git mutation and container restart capabilities
+disabled unless the process is running in a trusted local environment.
 
 See [docs/threat-model.md](docs/threat-model.md) for actors, assets, identity
 composition, credential flows, and residual risks.

@@ -2,20 +2,31 @@
 okf_version: "0.1"
 title: "Agent Entrypoint Tool"
 type: "topic"
-description: "Detailed guide on using the unified UniGrok agent tool, modes, progress reporting, and multi-agent fan-out."
+description: "Surface-scoped guide to the stable HTTP agent and trusted stdio agent tools."
 ---
 
 # Agent Entrypoint Tool
 
-The `agent` tool is the headline unified entrypoint for UniGrok. It automatically manages model routing, plane failover, context injection, and local filesystem access (web search, X search, and sandboxed python execution).
+The `agent` tool is the headline unified entrypoint for UniGrok.
+
+> **Surface scope:** the stable HTTP service at `:4765/mcp` exposes the public
+> `agent` documented first below. It is workspace-neutral and cannot browse the
+> IDE's files. Trusted stdio has a different `agent` signature and the broader
+> source tool set; contributor Forge at `:4766/mcp` adds repository memory and
+> Swarm tools to the stable HTTP surface. Always use live MCP `tools/list` as
+> the deployed contract.
 
 ## Tool Signatures & Schemas
 
-### `agent`
-Primary entry point for any agent task.
+### Stable HTTP `agent`
+Primary entry point for ordinary IDE calls to `:4765/mcp`.
 - **Parameters**:
-  - `task` (string, required): The goal or instruction.
+  - `prompt` (string, required): The goal or instruction.
   - `session` (string, optional): Context thread persistence.
+  - `system_prompt` (string, optional): Additional system instruction.
+  - `workspace_context` (string, optional): Deliberately selected project text
+    supplied by the calling IDE; it grants no filesystem authority.
+  - `workspace_label` (string, optional): Human-readable label for that text.
   - `mode` (string, optional): `"auto"` (default), `"fast"`, `"reasoning"`, `"thinking"`, or `"research"`.
   - `model` (string, optional): Enforce a specific Grok model ID.
   - `plane` (string, optional): `"auto"` (backward-compatible), `"cli"`
@@ -23,7 +34,6 @@ Primary entry point for any agent task.
   - `fallback_policy` (string, optional): `"same_plane"` forbids crossing the
     billing boundary; `"cross_plane"` preserves automatic recovery for legacy
     auto callers.
-  - `require_reasoning_level` (string, optional): `"low"`, `"medium"`, or `"high"`.
 - **Response Shape (`AgentResult`)**:
   ```json
   {
@@ -37,7 +47,7 @@ Primary entry point for any agent task.
     "latency_sec": 4.25,
     "route": "agentic",
     "plane": "API",
-    "reasoning_effort": "high",
+    "reasoning_effort": null,
     "citations": [
       {
         "url": "https://example.com/source"
@@ -75,8 +85,17 @@ Primary entry point for any agent task.
   }
   ```
 
-### `grok_agent`
-Dedicated tool wrapping a ReAct AgentLoop in a schema-enforced reflection review loop with strict iteration and budget constraints.
+### Trusted stdio `agent`
+
+The full stdio server also registers an `agent` whose required input is
+`task`. It adds `require_reasoning_level` and MCP progress reporting, and it may
+use local file/git/test tools within the resolved trusted workspace. An
+explicit `WORKSPACE_ROOT` wins; ordinary local stdio otherwise resolves to the
+UniGrok service root, never whichever IDE project happens to call it. That
+signature is not the stable HTTP contract.
+
+### Trusted stdio `grok_agent`
+Dedicated tool wrapping a ReAct AgentLoop in a schema-enforced reflection review loop with strict iteration and budget constraints. It is not exposed by the stable or Forge HTTP service.
 - **Parameters**:
   - `prompt` (string, required): Task description.
   - `session` (string, optional): Persistent conversation thread.
@@ -110,6 +129,7 @@ installation, device-auth, or secret-configuration actions. Never request
 `XAI_API_KEY` in chat or store it in the caller's project.
 
 When CLI-first is active, the selected CLI slug comes from the authenticated
-live catalog carried by the health probe. Coding prefers composer; reasoning
-prefers the CLI's reported default. Explicit API model pins remain on API even
-when the same slug is also exposed by the CLI subscription.
+live catalog returned by the `grok models` readiness probe. Coding prefers
+composer; reasoning prefers the CLI's reported default. Explicit API model
+pins remain on API even when the same slug is also exposed by the CLI
+subscription.

@@ -77,6 +77,7 @@ def test_render_is_deterministic_and_contains_async_public_tools():
     assert "async def agent(" in first
     assert "async def generate_image(" in first
     assert "### Function: `agent`" in first
+    assert "It is a source-code inventory, not the MCP `tools/list` contract" in first
     assert first.endswith("\n")
 
 

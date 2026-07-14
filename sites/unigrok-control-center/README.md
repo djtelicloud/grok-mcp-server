@@ -18,17 +18,19 @@ reusable, idless installer template.
 
 ## Authentication is not authorization
 
-The public Sites build retains a fail-closed SIWC/bootstrap fallback for
-rollback only. Production control runs the same source as a standalone Next.js
-service. It implements GitHub OAuth with PKCE, discards the GitHub user token
-after identity lookup, stores only a signed HttpOnly identity session, and
-performs a fresh installation-token collaborator check for every protected
-request.
+Canonical production control runs this source as a standalone Next.js service
+with `CONTROL_CENTER_MODE=github`. In that mode, `/control` reads a signed
+GitHub identity session established by OAuth with PKCE, discards the GitHub
+user token after identity lookup, and performs a fresh installation-token
+collaborator check for every protected request. It does not call
+`requireChatGPTUser` and does not depend on ChatGPT identity headers.
 
-`/control` first calls `requireChatGPTUser("/control")`. A successful ChatGPT
-sign-in identifies the viewer, but does not prove GitHub project membership.
-The server then applies `getGitHubProjectAuthorization()` as an independent,
-fail-closed check.
+The public Sites build is a separate rollback surface. In Sites mode, the
+route redirects to `CONTROL_CENTER_ORIGIN` when configured. Only the
+fail-closed fallback with no canonical redirect calls
+`requireChatGPTUser("/control")` and then applies
+`getGitHubProjectAuthorization()` to the server-held bootstrap mapping. A
+successful ChatGPT sign-in alone never proves GitHub project membership.
 
 The legacy Sites fallback authorization adapter reads
 `UNIGROK_GITHUB_IDENTITY_BINDINGS` from the hosted server environment. It is a
@@ -89,6 +91,8 @@ impact.
 | Variable | Purpose | Repository value |
 | --- | --- | --- |
 | `GITHUB_REPOSITORY` | Public repository label and links | `djtelicloud/grok-mcp-server` |
+| `CONTROL_CENTER_MODE` | `github` for canonical standalone control; `sites` for the hosted Sites surface | `sites` when unset |
+| `CONTROL_CENTER_ORIGIN` | Canonical standalone origin used by the Sites redirect | empty |
 | `UNIGROK_CONNECTION_MODE` | Wizard state: `unconfigured`, `local`, or `tunnel` | `unconfigured` |
 | `UNIGROK_LOCAL_BASE_URL` | Local-only loopback metadata | `http://127.0.0.1:4765` |
 | `UNIGROK_TUNNEL_PROFILE` | Non-secret tunnel profile label | `unigrok` |
@@ -107,9 +111,12 @@ npm ci
 npm run dev
 ```
 
-The public root works locally. The production control route expects
-Sites-provided ChatGPT identity headers. Use `/preview` for local visual work;
-that route is unavailable in production builds.
+The public root works locally. The default Sites mode expects
+Sites-provided ChatGPT identity headers only when exercising the rollback
+fallback. To exercise canonical control, set `CONTROL_CENTER_MODE=github` and
+the complete GitHub App configuration documented in
+`docs/cloud-run-deployment.md`. Use `/preview` for local visual work; that route
+is unavailable in production builds.
 
 ## Verification and deployment
 
@@ -130,11 +137,14 @@ Before deployment:
 
 1. inspect the full source diff;
 2. verify anonymous access to `/` and all three public metadata routes;
-3. verify anonymous `/control` redirects to dispatch-owned SIWC;
-4. verify a signed-in but unbound viewer sees only the denial surface;
-5. verify the configured owner binding reaches the control center without
-   serializing the ChatGPT email;
-6. confirm the hosted binding value and the Sites audience policy;
+3. verify the Sites `/control` route redirects to `CONTROL_CENTER_ORIGIN`;
+4. verify the standalone origin offers GitHub sign-in and denies a GitHub user
+   without current repository permission;
+5. verify an authorized collaborator reaches the control center after the
+   live installation-token check;
+6. separately test the SIWC/bootstrap mapping only when validating the Sites
+   rollback fallback, including denial for an unbound viewer and no serialized
+   ChatGPT email;
 7. save and review a version before approving production deployment.
 
 Every Sites deployment URL is production. See the current

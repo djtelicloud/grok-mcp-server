@@ -57,7 +57,9 @@ def _write_init_config(stream: TextIO, root: Path) -> None:
     print("Start the shared service", file=stream)
     print(f"  cd {root}", file=stream)
     print("  docker compose up --build -d", file=stream)
-    print("  curl -s http://localhost:4765/healthz", file=stream)
+    print("  curl --fail -s http://localhost:4765/healthz", file=stream)
+    print("After configuring API or CLI credentials", file=stream)
+    print("  curl --fail -s http://localhost:4765/readyz", file=stream)
     print("", file=stream)
     print("VS Code (.vscode/mcp.json or user mcp.json)", file=stream)
     print("""{
