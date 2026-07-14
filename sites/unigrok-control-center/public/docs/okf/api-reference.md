@@ -1326,6 +1326,21 @@ legal inside that boundary.  Remote sessions must have an authenticated
 principal.  This object is not accepted from request JSON or headers; a
 future stateful session middleware must inject it into the ASGI scope.
 
+### Class: `TrustedMCPProviderCapability` {#providers-mcp_sampling-trustedmcpprovidercapability}
+
+```python
+class TrustedMCPProviderCapability
+```
+
+**Keywords:** trusted, mcp, provider, capability
+
+Stable provider capability for one authenticated MCP client session.
+
+This contract carries no request, callback, delegation, or effect
+authority.  It can therefore be created before planning and safely expose
+the exact descriptor used by later one-request leases.  Provider branding
+remains an explicit Grok decision; client labels never infer it.
+
 ### Class: `TrustedMCPProviderGrant` {#providers-mcp_sampling-trustedmcpprovidergrant}
 
 ```python

@@ -691,6 +691,43 @@ EffectClaimInspector = Callable[[], bool]
 _SAMPLING_BINDING_FACTORY_SEAL = object()
 
 
+def _snapshot_sampling_capability_descriptor(
+    descriptor: ProviderDescriptor,
+    *,
+    provider: ProviderId,
+    channel: ProviderChannel,
+    capability: SamplingCapability,
+    models: ProviderModelPins,
+    route: RouteClass,
+) -> ProviderDescriptor:
+    try:
+        snapshot = ProviderDescriptor.model_validate_json(
+            descriptor.model_dump_json(warnings="error")
+        )
+    except (AttributeError, TypeError, ValueError, ValidationError):
+        raise ValueError("sampling capability descriptor is invalid") from None
+    if (
+        snapshot.provider != provider
+        or snapshot.channel != channel
+        or snapshot.credential_plane != CredentialPlane.SUBSCRIPTION
+        or snapshot.endpoint_host != MCP_CLIENT_ENDPOINT
+        or snapshot.endpoint_kind != "mcp_client_sampling"
+        or snapshot.credential_kind != "mcp_client_subscription"
+        or snapshot.billing_class != "subscription"
+        or snapshot.client_identity != capability.client_id
+        or snapshot.transport_resource_identity is None
+        or snapshot.credential_env_names
+        or snapshot.credential_state != CredentialState.DEFERRED
+        or snapshot.models != models
+        or route not in snapshot.supported_routes
+        or snapshot.data_handling != "provider_managed"
+        or snapshot.residency != "client_subscription"
+        or snapshot.supports_normalized_tools
+    ):
+        raise ValueError("sampling capability descriptor is invalid")
+    return snapshot
+
+
 @dataclass(frozen=True, slots=True, init=False)
 class SamplingClientBinding:
     capability: SamplingCapability
@@ -698,6 +735,7 @@ class SamplingClientBinding:
     provider: ProviderId
     channel: ProviderChannel
     models: ProviderModelPins
+    descriptor: ProviderDescriptor
     binding_digest: str
     supervision: GrokSupervisorBinding
     provider_request_id: str
@@ -714,6 +752,7 @@ class SamplingClientBinding:
         provider: ProviderId,
         channel: ProviderChannel,
         models: ProviderModelPins,
+        descriptor: ProviderDescriptor,
         binding_digest: str,
         supervision: GrokSupervisorBinding,
         provider_request_id: str,
@@ -728,8 +767,7 @@ class SamplingClientBinding:
             )
         if not re.fullmatch(r"sha256:[0-9a-f]{64}", binding_digest):
             raise ValueError("sampling binding digest must be a SHA-256 identity")
-        expected_client_id = "mcp-" + binding_digest.removeprefix("sha256:")
-        if capability.client_id != expected_client_id or not capability.sampling:
+        if not capability.sampling:
             raise ValueError("sampling capability does not match sealed binding")
         if SAMPLING_CHANNEL_PROVIDERS.get(channel) != provider:
             raise ValueError("sealed sampling provider and channel do not match")
@@ -752,6 +790,14 @@ class SamplingClientBinding:
             raise ValueError("sampling route is invalid")
         if not callable(effect_claimed):
             raise ValueError("sampling effect inspector is invalid")
+        descriptor_snapshot = _snapshot_sampling_capability_descriptor(
+            descriptor,
+            provider=provider,
+            channel=channel,
+            capability=capability,
+            models=models_snapshot,
+            route=route,
+        )
         delegation_digest = _sampling_delegation_digest(
             binding_digest=binding_digest,
             provider=provider,
@@ -767,6 +813,7 @@ class SamplingClientBinding:
         object.__setattr__(self, "provider", provider)
         object.__setattr__(self, "channel", channel)
         object.__setattr__(self, "models", models_snapshot)
+        object.__setattr__(self, "descriptor", descriptor_snapshot)
         object.__setattr__(self, "binding_digest", binding_digest)
         object.__setattr__(self, "supervision", supervision_snapshot)
         object.__setattr__(self, "provider_request_id", provider_request_id)
@@ -810,6 +857,7 @@ def _create_sealed_sampling_client_binding(
     provider: ProviderId,
     channel: ProviderChannel,
     models: ProviderModelPins,
+    descriptor: ProviderDescriptor,
     binding_digest: str,
     supervision: GrokSupervisorBinding,
     provider_request_id: str,
@@ -825,6 +873,7 @@ def _create_sealed_sampling_client_binding(
         provider=provider,
         channel=channel,
         models=models,
+        descriptor=descriptor,
         binding_digest=binding_digest,
         supervision=supervision,
         provider_request_id=provider_request_id,
@@ -947,41 +996,26 @@ class MCPClientSamplingAdapter(HTTPProviderAdapter):
                 route=binding.route,
                 authorized_model=models.for_route(binding.route),
             )
+            descriptor = _snapshot_sampling_capability_descriptor(
+                binding.descriptor,
+                provider=provider,
+                channel=channel,
+                capability=capability,
+                models=models,
+                route=binding.route,
+            )
         except Exception:
             raise ProviderConfigurationError(
                 provider, "sampling_grant_mismatch"
             ) from None
-        expected_client_id = "mcp-" + binding.binding_digest.removeprefix("sha256:")
         if (
             expected_delegation_digest != binding.delegation_digest
-            or capability.client_id != expected_client_id
+            or capability.client_id != binding.descriptor.client_identity
             or not capability.sampling
             or not callable(binding.callback)
             or not callable(binding.effect_claimed)
         ):
             raise ProviderConfigurationError(provider, "sampling_grant_mismatch")
-        descriptor = ProviderDescriptor(
-            provider=provider,
-            channel=channel,
-            credential_plane=CredentialPlane.SUBSCRIPTION,
-            display_name=f"{provider.value} IDE subscription",
-            endpoint_host=MCP_CLIENT_ENDPOINT,
-            endpoint_kind="mcp_client_sampling",
-            credential_kind="mcp_client_subscription",
-            billing_class="subscription",
-            client_identity=capability.client_id,
-            transport_resource_identity=transport_resource_identity(
-                "mcp_sampling_binding", binding.binding_digest
-            ),
-            credential_env_names=(),
-            credential_state=CredentialState.DEFERRED,
-            models=models,
-            supported_routes=(binding.route,),
-            max_output_tokens=32_768,
-            max_timeout_seconds=120.0,
-            data_handling="provider_managed",
-            residency="client_subscription",
-        )
         authority = _SamplingAdapterAuthority(
             provider=provider,
             channel=channel,
