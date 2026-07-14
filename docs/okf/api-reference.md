@@ -860,6 +860,99 @@ async def JobManager.wait(self, job_id: str) -> None
 Await a job's in-flight task if this process owns one (used by
 tests and graceful shutdown; a no-op for finished/foreign jobs).
 
+## mcp_session_guard.py {#mcp_session_guard}
+
+### Class: `SessionTransportRegistry` {#mcp_session_guard-sessiontransportregistry}
+
+```python
+class SessionTransportRegistry
+```
+
+**Keywords:** session, transport, registry
+
+Narrow transport ownership used by the guard.
+
+The production implementation below is the only place that knows the
+Python MCP SDK's private stateful-session map and creation lock.
+
+### Class: `SessionRuntimeRevoker` {#mcp_session_guard-sessionruntimerevoker}
+
+```python
+class SessionRuntimeRevoker
+```
+
+**Keywords:** session, runtime, revoker
+
+Revokes all session-owned callback/effect authority before teardown.
+
+### Class: `MCP126SessionTransportRegistry` {#mcp_session_guard-mcp126sessiontransportregistry}
+
+```python
+class MCP126SessionTransportRegistry
+```
+
+**Keywords:** mcp, 126, session, transport, registry
+
+Version-checked adapter over MCP SDK 1.26 private session state.
+
+This adapter is intentionally constructed with one exact session manager;
+it never discovers or mutates a module-global manager.  A future SDK minor
+must receive an explicit compatibility review before this adapter accepts
+it.
+
+### Class: `MCPSessionBinding` {#mcp_session_guard-mcpsessionbinding}
+
+```python
+class MCPSessionBinding
+```
+
+**Keywords:** mcp, session, binding
+
+Immutable server-owned identity for one physical MCP session.
+
+### Class: `StatefulMCPSessionGuard` {#mcp_session_guard-statefulmcpsessionguard}
+
+```python
+class StatefulMCPSessionGuard
+```
+
+**Keywords:** stateful, mcp, session, guard
+
+Admission, binding, expiry, and teardown for stateful MCP HTTP.
+
+Constructing the guard has no network, provider, credential, or transport
+effect.  The current UniGrok HTTP server deliberately does not install it.
+
+### Method: `StatefulMCPSessionGuard.reap_expired` {#mcp_session_guard-statefulmcpsessionguard-reap_expired}
+
+```python
+async def StatefulMCPSessionGuard.reap_expired(self) -> int
+```
+
+**Keywords:** stateful, mcp, session, guard, reap, expired
+
+Hard-revoke max-expired sessions; reap idle sessions when inactive.
+
+### Method: `StatefulMCPSessionGuard.cleanup_session` {#mcp_session_guard-statefulmcpsessionguard-cleanup_session}
+
+```python
+async def StatefulMCPSessionGuard.cleanup_session(self, session_id: str) -> bool
+```
+
+**Keywords:** stateful, mcp, session, guard, cleanup, session
+
+Idempotently revoke authority, then remove and terminate transport.
+
+### Method: `StatefulMCPSessionGuard.shutdown` {#mcp_session_guard-statefulmcpsessionguard-shutdown}
+
+```python
+async def StatefulMCPSessionGuard.shutdown(self) -> None
+```
+
+**Keywords:** stateful, mcp, session, guard, shutdown
+
+Idempotently reject admission and clean every committed session.
+
 ## metrics.py {#metrics}
 
 ### Function: `aggregate_telemetry_planes` {#metrics-aggregate_telemetry_planes}
