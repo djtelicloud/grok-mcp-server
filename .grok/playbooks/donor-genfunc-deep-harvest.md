@@ -63,6 +63,9 @@ Not: “put the chat model in a mutable container and git reset yourself.”
 | Cloud-truth + local hologram | Already: land receipts + workspace memory notes | Strengthen: agents never ask human for git |
 | Multi-agent bus = branches/PRs/notes | Draft PRs + exact heads + `Agent-*` trailers | Restore cron/automation that wakes lander |
 | UCB1 / model catalog ranking | `model_catalog` + routing telemetry | Prefer Grok stack for default intelligence |
+| **Silent-think harness** | `_parse_structured` + CLI `--json-schema` + receipts | High think budget, `include_thoughts=false`, tiny pydantic emit; see [silent-think-harness.md](silent-think-harness.md) |
+| **Dialect control-token library** | Reference harvest (not runtime yet) | [`.grok/harvest/dialect-control-tokens/`](../harvest/dialect-control-tokens/) — matrix + `DialectCompiler`; optimizer loop forced small models |
+| Recursive maxing (max_out compress) | Optional specialist param search | EVOLUTION.md patience loop; VPP-style cost ledger later |
 | Swarm compliance pre-commit | Existing tests + land scripts | Keep fail-closed |
 | Sky vs Twin split | Control vs MCP twin | Control = AS/broker; MCP = API inference only |
 | Isolated clone per mutation | Cloud worker pattern | Never shared mutable working tree |
