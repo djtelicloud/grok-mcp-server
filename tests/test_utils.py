@@ -1947,6 +1947,22 @@ class TestCompletionContentContract:
         "I'll audit now. 0 tests passed because I have not run them.",
         "I'll audit now. Verdict: I will provide the result after I inspect it.",
     )
+    progress_nonanswers = (
+        "Continuing the inspection: locating related tests and exercising the "
+        "guard logic for concrete failure modes.",
+        "Resuming the audit: reading the receipt tests and tracing the failure path.",
+        "Proceeding with the review — checking the diff and running focused tests.",
+        "Continuing the inspection and locating related tests.",
+        "Continuing the inspection.",
+        "Continuing to inspect the completion guard and trace its tests.",
+        "Continuing work on the completion guard and its tests.",
+        "Continuing the review now: checking the remaining tests.",
+        "Still working on the analysis; gathering evidence and comparing behavior.",
+        "Progress update: still reviewing the adapter and gathering evidence.",
+        "Review in progress — checking the remaining cases.",
+        "Currently tracing the call path and collecting logs.",
+        "Currently checking which tests failed and gathering the logs.",
+    )
 
     @pytest.mark.parametrize(
         "content",
@@ -1955,6 +1971,7 @@ class TestCompletionContentContract:
             "   \n\t",
             *reproduced_promises,
             *wrapped_promises,
+            *progress_nonanswers,
             "Plan:\n1. Inspect the repository.\n2. Run the tests.\n3. Report the results.",
             "1. Inspect the repository.\n2. Run the tests.\n3. Report back.",
             "Here's what I'll do:\n1. Inspect the repository.\n2. Run the tests.",
@@ -1994,6 +2011,51 @@ class TestCompletionContentContract:
         ),
     )
     def test_accepts_substantive_answers_and_discussion_of_promises(self, content):
+        from src.utils import _is_nonanswer_completion
+
+        assert _is_nonanswer_completion(content, prompt="Audit the repository") is False
+
+    def test_accepts_progress_lead_when_it_delivers_findings(self):
+        from src.utils import _is_nonanswer_completion
+
+        answers = (
+            "Continuing the inspection: Findings: the bare ASCII hyphen was "
+            "accepted as an immediate-delivery delimiter.",
+            "Continuing the inspection: the guard fails because progress-only "
+            "retries are accepted.",
+            "Continuing the inspection, I found two bugs in src/utils.py.",
+            "Continuing the inspection: locating tests revealed the delimiter bug.",
+            "Continuing the explanation: TTL belongs in both prediction and training.",
+        )
+        for content in answers:
+            assert _is_nonanswer_completion(content, prompt="Audit the repository") is False
+
+    def test_accepts_progress_only_answer_when_status_was_requested(self):
+        from src.utils import _is_nonanswer_completion
+
+        content = "Review in progress — checking the remaining cases."
+        assert _is_nonanswer_completion(content, prompt="What is the review status?") is False
+
+    def test_progress_word_in_task_does_not_disable_guard(self):
+        from src.utils import _is_nonanswer_completion
+
+        content = TestCompletionContentContract.progress_nonanswers[0]
+        assert (
+            _is_nonanswer_completion(
+                content,
+                prompt="Audit the progress-only completion guard",
+            )
+            is True
+        )
+
+    @pytest.mark.parametrize(
+        "content",
+        (
+            "Findings: TTL is missing. Next, I'll inspect the tests.",
+            "The answer is 42. I still need to check the repository.",
+        ),
+    )
+    def test_accepts_result_first_answers_with_follow_up(self, content):
         from src.utils import _is_nonanswer_completion
 
         assert _is_nonanswer_completion(content, prompt="Audit the repository") is False
@@ -2201,6 +2263,42 @@ class TestHonestOutcomes:
         }
         assert mock_store.save_telemetry.await_args.args[2] is None
         assert mock_store.save_task_memory.await_args.kwargs["success"] is None
+
+    @pytest.mark.asyncio
+    async def test_fast_progress_only_retry_is_rejected(self, monkeypatch):
+        from src.utils import orchestrate
+
+        mock_store = self._mock_store()
+        promise = "I'll inspect the completion-contract guard and return findings."
+        progress = TestCompletionContentContract.progress_nonanswers[0]
+
+        with patch("src.utils._call_plane", new_callable=AsyncMock) as mock_call:
+            mock_call.side_effect = (
+                (promise, 10, 0.001, True),
+                (progress, 12, 0.002, True),
+            )
+            layer = await orchestrate(
+                prompt="Audit the repository",
+                mode="auto",
+                store=mock_store,
+                dynamic_sys_prompt="sys",
+                enable_agentic=False,
+            )
+
+        assert layer.generation == (
+            "Grok returned a non-answer completion twice; UniGrok "
+            "rejected both responses and produced no result."
+        )
+        assert layer.finish_reason == "error"
+        assert mock_call.await_count == 2
+        assert layer.routing_receipt["completion_recovery"] == {
+            "attempted": True,
+            "reason": "nonanswer_completion",
+            "succeeded": False,
+            "attempts": 1,
+        }
+        assert mock_store.save_telemetry.await_args.args[2] == 0
+        assert mock_store.save_task_memory.await_args.kwargs["success"] == 0
 
     @pytest.mark.asyncio
     async def test_fast_final_answer_remains_unverified(self, monkeypatch):

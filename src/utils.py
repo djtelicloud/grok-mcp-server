@@ -5071,6 +5071,69 @@ _IMMEDIATE_DELIVERY_RE = re.compile(
     r"\b[^:\n.]{0,80}"
     r"(?::|[—–]|\s+-\s+|\.\s+|\n+)\s*(?P<value>\S[\s\S]*)"
 )
+_PROGRESS_STATUS_PREFIX_RE = re.compile(
+    rf"""(?ix)^\s*(?:[>*#-]+\s*)?{_PROMISE_WRAPPER}
+        (?:continuing|resuming|proceeding)(?:\s+with)?\s+
+        (?:(?:the|my|our)\s+)?
+        (?:inspection|review|audit|analysis|investigation|validation|
+           verification|tests?|checks?|trace|search|work)\b(?:\s+now)?
+    """
+)
+_ONGOING_ACTIVITY_PREFIX_RE = re.compile(
+    rf"""(?ix)^\s*(?:[>*#-]+\s*)?{_PROMISE_WRAPPER}(?:
+        (?:(?:i(?:['’]m|\s+am)|we(?:['’]re|\s+are))\s+)?
+          (?:still|currently)\s+
+          (?:working\s+on|inspecting|reviewing|auditing|analyzing|investigating|
+             validating|verifying|testing|checking|reading|locating|tracing|
+             gathering|collecting|running|exercising|searching)
+        | (?:status|progress)(?:\s+update)?\s*:\s*
+          (?:still\s+|currently\s+)?
+          (?:working\s+on|inspecting|reviewing|auditing|analyzing|investigating|
+             validating|verifying|testing|checking|reading|locating|tracing|
+             gathering|collecting|running|exercising|searching)
+        | (?:continuing|resuming|proceeding)\s+(?:
+            to\s+(?:inspect|review|audit|analy[sz]e|investigate|validate|verify|
+                    test|check|read|locate|trace|gather|collect|run|exercise|search)
+            | (?:work|working)\s+on
+          )
+    )\b"""
+)
+_IN_PROGRESS_PREFIX_RE = re.compile(
+    rf"""(?ix)^\s*(?:[>*#-]+\s*)?{_PROMISE_WRAPPER}
+        (?:inspection|review|audit|analysis|investigation|validation|
+           verification|tests?|checks?)\s+(?:is\s+)?
+        (?:underway|in\s+progress)\b
+    """
+)
+_PROGRESS_ACTIVITY_TAIL_RE = re.compile(
+    r"""(?ix)^(?:
+        locat(?:e|ing)|read(?:ing)?|inspect(?:ing)?|check(?:ing)?|run(?:ning)?|
+        exercis(?:e|ing)|test(?:ing)?|review(?:ing)?|trac(?:e|ing)|gather(?:ing)?|
+        collect(?:ing)?|open(?:ing)?|examin(?:e|ing)|evaluat(?:e|ing)|
+        assess(?:ing)?|validat(?:e|ing)|verif(?:y|ying)|compar(?:e|ing)|
+        query(?:ing)?|search(?:ing)?|analy[sz](?:e|ing)|audit(?:ing)?|
+        investigat(?:e|ing)|work(?:ing)?
+    )\b"""
+)
+_PROGRESS_TAIL_LEAD_RE = re.compile(
+    r"(?ix)^\s*(?:(?::|[.;,—–]|-\s+)\s*)?"
+    r"(?:(?:and|then|while|by|to)\s+)?"
+)
+_PROGRESS_RESULT_RE = re.compile(
+    r"(?ix)\b(?:found|identified|confirmed|verified|completed|finished|fixed|"
+    r"implemented|changed|updated|tested|revealed|showed|"
+    r"demonstrated|indicated)\b|"
+    r"\b(?:findings?|results?|verdict|evidence|answer|cause|fix|issues?|"
+    r"problems?|bugs?)\s*(?::|\b(?:is|are)\b)"
+)
+_STATUS_REQUEST_RE = re.compile(
+    r"(?is)(?:^\s*(?:current\s+)?(?:status|progress)\s*\??\s*$|"
+    r"\bwhat(?:['’]s|\s+is)\b.{0,40}\b(?:status|progress)\b|"
+    r"\b(?:give|provide|report|show|send)\b.{0,40}"
+    r"\b(?:status|progress)(?:\s+update)?\b|"
+    r"\bhow\s+(?:is|are)\b.{0,40}\bgoing\b|"
+    r"\bwhere\s+(?:are|do)\s+we\b)"
+)
 
 
 def _prompt_explicitly_requests_plan(prompt: str) -> bool:
@@ -5080,6 +5143,27 @@ def _prompt_explicitly_requests_plan(prompt: str) -> bool:
     if re.search(r"\b(?:do\s+not|don't)\b.{0,30}\b(?:plan|roadmap)\b", lowered):
         return False
     return bool(_EXPLICIT_PLAN_REQUEST_RE.search(prompt))
+
+
+def _prompt_explicitly_requests_status(prompt: str) -> bool:
+    return isinstance(prompt, str) and bool(_STATUS_REQUEST_RE.search(prompt))
+
+
+def _looks_like_progress_only(text: str) -> bool:
+    """Detect operational narration without rejecting a delivered conclusion."""
+
+    ongoing = _ONGOING_ACTIVITY_PREFIX_RE.search(text)
+    lead = ongoing or _PROGRESS_STATUS_PREFIX_RE.search(text) or _IN_PROGRESS_PREFIX_RE.search(text)
+    if not lead:
+        return False
+    if _contains_unfinished_result(text):
+        return True
+    tail = _PROGRESS_TAIL_LEAD_RE.sub("", text[lead.end():], count=1)
+    if _PROGRESS_RESULT_RE.search(tail):
+        return False
+    if ongoing:
+        return True
+    return not tail.strip() or bool(_PROGRESS_ACTIVITY_TAIL_RE.match(tail))
 
 
 def _is_substantive_result(value: str) -> bool:
@@ -5133,6 +5217,12 @@ def _is_nonanswer_completion(content: Any, *, prompt: str = "") -> bool:
     text = "\n".join(line.rstrip() for line in content.strip().splitlines()).strip()
     has_completion_evidence = _has_completion_evidence(text)
     plan_requested = _prompt_explicitly_requests_plan(prompt)
+
+    if (
+        not _prompt_explicitly_requests_status(prompt)
+        and _looks_like_progress_only(text)
+    ):
+        return True
 
     promise = _PROMISE_ONLY_PREFIX_RE.search(text)
     if promise:
