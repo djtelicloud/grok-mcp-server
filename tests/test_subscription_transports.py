@@ -24,6 +24,7 @@ from src.providers import (
     ProviderAttemptStart,
     ProviderChannel,
     ProviderConfigurationError,
+    ProviderDescriptor,
     ProviderId,
     ProviderMessage,
     ProviderModelPins,
@@ -183,15 +184,43 @@ def _sampling_binding(
         "test_mcp_sampling_binding",
         f"{provider.value}:{selected_channel.value}:{client_id}:{request.request_id}",
     )
+    capability_digest = transport_resource_identity(
+        "test_mcp_sampling_capability",
+        f"{provider.value}:{selected_channel.value}:{client_id}",
+    )
+    stable_client_identity = "mcp-" + capability_digest.removeprefix("sha256:")
+    descriptor = ProviderDescriptor(
+        provider=provider,
+        channel=selected_channel,
+        credential_plane=CredentialPlane.SUBSCRIPTION,
+        display_name=f"{provider.value} IDE subscription",
+        endpoint_host="mcp-client",
+        endpoint_kind="mcp_client_sampling",
+        credential_kind="mcp_client_subscription",
+        billing_class="subscription",
+        client_identity=stable_client_identity,
+        transport_resource_identity=transport_resource_identity(
+            "mcp_sampling_capability", capability_digest
+        ),
+        credential_env_names=(),
+        credential_state=CredentialState.DEFERRED,
+        models=models,
+        supported_routes=(request.route,),
+        max_output_tokens=32_768,
+        max_timeout_seconds=120.0,
+        data_handling="provider_managed",
+        residency="client_subscription",
+    )
     return _create_sealed_sampling_client_binding(
         capability=SamplingCapability(
-            client_id="mcp-" + binding_digest.removeprefix("sha256:"),
+            client_id=stable_client_identity,
             sampling=sampling,
         ),
         callback=callback,
         provider=provider,
         channel=selected_channel,
         models=models,
+        descriptor=descriptor,
         binding_digest=binding_digest,
         supervision=request.supervision,
         provider_request_id=request.request_id,
@@ -680,6 +709,28 @@ def test_sampling_binding_rejects_bare_callbacks_and_cross_provider_reuse():
         research="gpt-5.1",
     )
     digest = transport_resource_identity("test", "bare-callback")
+    descriptor = ProviderDescriptor(
+        provider=ProviderId.OPENAI,
+        channel=ProviderChannel.OPENAI_MCP_SAMPLING,
+        credential_plane=CredentialPlane.SUBSCRIPTION,
+        display_name="openai IDE subscription",
+        endpoint_host="mcp-client",
+        endpoint_kind="mcp_client_sampling",
+        credential_kind="mcp_client_subscription",
+        billing_class="subscription",
+        client_identity="mcp-" + digest.removeprefix("sha256:"),
+        transport_resource_identity=transport_resource_identity(
+            "mcp_sampling_capability", digest
+        ),
+        credential_env_names=(),
+        credential_state=CredentialState.DEFERRED,
+        models=models,
+        supported_routes=(request.route,),
+        max_output_tokens=32_768,
+        max_timeout_seconds=120.0,
+        data_handling="provider_managed",
+        residency="client_subscription",
+    )
     with pytest.raises(TypeError, match="stateful MCP sampling factory"):
         SamplingClientBinding(
             capability=SamplingCapability(
@@ -690,6 +741,7 @@ def test_sampling_binding_rejects_bare_callbacks_and_cross_provider_reuse():
             provider=ProviderId.OPENAI,
             channel=ProviderChannel.OPENAI_MCP_SAMPLING,
             models=models,
+            descriptor=descriptor,
             binding_digest=digest,
             supervision=request.supervision,
             provider_request_id=request.request_id,

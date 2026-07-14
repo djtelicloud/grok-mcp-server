@@ -13,11 +13,11 @@ The lease is the lifetime boundary: its callback cannot be cached globally,
 survive the tool request, cross principals or MCP sessions, select a provider,
 use tools, or grant a worker final authority.
 
-This is not yet broker-wirable.  Planning needs a stable session-capability
-descriptor before a deterministic provider request ID exists.  Only after the
-attempt start is durably recorded may later integration mint the exact grant,
-materialize this lease-owned adapter, verify lane conformance, and teach the
-broker's outer timeout to consult ``adapter.effect_claimed()``.
+This remains inert and is not broker-wired.  A trusted provider capability now
+supplies a stable public descriptor before any deterministic provider request
+ID or request grant exists.  Only after an attempt start is durably recorded
+may later integration mint the exact grant and materialize its private,
+lease-owned adapter.
 """
 
 from __future__ import annotations
@@ -37,13 +37,17 @@ from starlette.requests import Request
 from .base import Clock
 from .contracts import (
     MAX_RESPONSE_CHARS,
+    CredentialPlane,
+    CredentialState,
     GrokSupervisorBinding,
     ProviderChannel,
+    ProviderDescriptor,
     ProviderId,
     ProviderModelPins,
     ProviderRequest,
     RouteClass,
     StrictContract,
+    transport_resource_identity,
 )
 from .errors import (
     ProviderAuthorizationInvariantError,
@@ -65,6 +69,7 @@ from .subscription import (
 
 
 MCP_SESSION_AUTHORIZATION_SCOPE_KEY = "unigrok.mcp_sampling.session_authorization"
+MCP_PROVIDER_CAPABILITIES_SCOPE_KEY = "unigrok.mcp_sampling.provider_capabilities"
 MCP_PROVIDER_GRANTS_SCOPE_KEY = "unigrok.mcp_sampling.provider_grants"
 MCP_SESSION_RUNTIME_SCOPE_KEY = "unigrok.mcp_sampling.session_runtime"
 
@@ -159,6 +164,79 @@ class MCPSessionAuthorization(StrictContract):
         )
 
 
+class TrustedMCPProviderCapability(StrictContract):
+    """Stable provider capability for one authenticated MCP client session.
+
+    This contract carries no request, callback, delegation, or effect
+    authority.  It can therefore be created before planning and safely expose
+    the exact descriptor used by later one-request leases.  Provider branding
+    remains an explicit Grok decision; client labels never infer it.
+    """
+
+    version: Literal["trusted-mcp-provider-capability/v1"] = (
+        "trusted-mcp-provider-capability/v1"
+    )
+    issuer: Literal["grok"] = "grok"
+    session_authorization_digest: Annotated[str, Field(pattern=_DIGEST_PATTERN)]
+    provider: ProviderId
+    channel: ProviderChannel
+    models: ProviderModelPins
+    supported_routes: tuple[RouteClass, ...] = (
+        RouteClass.PLANNING,
+        RouteClass.CODING,
+        RouteClass.RESEARCH,
+    )
+    max_output_tokens: Annotated[int, Field(ge=1, le=32_768)] = 32_768
+    max_timeout_seconds: Annotated[float, Field(ge=1.0, le=120.0)] = 120.0
+
+    @model_validator(mode="after")
+    def validate_capability(self) -> "TrustedMCPProviderCapability":
+        if _SAMPLING_CHANNEL_PROVIDERS.get(self.channel) != self.provider:
+            raise ValueError("provider capability channel does not match provider")
+        if not self.supported_routes or len(set(self.supported_routes)) != len(
+            self.supported_routes
+        ):
+            raise ValueError("provider capability routes must be nonempty and unique")
+        # Pydantic's frozen models are shallow: detach the caller's nested
+        # model pins so later mutation of an input object cannot rewrite this
+        # authenticated capability identity.
+        object.__setattr__(self, "models", _snapshot(ProviderModelPins, self.models))
+        return self
+
+    @property
+    def capability_digest(self) -> str:
+        return _canonical_digest(
+            "trusted_mcp_provider_capability",
+            self.model_dump(mode="json"),
+        )
+
+    @property
+    def descriptor(self) -> ProviderDescriptor:
+        digest = self.capability_digest
+        return ProviderDescriptor(
+            provider=self.provider,
+            channel=self.channel,
+            credential_plane=CredentialPlane.SUBSCRIPTION,
+            display_name=f"{self.provider.value} IDE subscription",
+            endpoint_host="mcp-client",
+            endpoint_kind="mcp_client_sampling",
+            credential_kind="mcp_client_subscription",
+            billing_class="subscription",
+            client_identity="mcp-" + digest.removeprefix("sha256:"),
+            transport_resource_identity=transport_resource_identity(
+                "mcp_sampling_capability", digest
+            ),
+            credential_env_names=(),
+            credential_state=CredentialState.DEFERRED,
+            models=_snapshot(ProviderModelPins, self.models),
+            supported_routes=self.supported_routes,
+            max_output_tokens=self.max_output_tokens,
+            max_timeout_seconds=self.max_timeout_seconds,
+            data_handling="provider_managed",
+            residency="client_subscription",
+        )
+
+
 class TrustedMCPProviderGrant(StrictContract):
     """Server-owned provider/model grant bound to one authorized MCP session.
 
@@ -171,6 +249,7 @@ class TrustedMCPProviderGrant(StrictContract):
     issuer: Literal["grok"] = "grok"
     grant_id: Annotated[str, Field(pattern=_SAFE_BINDING_PATTERN)]
     session_authorization_digest: Annotated[str, Field(pattern=_DIGEST_PATTERN)]
+    session_capability_digest: Annotated[str, Field(pattern=_DIGEST_PATTERN)]
     supervision: GrokSupervisorBinding
     provider_request_id: Annotated[str, Field(pattern=_SAFE_BINDING_PATTERN)]
     provider_request_digest: Annotated[str, Field(pattern=_DIGEST_PATTERN)]
@@ -228,13 +307,6 @@ class TrustedMCPProviderGrant(StrictContract):
                 "provider_request_id": self.provider_request_id,
             },
         )
-
-    @property
-    def opaque_client_identity(self) -> str:
-        # Deliberately includes the grant and therefore the authorized session,
-        # principal, physical MCP session, provider, and model pins without
-        # exposing any of those raw values in descriptors or receipts.
-        return "mcp-" + self.grant_digest.removeprefix("sha256:")
 
 
 class MCPSamplingSessionRuntime:
@@ -366,6 +438,8 @@ class StatefulMCPSamplingLease:
         related_request_id: str | int,
         authorization: MCPSessionAuthorization,
         raw_authorization: MCPSessionAuthorization,
+        capability: TrustedMCPProviderCapability,
+        raw_capability: TrustedMCPProviderCapability,
         grant: TrustedMCPProviderGrant,
         raw_grant: TrustedMCPProviderGrant,
         runtime: MCPSamplingSessionRuntime,
@@ -381,6 +455,8 @@ class StatefulMCPSamplingLease:
         self._related_request_id = related_request_id
         self._authorization = authorization
         self._raw_authorization = raw_authorization
+        self._capability = capability
+        self._raw_capability = raw_capability
         self._grant = grant
         self._raw_grant = raw_grant
         self._runtime = runtime
@@ -394,13 +470,14 @@ class StatefulMCPSamplingLease:
         self._revoked = False
         binding = _create_sealed_sampling_client_binding(
             capability=SamplingCapability(
-                client_id=grant.opaque_client_identity,
+                client_id=capability.descriptor.client_identity,
                 sampling=True,
             ),
             callback=self._sample,
             provider=grant.provider,
             channel=grant.channel,
             models=grant.models,
+            descriptor=capability.descriptor,
             binding_digest=grant.grant_digest,
             supervision=grant.supervision,
             provider_request_id=grant.provider_request_id,
@@ -508,6 +585,13 @@ class StatefulMCPSamplingLease:
             item is self._raw_grant for item in grants
         ):
             raise ProviderConfigurationError(self._provider, "sampling_grant_mismatch")
+        capabilities = scope.get(MCP_PROVIDER_CAPABILITIES_SCOPE_KEY)
+        if not isinstance(capabilities, tuple) or not any(
+            item is self._raw_capability for item in capabilities
+        ):
+            raise ProviderConfigurationError(
+                self._provider, "sampling_capability_mismatch"
+            )
         if scope.get(MCP_SESSION_RUNTIME_SCOPE_KEY) is not self._runtime:
             raise ProviderConfigurationError(
                 self._provider, "sampling_session_mismatch"
@@ -515,6 +599,9 @@ class StatefulMCPSamplingLease:
         try:
             current_authorization = _snapshot(
                 MCPSessionAuthorization, self._raw_authorization
+            )
+            current_capability = _snapshot(
+                TrustedMCPProviderCapability, self._raw_capability
             )
             current_grant = _snapshot(TrustedMCPProviderGrant, self._raw_grant)
         except (TypeError, ValueError):
@@ -524,6 +611,10 @@ class StatefulMCPSamplingLease:
         if current_authorization != self._authorization:
             raise ProviderConfigurationError(
                 self._provider, "sampling_authorization_mismatch"
+            )
+        if current_capability != self._capability:
+            raise ProviderConfigurationError(
+                self._provider, "sampling_capability_mismatch"
             )
         if current_grant != self._grant:
             raise ProviderConfigurationError(self._provider, "sampling_grant_mismatch")
@@ -549,6 +640,19 @@ class StatefulMCPSamplingLease:
             self._authorization.authorization_digest
         ):
             raise ProviderConfigurationError(self._provider, "sampling_grant_mismatch")
+        if (
+            self._capability.session_authorization_digest
+            != self._authorization.authorization_digest
+            or self._grant.session_capability_digest
+            != self._capability.capability_digest
+            or self._capability.provider != self._provider
+            or self._capability.channel != self._channel
+            or self._grant.models != self._capability.models
+            or self._grant.route not in self._capability.supported_routes
+        ):
+            raise ProviderConfigurationError(
+                self._provider, "sampling_capability_mismatch"
+            )
         if (
             self._grant.provider != self._provider
             or self._grant.channel != self._channel
@@ -800,8 +904,36 @@ def create_stateful_mcp_sampling_lease(
         grant = _snapshot(TrustedMCPProviderGrant, raw_grant)
     except (TypeError, ValueError):
         raise ProviderConfigurationError(provider, "sampling_grant_missing") from None
+    raw_capabilities = request.scope.get(MCP_PROVIDER_CAPABILITIES_SCOPE_KEY)
+    if not isinstance(raw_capabilities, tuple):
+        raise ProviderConfigurationError(provider, "sampling_capability_missing")
+    matching_capabilities = tuple(
+        item
+        for item in raw_capabilities
+        if isinstance(item, TrustedMCPProviderCapability)
+        and getattr(item, "capability_digest", None) == grant.session_capability_digest
+        and getattr(item, "provider", None) == provider
+        and getattr(item, "channel", None) == channel
+    )
+    if len(matching_capabilities) != 1:
+        raise ProviderConfigurationError(provider, "sampling_capability_mismatch")
+    raw_capability = matching_capabilities[0]
+    try:
+        capability = _snapshot(TrustedMCPProviderCapability, raw_capability)
+    except (TypeError, ValueError):
+        raise ProviderConfigurationError(
+            provider, "sampling_capability_mismatch"
+        ) from None
     if (
         grant.session_authorization_digest != authorization.authorization_digest
+        or capability.session_authorization_digest != authorization.authorization_digest
+        or grant.session_capability_digest != capability.capability_digest
+        or capability.provider != provider
+        or capability.channel != channel
+        or grant.models != capability.models
+        or grant.route not in capability.supported_routes
+        or request_snapshot.max_output_tokens > capability.max_output_tokens
+        or request_snapshot.timeout_seconds > capability.max_timeout_seconds
         or grant.issued_at < authorization.issued_at
         or grant.expires_at > authorization.expires_at
         or grant.mcp_related_request_id != related_request_id
@@ -826,6 +958,8 @@ def create_stateful_mcp_sampling_lease(
         related_request_id=related_request_id,
         authorization=authorization,
         raw_authorization=raw_authorization,
+        capability=capability,
+        raw_capability=raw_capability,
         grant=grant,
         raw_grant=raw_grant,
         runtime=runtime,
@@ -839,6 +973,7 @@ def create_stateful_mcp_sampling_lease(
 
 __all__ = [
     "MAX_MCP_SAMPLING_EFFECT_CLAIMS",
+    "MCP_PROVIDER_CAPABILITIES_SCOPE_KEY",
     "MCP_PROVIDER_GRANTS_SCOPE_KEY",
     "MCP_SESSION_AUTHORIZATION_SCOPE_KEY",
     "MCP_SESSION_RUNTIME_SCOPE_KEY",
@@ -846,5 +981,6 @@ __all__ = [
     "MCPSamplingSessionRuntime",
     "StatefulMCPSamplingLease",
     "TrustedMCPProviderGrant",
+    "TrustedMCPProviderCapability",
     "create_stateful_mcp_sampling_lease",
 ]

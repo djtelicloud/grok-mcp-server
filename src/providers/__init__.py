@@ -57,12 +57,14 @@ from .errors import (
 from .gemini import GeminiAdapter
 from .mcp_sampling import (
     MAX_MCP_SAMPLING_EFFECT_CLAIMS,
+    MCP_PROVIDER_CAPABILITIES_SCOPE_KEY,
     MCP_PROVIDER_GRANTS_SCOPE_KEY,
     MCP_SESSION_AUTHORIZATION_SCOPE_KEY,
     MCP_SESSION_RUNTIME_SCOPE_KEY,
     MCPSessionAuthorization,
     MCPSamplingSessionRuntime,
     StatefulMCPSamplingLease,
+    TrustedMCPProviderCapability,
     TrustedMCPProviderGrant,
     create_stateful_mcp_sampling_lease,
 )
@@ -110,6 +112,7 @@ __all__ = [
     "GrokWorkerBrokerResult",
     "GrokWorkerDelegation",
     "GrokWorkerLaneAuthorization",
+    "MCP_PROVIDER_CAPABILITIES_SCOPE_KEY",
     "MCP_PROVIDER_GRANTS_SCOPE_KEY",
     "MCP_SESSION_AUTHORIZATION_SCOPE_KEY",
     "MCP_SESSION_RUNTIME_SCOPE_KEY",
@@ -146,6 +149,7 @@ __all__ = [
     "SamplingModelPreferences",
     "SamplingTextContent",
     "StatefulMCPSamplingLease",
+    "TrustedMCPProviderCapability",
     "TrustedMCPProviderGrant",
     "VertexADCAdapter",
     "build_provider_registry",

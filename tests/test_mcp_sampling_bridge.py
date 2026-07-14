@@ -13,11 +13,13 @@ from starlette.requests import Request
 from mcp.server.session import ServerSession
 
 from src.providers import (
+    MCP_PROVIDER_CAPABILITIES_SCOPE_KEY,
     MCP_PROVIDER_GRANTS_SCOPE_KEY,
     MCP_SESSION_AUTHORIZATION_SCOPE_KEY,
     MCP_SESSION_RUNTIME_SCOPE_KEY,
     MAX_MCP_SAMPLING_EFFECT_CLAIMS,
     GrokSupervisorBinding,
+    GrokWorkerLaneAuthorization,
     MCPSamplingSessionRuntime,
     MCPSessionAuthorization,
     ProviderAuthorizationInvariantError,
@@ -28,6 +30,7 @@ from src.providers import (
     ProviderModelPins,
     ProviderRequest,
     RouteClass,
+    TrustedMCPProviderCapability,
     TrustedMCPProviderGrant,
     create_stateful_mcp_sampling_lease,
     provider_request_digest,
@@ -69,17 +72,21 @@ class FakeServerSession:
 
 def _authorization(
     *,
+    binding_id: str = "binding-1",
+    mcp_session_id: str = "mcp-session-1",
     principal: str = "http:anon",
+    client_label: str = "antigravity",
+    mcp_client_name: str = "Antigravity",
     trust: str = "verified_local",
     issued_at: datetime = NOW - timedelta(seconds=5),
     expires_at: datetime = NOW + timedelta(minutes=5),
 ) -> MCPSessionAuthorization:
     return MCPSessionAuthorization(
-        binding_id="binding-1",
-        mcp_session_id="mcp-session-1",
+        binding_id=binding_id,
+        mcp_session_id=mcp_session_id,
         principal=principal,
-        client_label="antigravity",
-        mcp_client_name="Antigravity",
+        client_label=client_label,
+        mcp_client_name=mcp_client_name,
         trust=trust,
         issued_at=issued_at,
         expires_at=expires_at,
@@ -92,6 +99,27 @@ def _supervision(*, ttl: datetime | None = None) -> GrokSupervisorBinding:
         objective_id="objective-1",
         route_decision_id="route-1",
         ttl_expires_at=ttl or NOW + timedelta(minutes=2),
+    )
+
+
+def _capability(
+    authorization: MCPSessionAuthorization,
+    *,
+    provider: ProviderId = ProviderId.GOOGLE,
+    channel: ProviderChannel = ProviderChannel.GOOGLE_MCP_SAMPLING,
+    models: ProviderModelPins = MODELS,
+    supported_routes: tuple[RouteClass, ...] = (
+        RouteClass.PLANNING,
+        RouteClass.CODING,
+        RouteClass.RESEARCH,
+    ),
+) -> TrustedMCPProviderCapability:
+    return TrustedMCPProviderCapability(
+        session_authorization_digest=authorization.authorization_digest,
+        provider=provider,
+        channel=channel,
+        models=models,
+        supported_routes=supported_routes,
     )
 
 
@@ -119,6 +147,7 @@ def _provider_request(
 def _grant(
     authorization: MCPSessionAuthorization,
     *,
+    capability: TrustedMCPProviderCapability | None = None,
     supervision: GrokSupervisorBinding | None = None,
     related_request_id: str | int = "tool-request-7",
     provider_request_id: str = "provider-request-1",
@@ -126,6 +155,7 @@ def _grant(
     issued_at: datetime = NOW - timedelta(seconds=2),
     expires_at: datetime = NOW + timedelta(minutes=1),
 ) -> TrustedMCPProviderGrant:
+    capability = capability or _capability(authorization)
     supervision = supervision or _supervision()
     provider_request = _provider_request(
         supervision=supervision,
@@ -135,14 +165,15 @@ def _grant(
     return TrustedMCPProviderGrant(
         grant_id="grant-1",
         session_authorization_digest=authorization.authorization_digest,
+        session_capability_digest=capability.capability_digest,
         supervision=supervision,
         provider_request_id=provider_request_id,
         provider_request_digest=provider_request_digest(provider_request),
         mcp_related_request_id=related_request_id,
-        provider=ProviderId.GOOGLE,
-        channel=ProviderChannel.GOOGLE_MCP_SAMPLING,
+        provider=capability.provider,
+        channel=capability.channel,
         route=RouteClass.PLANNING,
-        models=MODELS,
+        models=capability.models,
         issued_at=issued_at,
         expires_at=expires_at,
     )
@@ -151,6 +182,7 @@ def _grant(
 def _context(
     *,
     authorization: MCPSessionAuthorization | None = None,
+    capability: TrustedMCPProviderCapability | None = None,
     grant: TrustedMCPProviderGrant | None = None,
     runtime: MCPSamplingSessionRuntime | None = None,
     session: FakeServerSession | None = None,
@@ -158,7 +190,12 @@ def _context(
     stateless: bool = False,
 ):
     authorization = authorization or _authorization()
-    grant = grant or _grant(authorization, related_request_id=request_id)
+    capability = capability or _capability(authorization)
+    grant = grant or _grant(
+        authorization,
+        capability=capability,
+        related_request_id=request_id,
+    )
     runtime = runtime or MCPSamplingSessionRuntime(authorization)
     session = session or FakeServerSession()
     scope = {
@@ -170,6 +207,7 @@ def _context(
             (b"x-client-id", authorization.client_label.encode()),
         ],
         MCP_SESSION_AUTHORIZATION_SCOPE_KEY: authorization,
+        MCP_PROVIDER_CAPABILITIES_SCOPE_KEY: (capability,),
         MCP_PROVIDER_GRANTS_SCOPE_KEY: (grant,),
         MCP_SESSION_RUNTIME_SCOPE_KEY: runtime,
     }
@@ -254,6 +292,162 @@ async def test_exact_stateful_session_success_is_text_only_and_request_scoped():
         match="sampling_effect_indeterminate",
     ):
         await adapter.complete(provider_request)
+
+
+@pytest.mark.asyncio
+async def test_request_grants_share_stable_capability_descriptor_without_cross_authority():
+    authorization = _authorization()
+    capability = _capability(authorization)
+    # This exact public lane identity exists before either request grant.
+    pregrant_descriptor = capability.descriptor
+    pregrant_lane = GrokWorkerLaneAuthorization.from_descriptor(pregrant_descriptor)
+    runtime = MCPSamplingSessionRuntime(authorization)
+    session = FakeServerSession()
+    supervision = _supervision()
+    grant1 = _grant(
+        authorization,
+        capability=capability,
+        supervision=supervision,
+        related_request_id="tool-request-1",
+        provider_request_id="provider-request-1",
+    )
+    grant2 = TrustedMCPProviderGrant(
+        **{
+            **_grant(
+                authorization,
+                capability=capability,
+                supervision=supervision,
+                related_request_id="tool-request-2",
+                provider_request_id="provider-request-2",
+            ).model_dump(),
+            "grant_id": "grant-2",
+        }
+    )
+    request1 = _request_for_grant(grant1)
+    request2 = _request_for_grant(grant2)
+    ctx1, *_ = _context(
+        authorization=authorization,
+        capability=capability,
+        grant=grant1,
+        runtime=runtime,
+        session=session,
+        request_id="tool-request-1",
+    )
+    ctx2, *_ = _context(
+        authorization=authorization,
+        capability=capability,
+        grant=grant2,
+        runtime=runtime,
+        session=session,
+        request_id="tool-request-2",
+    )
+
+    async with _lease(ctx1, grant1) as lease1, _lease(ctx2, grant2) as lease2:
+        assert lease1.adapter.descriptor == pregrant_descriptor
+        assert lease2.adapter.descriptor == pregrant_descriptor
+        assert (
+            GrokWorkerLaneAuthorization.from_descriptor(
+                lease1.adapter.descriptor
+            ).contract_digest
+            == pregrant_lane.contract_digest
+            == GrokWorkerLaneAuthorization.from_descriptor(
+                lease2.adapter.descriptor
+            ).contract_digest
+        )
+        authority1 = object.__getattribute__(lease1.adapter, "_sampling_authority")
+        authority2 = object.__getattribute__(lease2.adapter, "_sampling_authority")
+        assert grant1.grant_digest != grant2.grant_digest
+        assert grant1.provider_request_id != grant2.provider_request_id
+        assert grant1.provider_request_digest != grant2.provider_request_digest
+        assert grant1.effect_digest != grant2.effect_digest
+        assert authority1.delegation_digest != authority2.delegation_digest
+        rendered_descriptor = pregrant_descriptor.model_dump_json()
+        for private_identity in (
+            grant1.grant_digest,
+            grant2.grant_digest,
+            grant1.provider_request_id,
+            grant2.provider_request_id,
+            grant1.provider_request_digest,
+            grant2.provider_request_digest,
+            grant1.effect_digest,
+            grant2.effect_digest,
+            authority1.delegation_digest,
+            authority2.delegation_digest,
+        ):
+            assert private_identity not in rendered_descriptor
+
+        crossed1 = await lease1.adapter.attempt(request2)
+        crossed2 = await lease2.adapter.attempt(request1)
+        assert crossed1.failure is not None
+        assert crossed1.failure.error_code == "sampling_grant_mismatch"
+        assert crossed2.failure is not None
+        assert crossed2.failure.error_code == "sampling_grant_mismatch"
+        assert session.calls == []
+
+        first = await lease1.adapter.attempt(request1)
+        second = await lease2.adapter.attempt(request2)
+        replay1 = await lease1.adapter.attempt(request1)
+        replay2 = await lease2.adapter.attempt(request2)
+
+    assert first.status == second.status == "returned"
+    assert replay1.failure is not None
+    assert replay1.failure.error_code == "sampling_effect_already_claimed"
+    assert replay2.failure is not None
+    assert replay2.failure.error_code == "sampling_effect_already_claimed"
+    assert len(session.calls) == 2
+
+
+def test_authenticated_session_client_and_provider_capability_change_descriptor_identity():
+    base_authorization = _authorization()
+    session_authorization = _authorization(
+        binding_id="binding-2",
+        mcp_session_id="mcp-session-2",
+    )
+    client_authorization = _authorization(
+        binding_id="binding-3",
+        mcp_session_id="mcp-session-3",
+        client_label="codex",
+        mcp_client_name="Codex Desktop",
+    )
+    google = _capability(base_authorization)
+    other_session = _capability(session_authorization)
+    other_client = _capability(client_authorization)
+    openai_models = ProviderModelPins(
+        planning="gpt-5.1",
+        coding="gpt-5.1-code",
+        vision="gpt-5.1-vision",
+        research="gpt-5.1-research",
+    )
+    openai = _capability(
+        base_authorization,
+        provider=ProviderId.OPENAI,
+        channel=ProviderChannel.OPENAI_MCP_SAMPLING,
+        models=openai_models,
+    )
+
+    capabilities = (google, other_session, other_client, openai)
+    assert len({item.capability_digest for item in capabilities}) == len(capabilities)
+    descriptors = tuple(item.descriptor for item in capabilities)
+    assert len({item.client_identity for item in descriptors}) == len(descriptors)
+    assert len({item.transport_resource_identity for item in descriptors}) == len(
+        descriptors
+    )
+    exposed_openai = openai.descriptor
+    object.__setattr__(openai_models, "planning", "forged-input-model")
+    object.__setattr__(exposed_openai.models, "planning", "forged-descriptor-model")
+    assert openai.models.planning == "gpt-5.1"
+    assert openai.descriptor.models.planning == "gpt-5.1"
+    rendered = "".join(item.model_dump_json() for item in descriptors)
+    for raw_identity in (
+        base_authorization.principal,
+        base_authorization.mcp_session_id,
+        base_authorization.client_label,
+        base_authorization.mcp_client_name,
+        client_authorization.mcp_session_id,
+        client_authorization.client_label,
+        client_authorization.mcp_client_name,
+    ):
+        assert raw_identity not in rendered
 
 
 @pytest.mark.asyncio
@@ -761,13 +955,30 @@ async def test_future_or_expired_authority_fails_before_effect():
 
 
 @pytest.mark.asyncio
-async def test_auth_and_grant_object_mutation_is_detected_pre_effect():
+async def test_auth_capability_and_grant_object_mutation_is_detected_pre_effect():
     ctx, _, session, authorization, grant, _ = _context()
     lease = _lease(ctx, grant)
     async with lease:
         object.__setattr__(authorization, "principal", "oauth:attacker")
         with pytest.raises(
             ProviderConfigurationError, match="sampling_authorization_mismatch"
+        ):
+            await lease.adapter.complete(_request_for_grant(grant))
+    assert session.calls == []
+
+    ctx, _, session, _, grant, _ = _context()
+    capability = ctx.request_context.request.scope[MCP_PROVIDER_CAPABILITIES_SCOPE_KEY][
+        0
+    ]
+    lease = _lease(ctx, grant)
+    async with lease:
+        object.__setattr__(
+            capability,
+            "supported_routes",
+            (RouteClass.CODING,),
+        )
+        with pytest.raises(
+            ProviderConfigurationError, match="sampling_capability_mismatch"
         ):
             await lease.adapter.complete(_request_for_grant(grant))
     assert session.calls == []
