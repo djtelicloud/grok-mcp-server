@@ -61,38 +61,30 @@ test("keeps the connection wizard instructional", async () => {
   assert.doesNotMatch(controlCenter, /localStorage|sessionStorage|dangerouslySetInnerHTML/);
 });
 
-test("publishes Swarm as a client-only showcase", async () => {
+test("keeps Swarm behind contributor control instead of a public showcase", async () => {
   const [
     publicPage,
-    swarmHtml,
-    swarmScript,
+    controlCenter,
     publicSwarmHtml,
-    publicSwarmScript,
     syncScript,
-    versionSource,
   ] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../../../mcp_ui/swarm.html", import.meta.url), "utf8"),
-    readFile(new URL("../../../mcp_ui/swarm.js", import.meta.url), "utf8"),
+    readFile(new URL("../app/control-center.tsx", import.meta.url), "utf8"),
     readFile(new URL("../public/swarm/index.html", import.meta.url), "utf8"),
-    readFile(new URL("../public/swarm/swarm.js", import.meta.url), "utf8"),
     readFile(new URL("../scripts/sync-swarm-playground.mjs", import.meta.url), "utf8"),
-    readFile(new URL("../../../src/version.py", import.meta.url), "utf8"),
   ]);
-  const uiVersion = /UI_ASSET_VERSION = "([^"]+)"/.exec(versionSource)?.[1];
-  assert.ok(uiVersion);
 
-  assert.match(publicPage, /href="\/swarm\/"/);
-  assert.match(swarmScript, /state\.runtimeMode === "contributor"/);
-  assert.match(swarmScript, /source was not uploaded/);
-  assert.match(swarmScript, /Public showcase — client-side analysis only/);
-  assert.doesNotMatch(swarmScript, /localStorage|sessionStorage/);
-  assert.match(syncScript, /mcp_ui/);
-  assert.ok(swarmHtml.includes(`src="./swarm.js?v=${uiVersion}"`));
-  assert.ok(swarmScript.includes(`const UI_ASSET_VERSION = "${uiVersion}"`));
-  assert.ok(swarmScript.includes("swarm-sample.json?v=${encodeURIComponent(UI_ASSET_VERSION)}"));
-  assert.ok(publicSwarmHtml.includes(`src="./swarm.js?v=${uiVersion}"`));
-  assert.equal(publicSwarmScript, swarmScript);
+  assert.doesNotMatch(publicPage, /href="\/swarm\/"/);
+  assert.match(publicPage, /Contributor-only optimization tools stay behind the authenticated Console/);
+  assert.match(controlCenter, /id: "swarm", label: "Swarm"/);
+  assert.match(controlCenter, /SwarmDetail/);
+  assert.match(controlCenter, /Copy Swarm review prompt/);
+  assert.match(controlCenter, /http:\/\/127\.0\.0\.1:4766\/ui\/swarm\.html/);
+  assert.match(controlCenter, /does not become a second agent chat/);
+  assert.match(publicSwarmHtml, /http-equiv="refresh" content="0; url=\/control"/);
+  assert.match(publicSwarmHtml, /GitHub-gated contributor control/);
+  assert.match(syncScript, /rm\(targetDir, \{ recursive: true, force: true \}\)/);
+  assert.doesNotMatch(syncScript, /mcp_ui|swarm\.js|swarm-sample/);
 });
 
 test("requires adapters to separate PR review state from release impact", async () => {

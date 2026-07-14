@@ -1,34 +1,27 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
-const repositoryRoot = resolve(scriptDir, "../../..");
-const sourceDir = resolve(repositoryRoot, "mcp_ui");
 const targetDir = resolve(scriptDir, "../public/swarm");
 
+await rm(targetDir, { recursive: true, force: true });
 await mkdir(targetDir, { recursive: true });
 
-const html = (await readFile(resolve(sourceDir, "swarm.html"), "utf8"))
-  .replace('href="./index.html"', 'href="/"')
-  .replace("Contributor lab · verified optimization", "Public lab · client-side preview");
+const html = `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta http-equiv="refresh" content="0; url=/control" />
+    <title>UniGrok Contributor Control</title>
+  </head>
+  <body>
+    <p>Swarm is an Insider Console workflow. <a href="/control">Continue to GitHub-gated contributor control.</a></p>
+  </body>
+</html>
+`;
 
-await Promise.all([
-  writeFile(resolve(targetDir, "index.html"), html),
-  writeFile(
-    resolve(targetDir, "swarm.js"),
-    await readFile(resolve(sourceDir, "swarm.js"), "utf8"),
-  ),
-  writeFile(
-    resolve(targetDir, "swarm-sample.json"),
-    await readFile(resolve(sourceDir, "swarm-sample.json"), "utf8"),
-  ),
-  // Shared design tokens: the page links ./tokens.css so the public copy
-  // renders with the same UniGrok identity as the local surfaces.
-  writeFile(
-    resolve(targetDir, "tokens.css"),
-    await readFile(resolve(sourceDir, "tokens.css"), "utf8"),
-  ),
-]);
+await writeFile(resolve(targetDir, "index.html"), html);
 
-console.log("Synchronized public Swarm Playground assets.");
+console.log("Synchronized the public Swarm gate to Contributor Control.");
