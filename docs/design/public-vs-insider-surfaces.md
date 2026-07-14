@@ -55,18 +55,14 @@ contributor gates — that is not the public product.
   `review_pull_request`
 - Workspace-neutral (no automatic browse of the user’s app repo)
 - Trusted-loopback Control Center at `http://localhost:4765/ui/` for **this
-  machine’s** health, cost ledger, and optional agent playground. The
-  playground can invoke providers and spend metered credits; IDE MCP remains
-  the primary chat path.
+  machine’s** health, cost ledger, credential-plane status, and pasteable IDE
+  actions. It does not invoke inference; IDE MCP is the chat path.
 - Credentials stay in server env / CLI OAuth volume — never in IDE MCP JSON
 
-**TARGET Console (local Core UI):**
+**LIVE Console (local Core UI):**
 
 - Observe health + paste next actions
-- Not a second primary Grok chat for daily work (IDE MCP is primary)
-
-**LIVE Console note:** the bundled UI may still call `agent` (legacy operator
-playground). Label that as **legacy**; do not document it as the only chat path.
+- Not a second Grok chat for daily work (IDE MCP is primary)
 
 ### 4.2 Contributor Forge (`:4766`) — INSIDER only
 
@@ -138,7 +134,7 @@ public Quick Start.
 |---|---|
 | Public README is vibe-only; insider ops in CONTRIBUTING | Wave-1 docs goal |
 | Stable discover prose does not teach Forge connect | Wave-1 onboarding goal |
-| Console is observe+paste only | **TARGET** (legacy chat still LIVE) |
+| Console is observe+paste only | **LIVE** |
 | GitHub write+ for all cloud Console entry | **LIVE** |
 | Unified single Insider UI (swarm+control+core) | **Deferred** |
 | Silent skill compiler into user repos | **Forbidden** |

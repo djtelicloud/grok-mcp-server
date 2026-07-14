@@ -21,7 +21,7 @@ collaborators such as Curtis). Product language freeze:
 
 | Topic | LIVE today | TARGET |
 |---|---|---|
-| Core UI `/ui/` | Status + optional legacy `agent` playground | Observe + pasteable actions; IDE remains primary chat |
+| Core UI `/ui/` | Health, cost ledger, plane status, pasteable IDE actions | Observe + paste only; IDE MCP is the chat path |
 | Cloud Console entry | GitHub OAuth + live write+ collaborator check (`write` / `maintain` / `admin`) | Same; always fail closed |
 | Swarm | Contributor mode; prefer `dry_run` | Same; never default-apply |
 | Land / merge | Codex/`scripts/land` + required exact-head Codex Approval | Unchanged; Grok review is advisory only |
