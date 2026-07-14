@@ -216,3 +216,37 @@ def test_stable_and_contributor_compose_files_are_separate():
     assert "UNIGROK_MODE_DIALS=1" in dials
     for phoneword_port in (2886, 3278, 7327, 8465, 7724):
         assert str(phoneword_port) in dials
+
+@pytest.mark.asyncio
+async def test_stable_discover_self_has_no_forge_connect_recipes(monkeypatch):
+    """Public/stable discover prose must not coach Forge 4766 or land workflows."""
+    monkeypatch.setenv("UNIGROK_SERVICE_MODE", "stable")
+    monkeypatch.delenv("WORKSPACE_ROOT", raising=False)
+
+    result = await grok_mcp_discover_self()
+    prose = (result.response or "") + "\n" + (result.text or "")
+    forbidden = (
+        "localhost:4766",
+        "127.0.0.1:4766",
+        "docker-compose.dev",
+        "scripts/land",
+        "apply_swarm",
+        "start 4766",
+        "connect 4766",
+    )
+    lowered = prose.lower()
+    for token in forbidden:
+        assert token.lower() not in lowered, f"stable discover leaked {token!r}"
+    assert "http://localhost:4765/mcp" in prose
+    assert "plan critique" in lowered or "implementation plan" in lowered
+
+
+@pytest.mark.asyncio
+async def test_public_mcp_instructions_prefer_core_endpoint_and_plan_critique():
+    mcp = create_public_mcp()
+    text = mcp.instructions
+    assert "http://localhost:4765/mcp" in text
+    assert "Implementation Plans" in text
+    assert "4766" not in text
+    assert "scripts/land" not in text
+
