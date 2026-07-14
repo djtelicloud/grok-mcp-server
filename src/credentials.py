@@ -11,7 +11,7 @@ import os
 from typing import Any, Dict, Optional
 
 
-SERVER_OWNED_SECRET_ENV_NAMES = (
+UPSTREAM_PROVIDER_SECRET_ENV_NAMES = (
     "XAI_API_KEY",
     "XAI_MANAGEMENT_API_KEY",
     "GROK_API_KEY",
@@ -20,8 +20,17 @@ SERVER_OWNED_SECRET_ENV_NAMES = (
     "CLAUDE_API_KEY",
     "GEMINI_API_KEY",
     "GOOGLE_API_KEY",
+)
+# These server-owned values must be scrubbed from Grok CLI subprocesses, but
+# they are not upstream provider bearer secrets: one is a credential-file path
+# and the other is the gateway's own client-token allowlist.
+NON_BEARER_SERVER_OWNED_ENV_NAMES = (
     "GOOGLE_APPLICATION_CREDENTIALS",
     "UNIGROK_API_KEYS",
+)
+SERVER_OWNED_SECRET_ENV_NAMES = (
+    *UPSTREAM_PROVIDER_SECRET_ENV_NAMES,
+    *NON_BEARER_SERVER_OWNED_ENV_NAMES,
 )
 _CLI_AUTH_ENV_UNSETS = " ".join(
     f"-u {name}" for name in SERVER_OWNED_SECRET_ENV_NAMES

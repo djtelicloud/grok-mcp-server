@@ -28,6 +28,7 @@ from starlette.staticfiles import StaticFiles
 
 from .version import UI_ASSET_VERSION
 
+from .credentials import UPSTREAM_PROVIDER_SECRET_ENV_NAMES
 from .identity import (
     _ACTIVE_CLIENT_ID,
     _ACTIVE_SESSION_ID,
@@ -68,14 +69,6 @@ from .utils import (
 
 UNIGROK_AGENT_MODEL = "unigrok-agent"
 XAI_BASE_URL = "https://api.x.ai/v1"
-_UPSTREAM_PROVIDER_SECRET_ENV_NAMES = (
-    "XAI_API_KEY",
-    "XAI_MANAGEMENT_API_KEY",
-    "OPENAI_API_KEY",
-    "ANTHROPIC_API_KEY",
-    "CLAUDE_API_KEY",
-    "GEMINI_API_KEY",
-)
 FALLBACK_XAI_MODELS = FALLBACK_XAI_LANGUAGE_MODELS
 
 logger = logging.getLogger("GrokMCP")
@@ -360,7 +353,7 @@ def _token_is_allowed(token: Optional[str]) -> bool:
     # Server-owned upstream provider credentials are never valid gateway
     # client credentials.  Reject accidental aliases even when an operator
     # also copied the same value into UNIGROK_API_KEYS.
-    for env_name in _UPSTREAM_PROVIDER_SECRET_ENV_NAMES:
+    for env_name in UPSTREAM_PROVIDER_SECRET_ENV_NAMES:
         upstream_secret = os.environ.get(env_name, "").strip()
         if upstream_secret and _tokens_match(token, upstream_secret):
             return False

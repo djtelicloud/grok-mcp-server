@@ -6,6 +6,11 @@ import pytest
 from starlette.responses import JSONResponse
 from starlette.testclient import TestClient
 
+from src.credentials import (
+    NON_BEARER_SERVER_OWNED_ENV_NAMES,
+    SERVER_OWNED_SECRET_ENV_NAMES,
+    UPSTREAM_PROVIDER_SECRET_ENV_NAMES,
+)
 from src.http_server import (
     GatewayAuthMiddleware,
     MCPOriginMiddleware,
@@ -632,14 +637,7 @@ def test_readyz_body_stays_boolean_on_failure(monkeypatch):
 
 @pytest.mark.parametrize(
     "secret_env",
-    [
-        "XAI_API_KEY",
-        "XAI_MANAGEMENT_API_KEY",
-        "OPENAI_API_KEY",
-        "ANTHROPIC_API_KEY",
-        "CLAUDE_API_KEY",
-        "GEMINI_API_KEY",
-    ],
+    UPSTREAM_PROVIDER_SECRET_ENV_NAMES,
 )
 def test_upstream_provider_secret_is_not_client_auth(monkeypatch, secret_env):
     monkeypatch.setenv("UNIGROK_RUNTIME", "cloudrun")
@@ -654,18 +652,34 @@ def test_upstream_provider_secret_is_not_client_auth(monkeypatch, secret_env):
     assert res.status_code == 401
 
 
+def test_upstream_provider_secret_registry_completely_classifies_server_envs():
+    assert set(UPSTREAM_PROVIDER_SECRET_ENV_NAMES) == {
+        "XAI_API_KEY",
+        "XAI_MANAGEMENT_API_KEY",
+        "GROK_API_KEY",
+        "OPENAI_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "CLAUDE_API_KEY",
+        "GEMINI_API_KEY",
+        "GOOGLE_API_KEY",
+    }
+    assert set(NON_BEARER_SERVER_OWNED_ENV_NAMES) == {
+        "GOOGLE_APPLICATION_CREDENTIALS",
+        "UNIGROK_API_KEYS",
+    }
+    assert not (
+        set(UPSTREAM_PROVIDER_SECRET_ENV_NAMES)
+        & set(NON_BEARER_SERVER_OWNED_ENV_NAMES)
+    )
+    assert set(SERVER_OWNED_SECRET_ENV_NAMES) == (
+        set(UPSTREAM_PROVIDER_SECRET_ENV_NAMES)
+        | set(NON_BEARER_SERVER_OWNED_ENV_NAMES)
+    )
+
+
 def test_distinct_gateway_key_remains_valid_with_upstream_secrets(monkeypatch):
     monkeypatch.setenv("UNIGROK_RUNTIME", "cloudrun")
-    for index, env_name in enumerate(
-        (
-            "XAI_API_KEY",
-            "XAI_MANAGEMENT_API_KEY",
-            "OPENAI_API_KEY",
-            "ANTHROPIC_API_KEY",
-            "CLAUDE_API_KEY",
-            "GEMINI_API_KEY",
-        )
-    ):
+    for index, env_name in enumerate(UPSTREAM_PROVIDER_SECRET_ENV_NAMES):
         monkeypatch.setenv(env_name, f"upstream-secret-{index}")
     monkeypatch.setenv("UNIGROK_API_KEYS", "gateway-client-secret")
     monkeypatch.setattr(
