@@ -1,14 +1,17 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 import hashlib
 import json
 import sqlite3
+import threading
 
 import pytest
 from pydantic import ValidationError
 
+import src.utils as utils_module
 from src.providers import (
     CredentialPlane,
     GrokSupervisorBinding,
@@ -148,6 +151,18 @@ def _failed(start: ProviderAttemptStart, code: str = "provider_unavailable"):
     )
 
 
+async def _complete(
+    store: GrokSessionStore,
+    start: ProviderAttemptStart,
+    result: ProviderAttemptResult,
+) -> bool:
+    projection = store.canonical_provider_attempt_result(start.attempt_id, result)
+    return await store.complete_projected_provider_attempt(
+        start.attempt_id,
+        projection,
+    )
+
+
 def test_attempt_start_is_grok_bound_and_channel_consistent():
     start = _start()
     messages = model_visible_messages(start.request)
@@ -171,7 +186,7 @@ def test_attempt_start_is_grok_bound_and_channel_consistent():
 
 
 @pytest.mark.asyncio
-async def test_begin_and_complete_are_idempotent_transport_evidence(tmp_path):
+async def test_begin_is_idempotent_and_terminal_projection_is_one_shot(tmp_path):
     store = GrokSessionStore(tmp_path / "ledger.db")
     start = _start()
     usage = ProviderTokenUsage(
@@ -184,8 +199,14 @@ async def test_begin_and_complete_are_idempotent_transport_evidence(tmp_path):
 
     assert await store.begin_provider_attempt(start) is True
     assert await store.begin_provider_attempt(start) is False
-    assert await store.complete_provider_attempt(start.attempt_id, result) is True
-    assert await store.complete_provider_attempt(start.attempt_id, result) is False
+    projection = store.canonical_provider_attempt_result(start.attempt_id, result)
+    assert await store.complete_projected_provider_attempt(
+        start.attempt_id, projection
+    ) is True
+    with pytest.raises(ValueError, match="authorization is invalid"):
+        await store.complete_projected_provider_attempt(
+            start.attempt_id, projection
+        )
 
     rows = await store.list_provider_attempts(delegation_id=start.delegation_id)
     assert len(rows) == 1
@@ -220,7 +241,7 @@ async def test_identity_and_receipt_conflicts_fail_closed(tmp_path):
         request=wrong_request,
     )
     with pytest.raises(ValueError, match="request_id"):
-        await store.complete_provider_attempt(start.attempt_id, _returned(wrong_start))
+        await _complete(store, start, _returned(wrong_start))
     await store.close()
 
 
@@ -245,7 +266,7 @@ async def test_request_identity_cannot_be_reused_or_receipt_transplanted(tmp_pat
     )
     await store.begin_provider_attempt(second)
     with pytest.raises(ValueError, match="request_id"):
-        await store.complete_provider_attempt(second.attempt_id, _returned(first))
+        await _complete(store, second, _returned(first))
     await store.close()
 
 
@@ -277,9 +298,9 @@ async def test_each_physical_channel_attempt_has_its_own_ordered_row(tmp_path):
     )
 
     await store.begin_provider_attempt(first)
-    await store.complete_provider_attempt(first.attempt_id, _failed(first))
+    await _complete(store, first, _failed(first))
     await store.begin_provider_attempt(second)
-    await store.complete_provider_attempt(second.attempt_id, _returned(second))
+    await _complete(store, second, _returned(second))
 
     rows = await store.list_provider_attempts(delegation_id="delegation-google")
     assert [
@@ -359,8 +380,9 @@ async def test_secret_bearing_worker_output_is_redacted_before_storage(
     store = GrokSessionStore(db_path)
     start = _start()
     await store.begin_provider_attempt(start)
-    await store.complete_provider_attempt(
-        start.attempt_id,
+    await _complete(
+        store,
+        start,
         _returned(start, text=f"Worker echoed {anthropic_secret}"),
     )
     row = (await store.list_provider_attempts())[0]
@@ -373,6 +395,143 @@ async def test_secret_bearing_worker_output_is_redacted_before_storage(
         path.read_bytes() for path in tmp_path.glob("output-redaction.db*")
     )
     assert anthropic_secret.encode() not in persisted
+
+
+@pytest.mark.asyncio
+async def test_direct_completion_cannot_forge_clean_canonical_authority(
+    tmp_path,
+    monkeypatch,
+):
+    secret = "direct-caller-secret-that-must-not-persist"
+    monkeypatch.setenv("UNIGROK_API_KEYS", secret)
+    db_path = tmp_path / "direct-completion-capability.db"
+    store = GrokSessionStore(db_path)
+    start = _start()
+    unsafe = _returned(start, text=f"Worker echoed {secret}")
+    unsafe_json = json.dumps(
+        unsafe.model_dump(mode="json"),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    )
+    forged_digest = "sha256:" + hashlib.sha256(
+        unsafe_json.encode("utf-8")
+    ).hexdigest()
+
+    assert await store.begin_provider_attempt(start) is True
+    with pytest.raises(TypeError):
+        await store.complete_provider_attempt(
+            start.attempt_id,
+            unsafe,
+            canonical_result_digest=forged_digest,
+            canonical_output_redaction="clean",
+        )
+    assert (await store.list_provider_attempts())[0]["transport_status"] == "started"
+
+    with pytest.raises(PermissionError, match="direct provider-attempt completion"):
+        await store.complete_provider_attempt(start.attempt_id, unsafe)
+    projection = store.canonical_provider_attempt_result(start.attempt_id, unsafe)
+    assert await store.complete_projected_provider_attempt(
+        start.attempt_id, projection
+    ) is True
+    with pytest.raises(ValueError, match="authorization is invalid"):
+        await store.complete_projected_provider_attempt(
+            start.attempt_id, projection
+        )
+    row = (await store.list_provider_attempts())[0]
+    assert row["transport_status"] == "returned"
+    assert row["output_redaction"] == "redacted"
+    assert row["canonical_result_digest"] != forged_digest
+    assert secret not in row["output_text"]
+    await store.close()
+
+    persisted = b"".join(path.read_bytes() for path in tmp_path.glob(f"{db_path.name}*"))
+    assert secret.encode() not in persisted
+
+
+@pytest.mark.asyncio
+async def test_projected_completion_requires_store_minted_attempt_capability(tmp_path):
+    store = GrokSessionStore(tmp_path / "projected-completion-capability.db")
+    first = _start()
+    second = _start(
+        attempt_id="attempt-2",
+        delegation_id="delegation-2",
+        request=_request(request_id="request-2", session="session-2"),
+    )
+    await store.begin_provider_attempt(first)
+    await store.begin_provider_attempt(second)
+    projection = store.canonical_provider_attempt_result(
+        first.attempt_id,
+        _returned(first),
+    )
+    forged = projection.model_copy(
+        update={"authorization_tag": "hmac-sha256:" + "0" * 64}
+    )
+
+    with pytest.raises(ValueError, match="authorization is invalid"):
+        await store.complete_projected_provider_attempt(first.attempt_id, forged)
+    with pytest.raises(ValueError, match="different attempt"):
+        await store.complete_projected_provider_attempt(second.attempt_id, projection)
+    assert all(
+        row["transport_status"] == "started"
+        for row in await store.list_provider_attempts()
+    )
+
+    assert await store.complete_projected_provider_attempt(
+        first.attempt_id,
+        projection,
+    ) is True
+    assert first.attempt_id not in store._provider_projection_leases
+    assert first.attempt_id not in store._provider_projection_generations
+    assert store._provider_projection_authorizations == {}
+    with pytest.raises(ValueError, match="authorization is invalid"):
+        await store.complete_projected_provider_attempt(
+            first.attempt_id,
+            projection,
+        )
+    await store.close()
+
+
+@pytest.mark.asyncio
+async def test_revocation_tombstones_projection_already_in_redaction(
+    tmp_path,
+    monkeypatch,
+):
+    store = GrokSessionStore(tmp_path / "projection-revocation-race.db")
+    start = _start()
+    await store.begin_provider_attempt(start)
+    redaction_started = threading.Event()
+    redaction_release = threading.Event()
+    original_redactor = utils_module._redact_provider_episode_text
+
+    def blocking_redactor(*args, **kwargs):
+        redaction_started.set()
+        redaction_release.wait()
+        return original_redactor(*args, **kwargs)
+
+    monkeypatch.setattr(
+        utils_module,
+        "_redact_provider_episode_text",
+        blocking_redactor,
+    )
+    projection_task = asyncio.create_task(
+        asyncio.to_thread(
+            store.canonical_provider_attempt_result,
+            start.attempt_id,
+            _returned(start),
+        )
+    )
+    try:
+        assert await asyncio.to_thread(redaction_started.wait, 1.0)
+        await store.revoke_provider_attempt_projection(start.attempt_id)
+    finally:
+        redaction_release.set()
+
+    with pytest.raises(PermissionError, match="projection lease was revoked"):
+        await projection_task
+    assert store._provider_projection_authorizations == {}
+    assert (await store.list_provider_attempts())[0]["transport_status"] == "started"
+    await store.close()
 
 
 @pytest.mark.asyncio
@@ -408,7 +567,7 @@ async def test_terminal_projection_columns_are_receipt_bound(tmp_path):
     store = GrokSessionStore(tmp_path / "projection-tamper.db")
     start = _start()
     await store.begin_provider_attempt(start)
-    await store.complete_provider_attempt(start.attempt_id, _returned(start))
+    await _complete(store, start, _returned(start))
     await store._conn.execute(
         "UPDATE provider_attempts SET resolved_model = 'claude-forged', "
         "duration_ms = 999999, finish_reason = 'content_filter' "
@@ -426,7 +585,7 @@ async def test_lifecycle_times_and_redaction_states_are_digest_bound(tmp_path):
     store = GrokSessionStore(tmp_path / "lifecycle-tamper.db")
     start = _start()
     await store.begin_provider_attempt(start)
-    await store.complete_provider_attempt(start.attempt_id, _returned(start))
+    await _complete(store, start, _returned(start))
     await store._conn.execute(
         "UPDATE provider_attempts SET started_at = 'not-a-time', "
         "completed_at = '1999-01-01T00:00:00+00:00', "
@@ -478,7 +637,7 @@ async def test_started_and_terminal_rows_reject_schema_invalid_receipts(tmp_path
     store = GrokSessionStore(tmp_path / "terminal-receipt-tamper.db")
     completed = _start()
     await store.begin_provider_attempt(completed)
-    await store.complete_provider_attempt(completed.attempt_id, _returned(completed))
+    await _complete(store, completed, _returned(completed))
     row = (await store.list_provider_attempts())[0]
     completion = json.loads(row["completion_json"])
     completion["receipt"] = {}

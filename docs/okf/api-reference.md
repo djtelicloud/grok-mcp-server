@@ -1081,6 +1081,38 @@ grant a background SDK thread a fresh per-row lease. Every row token
 is bounded by both that deadline and the local outbox lease, and is
 revoked in ``finally`` even when this coroutine is cancelled.
 
+## provider_redaction.py {#provider_redaction}
+
+### Class: `ProviderRedactionSnapshot` {#provider_redaction-providerredactionsnapshot}
+
+```python
+class ProviderRedactionSnapshot
+```
+
+**Keywords:** provider, redaction, snapshot
+
+Exact server-owned values that must be removed from one result.
+
+### Method: `ProviderRedactionSnapshot.secret_values` {#provider_redaction-providerredactionsnapshot-secret_values}
+
+```python
+def ProviderRedactionSnapshot.secret_values(self) -> tuple[str, ...]
+```
+
+**Keywords:** provider, redaction, snapshot, secret, values
+
+Return the process-local values to the trusted store redactor.
+
+### Function: `capture_provider_redaction_snapshot` {#provider_redaction-capture_provider_redaction_snapshot}
+
+```python
+def capture_provider_redaction_snapshot() -> ProviderRedactionSnapshot
+```
+
+**Keywords:** capture, provider, redaction, snapshot
+
+Capture current server-owned secret values without logging or I/O.
+
 ## providers/base.py {#providers-base}
 
 ### Class: `HTTPProviderAdapter` {#providers-base-httpprovideradapter}
@@ -1222,6 +1254,25 @@ fallback policy. Consumers holding the originating plan must cross the
 same explicit boundary used by :meth:`GrokWorkerBroker.execute` before
 trusting delegation labels or attempt identities.
 
+### Class: `ProviderAttemptAdapterSource` {#providers-broker-providerattemptadaptersource}
+
+```python
+class ProviderAttemptAdapterSource
+```
+
+**Keywords:** provider, attempt, adapter, source
+
+Stable lane metadata that opens an adapter for one durable attempt.
+
+``open_attempt`` is called only after the exact attempt start is durably
+recorded and must synchronously return an otherwise inert context manager.
+Entering and exiting that context may acquire and revoke local request
+authority, but must not invoke the provider effect; the yielded adapter's
+``attempt`` method remains the sole physical effect boundary.  Its
+``__aexit__`` must be safe and idempotent after a failed or cancelled
+``__aenter__`` so the broker can mechanically revoke partially acquired
+authority before recording any terminal result.
+
 ### Class: `GrokWorkerBroker` {#providers-broker-grokworkerbroker}
 
 ```python
@@ -1354,6 +1405,20 @@ class ProviderAttemptResult
 **Keywords:** provider, attempt, result
 
 One subordinate worker return or failure for Grok synthesis.
+
+### Class: `ProviderAttemptCanonicalProjection` {#providers-contracts-providerattemptcanonicalprojection}
+
+```python
+class ProviderAttemptCanonicalProjection
+```
+
+**Keywords:** provider, attempt, canonical, projection
+
+Store-minted, attempt-bound authority for one canonical ledger result.
+
+The authorization tag is opaque outside the store.  Its presence is not
+semantic evidence; it only proves that this store instance projected the
+exact result bytes under the process-local lease created by durable begin.
 
 ### Function: `provider_result_matches_start` {#providers-contracts-provider_result_matches_start}
 
@@ -4182,6 +4247,26 @@ Durably record Grok authorization before a worker channel effect.
 Returns True for a new row and False for an exact idempotent replay.
 Reusing either identity for different work fails closed.
 
+### Method: `GrokSessionStore.canonical_provider_attempt_result` {#utils-groksessionstore-canonical_provider_attempt_result}
+
+```python
+def GrokSessionStore.canonical_provider_attempt_result(self, attempt_id: str, result: Any, redaction_snapshot: Any=None) -> Any
+```
+
+**Keywords:** grok, session, store, canonical, provider, attempt, result
+
+Mint an attempt-bound capability for the exact redacted payload.
+
+### Method: `GrokSessionStore.revoke_provider_attempt_projection` {#utils-groksessionstore-revoke_provider_attempt_projection}
+
+```python
+async def GrokSessionStore.revoke_provider_attempt_projection(self, attempt_id: str) -> None
+```
+
+**Keywords:** grok, session, store, revoke, provider, attempt, projection
+
+Revoke any uncommitted process-local authority for one attempt.
+
 ### Method: `GrokSessionStore.complete_provider_attempt` {#utils-groksessionstore-complete_provider_attempt}
 
 ```python
@@ -4190,7 +4275,17 @@ async def GrokSessionStore.complete_provider_attempt(self, attempt_id: str, resu
 
 **Keywords:** grok, session, store, complete, provider, attempt
 
-Bind one normalized transport result to its exact Grok start row.
+Reject terminal writes that bypass the broker projection lifecycle.
+
+### Method: `GrokSessionStore.complete_projected_provider_attempt` {#utils-groksessionstore-complete_projected_provider_attempt}
+
+```python
+async def GrokSessionStore.complete_projected_provider_attempt(self, attempt_id: str, projection: Any) -> bool
+```
+
+**Keywords:** grok, session, store, complete, projected, provider, attempt
+
+Atomically bind one store-authorized canonical result to its start.
 
 ### Method: `GrokSessionStore.mark_stale_provider_attempts_indeterminate` {#utils-groksessionstore-mark_stale_provider_attempts_indeterminate}
 

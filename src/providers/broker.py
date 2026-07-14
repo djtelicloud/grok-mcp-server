@@ -8,13 +8,17 @@ plans at the integration boundary.
 The broker chooses physical credential channels from an injected registry,
 records every physical attempt before its effect, and returns durable transport
 evidence to Grok without synthesizing or granting semantic authority.  It never
-reads credentials and never constructs a cloud harvester.
+constructs credential-bearing transports or a cloud harvester.  It snapshots
+server-owned values only for ephemeral result redaction.
 """
 
 from __future__ import annotations
 
 import asyncio
 from collections.abc import Mapping
+import contextlib
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from dataclasses import dataclass
 from datetime import UTC, datetime
 import hashlib
 import json
@@ -23,6 +27,10 @@ from typing import Annotated, Any, Literal, Protocol
 
 from pydantic import Field, model_validator
 
+from ..provider_redaction import (
+    ProviderRedactionSnapshot,
+    capture_provider_redaction_snapshot,
+)
 from .contracts import (
     MAX_OUTPUT_TOKENS,
     MAX_REQUEST_CHARS,
@@ -31,6 +39,7 @@ from .contracts import (
     CredentialState,
     GrokSupervisorBinding,
     ProviderAdapter,
+    ProviderAttemptCanonicalProjection,
     ProviderAttemptResult,
     ProviderAttemptStart,
     ProviderChannel,
@@ -458,7 +467,20 @@ class GrokWorkerBrokerResult(StrictContract):
 class ProviderAttemptStore(Protocol):
     async def begin_provider_attempt(self, start: Any) -> bool: ...
 
-    async def complete_provider_attempt(self, attempt_id: str, result: Any) -> bool: ...
+    def canonical_provider_attempt_result(
+        self,
+        attempt_id: str,
+        result: Any,
+        redaction_snapshot: ProviderRedactionSnapshot | None = None,
+    ) -> ProviderAttemptCanonicalProjection: ...
+
+    async def revoke_provider_attempt_projection(self, attempt_id: str) -> None: ...
+
+    async def complete_projected_provider_attempt(
+        self,
+        attempt_id: str,
+        projection: ProviderAttemptCanonicalProjection,
+    ) -> bool: ...
 
     async def list_provider_attempts(
         self,
@@ -470,6 +492,81 @@ class ProviderAttemptStore(Protocol):
 
 class ProviderAttemptHarvestTrigger(Protocol):
     async def run_once(self, store: Any, *, deadline_monotonic: float) -> Any: ...
+
+
+class ProviderAttemptAdapterSource(Protocol):
+    """Stable lane metadata that opens an adapter for one durable attempt.
+
+    ``open_attempt`` is called only after the exact attempt start is durably
+    recorded and must synchronously return an otherwise inert context manager.
+    Entering and exiting that context may acquire and revoke local request
+    authority, but must not invoke the provider effect; the yielded adapter's
+    ``attempt`` method remains the sole physical effect boundary.  Its
+    ``__aexit__`` must be safe and idempotent after a failed or cancelled
+    ``__aenter__`` so the broker can mechanically revoke partially acquired
+    authority before recording any terminal result.
+    """
+
+    @property
+    def descriptor(self) -> ProviderDescriptor: ...
+
+    def open_attempt(
+        self,
+        start: ProviderAttemptStart,
+    ) -> AbstractAsyncContextManager[ProviderAdapter]: ...
+
+
+class _StaticProviderAttemptAdapterSource:
+    """Compatibility source for existing process- and API-scoped adapters."""
+
+    def __init__(self, adapter: ProviderAdapter) -> None:
+        self._adapter = adapter
+
+    @property
+    def descriptor(self) -> ProviderDescriptor:
+        return self._adapter.descriptor
+
+    @property
+    def adapter(self) -> ProviderAdapter:
+        return self._adapter
+
+    @asynccontextmanager
+    async def open_attempt(self, start: ProviderAttemptStart):
+        del start
+        yield self._adapter
+
+
+@dataclass(frozen=True, slots=True)
+class _PreparedTerminalResult:
+    authoritative_digest: str
+    projection: ProviderAttemptCanonicalProjection
+
+
+@dataclass(frozen=True, slots=True)
+class _TerminalProjectionWork:
+    attempt_id: str
+    authoritative_digest: str
+    task: asyncio.Task[tuple[float, Any]]
+
+
+@dataclass(frozen=True, slots=True)
+class _AdapterLifecycleOutcome:
+    result: ProviderAttemptResult | None
+    prepared: _PreparedTerminalResult | None = None
+    cancelled: bool = False
+    indeterminate_reason: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class _AdapterCleanupOutcome:
+    status: Literal["complete", "failed", "timed_out"]
+
+
+@dataclass(frozen=True, slots=True)
+class _TerminalPersistenceOutcome:
+    result: ProviderAttemptResult | None
+    stored: bool = False
+    error: BaseException | None = None
 
 
 def _canonical_plan(plan: GrokDelegationPlan) -> str:
@@ -491,6 +588,24 @@ def _canonical_plan(plan: GrokDelegationPlan) -> str:
 def _content_digest(value: str) -> str:
     return (
         "sha256:" + hashlib.sha256(value.encode("utf-8", errors="strict")).hexdigest()
+    )
+
+
+def _provider_result_digest(result: ProviderAttemptResult) -> str:
+    return _content_digest(
+        json.dumps(
+            result.model_dump(mode="json"),
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        )
+    )
+
+
+def _snapshot_provider_result(result: ProviderAttemptResult) -> ProviderAttemptResult:
+    return ProviderAttemptResult.model_validate_json(
+        result.model_dump_json(warnings="error")
     )
 
 
@@ -709,25 +824,54 @@ class GrokWorkerBroker:
     def __init__(
         self,
         *,
-        registry: Mapping[ProviderChannel, ProviderAdapter],
+        registry: Mapping[
+            ProviderChannel,
+            ProviderAdapter | ProviderAttemptAdapterSource,
+        ],
         store: ProviderAttemptStore,
         harvester: ProviderAttemptHarvestTrigger | None = None,
         clock: Any | None = None,
         harvest_timeout_seconds: float = 5.0,
         terminal_write_timeout_seconds: float = 2.0,
+        adapter_cleanup_timeout_seconds: float = 2.0,
     ) -> None:
         if not 0.1 <= float(harvest_timeout_seconds) <= 30.0:
             raise ValueError("harvest trigger timeout is out of bounds")
         if not 0.1 <= float(terminal_write_timeout_seconds) <= 5.0:
             raise ValueError("terminal write timeout is out of bounds")
-        self._registry = dict(registry)
+        if not 0.1 <= float(adapter_cleanup_timeout_seconds) <= 5.0:
+            raise ValueError("adapter cleanup timeout is out of bounds")
+        if any(channel not in _ALL_WORKER_CHANNELS for channel in registry):
+            raise ValueError("broker registry contains a supervisor channel")
+        self._registry = {
+            channel: self._coerce_adapter_source(entry)
+            for channel, entry in registry.items()
+        }
         self._store = store
         self._harvester = harvester
         self._clock = clock or (lambda: datetime.now(UTC))
         self._harvest_timeout_seconds = float(harvest_timeout_seconds)
         self._terminal_write_timeout_seconds = float(terminal_write_timeout_seconds)
+        self._adapter_cleanup_timeout_seconds = float(
+            adapter_cleanup_timeout_seconds
+        )
         self._harvest_lock = asyncio.Lock()
         self._validate_registry()
+
+    @staticmethod
+    def _coerce_adapter_source(
+        entry: ProviderAdapter | ProviderAttemptAdapterSource,
+    ) -> ProviderAttemptAdapterSource:
+        has_open = callable(getattr(entry, "open_attempt", None))
+        has_attempt = callable(getattr(entry, "attempt", None))
+        has_complete = callable(getattr(entry, "complete", None))
+        if has_open and not has_attempt and not has_complete:
+            return entry
+        if not has_open and has_attempt and has_complete:
+            return _StaticProviderAttemptAdapterSource(entry)
+        raise ValueError(
+            "broker registry entry must be exactly one adapter or adapter source"
+        )
 
     def _now(self) -> datetime:
         now = self._clock()
@@ -740,10 +884,10 @@ class GrokWorkerBroker:
 
     def _validate_registry(self) -> None:
         descriptor_channels: set[ProviderChannel] = set()
-        for channel, adapter in self._registry.items():
+        for channel, source in self._registry.items():
             if channel not in _ALL_WORKER_CHANNELS:
                 raise ValueError("broker registry contains a supervisor channel")
-            descriptor = adapter.descriptor
+            descriptor = source.descriptor
             if descriptor.channel != channel:
                 raise ValueError("registry key and adapter channel do not match")
             if descriptor.channel in descriptor_channels:
@@ -833,7 +977,11 @@ class GrokWorkerBroker:
         *,
         delegation: GrokWorkerDelegation,
         plane: CredentialPlane,
-    ) -> tuple[ProviderChannel, ProviderAdapter, ProviderDescriptor] | None:
+    ) -> tuple[
+        ProviderChannel,
+        ProviderAttemptAdapterSource,
+        ProviderDescriptor,
+    ] | None:
         ladder = (
             _SUBSCRIPTION_LADDERS[delegation.provider]
             if plane == CredentialPlane.SUBSCRIPTION
@@ -842,10 +990,10 @@ class GrokWorkerBroker:
         for channel in ladder:
             if not any(lane.channel == channel for lane in delegation.authorized_lanes):
                 continue
-            adapter = self._registry.get(channel)
-            if adapter is None:
+            source = self._registry.get(channel)
+            if source is None:
                 continue
-            descriptor = self._snapshot_descriptor(adapter.descriptor)
+            descriptor = self._snapshot_descriptor(source.descriptor)
             if not self._descriptor_is_authorized(
                 delegation=delegation,
                 channel=channel,
@@ -857,7 +1005,7 @@ class GrokWorkerBroker:
                 continue
             if delegation.route not in descriptor.supported_routes:
                 continue
-            return channel, adapter, descriptor
+            return channel, source, descriptor
         return None
 
     def _start(
@@ -1081,9 +1229,12 @@ class GrokWorkerBroker:
         *,
         plan: GrokDelegationPlan,
         index: int,
+        source: ProviderAttemptAdapterSource,
         adapter: ProviderAdapter,
         descriptor: ProviderDescriptor,
         start: ProviderAttemptStart,
+        deadline_monotonic: float,
+        timeout_code: Literal["ttl_expired", "timeout"],
     ) -> ProviderAttemptResult:
         started = time.monotonic()
         if not _attempt_start_matches_plan(start, plan, index):
@@ -1096,6 +1247,7 @@ class GrokWorkerBroker:
                 duration_ms=0,
             )
         try:
+            source_descriptor = self._snapshot_descriptor(source.descriptor)
             current_descriptor = self._snapshot_descriptor(adapter.descriptor)
         except Exception:
             return self._pre_dispatch_failure(
@@ -1106,11 +1258,16 @@ class GrokWorkerBroker:
                 error_code="descriptor_authorization_changed",
                 duration_ms=0,
             )
-        if not self._descriptor_matches_start(
-            plan=plan,
-            index=index,
-            start=start,
-            descriptor=current_descriptor,
+        if not all(
+            self._opened_descriptor_matches_start(
+                plan=plan,
+                index=index,
+                source=source,
+                start=start,
+                descriptor=descriptor,
+                current=candidate,
+            )
+            for candidate in (source_descriptor, current_descriptor)
         ):
             return self._pre_dispatch_failure(
                 adapter=adapter,
@@ -1121,26 +1278,17 @@ class GrokWorkerBroker:
                 duration_ms=0,
             )
         remaining = self._remaining(plan)
-        if remaining <= 0:
+        deadline_remaining = deadline_monotonic - time.monotonic()
+        if remaining <= 0 or deadline_remaining <= 0:
             return self._pre_dispatch_failure(
                 adapter=adapter,
                 start=start,
                 descriptor=descriptor,
                 error_kind="transport",
-                error_code="ttl_expired",
+                error_code=("ttl_expired" if remaining <= 0 else timeout_code),
                 duration_ms=0,
             )
-        physical_timeout = min(
-            remaining,
-            start.request.timeout_seconds,
-            descriptor.max_timeout_seconds,
-        )
-        timeout_code = (
-            "ttl_expired"
-            if remaining
-            <= min(start.request.timeout_seconds, descriptor.max_timeout_seconds)
-            else "timeout"
-        )
+        physical_timeout = min(remaining, deadline_remaining)
         if self._sampling_effect_requires_indeterminate(
             channel=start.channel,
             adapter=adapter,
@@ -1160,11 +1308,27 @@ class GrokWorkerBroker:
         try:
             async with asyncio.timeout(physical_timeout):
                 raw_result = await adapter.attempt(physical_request)
-            result = (
+            wall_remaining = self._remaining(plan)
+            deadline_remaining = deadline_monotonic - time.monotonic()
+            if wall_remaining <= 0 or deadline_remaining <= 0:
+                return self._post_dispatch_failure(
+                    adapter=adapter,
+                    start=start,
+                    descriptor=descriptor,
+                    error_kind="transport",
+                    error_code=(
+                        "late_result_rejected"
+                        if wall_remaining <= 0
+                        else timeout_code
+                    ),
+                    duration_ms=round((time.monotonic() - started) * 1000),
+                )
+            validated_result = (
                 raw_result
                 if isinstance(raw_result, ProviderAttemptResult)
                 else ProviderAttemptResult.model_validate(raw_result)
             )
+            result = _snapshot_provider_result(validated_result)
         except TimeoutError:
             if physical_request != start.request:
                 return self._post_dispatch_failure(
@@ -1202,14 +1366,27 @@ class GrokWorkerBroker:
                 duration_ms=round((time.monotonic() - started) * 1000),
             )
         try:
+            completed_source_descriptor = self._snapshot_descriptor(
+                source.descriptor
+            )
             completed_descriptor = self._snapshot_descriptor(adapter.descriptor)
         except Exception:
+            completed_source_descriptor = None
             completed_descriptor = None
-        if completed_descriptor is None or not self._descriptor_matches_start(
-            plan=plan,
-            index=index,
-            start=start,
-            descriptor=completed_descriptor,
+        if any(
+            candidate is None
+            or not self._opened_descriptor_matches_start(
+                plan=plan,
+                index=index,
+                source=source,
+                start=start,
+                descriptor=descriptor,
+                current=candidate,
+            )
+            for candidate in (
+                completed_source_descriptor,
+                completed_descriptor,
+            )
         ):
             return self._post_dispatch_failure(
                 adapter=adapter,
@@ -1228,13 +1405,19 @@ class GrokWorkerBroker:
                 error_code="adapter_request_mutation",
                 duration_ms=round((time.monotonic() - started) * 1000),
             )
-        if self._remaining(plan) <= 0:
+        wall_remaining = self._remaining(plan)
+        deadline_remaining = deadline_monotonic - time.monotonic()
+        if wall_remaining <= 0 or deadline_remaining <= 0:
             return self._post_dispatch_failure(
                 adapter=adapter,
                 start=start,
                 descriptor=descriptor,
                 error_kind="transport",
-                error_code="late_result_rejected",
+                error_code=(
+                    "late_result_rejected"
+                    if wall_remaining <= 0
+                    else timeout_code
+                ),
                 duration_ms=round((time.monotonic() - started) * 1000),
             )
         if not _attempt_start_matches_plan(
@@ -1260,6 +1443,673 @@ class GrokWorkerBroker:
                 duration_ms=round((time.monotonic() - started) * 1000),
             )
         return result
+
+    def _source_descriptor_matches_start(
+        self,
+        *,
+        plan: GrokDelegationPlan,
+        index: int,
+        source: ProviderAttemptAdapterSource,
+        start: ProviderAttemptStart,
+        descriptor: ProviderDescriptor,
+    ) -> bool:
+        try:
+            current = self._snapshot_descriptor(source.descriptor)
+        except Exception:
+            return False
+        return all(
+            (
+                self._descriptor_matches_start(
+                    plan=plan,
+                    index=index,
+                    start=start,
+                    descriptor=current,
+                ),
+                isinstance(source, _StaticProviderAttemptAdapterSource)
+                or current == descriptor,
+            )
+        )
+
+    def _opened_descriptor_matches_start(
+        self,
+        *,
+        plan: GrokDelegationPlan,
+        index: int,
+        source: ProviderAttemptAdapterSource,
+        start: ProviderAttemptStart,
+        descriptor: ProviderDescriptor,
+        current: ProviderDescriptor,
+    ) -> bool:
+        return all(
+            (
+                self._descriptor_matches_start(
+                    plan=plan,
+                    index=index,
+                    start=start,
+                    descriptor=current,
+                ),
+                isinstance(source, _StaticProviderAttemptAdapterSource)
+                or current == descriptor,
+            )
+        )
+
+    @staticmethod
+    async def _run_context_exit(
+        manager: AbstractAsyncContextManager[ProviderAdapter],
+        failure: BaseException | None,
+    ) -> _AdapterCleanupOutcome:
+        try:
+            if failure is None:
+                await manager.__aexit__(None, None, None)
+            else:
+                await manager.__aexit__(
+                    type(failure),
+                    failure,
+                    failure.__traceback__,
+                )
+        except BaseException:
+            return _AdapterCleanupOutcome(status="failed")
+        return _AdapterCleanupOutcome(status="complete")
+
+    @staticmethod
+    def _consume_background_task(task: asyncio.Task[Any]) -> None:
+        try:
+            task.result()
+        except BaseException:
+            pass
+
+    async def _close_attempt_context(
+        self,
+        manager: AbstractAsyncContextManager[ProviderAdapter],
+        failure: BaseException | None,
+    ) -> _AdapterCleanupOutcome:
+        """Bound context cleanup and shield it from raw caller cancellation."""
+
+        cleanup_deadline = (
+            time.monotonic() + self._adapter_cleanup_timeout_seconds
+        )
+        exit_task = asyncio.create_task(self._run_context_exit(manager, failure))
+
+        async def bounded_cleanup() -> _AdapterCleanupOutcome:
+            done, _ = await asyncio.wait(
+                {exit_task},
+                timeout=max(0.0, cleanup_deadline - time.monotonic()),
+            )
+            if exit_task not in done:
+                exit_task.cancel()
+                exit_task.add_done_callback(self._consume_background_task)
+                return _AdapterCleanupOutcome(status="timed_out")
+            outcome = exit_task.result()
+            if time.monotonic() >= cleanup_deadline:
+                return _AdapterCleanupOutcome(status="timed_out")
+            return outcome
+
+        cleanup_task = asyncio.create_task(bounded_cleanup())
+        while True:
+            try:
+                return await asyncio.shield(cleanup_task)
+            except asyncio.CancelledError:
+                # The exact same cleanup task remains authoritative. Repeated
+                # raw Task.cancel() calls may delay this waiter, but cannot
+                # bypass cleanup and advance terminal persistence.
+                continue
+
+    def _source_failure(
+        self,
+        *,
+        start: ProviderAttemptStart,
+        descriptor: ProviderDescriptor,
+        error_code: str,
+    ) -> ProviderAttemptResult:
+        return self._normalized_failure(
+            start=start,
+            descriptor=descriptor,
+            error_kind="internal",
+            error_code=error_code,
+            duration_ms=0,
+        )
+
+    def _source_descriptor_failure(
+        self,
+        *,
+        source: ProviderAttemptAdapterSource,
+        start: ProviderAttemptStart,
+        descriptor: ProviderDescriptor,
+    ) -> ProviderAttemptResult:
+        if isinstance(source, _StaticProviderAttemptAdapterSource):
+            return self._pre_dispatch_failure(
+                adapter=source.adapter,
+                start=start,
+                descriptor=descriptor,
+                error_kind="protocol",
+                error_code="descriptor_authorization_changed",
+                duration_ms=0,
+            )
+        return self._source_failure(
+            start=start,
+            descriptor=descriptor,
+            error_code="adapter_source_descriptor_changed",
+        )
+
+    async def _project_terminal_result(
+        self,
+        result: ProviderAttemptResult,
+        *,
+        attempt_id: str,
+        deadline_monotonic: float,
+    ) -> tuple[_PreparedTerminalResult | None, str | None, bool]:
+        work, error = self._start_terminal_projection(
+            result,
+            attempt_id=attempt_id,
+        )
+        if work is None:
+            return None, error, False
+        return await self._finish_terminal_projection(
+            work,
+            result=result,
+            attempt_id=attempt_id,
+            deadline_monotonic=deadline_monotonic,
+        )
+
+    async def _projection_worker(
+        self,
+        attempt_id: str,
+        result: ProviderAttemptResult,
+        redaction_snapshot: ProviderRedactionSnapshot,
+    ) -> tuple[float, Any]:
+        projected = await asyncio.to_thread(
+            self._store.canonical_provider_attempt_result,
+            attempt_id,
+            result,
+            redaction_snapshot,
+        )
+        return time.monotonic(), projected
+
+    def _start_terminal_projection(
+        self,
+        result: ProviderAttemptResult,
+        *,
+        attempt_id: str,
+    ) -> tuple[_TerminalProjectionWork | None, str | None]:
+        """Snapshot a result and start projection without delaying source cleanup."""
+
+        try:
+            redaction_snapshot = capture_provider_redaction_snapshot()
+            authoritative = _snapshot_provider_result(result)
+            authoritative_digest = _provider_result_digest(authoritative)
+            projection_input = _snapshot_provider_result(authoritative)
+            task = asyncio.create_task(
+                self._projection_worker(
+                    attempt_id,
+                    projection_input,
+                    redaction_snapshot,
+                )
+            )
+        except Exception:
+            return None, "terminal_projection_failed"
+        return (
+            _TerminalProjectionWork(
+                attempt_id=attempt_id,
+                authoritative_digest=authoritative_digest,
+                task=task,
+            ),
+            None,
+        )
+
+    async def _abandon_terminal_projection(
+        self,
+        work: _TerminalProjectionWork | None,
+    ) -> None:
+        if work is None:
+            return
+        with contextlib.suppress(Exception):
+            await self._store.revoke_provider_attempt_projection(work.attempt_id)
+        if not work.task.done():
+            work.task.cancel()
+            return
+        if not work.task.cancelled():
+            with contextlib.suppress(BaseException):
+                work.task.exception()
+
+    async def _finish_terminal_projection(
+        self,
+        work: _TerminalProjectionWork,
+        *,
+        result: ProviderAttemptResult,
+        attempt_id: str,
+        deadline_monotonic: float,
+    ) -> tuple[_PreparedTerminalResult | None, str | None, bool]:
+        """Accept only a timely projection of the exact detached result."""
+
+        caller_cancelled = False
+        try:
+            authoritative = _snapshot_provider_result(result)
+            authoritative_digest = _provider_result_digest(authoritative)
+            if authoritative_digest != work.authoritative_digest:
+                await self._abandon_terminal_projection(work)
+                return None, "terminal_projection_mutated_authority", False
+            while not work.task.done():
+                remaining = deadline_monotonic - time.monotonic()
+                if remaining <= 0:
+                    await self._abandon_terminal_projection(work)
+                    return None, "terminal_projection_timed_out", caller_cancelled
+                try:
+                    await asyncio.wait_for(
+                        asyncio.shield(work.task),
+                        timeout=remaining,
+                    )
+                except asyncio.CancelledError:
+                    caller_cancelled = True
+                    continue
+                except TimeoutError:
+                    await self._abandon_terminal_projection(work)
+                    return None, "terminal_projection_timed_out", caller_cancelled
+            completed_at, projected_raw = work.task.result()
+            if completed_at > deadline_monotonic:
+                await self._abandon_terminal_projection(work)
+                return None, "terminal_projection_timed_out", caller_cancelled
+            validated_projection = (
+                ProviderAttemptCanonicalProjection.model_validate_json(
+                    projected_raw.model_dump_json(warnings="error")
+                )
+                if isinstance(
+                    projected_raw,
+                    ProviderAttemptCanonicalProjection,
+                )
+                else ProviderAttemptCanonicalProjection.model_validate(projected_raw)
+            )
+            projection = ProviderAttemptCanonicalProjection.model_validate_json(
+                validated_projection.model_dump_json(warnings="error")
+            )
+            if projection.attempt_id != attempt_id:
+                return None, "terminal_projection_changed_authority", caller_cancelled
+            if not self._canonical_projection_matches_result(
+                authoritative,
+                projection.result,
+            ):
+                return None, "terminal_projection_changed_authority", caller_cancelled
+        except Exception:
+            await self._abandon_terminal_projection(work)
+            return None, "terminal_projection_failed", caller_cancelled
+        if _provider_result_digest(authoritative) != authoritative_digest:
+            return None, "terminal_projection_mutated_authority", caller_cancelled
+        return (
+            _PreparedTerminalResult(
+                authoritative_digest=authoritative_digest,
+                projection=projection,
+            ),
+            None,
+            caller_cancelled,
+        )
+
+    async def _run_adapter_lifecycle(
+        self,
+        *,
+        plan: GrokDelegationPlan,
+        index: int,
+        source: ProviderAttemptAdapterSource,
+        descriptor: ProviderDescriptor,
+        start: ProviderAttemptStart,
+        deadline_monotonic: float,
+        timeout_code: Literal["ttl_expired", "timeout"],
+    ) -> _AdapterLifecycleOutcome:
+        """Own source entry, one effect, and close as a single task."""
+
+        source_start = ProviderAttemptStart.model_validate_json(
+            start.model_dump_json(warnings="error")
+        )
+        manager: AbstractAsyncContextManager[ProviderAdapter] | None = None
+        adapter: ProviderAdapter | None = None
+        entry_attempted = False
+        entered = False
+        cancellation: asyncio.CancelledError | None = None
+        lifecycle_failure: BaseException | None = None
+        result: ProviderAttemptResult | None = None
+        prepared: _PreparedTerminalResult | None = None
+        projection_work: _TerminalProjectionWork | None = None
+        indeterminate_reason: str | None = None
+        try:
+            if source_start != start:
+                result = self._source_failure(
+                    start=start,
+                    descriptor=descriptor,
+                    error_code="adapter_source_start_mutation",
+                )
+            elif not self._source_descriptor_matches_start(
+                plan=plan,
+                index=index,
+                source=source,
+                start=start,
+                descriptor=descriptor,
+            ):
+                result = self._source_descriptor_failure(
+                    source=source,
+                    start=start,
+                    descriptor=descriptor,
+                )
+            else:
+                remaining = self._remaining(plan)
+                deadline_remaining = deadline_monotonic - time.monotonic()
+                if remaining <= 0 or deadline_remaining <= 0:
+                    result = self._normalized_failure(
+                        start=start,
+                        descriptor=descriptor,
+                        error_kind="transport",
+                        error_code=(
+                            "ttl_expired" if remaining <= 0 else timeout_code
+                        ),
+                        duration_ms=0,
+                    )
+
+            if result is None:
+                manager = source.open_attempt(source_start)
+                if source_start != start:
+                    result = self._source_failure(
+                        start=start,
+                        descriptor=descriptor,
+                        error_code="adapter_source_start_mutation",
+                    )
+                elif not self._source_descriptor_matches_start(
+                    plan=plan,
+                    index=index,
+                    source=source,
+                    start=start,
+                    descriptor=descriptor,
+                ):
+                    result = self._source_descriptor_failure(
+                        source=source,
+                        start=start,
+                        descriptor=descriptor,
+                    )
+                else:
+                    remaining = self._remaining(plan)
+                    entry_timeout = min(
+                        remaining,
+                        deadline_monotonic - time.monotonic(),
+                    )
+                    if entry_timeout <= 0:
+                        result = self._normalized_failure(
+                            start=start,
+                            descriptor=descriptor,
+                            error_kind="transport",
+                            error_code=(
+                                "ttl_expired" if remaining <= 0 else timeout_code
+                            ),
+                            duration_ms=0,
+                        )
+
+            if result is None and manager is not None:
+                entry_attempted = True
+                try:
+                    async with asyncio.timeout(entry_timeout):
+                        adapter = await manager.__aenter__()
+                    entered = True
+                except TimeoutError as exc:
+                    lifecycle_failure = exc
+                    result = self._normalized_failure(
+                        start=start,
+                        descriptor=descriptor,
+                        error_kind="transport",
+                        error_code=timeout_code,
+                        duration_ms=0,
+                    )
+
+            if result is None and entered and adapter is not None:
+                if source_start != start:
+                    result = self._source_failure(
+                        start=start,
+                        descriptor=descriptor,
+                        error_code="adapter_source_start_mutation",
+                    )
+                elif not self._source_descriptor_matches_start(
+                    plan=plan,
+                    index=index,
+                    source=source,
+                    start=start,
+                    descriptor=descriptor,
+                ):
+                    result = self._source_descriptor_failure(
+                        source=source,
+                        start=start,
+                        descriptor=descriptor,
+                    )
+                else:
+                    try:
+                        adapter_descriptor = self._snapshot_descriptor(
+                            adapter.descriptor
+                        )
+                    except Exception:
+                        adapter_descriptor = None
+                    if (
+                        adapter_descriptor is None
+                        or not self._opened_descriptor_matches_start(
+                            plan=plan,
+                            index=index,
+                            source=source,
+                            start=start,
+                            descriptor=descriptor,
+                            current=adapter_descriptor,
+                        )
+                    ):
+                        result = self._pre_dispatch_failure(
+                            adapter=adapter,
+                            start=start,
+                            descriptor=descriptor,
+                            error_kind="protocol",
+                            error_code="descriptor_authorization_changed",
+                            duration_ms=0,
+                        )
+                    else:
+                        remaining = self._remaining(plan)
+                        deadline_remaining = deadline_monotonic - time.monotonic()
+                        if remaining <= 0 or deadline_remaining <= 0:
+                            result = self._pre_dispatch_failure(
+                                adapter=adapter,
+                                start=start,
+                                descriptor=descriptor,
+                                error_kind="transport",
+                                error_code=(
+                                    "ttl_expired"
+                                    if remaining <= 0
+                                    else timeout_code
+                                ),
+                                duration_ms=0,
+                            )
+
+            if result is None and adapter is not None:
+                result = await self._invoke_adapter(
+                    plan=plan,
+                    index=index,
+                    source=source,
+                    adapter=adapter,
+                    descriptor=descriptor,
+                    start=start,
+                    deadline_monotonic=deadline_monotonic,
+                    timeout_code=timeout_code,
+                )
+            # Returned content must be snapshotted before source cleanup can
+            # rotate credentials. Failures carry no provider content, so wait
+            # until cleanup and all final authority checks have settled before
+            # projecting them. This avoids timing-dependent failure digests.
+            if result is not None and result.response is not None:
+                projection_work, projection_error = self._start_terminal_projection(
+                    result,
+                    attempt_id=start.attempt_id,
+                )
+                if projection_work is None:
+                    result = None
+                    indeterminate_reason = (
+                        projection_error or "terminal_projection_failed"
+                    )
+        except asyncio.CancelledError as exc:
+            cancellation = exc
+            lifecycle_failure = exc
+            if adapter is None:
+                result = self._source_failure(
+                    start=start,
+                    descriptor=descriptor,
+                    error_code="adapter_source_cancelled",
+                )
+            else:
+                result = self._post_dispatch_failure(
+                    adapter=adapter,
+                    start=start,
+                    descriptor=descriptor,
+                    error_kind="transport",
+                    error_code="broker_cancelled",
+                    duration_ms=0,
+                )
+        except Exception as exc:
+            lifecycle_failure = exc
+            result = self._source_failure(
+                start=start,
+                descriptor=descriptor,
+                error_code=(
+                    "adapter_source_lifecycle_failed"
+                    if entered
+                    else "adapter_source_open_failed"
+                ),
+            )
+        finally:
+            if entry_attempted and manager is not None:
+                cleanup = await self._close_attempt_context(
+                    manager,
+                    lifecycle_failure,
+                )
+                if cleanup.status == "timed_out":
+                    result = None
+                    indeterminate_reason = "adapter_source_cleanup_timed_out"
+                elif cleanup.status == "failed":
+                    result = None
+                    indeterminate_reason = "adapter_source_cleanup_failed"
+
+        if result is not None and source_start != start:
+            result = self._source_failure(
+                start=start,
+                descriptor=descriptor,
+                error_code="adapter_source_start_mutation",
+            )
+        if result is not None and not self._source_descriptor_matches_start(
+            plan=plan,
+            index=index,
+            source=source,
+            start=start,
+            descriptor=descriptor,
+        ):
+            result = self._source_descriptor_failure(
+                source=source,
+                start=start,
+                descriptor=descriptor,
+            )
+        if result is None:
+            await self._abandon_terminal_projection(projection_work)
+            prepared = None
+        else:
+            result_digest = _provider_result_digest(result)
+            if (
+                projection_work is None
+                or projection_work.authoritative_digest != result_digest
+            ):
+                authority_changed = projection_work is not None
+                await self._abandon_terminal_projection(projection_work)
+                projection_work = None
+                if authority_changed:
+                    result = None
+                    indeterminate_reason = (
+                        "terminal_authority_changed_after_projection"
+                    )
+                elif result.response is not None:
+                    result = None
+                    indeterminate_reason = "terminal_projection_not_prepared"
+                else:
+                    projection_work, projection_error = (
+                        self._start_terminal_projection(
+                            result,
+                            attempt_id=start.attempt_id,
+                        )
+                    )
+                    if projection_work is None:
+                        result = None
+                        indeterminate_reason = (
+                            projection_error or "terminal_projection_failed"
+                        )
+            if result is not None and projection_work is not None:
+                projection_deadline = (
+                    deadline_monotonic
+                    if result.response is not None
+                    else max(
+                        deadline_monotonic,
+                        time.monotonic() + self._terminal_write_timeout_seconds,
+                    )
+                )
+                prepared, projection_error, projection_cancelled = (
+                    await self._finish_terminal_projection(
+                        projection_work,
+                        result=result,
+                        attempt_id=start.attempt_id,
+                        deadline_monotonic=projection_deadline,
+                    )
+                )
+                if projection_cancelled and cancellation is None:
+                    cancellation = asyncio.CancelledError()
+                if prepared is None:
+                    result = None
+                    indeterminate_reason = (
+                        projection_error or "terminal_projection_failed"
+                    )
+        return _AdapterLifecycleOutcome(
+            result=result,
+            prepared=prepared,
+            cancelled=cancellation is not None,
+            indeterminate_reason=indeterminate_reason,
+        )
+
+    async def _open_attempt_adapter(
+        self,
+        *,
+        plan: GrokDelegationPlan,
+        index: int,
+        source: ProviderAttemptAdapterSource,
+        descriptor: ProviderDescriptor,
+        start: ProviderAttemptStart,
+        deadline_monotonic: float,
+        timeout_code: Literal["ttl_expired", "timeout"],
+    ) -> _AdapterLifecycleOutcome:
+        lifecycle = asyncio.create_task(
+            self._run_adapter_lifecycle(
+                plan=plan,
+                index=index,
+                source=source,
+                descriptor=descriptor,
+                start=start,
+                deadline_monotonic=deadline_monotonic,
+                timeout_code=timeout_code,
+            )
+        )
+        caller_cancelled = False
+        while True:
+            try:
+                outcome = await asyncio.shield(lifecycle)
+                break
+            except asyncio.CancelledError:
+                caller_cancelled = True
+                if not lifecycle.done():
+                    lifecycle.cancel()
+                    continue
+                if lifecycle.cancelled():
+                    raise BrokerCancellationPersistenceError(
+                        "adapter lifecycle cancellation bypassed cleanup"
+                    ) from None
+                outcome = lifecycle.result()
+                break
+        if caller_cancelled and not outcome.cancelled:
+            outcome = _AdapterLifecycleOutcome(
+                result=outcome.result,
+                prepared=outcome.prepared,
+                cancelled=True,
+                indeterminate_reason=outcome.indeterminate_reason,
+            )
+        return outcome
 
     async def _stored_result(
         self,
@@ -1422,6 +2272,8 @@ class GrokWorkerBroker:
             return None, "replay_decode_failed"
         if not provider_result_matches_start(start, result):
             return None, "replay_contract_mismatch"
+        if row.get("canonical_result_digest") != _provider_result_digest(result):
+            return None, "replay_result_digest_mismatch"
         return result, None
 
     def _stored_conflict_result(
@@ -1635,58 +2487,209 @@ class GrokWorkerBroker:
         except Exception:
             return BrokerHarvestStatus(status="failed", reason="trigger_failed")
 
+    async def _bounded_terminal_stage(
+        self,
+        task: asyncio.Task[Any],
+        *,
+        deadline_monotonic: float,
+        label: str,
+    ) -> tuple[Any | None, BaseException | None]:
+        done, _ = await asyncio.wait(
+            {task},
+            timeout=max(0.0, deadline_monotonic - time.monotonic()),
+        )
+        if task not in done:
+            task.cancel()
+            task.add_done_callback(self._consume_background_task)
+            return None, TimeoutError(f"{label} timed out")
+        try:
+            value = task.result()
+            error: BaseException | None = None
+        except BaseException as exc:
+            value = None
+            error = exc
+        if time.monotonic() >= deadline_monotonic:
+            return None, TimeoutError(f"{label} timed out")
+        return value, error
+
     @staticmethod
-    async def _stop_write_task(write: asyncio.Task[bool]) -> None:
-        if write.done():
-            return
-        write.cancel()
-        done, _ = await asyncio.wait({write}, timeout=0.1)
-        for task in done:
-            try:
-                task.result()
-            except BaseException:
-                pass
+    def _canonical_projection_matches_result(
+        original: ProviderAttemptResult,
+        projected: ProviderAttemptResult,
+    ) -> bool:
+        """Allow the store to transform only returned response text."""
+
+        if original.status != projected.status:
+            return False
+        if original.status == "failed":
+            return original == projected
+        if original.response is None or projected.response is None:
+            return False
+        restored = projected.model_copy(
+            update={
+                "response": projected.response.model_copy(
+                    update={"text": original.response.text}
+                )
+            }
+        )
+        return restored == original
+
+    async def _run_terminal_persistence(
+        self,
+        *,
+        start: ProviderAttemptStart,
+        result: ProviderAttemptResult,
+        prepared: _PreparedTerminalResult | None,
+    ) -> _TerminalPersistenceOutcome:
+        """Run one terminal attempt and always revoke its ephemeral authority."""
+
+        try:
+            return await self._run_terminal_persistence_once(
+                start=start,
+                result=result,
+                prepared=prepared,
+            )
+        finally:
+            await self._store.revoke_provider_attempt_projection(
+                start.attempt_id
+            )
+
+    async def _run_terminal_persistence_once(
+        self,
+        *,
+        start: ProviderAttemptStart,
+        result: ProviderAttemptResult,
+        prepared: _PreparedTerminalResult | None,
+    ) -> _TerminalPersistenceOutcome:
+        """Own one bounded terminal write and its exact durable replay check."""
+
+        deadline = time.monotonic() + self._terminal_write_timeout_seconds
+        try:
+            authoritative = _snapshot_provider_result(result)
+            authoritative_digest = _provider_result_digest(authoritative)
+            if prepared is None:
+                raise ValueError("terminal result lacks a canonical projection")
+            if prepared.authoritative_digest != authoritative_digest:
+                raise ValueError("prepared terminal authority changed")
+            projection = ProviderAttemptCanonicalProjection.model_validate_json(
+                prepared.projection.model_dump_json(warnings="error")
+            )
+            if projection.attempt_id != start.attempt_id:
+                raise ValueError("prepared projection is bound to another attempt")
+            projected = _snapshot_provider_result(projection.result)
+            projected_digest = _provider_result_digest(projected)
+            if projected_digest != projection.result_digest:
+                raise ValueError("prepared terminal projection changed")
+        except Exception as exc:
+            return _TerminalPersistenceOutcome(result=None, error=exc)
+        if not self._canonical_projection_matches_result(
+            authoritative,
+            projected,
+        ):
+            return _TerminalPersistenceOutcome(
+                result=None,
+                error=ValueError("terminal canonical projection changed authority"),
+            )
+        if not provider_result_matches_start(start, projected):
+            return _TerminalPersistenceOutcome(
+                result=None,
+                error=ValueError("terminal canonical projection changed contract"),
+            )
+
+        write_input = ProviderAttemptCanonicalProjection.model_validate_json(
+            projection.model_dump_json(warnings="error")
+        )
+        write = asyncio.create_task(
+            self._store.complete_projected_provider_attempt(
+                start.attempt_id,
+                write_input,
+            )
+        )
+        stored, write_error = await self._bounded_terminal_stage(
+            write,
+            deadline_monotonic=deadline,
+            label="terminal write",
+        )
+        if write_error is not None:
+            return _TerminalPersistenceOutcome(result=None, error=write_error)
+        if type(stored) is not bool:
+            return _TerminalPersistenceOutcome(
+                result=None,
+                error=TypeError("terminal store returned a non-boolean result"),
+            )
+
+        replay_read = asyncio.create_task(self._stored_result(start))
+        replay_outcome, replay_task_error = await self._bounded_terminal_stage(
+            replay_read,
+            deadline_monotonic=deadline,
+            label="terminal replay check",
+        )
+        if replay_task_error is not None:
+            return _TerminalPersistenceOutcome(
+                result=None,
+                stored=stored,
+                error=replay_task_error,
+            )
+        replay, replay_error = replay_outcome
+        if (
+            replay is None
+            or _provider_result_digest(replay) != projected_digest
+            or replay != projected
+        ):
+            return _TerminalPersistenceOutcome(
+                result=None,
+                stored=stored,
+                error=ValueError(
+                    replay_error or "terminal replay changed canonical result"
+                ),
+            )
+        return _TerminalPersistenceOutcome(result=replay, stored=stored)
 
     async def _write_terminal(
         self,
         *,
         start: ProviderAttemptStart,
         result: ProviderAttemptResult,
-    ) -> bool:
-        """Bound and shield only the authoritative terminal ledger write.
+        prepared: _PreparedTerminalResult | None,
+    ) -> ProviderAttemptResult:
+        """Shield one authoritative persistence task from repeated cancellation.
 
-        Cancellation of the broker task does not cancel a write that already
-        received the provider result.  After the bounded write is confirmed,
-        the original cancellation still propagates to the caller.
+        Cancellation of the broker task never cancels a write that already
+        received the provider result.  The original cancellation propagates
+        only after exact durable replay is known.
         """
 
-        write = asyncio.create_task(
-            self._store.complete_provider_attempt(start.attempt_id, result)
-        )
-        try:
-            stored = await asyncio.wait_for(
-                asyncio.shield(write),
-                timeout=self._terminal_write_timeout_seconds,
+        persistence = asyncio.create_task(
+            self._run_terminal_persistence(
+                start=start,
+                result=result,
+                prepared=prepared,
             )
-        except asyncio.CancelledError:
+        )
+        caller_cancelled = False
+        while True:
             try:
-                await asyncio.wait_for(
-                    asyncio.shield(write),
-                    timeout=self._terminal_write_timeout_seconds,
-                )
-                replay, _ = await self._stored_result(start)
-                if replay is None:
-                    raise ValueError("cancelled terminal result is not durable")
-            except BaseException as exc:
-                await self._stop_write_task(write)
+                outcome = await asyncio.shield(persistence)
+                break
+            except asyncio.CancelledError:
+                if persistence.cancelled():
+                    raise BrokerCancellationPersistenceError(
+                        "authoritative terminal persistence task was cancelled"
+                    ) from None
+                caller_cancelled = True
+                continue
+
+        if outcome.result is None or outcome.error is not None:
+            if caller_cancelled:
                 raise BrokerCancellationPersistenceError(
                     "cancelled provider attempt could not be terminalized"
-                ) from exc
-            raise
-        except BaseException:
-            await self._stop_write_task(write)
-            raise
-        return stored
+                ) from outcome.error
+            raise RuntimeError("provider attempt terminal persistence failed") from (
+                outcome.error
+            )
+        if caller_cancelled:
+            raise asyncio.CancelledError
+        return outcome.result
 
     async def _attempt(
         self,
@@ -1694,12 +2697,12 @@ class GrokWorkerBroker:
         plan: GrokDelegationPlan,
         index: int,
         channel: ProviderChannel,
-        adapter: ProviderAdapter,
+        source: ProviderAttemptAdapterSource,
         descriptor: ProviderDescriptor,
         ordinal: Literal[1, 2],
     ) -> BrokerAttemptEvidence:
         delegation = plan.delegations[index]
-        current_descriptor = self._snapshot_descriptor(adapter.descriptor)
+        current_descriptor = self._snapshot_descriptor(source.descriptor)
         if (
             not self._descriptor_is_authorized(
                 delegation=delegation,
@@ -1754,43 +2757,114 @@ class GrokWorkerBroker:
                 ),
             )
 
-        try:
-            result = await self._invoke_adapter(
+        remaining = self._remaining(plan)
+        if remaining <= 0:
+            outcome = _AdapterLifecycleOutcome(
+                result=self._normalized_failure(
+                    start=start,
+                    descriptor=descriptor,
+                    error_kind="transport",
+                    error_code="ttl_expired",
+                    duration_ms=0,
+                )
+            )
+        elif not self._source_descriptor_matches_start(
+            plan=plan,
+            index=index,
+            source=source,
+            start=start,
+            descriptor=descriptor,
+        ):
+            outcome = _AdapterLifecycleOutcome(
+                result=self._source_descriptor_failure(
+                    source=source,
+                    start=start,
+                    descriptor=descriptor,
+                )
+            )
+        else:
+            physical_budget = min(
+                remaining,
+                start.request.timeout_seconds,
+                descriptor.max_timeout_seconds,
+            )
+            timeout_code: Literal["ttl_expired", "timeout"] = (
+                "ttl_expired"
+                if remaining
+                <= min(
+                    start.request.timeout_seconds,
+                    descriptor.max_timeout_seconds,
+                )
+                else "timeout"
+            )
+            outcome = await self._open_attempt_adapter(
                 plan=plan,
                 index=index,
-                adapter=adapter,
+                source=source,
                 descriptor=descriptor,
                 start=start,
+                deadline_monotonic=time.monotonic() + physical_budget,
+                timeout_code=timeout_code,
             )
-        except asyncio.CancelledError:
-            result = self._post_dispatch_failure(
-                adapter=adapter,
+        if outcome.result is not None and outcome.prepared is None:
+            prepared, projection_error, projection_cancelled = (
+                await self._project_terminal_result(
+                    outcome.result,
+                    attempt_id=start.attempt_id,
+                    deadline_monotonic=(
+                        time.monotonic() + self._terminal_write_timeout_seconds
+                    ),
+                )
+            )
+            outcome = _AdapterLifecycleOutcome(
+                result=outcome.result if prepared is not None else None,
+                prepared=prepared,
+                cancelled=outcome.cancelled or projection_cancelled,
+                indeterminate_reason=(
+                    outcome.indeterminate_reason
+                    if prepared is not None
+                    else projection_error or "terminal_projection_failed"
+                ),
+            )
+        if outcome.result is None:
+            if outcome.cancelled:
+                raise BrokerCancellationPersistenceError(
+                    "cancelled adapter source cleanup did not complete"
+                )
+            return BrokerAttemptEvidence(
                 start=start,
-                descriptor=descriptor,
-                error_kind="transport",
-                error_code="broker_cancelled",
-                duration_ms=0,
+                persistence="terminal_indeterminate",
+                harvest=BrokerHarvestStatus(
+                    status="not_applicable",
+                    reason=(
+                        outcome.indeterminate_reason
+                        or "adapter_source_lifecycle_indeterminate"
+                    ),
+                ),
             )
+        result = outcome.result
+        if outcome.cancelled:
             try:
                 await self._write_terminal(
                     start=start,
                     result=result,
+                    prepared=outcome.prepared,
                 )
             except BrokerCancellationPersistenceError:
+                raise
+            except asyncio.CancelledError:
                 raise
             except BaseException as exc:
                 raise BrokerCancellationPersistenceError(
                     "cancelled provider attempt could not be terminalized"
                 ) from exc
-            raise
+            raise asyncio.CancelledError
         try:
-            await self._write_terminal(
+            durable_result = await self._write_terminal(
                 start=start,
                 result=result,
+                prepared=outcome.prepared,
             )
-            durable_result, _ = await self._stored_result(start)
-            if durable_result is None:
-                raise ValueError("terminal result is not durably returnable")
         except BrokerCancellationPersistenceError:
             raise
         except Exception:
@@ -1857,12 +2931,12 @@ class GrokWorkerBroker:
 
             attempts: list[BrokerAttemptEvidence] = []
             if subscription is not None:
-                channel, adapter, descriptor = subscription
+                channel, source, descriptor = subscription
                 evidence = await self._attempt(
                     plan=plan,
                     index=index,
                     channel=channel,
-                    adapter=adapter,
+                    source=source,
                     descriptor=descriptor,
                     ordinal=1,
                 )
@@ -1930,12 +3004,12 @@ class GrokWorkerBroker:
                     reason="ttl_expired_before_api_fallback",
                     attempts=tuple(attempts),
                 )
-            channel, adapter, descriptor = api
+            channel, source, descriptor = api
             evidence = await self._attempt(
                 plan=plan,
                 index=index,
                 channel=channel,
-                adapter=adapter,
+                source=source,
                 descriptor=descriptor,
                 ordinal=2,
             )

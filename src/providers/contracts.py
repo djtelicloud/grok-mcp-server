@@ -9,6 +9,7 @@ which adapter may be called.
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -757,6 +758,47 @@ class ProviderAttemptResult(StrictContract):
             self.failure is None or self.response is not None
         ):
             raise ValueError("failed attempts require only a failure receipt")
+        return self
+
+
+class ProviderAttemptCanonicalProjection(StrictContract):
+    """Store-minted, attempt-bound authority for one canonical ledger result.
+
+    The authorization tag is opaque outside the store.  Its presence is not
+    semantic evidence; it only proves that this store instance projected the
+    exact result bytes under the process-local lease created by durable begin.
+    """
+
+    version: Literal["provider-attempt-canonical-projection/v1"] = (
+        "provider-attempt-canonical-projection/v1"
+    )
+    attempt_id: Annotated[str, Field(min_length=1, max_length=128)]
+    result: ProviderAttemptResult
+    result_digest: Annotated[str, Field(pattern=r"^sha256:[0-9a-f]{64}$")]
+    output_redaction: Literal["clean", "redacted", "withheld"] | None = None
+    authorization_tag: Annotated[
+        str,
+        Field(pattern=r"^hmac-sha256:[0-9a-f]{64}$"),
+    ]
+
+    @model_validator(mode="after")
+    def validate_projection(self) -> "ProviderAttemptCanonicalProjection":
+        if not _SAFE_IDENTIFIER_RE.fullmatch(self.attempt_id):
+            raise ValueError("projection attempt_id must be opaque and safe")
+        if (self.result.response is None) != (self.output_redaction is None):
+            raise ValueError("projection redaction state must match response presence")
+        canonical = json.dumps(
+            self.result.model_dump(mode="json"),
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        )
+        digest = "sha256:" + hashlib.sha256(
+            canonical.encode("utf-8", errors="strict")
+        ).hexdigest()
+        if self.result_digest != digest:
+            raise ValueError("projection result digest does not match payload")
         return self
 
 
