@@ -1,0 +1,26 @@
+{
+  "total_roots": 395,
+  "total_atoms_simulated_target": 20000,
+  "atoms_generated_in_shard": 200,
+  "pack_distribution": {
+    "intent_surface": 20,
+    "funnel_routing": 20,
+    "observation_typing": 20,
+    "memory_selection": 20,
+    "resource_selection": 20,
+    "tool_selection": 20,
+    "plan_state_transition": 20,
+    "recovery_selection": 20,
+    "authorization_ttl_decision": 20,
+    "verification_request": 20
+  },
+  "donor_counts": {
+    "gemini-3.0-pro (vertex)": 200
+  },
+  "critic_counts": {
+    "grok-4.5 (cli)": 200
+  },
+  "judge_counts": {
+    "gemini-1.5-pro (blind)": 100
+  }
+}

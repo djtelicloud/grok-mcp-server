@@ -1,0 +1,10 @@
+{
+  "version": "D0001",
+  "name": "AKE Static Dataset V1",
+  "source_bundle": "docs/okf/okf-manifest.json",
+  "legacy_reference": "PR #74 (120-row D0001)",
+  "files": [
+    "stats.json",
+    "generation_recipe.md"
+  ]
+}
