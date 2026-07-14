@@ -8,6 +8,7 @@ files, copy credentials, route work, or grant a worker completion authority.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 import re
@@ -29,20 +30,26 @@ from .contracts import (
     MAX_RESPONSE_CHARS,
     CredentialPlane,
     CredentialState,
+    GrokSupervisorBinding,
     ProviderAdapter,
+    ProviderAttemptResult,
     ProviderChannel,
     ProviderDescriptor,
+    ProviderFailureReceipt,
     ProviderId,
     ProviderModelPins,
     ProviderReceipt,
     ProviderRequest,
     ProviderResponse,
     ProviderTokenUsage,
+    RouteClass,
     is_safe_model_id,
     transport_resource_identity,
 )
 from .errors import (
+    ProviderAuthorizationInvariantError,
     ProviderConfigurationError,
+    ProviderError,
     ProviderProtocolError,
     ProviderTransportError,
 )
@@ -59,12 +66,6 @@ CLAUDE_WORKER_SYSTEM_PROMPT = (
 )
 
 CLAUDE_SUBSCRIPTION_MODELS = DEFAULT_MODEL_PINS[ProviderChannel.ANTHROPIC_API]
-
-SAMPLING_DEFAULT_MODELS: dict[ProviderId, ProviderModelPins] = {
-    ProviderId.OPENAI: DEFAULT_MODEL_PINS[ProviderChannel.OPENAI_API],
-    ProviderId.ANTHROPIC: CLAUDE_SUBSCRIPTION_MODELS,
-    ProviderId.GOOGLE: DEFAULT_MODEL_PINS[ProviderChannel.GEMINI_API_KEY],
-}
 
 SAMPLING_CHANNEL_PROVIDERS: dict[ProviderChannel, ProviderId] = {
     ProviderChannel.OPENAI_MCP_SAMPLING: ProviderId.OPENAI,
@@ -684,26 +685,229 @@ SamplingCallback = Callable[
     [ClientSamplingRequest],
     Awaitable[ClientSamplingResult | Mapping[str, Any]],
 ]
+EffectClaimInspector = Callable[[], bool]
 
 
-@dataclass(frozen=True, slots=True)
+_SAMPLING_BINDING_FACTORY_SEAL = object()
+
+
+@dataclass(frozen=True, slots=True, init=False)
 class SamplingClientBinding:
     capability: SamplingCapability
     callback: SamplingCallback
-    models: ProviderModelPins | None = None
+    provider: ProviderId
+    channel: ProviderChannel
+    models: ProviderModelPins
+    binding_digest: str
+    supervision: GrokSupervisorBinding
+    provider_request_id: str
+    provider_request_digest: str
+    route: RouteClass
+    effect_claimed: EffectClaimInspector
+    delegation_digest: str
+
+    def __init__(
+        self,
+        *,
+        capability: SamplingCapability,
+        callback: SamplingCallback,
+        provider: ProviderId,
+        channel: ProviderChannel,
+        models: ProviderModelPins,
+        binding_digest: str,
+        supervision: GrokSupervisorBinding,
+        provider_request_id: str,
+        provider_request_digest: str,
+        route: RouteClass,
+        effect_claimed: EffectClaimInspector,
+        _factory_seal: object | None = None,
+    ) -> None:
+        if _factory_seal is not _SAMPLING_BINDING_FACTORY_SEAL:
+            raise TypeError(
+                "SamplingClientBinding must be created by the stateful MCP sampling factory"
+            )
+        if not re.fullmatch(r"sha256:[0-9a-f]{64}", binding_digest):
+            raise ValueError("sampling binding digest must be a SHA-256 identity")
+        expected_client_id = "mcp-" + binding_digest.removeprefix("sha256:")
+        if capability.client_id != expected_client_id or not capability.sampling:
+            raise ValueError("sampling capability does not match sealed binding")
+        if SAMPLING_CHANNEL_PROVIDERS.get(channel) != provider:
+            raise ValueError("sealed sampling provider and channel do not match")
+        try:
+            supervision_snapshot = GrokSupervisorBinding.model_validate_json(
+                supervision.model_dump_json()
+            )
+            models_snapshot = ProviderModelPins.model_validate_json(
+                models.model_dump_json()
+            )
+        except (AttributeError, TypeError, ValueError, ValidationError):
+            raise ValueError("sampling grant binding is invalid") from None
+        if not isinstance(supervision_snapshot, GrokSupervisorBinding):
+            raise ValueError("sampling supervision binding is invalid")
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", provider_request_id):
+            raise ValueError("sampling provider request id is invalid")
+        if not re.fullmatch(r"sha256:[0-9a-f]{64}", provider_request_digest):
+            raise ValueError("sampling provider request digest is invalid")
+        if not isinstance(route, RouteClass):
+            raise ValueError("sampling route is invalid")
+        if not callable(effect_claimed):
+            raise ValueError("sampling effect inspector is invalid")
+        delegation_digest = _sampling_delegation_digest(
+            binding_digest=binding_digest,
+            provider=provider,
+            channel=channel,
+            supervision=supervision_snapshot,
+            provider_request_id=provider_request_id,
+            provider_request_digest=provider_request_digest,
+            route=route,
+            authorized_model=models_snapshot.for_route(route),
+        )
+        object.__setattr__(self, "capability", capability)
+        object.__setattr__(self, "callback", callback)
+        object.__setattr__(self, "provider", provider)
+        object.__setattr__(self, "channel", channel)
+        object.__setattr__(self, "models", models_snapshot)
+        object.__setattr__(self, "binding_digest", binding_digest)
+        object.__setattr__(self, "supervision", supervision_snapshot)
+        object.__setattr__(self, "provider_request_id", provider_request_id)
+        object.__setattr__(self, "provider_request_digest", provider_request_digest)
+        object.__setattr__(self, "route", route)
+        object.__setattr__(self, "effect_claimed", effect_claimed)
+        object.__setattr__(self, "delegation_digest", delegation_digest)
 
 
-def _provider_model_matches(provider: ProviderId, model: str) -> bool:
-    prefixes = {
-        ProviderId.OPENAI: ("gpt-", "o1", "o3", "o4", "codex-", "chatgpt-"),
-        ProviderId.ANTHROPIC: ("claude-",),
-        ProviderId.GOOGLE: ("gemini-",),
+def _sampling_delegation_digest(
+    *,
+    binding_digest: str,
+    provider: ProviderId,
+    channel: ProviderChannel,
+    supervision: GrokSupervisorBinding,
+    provider_request_id: str,
+    provider_request_digest: str,
+    route: RouteClass,
+    authorized_model: str,
+) -> str:
+    payload = {
+        "binding_digest": binding_digest,
+        "provider": provider.value,
+        "channel": channel.value,
+        "supervision": supervision.model_dump(mode="json"),
+        "provider_request_id": provider_request_id,
+        "provider_request_digest": provider_request_digest,
+        "route": route.value,
+        "authorized_model": authorized_model,
     }
-    return provider in prefixes and model.startswith(prefixes[provider])
+    material = json.dumps(
+        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True
+    ).encode("utf-8", errors="strict")
+    return "sha256:" + hashlib.sha256(material).hexdigest()
+
+
+def _create_sealed_sampling_client_binding(
+    *,
+    capability: SamplingCapability,
+    callback: SamplingCallback,
+    provider: ProviderId,
+    channel: ProviderChannel,
+    models: ProviderModelPins,
+    binding_digest: str,
+    supervision: GrokSupervisorBinding,
+    provider_request_id: str,
+    provider_request_digest: str,
+    route: RouteClass,
+    effect_claimed: EffectClaimInspector,
+) -> SamplingClientBinding:
+    """Internal constructor used only by the stateful request lease."""
+
+    return SamplingClientBinding(
+        capability=capability,
+        callback=callback,
+        provider=provider,
+        channel=channel,
+        models=models,
+        binding_digest=binding_digest,
+        supervision=supervision,
+        provider_request_id=provider_request_id,
+        provider_request_digest=provider_request_digest,
+        route=route,
+        effect_claimed=effect_claimed,
+        _factory_seal=_SAMPLING_BINDING_FACTORY_SEAL,
+    )
+
+
+def provider_request_digest(request: ProviderRequest) -> str:
+    """Canonical secret-safe digest of one complete provider request."""
+
+    snapshot = ProviderRequest.model_validate_json(
+        request.model_dump_json(warnings="error")
+    )
+    material = json.dumps(
+        snapshot.model_dump(mode="json"),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    ).encode("utf-8", errors="strict")
+    return "sha256:" + hashlib.sha256(material).hexdigest()
+
+
+@dataclass(frozen=True, slots=True)
+class _SamplingAdapterAuthority:
+    provider: ProviderId
+    channel: ProviderChannel
+    capability: SamplingCapability
+    callback: SamplingCallback
+    effect_claimed: EffectClaimInspector
+    models: ProviderModelPins
+    binding_digest: str
+    supervision: GrokSupervisorBinding
+    provider_request_id: str
+    provider_request_digest: str
+    route: RouteClass
+    delegation_digest: str
+    descriptor: ProviderDescriptor
+    clock: Clock
+
+
+def _sampling_adapter_authority_digest(authority: _SamplingAdapterAuthority) -> str:
+    payload = {
+        "provider": authority.provider.value,
+        "channel": authority.channel.value,
+        "capability": authority.capability.model_dump(mode="json"),
+        "callback_identity": id(authority.callback),
+        "effect_claimed_identity": id(authority.effect_claimed),
+        "models": authority.models.model_dump(mode="json"),
+        "binding_digest": authority.binding_digest,
+        "supervision": authority.supervision.model_dump(mode="json"),
+        "provider_request_id": authority.provider_request_id,
+        "provider_request_digest": authority.provider_request_digest,
+        "route": authority.route.value,
+        "delegation_digest": authority.delegation_digest,
+        "descriptor": authority.descriptor.model_dump(mode="json"),
+        "clock_identity": id(authority.clock),
+    }
+    material = json.dumps(
+        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True
+    ).encode("utf-8", errors="strict")
+    return "sha256:" + hashlib.sha256(material).hexdigest()
 
 
 class MCPClientSamplingAdapter(HTTPProviderAdapter):
-    """One client-advertised MCP sampling lane bound to one trusted provider."""
+    """One lease-owned MCP sampling lane bound to one trusted provider grant.
+
+    The private authority state is sealed against ordinary assignment and
+    rechecked before and after every await.  Arbitrary code execution inside
+    the trusted server process remains outside this object's security boundary.
+    """
+
+    _PROTECTED_AUTHORITY_ATTRIBUTES = frozenset({"provider", "channel", "_clock"})
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        if getattr(self, "_sampling_adapter_sealed", False) and (
+            name in self._PROTECTED_AUTHORITY_ATTRIBUTES
+            or name.startswith("_sampling_")
+        ):
+            raise AttributeError("sealed MCP sampling authority cannot be mutated")
+        object.__setattr__(self, name, value)
 
     def __init__(
         self,
@@ -712,15 +916,51 @@ class MCPClientSamplingAdapter(HTTPProviderAdapter):
         channel: ProviderChannel,
         binding: SamplingClientBinding,
         clock: Clock | None = None,
+        _factory_seal: object | None = None,
     ) -> None:
+        if _factory_seal is not _MCP_SAMPLING_ADAPTER_FACTORY_SEAL:
+            raise TypeError(
+                "MCPClientSamplingAdapter must be created by the stateful MCP sampling lease"
+            )
         super().__init__(environ={}, clock=clock)
         if SAMPLING_CHANNEL_PROVIDERS.get(channel) != provider:
             raise ProviderConfigurationError(provider, "sampling_channel_mismatch")
-        self.provider = provider
-        self.channel = channel
-        self._binding = binding
-        models = binding.models or SAMPLING_DEFAULT_MODELS[provider]
-        self._descriptor = ProviderDescriptor(
+        if binding.provider != provider or binding.channel != channel:
+            raise ProviderConfigurationError(provider, "sampling_grant_mismatch")
+        try:
+            capability = SamplingCapability.model_validate_json(
+                binding.capability.model_dump_json(warnings="error")
+            )
+            models = ProviderModelPins.model_validate_json(
+                binding.models.model_dump_json(warnings="error")
+            )
+            supervision = GrokSupervisorBinding.model_validate_json(
+                binding.supervision.model_dump_json(warnings="error")
+            )
+            expected_delegation_digest = _sampling_delegation_digest(
+                binding_digest=binding.binding_digest,
+                provider=binding.provider,
+                channel=binding.channel,
+                supervision=supervision,
+                provider_request_id=binding.provider_request_id,
+                provider_request_digest=binding.provider_request_digest,
+                route=binding.route,
+                authorized_model=models.for_route(binding.route),
+            )
+        except Exception:
+            raise ProviderConfigurationError(
+                provider, "sampling_grant_mismatch"
+            ) from None
+        expected_client_id = "mcp-" + binding.binding_digest.removeprefix("sha256:")
+        if (
+            expected_delegation_digest != binding.delegation_digest
+            or capability.client_id != expected_client_id
+            or not capability.sampling
+            or not callable(binding.callback)
+            or not callable(binding.effect_claimed)
+        ):
+            raise ProviderConfigurationError(provider, "sampling_grant_mismatch")
+        descriptor = ProviderDescriptor(
             provider=provider,
             channel=channel,
             credential_plane=CredentialPlane.SUBSCRIPTION,
@@ -729,27 +969,209 @@ class MCPClientSamplingAdapter(HTTPProviderAdapter):
             endpoint_kind="mcp_client_sampling",
             credential_kind="mcp_client_subscription",
             billing_class="subscription",
-            client_identity=binding.capability.client_id,
+            client_identity=capability.client_id,
             transport_resource_identity=transport_resource_identity(
-                "mcp_sampling_client",
-                binding.capability.client_id,
+                "mcp_sampling_binding", binding.binding_digest
             ),
             credential_env_names=(),
-            credential_state=(
-                CredentialState.DEFERRED
-                if binding.capability.sampling
-                else CredentialState.MISSING
-            ),
+            credential_state=CredentialState.DEFERRED,
             models=models,
+            supported_routes=(binding.route,),
             max_output_tokens=32_768,
             max_timeout_seconds=120.0,
             data_handling="provider_managed",
             residency="client_subscription",
         )
+        authority = _SamplingAdapterAuthority(
+            provider=provider,
+            channel=channel,
+            capability=capability,
+            callback=binding.callback,
+            effect_claimed=binding.effect_claimed,
+            models=models,
+            binding_digest=str(binding.binding_digest),
+            supervision=supervision,
+            provider_request_id=str(binding.provider_request_id),
+            provider_request_digest=str(binding.provider_request_digest),
+            route=binding.route,
+            delegation_digest=str(binding.delegation_digest),
+            descriptor=descriptor,
+            clock=self._clock,
+        )
+        self.provider = provider
+        self.channel = channel
+        self._sampling_authority = authority
+        self._sampling_authority_identity = id(authority)
+        self._sampling_authority_digest = _sampling_adapter_authority_digest(authority)
+        self._sampling_adapter_sealed = True
+
+    def _validated_authority(self) -> _SamplingAdapterAuthority:
+        try:
+            authority = object.__getattribute__(self, "_sampling_authority")
+            valid = (
+                isinstance(authority, _SamplingAdapterAuthority)
+                and id(authority)
+                == object.__getattribute__(self, "_sampling_authority_identity")
+                and _sampling_adapter_authority_digest(authority)
+                == object.__getattribute__(self, "_sampling_authority_digest")
+                and object.__getattribute__(self, "provider") == authority.provider
+                and object.__getattribute__(self, "channel") == authority.channel
+                and object.__getattribute__(self, "_clock") is authority.clock
+            )
+        except Exception:
+            valid = False
+            authority = None
+        if not valid or authority is None:
+            provider = getattr(self, "provider", ProviderId.XAI)
+            if not isinstance(provider, ProviderId):
+                provider = ProviderId.XAI
+            raise ProviderAuthorizationInvariantError(
+                provider, "sampling_adapter_authority_mutated"
+            )
+        return authority
+
+    @staticmethod
+    def _claimed(authority: _SamplingAdapterAuthority) -> bool:
+        try:
+            claimed = authority.effect_claimed()
+        except Exception:
+            return True
+        return claimed if isinstance(claimed, bool) else True
+
+    @staticmethod
+    def _snapshot_request(
+        request: ProviderRequest, provider: ProviderId
+    ) -> ProviderRequest:
+        try:
+            if not isinstance(request, ProviderRequest):
+                raise TypeError
+            return ProviderRequest.model_validate_json(
+                request.model_dump_json(warnings="error")
+            )
+        except Exception:
+            raise ProviderConfigurationError(
+                provider, "sampling_provider_request_invalid"
+            ) from None
 
     @property
     def descriptor(self) -> ProviderDescriptor:
-        return self._descriptor
+        authority = self._validated_authority()
+        return ProviderDescriptor.model_validate_json(
+            authority.descriptor.model_dump_json(warnings="error")
+        )
+
+    def effect_claimed(self) -> bool:
+        """Return fail-closed one-shot state from the lease-owned runtime."""
+
+        try:
+            authority = self._validated_authority()
+        except ProviderAuthorizationInvariantError:
+            return True
+        return self._claimed(authority)
+
+    async def attempt(self, request: ProviderRequest) -> ProviderAttemptResult:
+        authority = self._validated_authority()
+        request_snapshot = self._snapshot_request(request, authority.provider)
+        receipt_descriptor = ProviderDescriptor.model_validate_json(
+            authority.descriptor.model_dump_json(warnings="error")
+        )
+        receipt_provider = authority.provider
+        receipt_channel = authority.channel
+        started = time.monotonic()
+        requested_model = request_snapshot.model or authority.models.for_route(
+            request_snapshot.route
+        )
+        try:
+            response = await self.complete(request_snapshot)
+        except ProviderError as exc:
+            return ProviderAttemptResult(
+                status="failed",
+                failure=self._sampling_failure_receipt(
+                    request=request_snapshot,
+                    requested_model=requested_model,
+                    provider=receipt_provider,
+                    channel=receipt_channel,
+                    descriptor=receipt_descriptor,
+                    error_kind=self._error_kind(exc),
+                    error_code=exc.code,
+                    duration_ms=max(0, round((time.monotonic() - started) * 1000)),
+                ),
+            )
+        except Exception:
+            return ProviderAttemptResult(
+                status="failed",
+                failure=self._sampling_failure_receipt(
+                    request=request_snapshot,
+                    requested_model=requested_model,
+                    provider=receipt_provider,
+                    channel=receipt_channel,
+                    descriptor=receipt_descriptor,
+                    error_kind="internal",
+                    error_code="unexpected_error",
+                    duration_ms=max(0, round((time.monotonic() - started) * 1000)),
+                ),
+            )
+        return ProviderAttemptResult(status="returned", response=response)
+
+    @staticmethod
+    def _sampling_failure_receipt(
+        *,
+        request: ProviderRequest,
+        requested_model: str,
+        provider: ProviderId,
+        channel: ProviderChannel,
+        descriptor: ProviderDescriptor,
+        error_kind: Literal["configuration", "transport", "protocol", "internal"],
+        error_code: str,
+        duration_ms: int,
+    ) -> ProviderFailureReceipt:
+        return ProviderFailureReceipt(
+            request_id=request.request_id,
+            supervision=request.supervision,
+            provider=provider,
+            channel=channel,
+            credential_plane=descriptor.credential_plane,
+            route=request.route,
+            requested_model=requested_model,
+            endpoint_host=descriptor.endpoint_host,
+            endpoint_kind=descriptor.endpoint_kind,
+            credential_kind=descriptor.credential_kind,
+            billing_class=descriptor.billing_class,
+            client_identity=descriptor.client_identity,
+            error_kind=error_kind,
+            error_code=error_code,
+            duration_ms=duration_ms,
+        )
+
+    async def complete(self, request: ProviderRequest) -> ProviderResponse:
+        """Preserve post-claim indeterminacy across the base TTL boundary.
+
+        The future broker integration must perform the same probe around its
+        own outer timeout before this adapter can be wired into runtime.
+        """
+
+        authority = self._validated_authority()
+        request_snapshot = self._snapshot_request(request, authority.provider)
+        try:
+            response = await super().complete(request_snapshot)
+            self._validated_authority()
+            return response
+        except asyncio.CancelledError:
+            # Only pre-claim cancellation can reach this boundary.  The lease
+            # converts every post-claim cancellation source to an internal,
+            # indeterminate effect failure before it reaches the adapter.
+            raise
+        except (
+            ProviderConfigurationError,
+            ProviderProtocolError,
+            ProviderTransportError,
+        ):
+            self._validated_authority()
+            if self._claimed(authority):
+                raise ProviderAuthorizationInvariantError(
+                    authority.provider, "sampling_effect_indeterminate"
+                ) from None
+            raise
 
     def _sampling_request(
         self,
@@ -782,8 +1204,44 @@ class MCPClientSamplingAdapter(HTTPProviderAdapter):
         )
 
     async def _complete(self, request: ProviderRequest) -> ProviderResponse:
-        if not self._binding.capability.sampling:
-            raise ProviderConfigurationError(self.provider, "sampling_unavailable")
+        authority = self._validated_authority()
+        request = self._snapshot_request(request, authority.provider)
+        callback = authority.callback
+        descriptor = ProviderDescriptor.model_validate_json(
+            authority.descriptor.model_dump_json(warnings="error")
+        )
+        models = ProviderModelPins.model_validate_json(
+            authority.models.model_dump_json(warnings="error")
+        )
+        if not authority.capability.sampling:
+            raise ProviderConfigurationError(authority.provider, "sampling_unavailable")
+        try:
+            current_digest = _sampling_delegation_digest(
+                binding_digest=authority.binding_digest,
+                provider=authority.provider,
+                channel=authority.channel,
+                supervision=authority.supervision,
+                provider_request_id=authority.provider_request_id,
+                provider_request_digest=authority.provider_request_digest,
+                route=authority.route,
+                authorized_model=models.for_route(authority.route),
+            )
+            requested_model = request.model or models.for_route(request.route)
+            matches_request = (
+                current_digest == authority.delegation_digest
+                and request.supervision == authority.supervision
+                and request.request_id == authority.provider_request_id
+                and provider_request_digest(request)
+                == authority.provider_request_digest
+                and request.route == authority.route
+                and requested_model == models.for_route(authority.route)
+            )
+        except Exception:
+            matches_request = False
+        if not matches_request:
+            raise ProviderConfigurationError(
+                authority.provider, "sampling_grant_mismatch"
+            )
         model = self._model(request)
         max_tokens, timeout = self._limits(request)
         sampling_request = self._sampling_request(
@@ -791,34 +1249,51 @@ class MCPClientSamplingAdapter(HTTPProviderAdapter):
             model=model,
             max_tokens=max_tokens,
         )
+        self._validated_authority()
         started = time.monotonic()
+        adapter_timeout: asyncio.Timeout | None = None
         try:
-            async with asyncio.timeout(timeout):
-                raw_result = await self._binding.callback(sampling_request)
+            async with asyncio.timeout(timeout) as adapter_timeout:
+                raw_result = await callback(sampling_request)
         except TimeoutError:
-            raise ProviderTransportError(self.provider, "timeout") from None
-        except (
-            ProviderConfigurationError,
-            ProviderProtocolError,
-            ProviderTransportError,
-        ):
+            self._validated_authority()
+            if self._claimed(authority):
+                raise ProviderAuthorizationInvariantError(
+                    authority.provider, "sampling_effect_indeterminate"
+                ) from None
+            raise ProviderTransportError(authority.provider, "timeout") from None
+        except ProviderError:
+            self._validated_authority()
             raise
         except Exception:
-            raise ProviderTransportError(self.provider, "sampling_failed") from None
+            self._validated_authority()
+            raise ProviderTransportError(
+                authority.provider, "sampling_failed"
+            ) from None
+        self._validated_authority()
+        if adapter_timeout is not None and adapter_timeout.expired():
+            if self._claimed(authority):
+                raise ProviderAuthorizationInvariantError(
+                    authority.provider, "sampling_effect_indeterminate"
+                )
+            raise ProviderTransportError(authority.provider, "timeout")
         try:
             result = (
-                raw_result
+                ClientSamplingResult.model_validate_json(
+                    raw_result.model_dump_json(warnings="error")
+                )
                 if isinstance(raw_result, ClientSamplingResult)
                 else ClientSamplingResult.model_validate(raw_result)
             )
-        except (ValidationError, ValueError, TypeError):
-            raise ProviderProtocolError(
-                self.provider, "invalid_sampling_result"
+        except Exception:
+            raise ProviderAuthorizationInvariantError(
+                authority.provider, "sampling_effect_indeterminate"
             ) from None
-        if not is_safe_model_id(result.model) or not _provider_model_matches(
-            self.provider, result.model
-        ):
-            raise ProviderProtocolError(self.provider, "provider_model_mismatch")
+        granted_model = models.for_route(authority.route)
+        if not is_safe_model_id(result.model) or result.model != granted_model:
+            raise ProviderAuthorizationInvariantError(
+                authority.provider, "sampling_effect_indeterminate"
+            )
         finish_reason = {
             "endTurn": "stop",
             "stopSequence": "stop",
@@ -826,34 +1301,31 @@ class MCPClientSamplingAdapter(HTTPProviderAdapter):
             "contentFilter": "content_filter",
         }[result.stop_reason]
         duration_ms = max(0, round((time.monotonic() - started) * 1000))
-        descriptor = self.descriptor
         receipt = ProviderReceipt(
             request_id=request.request_id,
             supervision=request.supervision,
-            provider=self.provider,
-            channel=self.channel,
+            provider=authority.provider,
+            channel=authority.channel,
             credential_plane=descriptor.credential_plane,
             route=request.route,
             requested_model=model,
             resolved_model=result.model,
-            model_source="provider_reported",
+            model_source="requested_fallback",
             endpoint_host=descriptor.endpoint_host,
             endpoint_kind=descriptor.endpoint_kind,
             credential_kind=descriptor.credential_kind,
             billing_class=descriptor.billing_class,
             client_identity=descriptor.client_identity,
-            cost_usd=result.cost_usd,
-            cost_source="provider_exact"
-            if result.cost_usd is not None
-            else "unavailable",
+            cost_usd=None,
+            cost_source="unavailable",
             region="client_subscription",
-            response_id=result.response_id,
+            response_id=None,
             duration_ms=duration_ms,
-            usage=result.usage,
+            usage=ProviderTokenUsage(),
         )
         return ProviderResponse(
-            provider=self.provider,
-            channel=self.channel,
+            provider=authority.provider,
+            channel=authority.channel,
             model=result.model,
             text=result.content.text,
             finish_reason=finish_reason,
@@ -861,12 +1333,32 @@ class MCPClientSamplingAdapter(HTTPProviderAdapter):
         )
 
 
+_MCP_SAMPLING_ADAPTER_FACTORY_SEAL = object()
+
+
+def _create_sealed_mcp_sampling_adapter(
+    *,
+    provider: ProviderId,
+    channel: ProviderChannel,
+    binding: SamplingClientBinding,
+    clock: Clock | None = None,
+) -> MCPClientSamplingAdapter:
+    """Internal bridge from a live lease callback to one bounded adapter."""
+
+    return MCPClientSamplingAdapter(
+        provider=provider,
+        channel=channel,
+        binding=binding,
+        clock=clock,
+        _factory_seal=_MCP_SAMPLING_ADAPTER_FACTORY_SEAL,
+    )
+
+
 def build_subscription_registry(
     *,
     claude_executable: str = "claude",
     environ: Mapping[str, str] | None = None,
     claude_runner: CLIProcessRunner | None = None,
-    sampling_clients: Mapping[ProviderChannel, SamplingClientBinding] | None = None,
     clock: Clock | None = None,
 ) -> dict[ProviderChannel, ProviderAdapter]:
     """Construct request-scoped subscription adapters without any effect."""
@@ -879,14 +1371,4 @@ def build_subscription_registry(
             clock=clock,
         )
     }
-    for channel, binding in (sampling_clients or {}).items():
-        provider = SAMPLING_CHANNEL_PROVIDERS.get(channel)
-        if provider is None:
-            raise ValueError("unsupported sampling channel")
-        registry[channel] = MCPClientSamplingAdapter(
-            provider=provider,
-            channel=channel,
-            binding=binding,
-            clock=clock,
-        )
     return registry

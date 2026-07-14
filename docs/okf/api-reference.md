@@ -1292,6 +1292,154 @@ def is_safe_response_id(value: str) -> bool
 
 Return whether an upstream response ID is safe to put in a receipt.
 
+## providers/errors.py {#providers-errors}
+
+### Class: `ProviderAuthorizationInvariantError` {#providers-errors-providerauthorizationinvarianterror}
+
+```python
+class ProviderAuthorizationInvariantError
+```
+
+**Keywords:** provider, authorization, invariant, error
+
+A server-owned authorization invariant failed after routing.
+
+This is deliberately neither a configuration, transport, nor protocol
+failure.  In particular, a consumed one-shot delegation must never make a
+broker eligible to repeat the effect through an API fallback.
+
+## providers/mcp_sampling.py {#providers-mcp_sampling}
+
+### Class: `MCPSessionAuthorization` {#providers-mcp_sampling-mcpsessionauthorization}
+
+```python
+class MCPSessionAuthorization
+```
+
+**Keywords:** mcp, session, authorization
+
+Gateway-issued authorization for one principal-bound MCP session.
+
+``verified_local`` covers a directly verified loopback request or a
+separately attested loopback-only proxy boundary.  Anonymous HTTP is only
+legal inside that boundary.  Remote sessions must have an authenticated
+principal.  This object is not accepted from request JSON or headers; a
+future stateful session middleware must inject it into the ASGI scope.
+
+### Class: `TrustedMCPProviderGrant` {#providers-mcp_sampling-trustedmcpprovidergrant}
+
+```python
+class TrustedMCPProviderGrant
+```
+
+**Keywords:** trusted, mcp, provider, grant
+
+Server-owned provider/model grant bound to one authorized MCP session.
+
+Client labels and advertised sampling support never imply a provider
+brand.  Only later Grok routing policy may issue this one-delegation grant;
+generic session middleware must never mint it.
+
+### Method: `TrustedMCPProviderGrant.effect_digest` {#providers-mcp_sampling-trustedmcpprovidergrant-effect_digest}
+
+```python
+def TrustedMCPProviderGrant.effect_digest(self) -> str
+```
+
+**Keywords:** trusted, mcp, provider, grant, effect, digest
+
+Stable one-shot identity for the exact broker-authorized effect.
+
+Grant IDs and validity windows are intentionally excluded.  Reissuing
+a grant cannot repeat an indeterminate physical effect; an authorized
+retry requires a new deterministic ``ProviderRequest.request_id``.
+
+### Class: `MCPSamplingSessionRuntime` {#providers-mcp_sampling-mcpsamplingsessionruntime}
+
+```python
+class MCPSamplingSessionRuntime
+```
+
+**Keywords:** mcp, sampling, session, runtime
+
+Mutable session-wide revocation and concurrency gate.
+
+A future authoritative stateful-session registry creates exactly one of
+these objects for one ``MCPSessionAuthorization`` and injects that same
+object into every request scope for the MCP session.  It is intentionally
+not a module global.  Separate request leases therefore share one physical
+sampling slot and one disconnect/revocation state.
+
+### Method: `MCPSamplingSessionRuntime.effect_claimed` {#providers-mcp_sampling-mcpsamplingsessionruntime-effect_claimed}
+
+```python
+def MCPSamplingSessionRuntime.effect_claimed(self, effect_digest: str) -> bool
+```
+
+**Keywords:** mcp, sampling, session, runtime, effect, claimed
+
+Return exact session-owned state for one stable effect identity.
+
+### Method: `MCPSamplingSessionRuntime.claim_effect` {#providers-mcp_sampling-mcpsamplingsessionruntime-claim_effect}
+
+```python
+def MCPSamplingSessionRuntime.claim_effect(self, effect_digest: str) -> bool
+```
+
+**Keywords:** mcp, sampling, session, runtime, claim, effect
+
+Atomically consume one grant before its physical sampling effect.
+
+This runtime belongs to one asyncio session loop.  The synchronous
+check-and-add has no suspension point and is therefore atomic with
+respect to every lease sharing that runtime.  Claims are terminal:
+revocation, timeout, disconnect, and indeterminate provider outcomes
+never remove them.
+
+### Method: `MCPSamplingSessionRuntime.revoke` {#providers-mcp_sampling-mcpsamplingsessionruntime-revoke}
+
+```python
+async def MCPSamplingSessionRuntime.revoke(self, *, drain_timeout_seconds: float=1.0) -> None
+```
+
+**Keywords:** mcp, sampling, session, runtime, revoke
+
+Revoke the whole MCP session and boundedly cancel every sample.
+
+### Class: `StatefulMCPSamplingLease` {#providers-mcp_sampling-statefulmcpsamplinglease}
+
+```python
+class StatefulMCPSamplingLease
+```
+
+**Keywords:** stateful, mcp, sampling, lease
+
+Short-lived callback lease around one exact FastMCP tool request.
+
+### Method: `StatefulMCPSamplingLease.revoke` {#providers-mcp_sampling-statefulmcpsamplinglease-revoke}
+
+```python
+async def StatefulMCPSamplingLease.revoke(self) -> None
+```
+
+**Keywords:** stateful, mcp, sampling, lease, revoke
+
+Revoke the callback, cancel in-flight samples, and bound the drain.
+
+### Function: `create_stateful_mcp_sampling_lease` {#providers-mcp_sampling-create_stateful_mcp_sampling_lease}
+
+```python
+def create_stateful_mcp_sampling_lease(ctx: Any, *, provider: ProviderId, channel: ProviderChannel, provider_request: ProviderRequest, drain_timeout_seconds: Annotated[float, Field(gt=0.0, le=10.0)]=1.0, clock: Clock | None=None) -> StatefulMCPSamplingLease
+```
+
+**Keywords:** create, stateful, mcp, sampling, lease
+
+Validate the current FastMCP request and create an inert sampling lease.
+
+The returned object must be used as an async context manager.  Merely
+constructing it has no provider, process, network, storage, or routing
+effect.
+
 ## providers/registry.py {#providers-registry}
 
 ### Function: `build_provider_registry` {#providers-registry-build_provider_registry}
@@ -1316,6 +1464,16 @@ class ClaudeCLIAdapter
 
 One-shot Claude Code OAuth worker with tools and persistence disabled.
 
+### Function: `provider_request_digest` {#providers-subscription-provider_request_digest}
+
+```python
+def provider_request_digest(request: ProviderRequest) -> str
+```
+
+**Keywords:** provider, request, digest
+
+Canonical secret-safe digest of one complete provider request.
+
 ### Class: `MCPClientSamplingAdapter` {#providers-subscription-mcpclientsamplingadapter}
 
 ```python
@@ -1324,12 +1482,39 @@ class MCPClientSamplingAdapter
 
 **Keywords:** mcp, client, sampling, adapter
 
-One client-advertised MCP sampling lane bound to one trusted provider.
+One lease-owned MCP sampling lane bound to one trusted provider grant.
+
+The private authority state is sealed against ordinary assignment and
+rechecked before and after every await.  Arbitrary code execution inside
+the trusted server process remains outside this object's security boundary.
+
+### Method: `MCPClientSamplingAdapter.effect_claimed` {#providers-subscription-mcpclientsamplingadapter-effect_claimed}
+
+```python
+def MCPClientSamplingAdapter.effect_claimed(self) -> bool
+```
+
+**Keywords:** mcp, client, sampling, adapter, effect, claimed
+
+Return fail-closed one-shot state from the lease-owned runtime.
+
+### Method: `MCPClientSamplingAdapter.complete` {#providers-subscription-mcpclientsamplingadapter-complete}
+
+```python
+async def MCPClientSamplingAdapter.complete(self, request: ProviderRequest) -> ProviderResponse
+```
+
+**Keywords:** mcp, client, sampling, adapter, complete
+
+Preserve post-claim indeterminacy across the base TTL boundary.
+
+The future broker integration must perform the same probe around its
+own outer timeout before this adapter can be wired into runtime.
 
 ### Function: `build_subscription_registry` {#providers-subscription-build_subscription_registry}
 
 ```python
-def build_subscription_registry(*, claude_executable: str='claude', environ: Mapping[str, str] | None=None, claude_runner: CLIProcessRunner | None=None, sampling_clients: Mapping[ProviderChannel, SamplingClientBinding] | None=None, clock: Clock | None=None) -> dict[ProviderChannel, ProviderAdapter]
+def build_subscription_registry(*, claude_executable: str='claude', environ: Mapping[str, str] | None=None, claude_runner: CLIProcessRunner | None=None, clock: Clock | None=None) -> dict[ProviderChannel, ProviderAdapter]
 ```
 
 **Keywords:** build, subscription, registry

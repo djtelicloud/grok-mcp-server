@@ -26,20 +26,25 @@ from src.providers import (
     ProviderConfigurationError,
     ProviderId,
     ProviderMessage,
+    ProviderModelPins,
     ProviderReceipt,
     ProviderRequest,
     ProviderTokenUsage,
     RouteClass,
     SamplingCapability,
-    SamplingClientBinding,
     SamplingTextContent,
     build_subscription_registry,
+    provider_request_digest,
+    transport_resource_identity,
 )
 from src.providers.subscription import (
     MAX_CLI_STDERR_BYTES,
     MAX_CLI_STDOUT_BYTES,
     _ProcessOutputLimit,
     _ProcessTimeout,
+    SamplingClientBinding,
+    _create_sealed_mcp_sampling_adapter,
+    _create_sealed_sampling_client_binding,
     _claude_subscription_environment,
     _run_bounded_process,
 )
@@ -147,12 +152,87 @@ class CapturingRunner:
 def _sampling_binding(
     callback,
     *,
+    request: ProviderRequest,
+    provider: ProviderId = ProviderId.OPENAI,
+    channel: ProviderChannel | None = None,
     client_id: str = "codex-desktop",
     sampling: bool = True,
+    effect_claimed=None,
 ) -> SamplingClientBinding:
-    return SamplingClientBinding(
-        capability=SamplingCapability(client_id=client_id, sampling=sampling),
+    channels = {
+        ProviderId.OPENAI: ProviderChannel.OPENAI_MCP_SAMPLING,
+        ProviderId.ANTHROPIC: ProviderChannel.ANTHROPIC_MCP_SAMPLING,
+        ProviderId.GOOGLE: ProviderChannel.GOOGLE_MCP_SAMPLING,
+    }
+    selected_channel = channel or channels[provider]
+    model = (
+        request.model
+        or {
+            ProviderId.OPENAI: "gpt-5.1",
+            ProviderId.ANTHROPIC: "claude-fable-5",
+            ProviderId.GOOGLE: "gemini-3.5-flash",
+        }[provider]
+    )
+    models = ProviderModelPins(
+        planning=model,
+        coding=model,
+        vision=model,
+        research=model,
+    )
+    binding_digest = transport_resource_identity(
+        "test_mcp_sampling_binding",
+        f"{provider.value}:{selected_channel.value}:{client_id}:{request.request_id}",
+    )
+    return _create_sealed_sampling_client_binding(
+        capability=SamplingCapability(
+            client_id="mcp-" + binding_digest.removeprefix("sha256:"),
+            sampling=sampling,
+        ),
         callback=callback,
+        provider=provider,
+        channel=selected_channel,
+        models=models,
+        binding_digest=binding_digest,
+        supervision=request.supervision,
+        provider_request_id=request.request_id,
+        provider_request_digest=provider_request_digest(request),
+        route=request.route,
+        effect_claimed=effect_claimed or (lambda: False),
+    )
+
+
+def _sampling_adapter(
+    callback,
+    *,
+    request: ProviderRequest,
+    provider: ProviderId = ProviderId.OPENAI,
+    channel: ProviderChannel | None = None,
+    client_id: str = "codex-desktop",
+    sampling: bool = True,
+    effect_claimed=None,
+    clock=None,
+) -> MCPClientSamplingAdapter:
+    selected_channel = (
+        channel
+        or {
+            ProviderId.OPENAI: ProviderChannel.OPENAI_MCP_SAMPLING,
+            ProviderId.ANTHROPIC: ProviderChannel.ANTHROPIC_MCP_SAMPLING,
+            ProviderId.GOOGLE: ProviderChannel.GOOGLE_MCP_SAMPLING,
+        }[provider]
+    )
+    return _create_sealed_mcp_sampling_adapter(
+        provider=provider,
+        channel=selected_channel,
+        binding=_sampling_binding(
+            callback,
+            request=request,
+            provider=provider,
+            channel=selected_channel,
+            client_id=client_id,
+            sampling=sampling,
+            effect_claimed=effect_claimed,
+        ),
+        clock=clock,
     )
 
 
@@ -576,16 +656,141 @@ async def test_sampling_requires_advertised_capability_and_never_calls_when_abse
         calls += 1
         raise AssertionError("capability-absent client was called")
 
-    adapter = MCPClientSamplingAdapter(
-        provider=ProviderId.GOOGLE,
-        channel=ProviderChannel.GOOGLE_MCP_SAMPLING,
-        binding=_sampling_binding(callback, client_id="antigravity", sampling=False),
-    )
-    assert adapter.descriptor.credential_state == CredentialState.MISSING
-    result = await adapter.attempt(_request(model="gemini-3.5-flash"))
-    assert result.failure is not None
-    assert result.failure.error_code == "sampling_unavailable"
+    request = _request(model="gemini-3.5-flash")
+    with pytest.raises(ValueError, match="sealed binding"):
+        _sampling_binding(
+            callback,
+            request=request,
+            provider=ProviderId.GOOGLE,
+            client_id="antigravity",
+            sampling=False,
+        )
     assert calls == 0
+
+
+def test_sampling_binding_rejects_bare_callbacks_and_cross_provider_reuse():
+    async def callback(_request):
+        raise AssertionError("construction must stay inert")
+
+    request = _request(model="gpt-5.1")
+    models = ProviderModelPins(
+        planning="gpt-5.1",
+        coding="gpt-5.1",
+        vision="gpt-5.1",
+        research="gpt-5.1",
+    )
+    digest = transport_resource_identity("test", "bare-callback")
+    with pytest.raises(TypeError, match="stateful MCP sampling factory"):
+        SamplingClientBinding(
+            capability=SamplingCapability(
+                client_id="mcp-" + digest.removeprefix("sha256:"),
+                sampling=True,
+            ),
+            callback=callback,
+            provider=ProviderId.OPENAI,
+            channel=ProviderChannel.OPENAI_MCP_SAMPLING,
+            models=models,
+            binding_digest=digest,
+            supervision=request.supervision,
+            provider_request_id=request.request_id,
+            provider_request_digest=provider_request_digest(request),
+            route=request.route,
+            effect_claimed=lambda: False,
+        )
+
+    binding = _sampling_binding(callback, request=request)
+    with pytest.raises(ProviderConfigurationError, match="sampling_grant_mismatch"):
+        _create_sealed_mcp_sampling_adapter(
+            provider=ProviderId.ANTHROPIC,
+            channel=ProviderChannel.ANTHROPIC_MCP_SAMPLING,
+            binding=binding,
+        )
+    with pytest.raises(TypeError, match="stateful MCP sampling lease"):
+        MCPClientSamplingAdapter(
+            provider=ProviderId.OPENAI,
+            channel=ProviderChannel.OPENAI_MCP_SAMPLING,
+            binding=binding,
+        )
+
+    google_request = _request(model="gemini-3.5-flash")
+    relabeled = _sampling_binding(
+        callback,
+        request=google_request,
+        provider=ProviderId.GOOGLE,
+    )
+    object.__setattr__(relabeled, "provider", ProviderId.OPENAI)
+    object.__setattr__(relabeled, "channel", ProviderChannel.OPENAI_MCP_SAMPLING)
+    with pytest.raises(ProviderConfigurationError, match="sampling_grant_mismatch"):
+        _create_sealed_mcp_sampling_adapter(
+            provider=ProviderId.OPENAI,
+            channel=ProviderChannel.OPENAI_MCP_SAMPLING,
+            binding=relabeled,
+        )
+
+    wrong_identity = _sampling_binding(callback, request=request)
+    object.__setattr__(wrong_identity.capability, "client_id", "mcp-" + ("0" * 64))
+    with pytest.raises(ProviderConfigurationError, match="sampling_grant_mismatch"):
+        _create_sealed_mcp_sampling_adapter(
+            provider=ProviderId.OPENAI,
+            channel=ProviderChannel.OPENAI_MCP_SAMPLING,
+            binding=wrong_identity,
+        )
+
+
+@pytest.mark.asyncio
+async def test_sampling_grant_matches_exact_supervision_request_route_and_model_pre_effect():
+    calls = 0
+
+    async def callback(_request):
+        nonlocal calls
+        calls += 1
+        return ClientSamplingResult(
+            content=SamplingTextContent(type="text", text="unreachable"),
+            model="gpt-5.1",
+            stop_reason="endTurn",
+        )
+
+    request = _request(model="gpt-5.1")
+    adapter = _sampling_adapter(callback, request=request)
+    other_supervision = request.supervision.model_copy(
+        update={"objective_id": "objective-2"}
+    )
+    altered = (
+        request.model_copy(update={"supervision": other_supervision}),
+        request.model_copy(update={"request_id": "provider-request-2"}),
+        request.model_copy(update={"route": RouteClass.CODING}),
+        request.model_copy(update={"model": "gpt-5.2"}),
+        request.model_copy(
+            update={
+                "messages": (ProviderMessage(role="user", content="Changed content."),)
+            }
+        ),
+        request.model_copy(update={"max_output_tokens": 2048}),
+        request.model_copy(update={"timeout_seconds": 12.0}),
+        request.model_copy(update={"temperature": 0.8}),
+    )
+    for candidate in altered:
+        result = await adapter.attempt(candidate)
+        assert result.failure is not None
+        assert result.failure.error_code == "sampling_grant_mismatch"
+    assert calls == 0
+
+
+@pytest.mark.asyncio
+async def test_constructed_client_sampling_result_is_revalidated():
+    async def callback(_request):
+        return ClientSamplingResult.model_construct(
+            role="assistant",
+            content={"type": "tool_use", "text": "forbidden"},
+            model="gpt-5.1",
+            stop_reason="endTurn",
+        )
+
+    request = _request(model="gpt-5.1")
+    result = await _sampling_adapter(callback, request=request).attempt(request)
+    assert result.failure is not None
+    assert result.failure.error_kind == "internal"
+    assert result.failure.error_code == "sampling_effect_indeterminate"
 
 
 @pytest.mark.asyncio
@@ -596,18 +801,20 @@ async def test_sampling_request_has_no_context_tools_or_implicit_model_and_recei
         observed.append(request)
         return ClientSamplingResult(
             content=SamplingTextContent(type="text", text="IDE subscription answer."),
-            model="gpt-5.1-20260701",
+            model="gpt-5.1",
             stop_reason="endTurn",
             response_id="sampling-response-1",
         )
 
-    adapter = MCPClientSamplingAdapter(
+    provider_request = _request(model="gpt-5.1", max_output_tokens=9000)
+    binding = _sampling_binding(callback, request=provider_request)
+    adapter = _create_sealed_mcp_sampling_adapter(
         provider=ProviderId.OPENAI,
         channel=ProviderChannel.OPENAI_MCP_SAMPLING,
-        binding=_sampling_binding(callback),
+        binding=binding,
     )
     assert adapter.descriptor.credential_state == CredentialState.DEFERRED
-    response = await adapter.complete(_request(model="gpt-5.1", max_output_tokens=9000))
+    response = await adapter.complete(provider_request)
     assert len(observed) == 1
     request = observed[0]
     assert request.method == "sampling/createMessage"
@@ -625,9 +832,10 @@ async def test_sampling_request_has_no_context_tools_or_implicit_model_and_recei
     assert wire_request["messages"][0]["content"]["type"] == "text"
     assert response.receipt.provider == ProviderId.OPENAI
     assert response.receipt.channel == ProviderChannel.OPENAI_MCP_SAMPLING
-    assert response.receipt.client_identity == "codex-desktop"
-    assert response.receipt.resolved_model == "gpt-5.1-20260701"
-    assert response.receipt.model_source == "provider_reported"
+    assert response.receipt.client_identity == binding.capability.client_id
+    assert response.receipt.resolved_model == "gpt-5.1"
+    assert response.receipt.response_id is None
+    assert response.receipt.model_source == "requested_fallback"
     assert response.receipt.billing_class == "subscription"
     assert response.receipt.usage.source == "unavailable"
     assert response.receipt.cost_usd is None
@@ -638,6 +846,8 @@ async def test_sampling_request_has_no_context_tools_or_implicit_model_and_recei
 
 @pytest.mark.asyncio
 async def test_sampling_rejects_provider_spoofing_model_spoofing_and_malformed_content():
+    request = _request(model="gpt-5.1")
+
     async def wrong_model(_request):
         return {
             "content": {"type": "text", "text": "spoofed"},
@@ -646,14 +856,11 @@ async def test_sampling_rejects_provider_spoofing_model_spoofing_and_malformed_c
             "stopReason": "endTurn",
         }
 
-    adapter = MCPClientSamplingAdapter(
-        provider=ProviderId.OPENAI,
-        channel=ProviderChannel.OPENAI_MCP_SAMPLING,
-        binding=_sampling_binding(wrong_model),
-    )
-    result = await adapter.attempt(_request(model="gpt-5.1"))
+    adapter = _sampling_adapter(wrong_model, request=request)
+    result = await adapter.attempt(request)
     assert result.failure is not None
-    assert result.failure.error_code == "provider_model_mismatch"
+    assert result.failure.error_kind == "internal"
+    assert result.failure.error_code == "sampling_effect_indeterminate"
 
     async def spoofed_provider(_request):
         return {
@@ -663,14 +870,11 @@ async def test_sampling_rejects_provider_spoofing_model_spoofing_and_malformed_c
             "stop_reason": "endTurn",
         }
 
-    adapter = MCPClientSamplingAdapter(
-        provider=ProviderId.OPENAI,
-        channel=ProviderChannel.OPENAI_MCP_SAMPLING,
-        binding=_sampling_binding(spoofed_provider),
-    )
-    result = await adapter.attempt(_request(model="gpt-5.1"))
+    adapter = _sampling_adapter(spoofed_provider, request=request)
+    result = await adapter.attempt(request)
     assert result.failure is not None
-    assert result.failure.error_code == "invalid_sampling_result"
+    assert result.failure.error_kind == "internal"
+    assert result.failure.error_code == "sampling_effect_indeterminate"
 
     async def tool_content(_request):
         return {
@@ -680,20 +884,17 @@ async def test_sampling_rejects_provider_spoofing_model_spoofing_and_malformed_c
             "stopReason": "endTurn",
         }
 
-    adapter = MCPClientSamplingAdapter(
-        provider=ProviderId.OPENAI,
-        channel=ProviderChannel.OPENAI_MCP_SAMPLING,
-        binding=_sampling_binding(tool_content),
-    )
-    result = await adapter.attempt(_request(model="gpt-5.1"))
+    adapter = _sampling_adapter(tool_content, request=request)
+    result = await adapter.attempt(request)
     assert result.failure is not None
-    assert result.failure.error_code == "invalid_sampling_result"
+    assert result.failure.error_kind == "internal"
+    assert result.failure.error_code == "sampling_effect_indeterminate"
 
     with pytest.raises(ProviderConfigurationError, match="sampling_channel_mismatch"):
-        MCPClientSamplingAdapter(
+        _create_sealed_mcp_sampling_adapter(
             provider=ProviderId.ANTHROPIC,
             channel=ProviderChannel.OPENAI_MCP_SAMPLING,
-            binding=_sampling_binding(spoofed_provider),
+            binding=_sampling_binding(spoofed_provider, request=request),
         )
 
 
@@ -704,11 +905,13 @@ async def test_sampling_callback_errors_are_secret_safe():
     async def callback(_request):
         raise RuntimeError(secret)
 
-    result = await MCPClientSamplingAdapter(
+    request = _request(model="gemini-3.5-flash")
+    result = await _sampling_adapter(
+        callback,
+        request=request,
         provider=ProviderId.GOOGLE,
-        channel=ProviderChannel.GOOGLE_MCP_SAMPLING,
-        binding=_sampling_binding(callback, client_id="antigravity"),
-    ).attempt(_request(model="gemini-3.5-flash"))
+        client_id="antigravity",
+    ).attempt(request)
     assert result.failure is not None
     assert result.failure.error_code == "sampling_failed"
     assert secret not in result.failure.model_dump_json()
@@ -725,33 +928,68 @@ async def test_sampling_ttl_expiry_and_callback_timeout_are_bounded():
         await asyncio.sleep(5)
         raise AssertionError("unreachable")
 
-    adapter = MCPClientSamplingAdapter(
+    expired_request = _request(now=now, ttl_seconds=-1, model="gemini-3.5-flash")
+    adapter = _sampling_adapter(
+        callback,
+        request=expired_request,
         provider=ProviderId.GOOGLE,
-        channel=ProviderChannel.GOOGLE_MCP_SAMPLING,
-        binding=_sampling_binding(callback, client_id="antigravity"),
+        client_id="antigravity",
         clock=lambda: now,
     )
-    expired = await adapter.attempt(
-        _request(now=now, ttl_seconds=-1, model="gemini-3.5-flash")
-    )
+    expired = await adapter.attempt(expired_request)
     assert expired.failure is not None
     assert expired.failure.error_code == "ttl_expired"
     assert calls == 0
 
     # The absolute completion guard is independently tested with a real clock.
-    timed = MCPClientSamplingAdapter(
+    timed_request = _request(ttl_seconds=0.02, model="gemini-3.5-flash")
+    timed = _sampling_adapter(
+        callback,
+        request=timed_request,
         provider=ProviderId.GOOGLE,
-        channel=ProviderChannel.GOOGLE_MCP_SAMPLING,
-        binding=_sampling_binding(callback, client_id="antigravity"),
+        client_id="antigravity",
     )
-    timeout = await timed.attempt(_request(ttl_seconds=0.02, model="gemini-3.5-flash"))
+    timeout = await timed.attempt(timed_request)
     assert timeout.failure is not None
     assert timeout.failure.error_code == "ttl_expired"
     assert calls == 1
 
 
 @pytest.mark.asyncio
-async def test_sampling_records_only_actually_returned_usage_and_cost():
+async def test_sampling_base_ttl_boundary_after_claim_is_internal():
+    now = datetime(2030, 1, 1, tzinfo=UTC)
+    current = now
+    claimed = False
+    request = _request(
+        now=now,
+        ttl_seconds=10.0,
+        model="gemini-3.5-flash",
+    )
+
+    async def callback(_request):
+        nonlocal claimed, current
+        claimed = True
+        current = request.supervision.ttl_expires_at
+        return ClientSamplingResult(
+            content=SamplingTextContent(type="text", text="boundary result"),
+            model="gemini-3.5-flash",
+            stop_reason="endTurn",
+        )
+
+    result = await _sampling_adapter(
+        callback,
+        request=request,
+        provider=ProviderId.GOOGLE,
+        effect_claimed=lambda: claimed,
+        clock=lambda: current,
+    ).attempt(request)
+    assert result.failure is not None
+    assert result.failure.error_kind == "internal"
+    assert result.failure.error_code == "sampling_effect_indeterminate"
+
+
+@pytest.mark.asyncio
+async def test_sampling_client_usage_cost_and_response_id_are_not_receipt_authority():
     async def callback(_request):
         return ClientSamplingResult(
             content=SamplingTextContent(type="text", text="Measured answer."),
@@ -764,21 +1002,25 @@ async def test_sampling_records_only_actually_returned_usage_and_cost():
                 source="provider_exact",
             ),
             cost_usd=Decimal("0.00120000"),
+            response_id="client-claimed-response",
         )
 
-    response = await MCPClientSamplingAdapter(
+    request = _request(model="claude-fable-5")
+    response = await _sampling_adapter(
+        callback,
+        request=request,
         provider=ProviderId.ANTHROPIC,
-        channel=ProviderChannel.ANTHROPIC_MCP_SAMPLING,
-        binding=_sampling_binding(callback, client_id="claude-code"),
-    ).complete(_request(model="claude-fable-5"))
+        client_id="claude-code",
+    ).complete(request)
     assert response.finish_reason == "length"
-    assert response.receipt.usage.total_tokens == 14
-    assert response.receipt.usage.source == "provider_exact"
-    assert response.receipt.cost_usd == Decimal("0.00120000")
-    assert response.receipt.cost_source == "provider_exact"
+    assert response.receipt.usage.total_tokens is None
+    assert response.receipt.usage.source == "unavailable"
+    assert response.receipt.cost_usd is None
+    assert response.receipt.cost_source == "unavailable"
+    assert response.receipt.response_id is None
 
 
-def test_subscription_registry_is_inert_request_scoped_and_has_no_codex_cli():
+def test_subscription_registry_is_inert_and_sampling_requires_live_lease():
     effects = 0
 
     async def runner(**_kwargs):
@@ -786,25 +1028,11 @@ def test_subscription_registry_is_inert_request_scoped_and_has_no_codex_cli():
         effects += 1
         raise AssertionError("registry construction executed Claude")
 
-    async def callback(_request):
-        nonlocal effects
-        effects += 1
-        raise AssertionError("registry construction sampled an IDE")
-
     registry = build_subscription_registry(
         environ={"OPENAI_API_KEY": "must-not-be-read"},
         claude_runner=runner,
-        sampling_clients={
-            ProviderChannel.GOOGLE_MCP_SAMPLING: _sampling_binding(
-                callback,
-                client_id="antigravity",
-            )
-        },
     )
-    assert set(registry) == {
-        ProviderChannel.CLAUDE_CLI,
-        ProviderChannel.GOOGLE_MCP_SAMPLING,
-    }
+    assert set(registry) == {ProviderChannel.CLAUDE_CLI}
     assert effects == 0
     assert all(
         adapter.descriptor.credential_plane == CredentialPlane.SUBSCRIPTION
@@ -820,14 +1048,6 @@ def test_subscription_registry_is_inert_request_scoped_and_has_no_codex_cli():
         descriptor.credential_kind
         for descriptor in (adapter.descriptor for adapter in registry.values())
     )
-    with pytest.raises(ValueError, match="unsupported sampling channel"):
-        build_subscription_registry(
-            environ={},
-            claude_runner=runner,
-            sampling_clients={
-                ProviderChannel.OPENAI_API: _sampling_binding(callback),
-            },
-        )
     assert effects == 0
 
 
@@ -881,10 +1101,18 @@ def test_subscription_lane_identities_are_pinned_without_exposing_paths():
         ),
     )
     for provider, channel, client_id in sampling:
-        descriptor = MCPClientSamplingAdapter(
+        descriptor = _sampling_adapter(
+            callback,
+            request=_request(
+                model={
+                    ProviderId.OPENAI: "gpt-5.1",
+                    ProviderId.ANTHROPIC: "claude-fable-5",
+                    ProviderId.GOOGLE: "gemini-3.5-flash",
+                }[provider]
+            ),
             provider=provider,
             channel=channel,
-            binding=_sampling_binding(callback, client_id=client_id),
+            client_id=client_id,
         ).descriptor
         assert descriptor.transport_resource_identity is not None
         assert GrokWorkerLaneAuthorization.from_descriptor(descriptor).contract_digest
