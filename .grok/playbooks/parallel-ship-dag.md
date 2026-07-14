@@ -2,6 +2,23 @@
 
 Human speaks product intent only. Agents own git. Codex owns land on `main`.
 
+## Session physics (non-negotiable)
+
+1. **Do not stop to ask the human** about choices that are already decided by
+   product freeze, security fail-closed rules, or donor-crucible evidence.
+   Decide, implement, put the handoff triad on GitHub, continue.
+2. **Marathon mode:** keep working until draft PRs + exact heads + notes exist
+   for every open lane. Idle only when blocked on secrets/human-only MFA or a
+   hard external outage.
+3. **No multi-vendor opinion fan-out by default.** Prefer Grok self-parallel
+   (two lanes / two worktrees / UniGrok modes). Other providers only for
+   specialized adapters or data the Grok stack cannot access.
+4. **Monthly API budget envelope** (operator): **$2000/month** unless revised.
+   Prefer CLI plane. Log API `cost_usd` on PRs. Hard-stop leaves notes, not a
+   quiz for the human.
+5. **Donor GenFunc branches are unfinished intelligence**, not abandoned noise.
+   See `donor-genfunc-deep-harvest.md`.
+
 ## Lanes
 
 | Lane | Mission | UniGrok modes | Path ownership (examples) |

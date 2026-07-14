@@ -42,6 +42,16 @@ Public tool stays Grok-routed. Multi-provider adapters are not a second chat pro
 - Prefer `plane=cli` + `fallback_policy=same_plane` for free-compatible work.
 - API plane only when required (hosted twin, Deep-Think, metered models).
 - Record non-zero `cost_usd` in PR notes. Hard-stop on budget.
+- Default monthly API envelope: **$2000** unless the operator revises it.
+- Do **not** multi-vendor fan-out “to compare models” by default — usually
+  worse ROI than Grok self-parallel + git-DAG coordination (see donor harvest).
+
+## Donor intelligence
+
+GenFuncAgentixAI long branches (`twin/chrysalis`, `twin/gemma_dpo_reflection`,
+`twin/singularity`, etc.) encode Cloud-Truth + GitOps intent workers + Pareto
+crucible work. Harvest via
+`.grok/playbooks/donor-genfunc-deep-harvest.md` — do not treat them as orphans.
 
 ## After Codex lands
 

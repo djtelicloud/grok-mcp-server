@@ -56,6 +56,10 @@ When the operator wants both public product and intelligence work:
 - For risky or mutating operations, require explicit authorization through the
   configured MCP tool or environment gate.
 - For repeated task patterns, use prior UniGrok memory as a hint, not as proof.
-- End operator-facing answers with either one clear next action you will take
-  (or already left on a PR) or one product question — not a wall of options
-  that re-involves the human in git.
+- **Never** re-ask the operator for git steps, land order of already-GO PRs,
+  or “should we fan out to Claude/GPT?” when Grok self-parallel is sufficient.
+- Prefer continuing tool work over conversational check-ins. Put progress on
+  the git DAG (PR notes) so peer agents see it without the human as bus.
+- End operator-facing answers only when a true product fork remains (budget
+  raise, legal, credentials the agent cannot mint). Otherwise state what was
+  shipped to the DAG and keep going.
