@@ -135,10 +135,51 @@ def _workflow_run_url(repository: str) -> str | None:
     return f"https://github.com/{repository}/actions/runs/{run_id}"
 
 
+def _gateway_bearer_token() -> str:
+    """Resolve MCP auth: static token override, else mint a ~120s service token.
+
+    Production twin validates via Control introspection. Long-lived static
+    client keys must not be installed on Cloud Run. When
+    ``UNIGROK_MCP_TOKEN_SECRET`` is set (same as Control ``MCP_TOKEN_SECRET``),
+    mint ``service:github-review-broker`` with ``unigrok:review``.
+    """
+    static = os.environ.get("UNIGROK_CLIENT_TOKEN", "").strip()
+    if static:
+        return static
+    secret = os.environ.get("UNIGROK_MCP_TOKEN_SECRET", "").strip()
+    if not secret:
+        return ""
+    # Import path works when run as ``uv run python scripts/github-grok-review.py``
+    # with repo root on sys.path (uv / Actions checkout default).
+    try:
+        from scripts.mint_mcp_service_token import mint_service_access_token
+    except ImportError:  # pragma: no cover - script dir execution
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+        from scripts.mint_mcp_service_token import mint_service_access_token
+    issuer = os.environ.get("UNIGROK_OAUTH_ISSUER", "https://control.grokmcp.org").strip()
+    resource = os.environ.get(
+        "UNIGROK_MCP_RESOURCE_URL",
+        os.environ.get("UNIGROK_MCP_URL", "https://mcp.grokmcp.org/mcp").strip(),
+    ).strip()
+    if resource.endswith("/"):
+        resource = resource.rstrip("/")
+    # Resource must be the OAuth audience (.../mcp), not a path typo.
+    if not resource.endswith("/mcp"):
+        if resource.endswith(".org") or resource.endswith(".com"):
+            resource = f"{resource}/mcp"
+    return mint_service_access_token(
+        secret=secret,
+        issuer=issuer,
+        resource=resource,
+        service=os.environ.get("UNIGROK_SERVICE_NAME", "github-review-broker").strip(),
+        scope=os.environ.get("UNIGROK_SERVICE_SCOPE", "unigrok:review").strip(),
+    )
+
+
 async def _call_unigrok(arguments: dict[str, Any]) -> dict[str, Any]:
     url = os.environ.get("UNIGROK_MCP_URL", "http://127.0.0.1:4765/mcp")
-    headers = {"X-Client-ID": "github-actions"}
-    gateway_token = os.environ.get("UNIGROK_CLIENT_TOKEN", "").strip()
+    headers = {"X-Client-ID": "github-actions", "X-Caller": "github-review-broker"}
+    gateway_token = _gateway_bearer_token()
     if gateway_token:
         headers["Authorization"] = f"Bearer {gateway_token}"
     async with httpx.AsyncClient(headers=headers, timeout=180.0) as client:

@@ -53,7 +53,10 @@ Repository configuration (Codex/project-admin):
    - `UNIGROK_REVIEW_MCP_URL` = `https://mcp.grokmcp.org/mcp`
    - `UNIGROK_REVIEW_PLANE` = `api`
 2. Prefer short-lived OAuth / Control-minted tokens with scope `unigrok:review`.
-   A repository secret `UNIGROK_CLIENT_TOKEN` is a **temporary bridge only** —
+   Repository secret `UNIGROK_MCP_TOKEN_SECRET` must match Control
+   `MCP_TOKEN_SECRET` so Actions can mint a ~120s `service:github-review-broker`
+   token (see `scripts/mint_mcp_service_token.py`). A static
+   `UNIGROK_CLIENT_TOKEN` is a **lab-only bridge** —
    never store `XAI_API_KEY` in GitHub. Never use `XAI_API_KEY` as this token.
 3. Workflow permissions stay `contents: read` and `pull-requests: write`.
 4. Trigger: owner/member/collaborator comments `@grok review`, or

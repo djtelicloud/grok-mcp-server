@@ -17,6 +17,7 @@ from .semantic_evals import get_semantic_eval_stats
 
 import httpx
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import ToolAnnotations
 from pydantic import BaseModel
 from starlette.applications import Starlette
@@ -2079,6 +2080,55 @@ def _research_agent_count() -> int:
     return value if value in (4, 16) else 4
 
 
+def public_mcp_transport_security(
+    public_mcp_url: Optional[str] = None,
+) -> TransportSecuritySettings:
+    """DNS-rebinding allowlist for Streamable HTTP /mcp.
+
+    FastMCP defaults to localhost-only hosts when constructed with the default
+    host. Production Cloud Run serves ``mcp.grokmcp.org`` (and similar), so
+    authenticated /mcp traffic must allow the public hostname from
+    ``UNIGROK_PUBLIC_MCP_URL`` or the optional override.
+    """
+    hosts = [
+        "127.0.0.1",
+        "127.0.0.1:*",
+        "localhost",
+        "localhost:*",
+        "[::1]",
+        "[::1]:*",
+    ]
+    origins = [
+        "http://127.0.0.1",
+        "http://127.0.0.1:*",
+        "http://localhost",
+        "http://localhost:*",
+        "http://[::1]",
+        "http://[::1]:*",
+    ]
+    raw = (public_mcp_url if public_mcp_url is not None else os.environ.get("UNIGROK_PUBLIC_MCP_URL", "")).strip()
+    if raw:
+        parsed = urlsplit(raw)
+        host = (parsed.hostname or "").lower()
+        if host:
+            hosts.append(host)
+            if parsed.port:
+                hosts.append(f"{host}:{parsed.port}")
+            scheme = parsed.scheme if parsed.scheme in {"http", "https"} else "https"
+            origin = f"{scheme}://{host}"
+            if parsed.port:
+                origin = f"{origin}:{parsed.port}"
+            origins.append(origin)
+    # De-dupe while preserving order.
+    hosts = list(dict.fromkeys(hosts))
+    origins = list(dict.fromkeys(origins))
+    return TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=hosts,
+        allowed_origins=origins,
+    )
+
+
 def create_public_mcp() -> FastMCP:
     mcp = FastMCP(
         "UniGrok xAI Gateway",
@@ -2102,6 +2152,7 @@ def create_public_mcp() -> FastMCP:
         ),
         streamable_http_path="/mcp",
         stateless_http=True,
+        transport_security=public_mcp_transport_security(),
     )
     mcp.add_tool(public_agent, name="agent")
     review_widget_uri = "ui://widget/unigrok-github-review-v1.html"
