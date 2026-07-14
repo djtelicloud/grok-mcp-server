@@ -23,7 +23,7 @@ export default function ControlSignedOut() {
           <strong>Who gets in, and how it is checked.</strong>
           <p>
             Sign in with GitHub, and every request re-verifies your collaborator role
-            (triage or higher) against the repository — server-side, on each visit.
+            (write, maintain, or admin) against the repository — server-side, on each visit.
             There is nothing to configure and no separate account to create. Public
             project information stays available without any sign-in.
           </p>

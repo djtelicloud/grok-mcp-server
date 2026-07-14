@@ -19,7 +19,7 @@ export const PUBLIC_PROJECT = {
     origin: "https://control.grokmcp.org",
     authentication: "github-oauth-app",
     authorization: "fresh-server-side-github-repository-role-check",
-    minimumRole: "triage",
+    minimumRole: "write",
   },
   mcp: {
     localDefault: "http://localhost:4765/mcp",
