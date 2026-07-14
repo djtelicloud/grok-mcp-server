@@ -78,7 +78,7 @@ Start the shared service:
 
 ```bash
 docker compose up --build -d
-curl -s http://localhost:4765/healthz
+curl --fail -s http://localhost:4765/healthz
 ```
 
 For the SuperGrok subscription path, authenticate once per machine:
@@ -94,9 +94,18 @@ startup is noninteractive. The service is usable when either the API plane or
 the CLI plane is ready; features that exist only on the other plane remain
 unavailable until that credential is configured.
 
-You are done when health reports `{"status":"healthy"}` and the Control Center
-at `http://localhost:4765/ui/` says the gateway is live. Use host port `4765`
-for IDEs and browsers; `8080` is only the container's internal port.
+After configuring at least one credential path, run the final readiness gate:
+
+```bash
+curl --fail -s http://localhost:4765/readyz
+```
+
+You are done when `/readyz` reports `{"status":"ready", ...}` and the Control
+Center at `http://localhost:4765/ui/` says the gateway is live. `/healthz`
+only proves that the HTTP process is answering. `/readyz` checks that an API
+credential is configured or the CLI OAuth probe succeeds, plus writable state
+and SQLite. It does not make a paid API call to validate an API key. Use host
+port `4765` for IDEs and browsers; `8080` is only the container's internal port.
 
 For an explicit no-API-billing agent call, set `plane="cli"` and
 `fallback_policy="same_plane"`. Use `plane="api"` for a strict metered API
@@ -180,7 +189,7 @@ globally) and paste:
     "unigrok": {
       "url": "http://localhost:4765/mcp",
       "name": "UniGrok MCP Gateway",
-      "description": "Shared Grok agent with live Control Center, cost tracking, reasoning guard, OKF + WebMCP self-discovery",
+      "description": "Shared Grok agent with live Control Center, cost tracking, OKF + WebMCP self-discovery",
       "headers": { "X-Client-ID": "cursor" }
     }
   }
@@ -295,10 +304,13 @@ surface centered on:
 
 - `agent`: auto-routed Grok agent with modes `auto`, `fast`, `reasoning`,
   `thinking`, and `research`.
-- status and discovery tools that explain readiness without running inference.
+- `review_pull_request`: read-only review of caller-supplied PR evidence.
+- `grok_mcp_status` and `grok_mcp_discover_self`: non-secret status,
+  capability, model-catalog, and onboarding information.
+- `grok_mcp_restart_container`: a maintenance helper that is present but
+  refuses to act unless a trusted local operator explicitly enables it.
 
-Trusted stdio and contributor modes additionally expose specialist tools such
-as:
+Trusted stdio additionally exposes specialist tools such as:
 
 - `grok_reflect`: focused structured critique for plans, code-review notes,
   outputs, and architecture decisions.
@@ -326,6 +338,11 @@ as:
   the stable workspace-neutral service.
 - `generate_image`, `generate_video`, `extend_video`: Grok Imagine media.
 
+Contributor Forge HTTP (`:4766/mcp`) adds only commit-anchored workspace-memory
+and Swarm tools to the stable five-tool surface. It does not expose the trusted
+stdio chat, media, research, file, Git, or test registries directly. Always use
+live MCP `tools/list` as the authority for a connected surface.
+
 ### Explainable model selection
 
 `agent(model=None, mode="auto")` uses one deterministic, local-first selector:
@@ -333,8 +350,9 @@ as:
 - capability classes are `planning`, `coding`, `vision`, and `research`;
 - planning cold-starts on `grok-4.5`, coding on `grok-build-0.1`, and research
   on the live Grok 4.20 multi-agent slug;
-- explicit model pins and `UNIGROK_*_MODEL` overrides win only after strict
-  plane/catalog compatibility validation;
+- explicit model pins and `UNIGROK_*_MODEL` overrides take selection
+  precedence. Strict `plane="cli"` and `plane="api"` requests validate against
+  that plane; `plane="auto"` may defer availability checks to execution;
 - the live catalog is cached for 15 minutes and a discovery failure uses the
   bundled model directory instead of blocking a request;
 - fresh eval calibration is considered before local telemetry, but a peer
@@ -356,10 +374,11 @@ Workspace-memory operations are also available locally as
 `unigrok-mcp memory import`. The Git Notes ref is local provenance and is not
 part of ordinary branch pushes.
 
-The public HTTP surface stays intentionally small: `agent`, status, discovery,
-and the disabled-by-default maintenance helper. In unrelated projects, call
-`agent` normally and add `workspace_context` only when local project evidence
-is needed.
+The public HTTP surface stays intentionally small: `agent`, read-only PR
+review, status, discovery, and the disabled-by-default maintenance helper. In
+unrelated projects, call `agent` normally and add `workspace_context` only when
+local project evidence is needed. Treat the live MCP `tools/list` response as
+the authority for a running deployment.
 
 ## Architecture
 
@@ -447,8 +466,10 @@ The directory `/docs/okf/` contains a fully self-describing documentation bundle
 
 ### 2. WebMCP-Enabled Docs & Console
 When running the HTTP gateway, visiting `http://localhost:4765/ui/` exposes browser-native WebMCP tools under `document.modelContext`.
-Any agent visiting this page can automatically discover and call:
-- `get_schema(tool_name)`: Returns the Pydantic JSON schema of a given UniGrok tool.
+Any compatible agent visiting this page can discover and call:
+- `get_result_shape_example(tool_name)`: Returns an illustrative field map for
+  common result types. It is not a wire schema; live MCP `tools/list` is
+  authoritative.
 - `example_call(mode)`: Returns JSON templates/examples for different operational modes.
 - `simulate_reasoning_guard`: Simulates checking if a model meets the required reasoning level.
 - `fetch_okf_bundle`: Returns the metadata and file paths in the OKF bundle.
@@ -518,15 +539,16 @@ curl --fail --silent --show-error \
 
 For the subscription-backed CLI plane, open **Setup & Status** in the Control
 Center. If authentication is missing, run `docker compose run --rm
-grok-cli-auth` and complete the device-code login. UniGrok uses `grok --check`
-inside the service as its readiness probe.
+grok-cli-auth` and complete the device-code login. UniGrok probes the
+authenticated CLI with `grok models` in an API-key-stripped environment.
+`grok --check` is a prompt self-verification option, not a readiness command.
 
 </details>
 
 <details>
 <summary><strong><code>mcp-remote</code> cannot connect</strong></summary>
 
-1. Confirm the server is running: `curl http://localhost:4765/healthz`.
+1. Confirm the service is usable: `curl --fail http://localhost:4765/readyz`.
 2. Point the IDE at `http://localhost:4765/mcp`, not `/sse`.
 3. Restart the IDE's MCP client after changing its configuration.
 
@@ -549,7 +571,9 @@ inside the service as its readiness probe.
 - `example.env` is a template only. The runtime loads `.env` when present and
   rejects the placeholder key.
 - Docker publishes `127.0.0.1:4765` by default.
-- Set `UNIGROK_API_KEYS` before exposing the gateway beyond loopback.
+- Before exposing the gateway beyond loopback, require either static client
+  tokens with `UNIGROK_API_KEYS` or the documented OAuth introspection
+  boundary. Do not enable both on the production OAuth service.
 - Git write tools are disabled unless local runtime flags explicitly enable
   them.
 - Container restart is disabled by default and should only be enabled for a

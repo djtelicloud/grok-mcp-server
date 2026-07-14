@@ -7,7 +7,17 @@ description: "How to generate and edit images and videos using Grok Imagine, wit
 
 # Media Generation
 
-UniGrok integrates xAI's image generation (Grok Imagine) and video generation capabilities into the MCP server.
+UniGrok's full trusted stdio server integrates xAI's image and video generation
+capabilities.
+
+> **Surface scope:** `generate_image`, `generate_video`, and `extend_video` are
+> API-plane tools on trusted stdio only. They are not exposed by stable HTTP at
+> `:4765/mcp`, and contributor Forge does not add them. A caller must confirm
+> live `tools/list` before relying on these names. Local file inputs resolve
+> only within the trusted stdio workspace; URL inputs do not grant filesystem
+> access. In ordinary local trusted stdio, the resolved workspace
+> defaults to the UniGrok service root unless `WORKSPACE_ROOT` is set; it never
+> follows the calling IDE project implicitly.
 
 ## Media Tools Schema Contract
 
@@ -16,7 +26,7 @@ All media tools return `MediaResult` (inheriting from `BaseResult`) to guarantee
 ### `MediaResult` Output Schema
 ```json
 {
-  "response": "Summary text description of generated media...",
+  "response": "https://img.x.ai/image-xyz.png",
   "text": "Human-formatted summary markdown...",
   "finish_reason": "final_answer",
   "cost_usd": 0.05,
@@ -38,7 +48,7 @@ All media tools return `MediaResult` (inheriting from `BaseResult`) to guarantee
 }
 ```
 
-## Available Media Tools
+## Trusted stdio media tools
 
 ### 1. `generate_image`
 Generates new images or edits existing ones using text instructions.

@@ -19,8 +19,8 @@ This release introduces the all-new, high-fidelity **UniGrok Control Center UI v
 1. **Control Center UI Redesign (v0.4.0)**
    The `/ui/` interface has been completely transformed into a rich multi-tab interactive workbench for developers and agents alike:
    - **Quick Test Console**: A prompt sandbox featuring selectable execution modes (`auto`, `fast`, `reasoning`, `thinking`, `research`) and live conversation bubbles.
-   - **Schema Explorer**: Interactive tool mapping the backend Pydantic v2 schemas (`AgentResult`, `ChatResult`, etc.) dynamically.
-   - **Reasoning Guard Simulator**: Pre-flight test sandbox demonstrating router policies and block/pass states.
+   - **Result Shape Guide**: Illustrative result-field examples; live MCP `tools/list` remains the authoritative schema source.
+   - **Reasoning Guard Preview**: Local preview of reasoning-level checks; it does not execute or prove the live router path.
    - **OKF Browser**: Renders Open Knowledge Format documentation dynamically with YAML headers stripped.
    - **WebMCP Tester**: Manifest inspector and client bridge prober.
    - **Telemetry & Metrics**: Displays cost tracking, average latency, and raw Prometheus metrics.

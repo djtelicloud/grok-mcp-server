@@ -1069,7 +1069,7 @@ async def grok_mcp_discover_self(include_models: bool = False) -> SystemResult:
             "For full schemas, reasoning level weights, media generation params, metrics, and verified support answers, ingest these files.\n\n"
             "## WebMCP Manifest\n"
             "- **Path:** `/.well-known/webmcp`\n"
-            "Exposes browser-native callable tools (like `get_schema`, `example_call`, etc.) directly on the console documentation UI."
+            "Exposes browser-native helpers (like `get_result_shape_example`, `example_call`, etc.) directly on the console documentation UI. Result shapes are illustrative; live MCP `tools/list` schemas are authoritative."
         )
 
         return SystemResult(

@@ -77,12 +77,21 @@ def test_webmcp_manifest_is_open(monkeypatch):
 
     with TestClient(create_app()) as client:
         res = client.get("/.well-known/webmcp")
+        ui_res = client.get("/ui/.well-known/webmcp")
 
     assert res.status_code == 200
+    assert ui_res.status_code == 200
     manifest = res.json()
+    assert ui_res.json() == manifest
     assert manifest["webmcp_version"] == "0.1"
     assert manifest["name"] == "uni-grok-mcp-docs"
-    assert len(manifest["tools"]) == 4
+    assert len(manifest["tools"]) == 6
+    tools = {tool["name"]: tool for tool in manifest["tools"]}
+    assert "unigrok_ui_layout_get" in tools
+    assert "get_result_shape_example" in tools
+    assert "Deprecated compatibility alias" in tools["get_schema"]["description"]
+    assert "non-authoritative" in tools["get_result_shape_example"]["description"]
+    assert "tools/list" in tools["get_result_shape_example"]["description"]
 
 
 def test_public_discovery_is_sanitized_in_cloudrun(monkeypatch):

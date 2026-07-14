@@ -453,15 +453,32 @@ def local_context_enabled() -> bool:
         return os.environ.get("UNIGROK_ENABLE_LOCAL_CONTEXT", "").lower() in ("1", "true", "yes")
     return True
 
-# Initialize configurations
-root_dir = PathResolver.get_service_root()
-env_path = root_dir / ".env"
-if env_path.exists():
-    load_dotenv(env_path)
-else:
-    load_dotenv(root_dir / "example.env")
+# Initialize configurations. ``example.env`` is distribution documentation,
+# never a runtime fallback: loading it would turn a checked-in placeholder into
+# process configuration for source/stdio launches.
+_PLACEHOLDER_XAI_API_KEY = "your_xai_api_key_here"
 
-XAI_API_KEY = os.getenv("XAI_API_KEY", "")
+
+def _load_service_environment(root_dir: Path) -> None:
+    env_path = root_dir / ".env"
+    if env_path.is_file():
+        load_dotenv(env_path)
+
+
+def _normalize_xai_api_key(value: Optional[str]) -> str:
+    key = str(value or "").strip()
+    return "" if key == _PLACEHOLDER_XAI_API_KEY else key
+
+
+root_dir = PathResolver.get_service_root()
+_load_service_environment(root_dir)
+_raw_xai_api_key = os.getenv("XAI_API_KEY", "")
+XAI_API_KEY = _normalize_xai_api_key(_raw_xai_api_key)
+if _raw_xai_api_key.strip() == _PLACEHOLDER_XAI_API_KEY:
+    # Downstream HTTP readiness and client construction also consult the live
+    # process environment, so remove the sentinel rather than merely hiding it
+    # in the module constant.
+    os.environ.pop("XAI_API_KEY", None)
 
 _LOCAL_EXECUTOR: Optional[concurrent.futures.ThreadPoolExecutor] = None
 
@@ -773,7 +790,7 @@ CLI_MODEL_IDS = tuple(FALLBACK_GROK_CLI_MODELS)
 
 
 def xai_api_key_configured() -> bool:
-    return bool((os.environ.get("XAI_API_KEY") or XAI_API_KEY or "").strip())
+    return bool(_normalize_xai_api_key(os.environ.get("XAI_API_KEY") or XAI_API_KEY))
 
 
 def cli_plane_ready_for_local_runtime() -> bool:

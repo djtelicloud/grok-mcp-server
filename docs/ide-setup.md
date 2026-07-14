@@ -12,10 +12,10 @@ host-facing MCP, health, and Control Center URLs always use port `4765`;
 ## Start the service
 
 ```bash
-cd /path/to/uni-grok-mcp        # the real checkout, not a worktree
+cd /path/to/grok-mcp-server     # the primary checkout, not a task worktree
 uv run python main.py init      # first time only; creates .env if absent
 docker compose up -d --build
-curl -s http://localhost:4765/healthz   # -> {"status":"healthy"}
+curl --fail -s http://localhost:4765/healthz
 ```
 
 Choose at least one credential path:
@@ -27,22 +27,34 @@ Choose at least one credential path:
 - **Both:** recommended for maximum coverage. The default `cli_first` policy
   prefers compatible subscription work while preserving API-only features.
 
-Open `http://localhost:4765/ui/` and use **Setup & Status** to confirm which
+After configuring at least one credential path, run:
+
+```bash
+curl --fail -s http://localhost:4765/readyz
+```
+
+`/healthz` only proves that the HTTP process is alive. A successful `/readyz`
+checks API credential presence or a live CLI OAuth probe, writable state, and
+SQLite. It does not spend a request to validate an API key. Open
+`http://localhost:4765/ui/` and use **Setup & Status** to confirm which
 credential planes are ready before configuring every IDE.
 
 Compose loads secrets from the launched checkout's `.env`. Agent worktrees
 often do not have that gitignored file; set
-`UNIGROK_ENV_FILE=/path/to/.env` before `docker compose up` to use a secret
-file from another checkout.
+`UNIGROK_ENV_FILE=/path/to/grok-mcp-server/.env` before `docker compose up` to
+use the primary checkout's secret file.
 
 The stable compose file runs the image's baked application at `/app`, stores
 mutable data in a Docker volume mounted at `/state`, and publishes
 `127.0.0.1:4765`. It does not mount the UniGrok checkout or an IDE project.
 Compose declares that this is a trusted loopback-only host publication so the
-local service can run without a client token. The application still requires `UNIGROK_API_KEYS` for any
-direct non-loopback bind or Cloud Run deployment. Remove the
-`UNIGROK_TRUSTED_LOOPBACK_PROXY` declaration and set `UNIGROK_API_KEYS` before
-changing the port mapping to `0.0.0.0:4765:8080` or `4765:8080`.
+local service can run without a client token. Any direct non-loopback bind must
+enable authentication: static deployments use `UNIGROK_API_KEYS`; the private
+Cloud Run deployment instead uses `UNIGROK_OAUTH_INTROSPECTION_URL` and the
+associated OAuth discovery settings. Remove the
+`UNIGROK_TRUSTED_LOOPBACK_PROXY` declaration and configure one of those
+documented authentication boundaries before changing the port mapping to
+`0.0.0.0:4765:8080` or `4765:8080`.
 
 Do not edit Compose to mount each project you open. MCP registration is global
 service access, not filesystem authority. A calling IDE supplies only the
@@ -99,8 +111,11 @@ even if both assert `X-Client-ID: vscode`. Budgets bind to the authenticated
 principal. Omitting the header shares that principal's client-neutral
 namespace.
 
-If `UNIGROK_API_KEYS` is set, also add
+If the local/static gateway sets `UNIGROK_API_KEYS`, also add
 `"Authorization": "Bearer <one-of-those-keys>"` to each config's headers.
+OAuth-protected remote clients obtain a scoped access token through the
+published RFC 9728 metadata; they do not reuse an xAI key or a local static
+gateway token.
 
 ## Cursor (`.cursor/mcp.json` in project root, or `~/.cursor/mcp.json`)
 
@@ -112,7 +127,7 @@ With Cursor joining the xAI family, it's the natural first-class Grok IDE.
     "unigrok": {
       "url": "http://localhost:4765/mcp",
       "name": "UniGrok MCP Gateway",
-      "description": "Shared Grok agent with live Control Center, cost tracking, reasoning guard, OKF + WebMCP self-discovery",
+      "description": "Shared Grok agent with live Control Center, cost tracking, OKF + WebMCP self-discovery",
       "headers": { "X-Client-ID": "cursor" }
     }
   }

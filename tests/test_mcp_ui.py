@@ -1,8 +1,13 @@
+import json
 from html.parser import HTMLParser
+from pathlib import Path
 
 from starlette.testclient import TestClient
 
 from src.http_server import create_app
+
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 class _AnchorHrefParser(HTMLParser):
@@ -42,9 +47,9 @@ def test_mcp_ui_static_files_are_served(monkeypatch):
     assert index.status_code == 200
     assert "<title>UniGrok MCP v0.6.0 Control Center</title>" in index.text
     assert '<span class="version-badge">v0.6.0</span>' in index.text
-    assert 'script type="module" src="./app.js?v=grok-v0.6.0-r3"' in index.text
-    assert '<link rel="stylesheet" href="./styles.css?v=grok-v0.6.0-r3" />' in index.text
-    assert '<link rel="stylesheet" href="./tokens.css?v=grok-v0.6.0-r3" />' in index.text
+    assert 'script type="module" src="./app.js?v=grok-v0.6.0-r4"' in index.text
+    assert '<link rel="stylesheet" href="./styles.css?v=grok-v0.6.0-r4" />' in index.text
+    assert '<link rel="stylesheet" href="./tokens.css?v=grok-v0.6.0-r4" />' in index.text
     assert "Control Center" in index.text
     assert "Bearer token" not in index.text
     assert "Agent Playground" in index.text
@@ -60,6 +65,27 @@ def test_mcp_ui_static_files_are_served(monkeypatch):
     assert "/runtimez" in script.text
     assert "grok_mcp_discover_self" in script.text
     assert "simulate_reasoning_guard" in script.text
+    assert "get_result_shape_example" in script.text
+    assert 'name: "get_schema"' in script.text
+    assert "Deprecated compatibility alias" in script.text
+    assert "authoritative: false" in script.text
+    assert "Live MCP tools/list schemas are authoritative" in script.text
+    assert "Result Shape Guide" in index.text
+    assert "startup ingestion is not automatic" in index.text
+    assert "before hitting the API" not in script.text
+    assert "safely route this call" not in script.text
+    assert '"grok-4.3": 0' in script.text
+    assert '"grok-4.5": 0' in script.text
+    assert "no declared reasoning_effort" in script.text
+    assert "Standard / Medium" not in index.text
+    assert "Premier / High" not in index.text
+    assert 'auto: { prompt: "Describe quantum computing."' in script.text
+    profiles = [
+        json.loads(path.read_text(encoding="utf-8"))
+        for path in (ROOT / ".grok" / "hyperparams").glob("*.json")
+    ]
+    assert profiles
+    assert all("reasoning_effort" not in profile for profile in profiles)
     assert "fetch_okf_bundle" in script.text
     assert 'fetch("/docs/okf/okf-manifest.json")' in script.text
     assert "source.files.map" in script.text
@@ -363,7 +389,7 @@ def test_mcp_ui_markdown_renderer_is_shared_and_escape_first():
     assert "\\u000E-\\u001F" in renderer.text
     # app.js imports the shared renderer at the current cache-bust version and
     # no longer defines its own.
-    assert 'from "./markdown.js?v=grok-v0.6.0-r3"' in script.text
+    assert 'from "./markdown.js?v=grok-v0.6.0-r4"' in script.text
     assert "import { parseMarkdown" in script.text
     assert "function parseMarkdown" not in script.text
     assert "renderMarkdownInto" in script.text

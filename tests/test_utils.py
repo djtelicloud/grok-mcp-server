@@ -3954,6 +3954,29 @@ class TestCliPlaneV2:
         assert "GROK_API_KEY" not in child_env
         assert child_env["KEEP_ME"] == "yes"
 
+    def test_example_env_is_never_loaded_as_runtime_configuration(
+        self, monkeypatch, tmp_path
+    ):
+        from src import utils
+
+        (tmp_path / "example.env").write_text(
+            "XAI_API_KEY=xai-example-must-not-load\n", encoding="utf-8"
+        )
+        loaded = []
+        monkeypatch.setattr(utils, "load_dotenv", loaded.append)
+
+        utils._load_service_environment(tmp_path)
+
+        assert loaded == []
+
+    def test_xai_placeholder_is_not_a_configured_credential(self, monkeypatch):
+        from src import utils
+
+        monkeypatch.setenv("XAI_API_KEY", "your_xai_api_key_here")
+
+        assert utils._normalize_xai_api_key("your_xai_api_key_here") == ""
+        assert utils.xai_api_key_configured() is False
+
     def test_isolated_cli_runtime_has_empty_workspace_and_durable_oauth_path(
         self, tmp_path, monkeypatch
     ):

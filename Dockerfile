@@ -56,7 +56,8 @@ RUN useradd --create-home --uid 1000 --shell /usr/sbin/nologin appuser \
     && chown -R appuser:appuser /app /state /home/appuser/.grok
 USER appuser
 
-# Expose port (optional for stdio, required for HTTP transport later if I will add it)
+# The container command runs the current HTTP gateway on its internal port.
+# Host publication remains explicit and loopback-bound in the default Compose file.
 EXPOSE 8080
 
 # Containers must listen on all interfaces: the container loopback is not
