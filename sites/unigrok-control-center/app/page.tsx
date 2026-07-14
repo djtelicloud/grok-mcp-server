@@ -14,7 +14,6 @@ export default function Home() {
         <nav aria-label="Public navigation">
           <a href="#how-it-works">How it works</a>
           <a href="#start">Get started</a>
-          <a href="/swarm/">Swarm Playground</a>
           <a href="/docs/okf/index.md">Knowledge</a>
           <a href="/contribute">Contribute</a>
           <a href={PUBLIC_PROJECT.repository.url}>GitHub</a>
@@ -76,7 +75,7 @@ export default function Home() {
           <article><b>01</b><h3>Shared MCP gateway</h3><p>Connect multiple IDE agents to one stable endpoint with per-client attribution and server-held credentials.</p><code>POST /mcp</code></article>
           <article><b>02</b><h3>Two execution planes</h3><p>The xAI API plane and Grok CLI subscription plane have separate catalogs, sessions, costs, and failover rules.</p><code>api ≠ cli</code></article>
           <article><b>03</b><h3>Supervised collaboration</h3><p>Agents and humans can propose changes while deterministic tests and Codex-owned landing keep main coherent.</p><code>review → verify → land</code></article>
-          <article><b>04</b><h3>Swarm code optimization</h3><p>Paste Python for private browser-side analytics, replay a measured run, then move to local Forge for verified evolutionary search.</p><a href="/swarm/"><code>open playground →</code></a></article>
+          <article><b>04</b><h3>IDE-first collaboration</h3><p>Use UniGrok through the coding agent that already understands your project. Contributor-only optimization tools stay behind the authenticated Console.</p><code>IDE → MCP → Grok</code></article>
         </div>
       </section>
 

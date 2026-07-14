@@ -29,7 +29,7 @@ type IconName =
   | "terminal"
   | "x";
 
-type PanelName = "connection" | "deployments" | "grok-review" | "pull-requests" | "repository" | "review" | "runtime" | "settings" | null;
+type PanelName = "connection" | "deployments" | "grok-review" | "pull-requests" | "repository" | "review" | "runtime" | "settings" | "swarm" | null;
 type WizardMode = "local" | "tunnel";
 
 type ControlCenterProps = {
@@ -51,6 +51,8 @@ type CommandItem = {
 
 const secureTunnelGuide = "https://developers.openai.com/api/docs/guides/secure-mcp-tunnels";
 const sitesGuide = "https://learn.chatgpt.com/docs/sites";
+const localForgeSwarm = "http://127.0.0.1:4766/ui/swarm.html";
+const swarmReviewPrompt = `Open the UniGrok repository in this IDE and use the Contributor Forge Swarm workflow in dry-run mode to inspect the current change. Verify Core and Forge health, run the relevant measured checks, and summarize the evidence. Do not apply changes, open a pull request, or land anything until I approve.`;
 const guardrails = [
   "Identity and fresh project authorization stay separate",
   "Missing, revoked, or public-read-only GitHub access denies control access",
@@ -207,6 +209,7 @@ export default function ControlCenter({ authorization, connection, previewMode =
   const commands: CommandItem[] = [
     { action: () => openPanel("pull-requests", "pull-requests"), detail: "View the explicit PR integration state", icon: "pr", label: "Open pull-request status" },
     { action: () => openPanel("grok-review", "grok-review"), detail: "View the explicit Grok review integration state", icon: "review", label: "Open Grok review results" },
+    { action: () => openPanel("swarm", "swarm"), detail: "Launch a dry-run Swarm review through your local IDE", icon: "spark", label: "Open Swarm workflow" },
     { action: () => openPanel("connection", "connection"), detail: "Choose local development or Secure MCP Tunnel", icon: "cloud", label: "Open connection wizard" },
     { action: () => openPanel("repository", "repository"), detail: "Configure repository metadata without a GitHub token", icon: "github", label: "Review repository setup" },
     { action: () => openPanel("review", "review"), detail: "Inspect control-surface privacy and secret boundaries", icon: "review", label: "View control guardrails" },
@@ -287,6 +290,7 @@ export default function ControlCenter({ authorization, connection, previewMode =
     { id: "overview", label: "Overview", icon: "home", panel: null },
     { id: "pull-requests", label: "Pull requests", icon: "pr", panel: "pull-requests" },
     { id: "grok-review", label: "Grok review", icon: "review", panel: "grok-review" },
+    { id: "swarm", label: "Swarm", icon: "spark", panel: "swarm" },
     { id: "connection", label: "Connection", icon: "cloud", panel: "connection" },
     { id: "runtime", label: "Runtime", icon: "activity", panel: "runtime" },
     { id: "deployments", label: "Deployment", icon: "deploy", panel: "deployments" },
@@ -479,6 +483,7 @@ export default function ControlCenter({ authorization, connection, previewMode =
             {panel === "grok-review" && <GrokReviewDetail snapshot={snapshot} />}
             {panel === "review" && <ReviewDetail />}
             {panel === "runtime" && <RuntimeDetail connection={connection} />}
+            {panel === "swarm" && <SwarmDetail copyText={copyText} />}
             {panel === "deployments" && <DeploymentDetail siteProvisioned={siteProvisioned} snapshot={snapshot} />}
             {panel === "settings" && <SettingsDetail authorization={authorization} displayName={user.displayName} previewMode={previewMode} signOutPath={signOutPath} />}
           </aside>
@@ -586,6 +591,27 @@ function RuntimeDetail({ connection }: { connection: PublicConnectionConfig }) {
       <DrawerHeader icon="activity" eyebrow="Runtime boundary" title="Verification is deliberately local" description="The Site reports configuration metadata only. It does not proxy arbitrary URLs or use a visitor-supplied target." />
       <section className="drawer-section data-list"><h3>Configured metadata</h3><div><span>Mode</span><strong>{connection.connectionMode}</strong></div><div><span>Label</span><strong>{connection.endpointLabel}</strong></div><div><span>Health route</span><strong><code>/healthz</code></strong></div><div><span>MCP route</span><strong><code>/mcp</code></strong></div></section>
       <section className="drawer-section steps-list"><h3>Truthful verification</h3><p><span>1</span><span className="step-copy">For local mode, run the health command on the UniGrok machine.</span></p><p><span>2</span><span className="step-copy">For tunnel mode, run tunnel-client doctor beside UniGrok.</span></p><p><span>3</span><span className="step-copy">Treat this Site as configuration guidance until an approved integration is added.</span></p></section>
+    </div>
+  );
+}
+
+function SwarmDetail({ copyText }: { copyText: (value: string, successMessage: string) => Promise<void> }) {
+  return (
+    <div className="drawer-content">
+      <DrawerHeader icon="spark" eyebrow="Contributor workflow" title="Swarm lives behind the Insider Console" description="Use your IDE agent as the operator. The Console supplies a bounded prompt and the local Forge link; it does not become a second agent chat." />
+      <section className="drawer-section steps-list">
+        <h3>Verified optimization loop</h3>
+        <p><span>1</span><span className="step-copy">Copy the dry-run prompt into the IDE that already has this repository open.</span></p>
+        <p><span>2</span><span className="step-copy">Let the IDE agent call UniGrok and the contributor-only Swarm tools with repository context.</span></p>
+        <p><span>3</span><span className="step-copy">Review measured evidence before allowing apply, PR, or landing actions.</span></p>
+      </section>
+      <section className="drawer-section">
+        <h3>Paste into your IDE agent</h3>
+        <pre className="safe-code"><code>{swarmReviewPrompt}</code></pre>
+        <button className="secondary-action drawer-wide-action" onClick={() => copyText(swarmReviewPrompt, "Swarm review prompt copied")}><Icon name="code" size={17} /> Copy Swarm review prompt</button>
+      </section>
+      <div className="runtime-callout warning"><Icon name="shield" size={21} /><p><strong>Local contributor boundary</strong><span>The Forge view is available only on the contributor runtime on this machine. The public project Site does not expose the Swarm playground.</span></p></div>
+      <a className="external-doc-link" href={localForgeSwarm} target="_blank" rel="noreferrer">Open local Forge Swarm <Icon name="external" size={16} /></a>
     </div>
   );
 }
