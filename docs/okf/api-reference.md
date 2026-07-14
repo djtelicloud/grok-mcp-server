@@ -26,6 +26,143 @@ def init_project(root: Path | None=None, stream: TextIO | None=None) -> int
 
 Create first-run files and print IDE setup snippets.
 
+## completion_envelope.py {#completion_envelope}
+
+### Class: `CompletionContractError` {#completion_envelope-completioncontracterror}
+
+```python
+class CompletionContractError
+```
+
+**Keywords:** completion, contract, error
+
+The completion cannot be accepted under the mechanical contract.
+
+### Class: `CompletionNotFinalError` {#completion_envelope-completionnotfinalerror}
+
+```python
+class CompletionNotFinalError
+```
+
+**Keywords:** completion, not, final, error
+
+A progress or blocked envelope was presented as a final result.
+
+### Class: `EvidenceResolutionError` {#completion_envelope-evidenceresolutionerror}
+
+```python
+class EvidenceResolutionError
+```
+
+**Keywords:** evidence, resolution, error
+
+An evidence reference did not resolve to current verified evidence.
+
+### Class: `SchemaCompositionError` {#completion_envelope-schemacompositionerror}
+
+```python
+class SchemaCompositionError
+```
+
+**Keywords:** schema, composition, error
+
+A caller result schema cannot be safely embedded in the envelope.
+
+### Class: `EvidenceRef` {#completion_envelope-evidenceref}
+
+```python
+class EvidenceRef
+```
+
+**Keywords:** evidence, ref
+
+Content-bound pointer to one verifier receipt.
+
+### Class: `EvidenceReceipt` {#completion_envelope-evidencereceipt}
+
+```python
+class EvidenceReceipt
+```
+
+**Keywords:** evidence, receipt
+
+Minimal local receipt shape accepted by evidence resolution.
+
+``verification_status`` describes the verifier receipt itself.  It is not a
+task-success label and is never promoted into semantic outcome telemetry.
+
+### Function: `compose_completion_schema` {#completion_envelope-compose_completion_schema}
+
+```python
+def compose_completion_schema(result_schema: Mapping[str, Any] | None=None) -> dict[str, Any]
+```
+
+**Keywords:** compose, completion, schema
+
+Return a strict JSON Schema for one completion envelope.
+
+A caller schema is copied, checked for remote or scope-changing references,
+and embedded under ``complete.result``.  Local JSON-pointer references are
+rebased to that location.  The caller's object is never mutated.
+
+### Function: `parse_completion_envelope` {#completion_envelope-parse_completion_envelope}
+
+```python
+def parse_completion_envelope(payload: Mapping[str, Any] | str | bytes | bytearray, *, result_schema: Mapping[str, Any] | None=None) -> CompletionEnvelope
+```
+
+**Keywords:** parse, completion, envelope
+
+Parse an envelope locally and validate a complete result's caller schema.
+
+### Function: `evidence_receipt_digest` {#completion_envelope-evidence_receipt_digest}
+
+```python
+def evidence_receipt_digest(receipt: EvidenceReceipt) -> str
+```
+
+**Keywords:** evidence, receipt, digest
+
+Return the canonical content digest used by an :class:`EvidenceRef`.
+
+### Function: `validate_evidence_refs` {#completion_envelope-validate_evidence_refs}
+
+```python
+def validate_evidence_refs(envelope: CompletionEnvelope, receipts: Iterable[EvidenceReceipt], *, now: datetime | None=None) -> tuple[EvidenceReceipt, ...]
+```
+
+**Keywords:** validate, evidence, refs
+
+Resolve envelope references to current, verified, same-attempt receipts.
+
+This resolver intentionally says nothing about which receipts were required
+for the attempt.  Finalization must additionally compare the model-authored
+references with a runtime-authoritative set via
+:func:`unwrap_complete_result`.
+
+### Function: `unwrap_complete_result` {#completion_envelope-unwrap_complete_result}
+
+```python
+def unwrap_complete_result(envelope: CompletionEnvelope, *, expected_attempt_id: str, expected_ttl_expires_at: datetime, provider_finish_reason: str, expected_evidence_refs: Iterable[EvidenceRef], evidence_requirement: EvidenceRequirement, receipts: Iterable[EvidenceReceipt], now: datetime | None=None, result_schema: Mapping[str, Any] | None=None) -> JsonValue
+```
+
+**Keywords:** unwrap, complete, result
+
+Mechanically accept and return only a complete result.
+
+This is intentionally not a semantic-success decision.  It checks the
+authoritative attempt and TTL, the provider's terminal reason, result
+presence, the runtime-selected evidence set, and receipt resolution, then
+returns a defensive copy of the result without leaking wrapper fields.
+
+``evidence_requirement`` has no default.  Action-producing paths must use
+``"required"`` with a nonempty authoritative reference set.  The ``"none"``
+policy is an explicit escape hatch for direct-answer paths and rejects any
+expected or model-supplied references.  Neither policy proves that free text
+is semantically complete: a typed ``complete`` result can still contain a
+promise, so Grok arbitration (and later calibrated Needle evaluation) stays
+mandatory wherever semantic completion matters.
+
 ## credentials.py {#credentials}
 
 ### Function: `credential_plane_policy` {#credentials-credential_plane_policy}
