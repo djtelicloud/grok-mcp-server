@@ -623,6 +623,8 @@ _PROTOCOL_MEMBERS = (
     "list_unsynced_task_memories", "mark_task_memory_synced",
     "mark_task_memory_sync_failed", "get_task_memories_by_remote_ids",
     "count_unsynced_task_memories", "reset_task_memory_sync",
+    "begin_provider_attempt", "complete_provider_attempt",
+    "mark_stale_provider_attempts_indeterminate", "list_provider_attempts",
     "save_workspace_evidence", "get_workspace_evidence",
     "list_workspace_evidence", "list_unsynced_workspace_evidence",
     "mark_workspace_evidence_synced", "mark_workspace_evidence_sync_failed",

@@ -28,6 +28,7 @@ from .contracts import (
     ProviderTokenUsage,
     is_safe_model_id,
     is_safe_response_id,
+    model_visible_messages,
 )
 from .errors import (
     ProviderError,
@@ -140,16 +141,7 @@ class HTTPProviderAdapter:
             raise ProviderTransportError(self.provider, "ttl_expired") from None
 
     def _model_messages(self, request: ProviderRequest) -> list[ProviderMessage]:
-        expires = (
-            request.supervision.ttl_expires_at.astimezone(UTC)
-            .isoformat(timespec="seconds")
-            .replace("+00:00", "Z")
-        )
-        ttl_fact = ProviderMessage(
-            role="system",
-            content=f"Supervisor TTL expires at {expires}; do not claim work after it.",
-        )
-        return [ttl_fact, *request.messages]
+        return list(model_visible_messages(request))
 
     async def attempt(self, request: ProviderRequest) -> ProviderAttemptResult:
         """Return a complete worker result without granting it semantic authority."""

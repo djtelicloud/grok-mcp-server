@@ -831,6 +831,30 @@ class WorkerAuthority
 
 Mechanical denial of supervisor authority to external model workers.
 
+### Function: `model_visible_messages` {#providers-contracts-model_visible_messages}
+
+```python
+def model_visible_messages(request: ProviderRequest) -> tuple[ProviderMessage, ...]
+```
+
+**Keywords:** model, visible, messages
+
+Return the exact normalized messages shown to a subordinate worker.
+
+The supervisor deadline is model-visible and shared by every transport.
+Keeping this construction in the contract module lets the adapter, the
+attempt ledger, and the Grok broker layer hash the same logical request.
+
+### Class: `ProviderAttemptStart` {#providers-contracts-providerattemptstart}
+
+```python
+class ProviderAttemptStart
+```
+
+**Keywords:** provider, attempt, start
+
+Grok-authorized identity for one physical subordinate channel call.
+
 ### Class: `ProviderFailureReceipt` {#providers-contracts-providerfailurereceipt}
 
 ```python
@@ -3338,6 +3362,39 @@ async def GrokSessionStore.reset_task_memory_sync(self) -> int
 Re-queue every VERIFIED task memory for mirroring (rag backfill
 --force-reupload): deterministic document names keep the re-upload
 idempotent on the collection side. Returns the row count.
+
+### Method: `GrokSessionStore.begin_provider_attempt` {#utils-groksessionstore-begin_provider_attempt}
+
+```python
+async def GrokSessionStore.begin_provider_attempt(self, start: Any) -> bool
+```
+
+**Keywords:** grok, session, store, begin, provider, attempt
+
+Durably record Grok authorization before a worker channel effect.
+
+Returns True for a new row and False for an exact idempotent replay.
+Reusing either identity for different work fails closed.
+
+### Method: `GrokSessionStore.complete_provider_attempt` {#utils-groksessionstore-complete_provider_attempt}
+
+```python
+async def GrokSessionStore.complete_provider_attempt(self, attempt_id: str, result: Any) -> bool
+```
+
+**Keywords:** grok, session, store, complete, provider, attempt
+
+Bind one normalized transport result to its exact Grok start row.
+
+### Method: `GrokSessionStore.mark_stale_provider_attempts_indeterminate` {#utils-groksessionstore-mark_stale_provider_attempts_indeterminate}
+
+```python
+async def GrokSessionStore.mark_stale_provider_attempts_indeterminate(self, stale_before: datetime) -> int
+```
+
+**Keywords:** grok, session, store, mark, stale, provider, attempts, indeterminate
+
+Close crash-left starts without pretending the worker failed.
 
 ### Method: `GrokSessionStore.save_fact` {#utils-groksessionstore-save_fact}
 
