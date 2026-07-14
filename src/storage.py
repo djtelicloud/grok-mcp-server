@@ -146,6 +146,31 @@ class SessionStoreProtocol(Protocol):
         delegation_id: Optional[str] = None,
         limit: int = 100,
     ) -> List[Dict[str, Any]]: ...
+    async def lease_provider_attempts_for_harvest(
+        self,
+        lease_id: str,
+        lease_seconds: float = 60.0,
+        limit: int = 25,
+    ) -> List[Dict[str, Any]]: ...
+    async def provider_attempt_harvest_lease_is_fresh(
+        self,
+        attempt_id: str,
+        lease_id: str,
+        minimum_remaining_seconds: float = 0.0,
+    ) -> bool: ...
+    async def mark_provider_attempt_harvest_synced(
+        self,
+        attempt_id: str,
+        lease_id: str,
+        remote_file_id: str,
+    ) -> bool: ...
+    async def mark_provider_attempt_harvest_retry(
+        self,
+        attempt_id: str,
+        lease_id: str,
+        error: str,
+        backoff_seconds: float,
+    ) -> bool: ...
     # ── Commit-anchored workspace evidence ─────────────────────────────────
     async def save_workspace_evidence(self, payload: Dict[str, Any]) -> int: ...
     async def get_workspace_evidence(self, evidence_id: str) -> Optional[Dict[str, Any]]: ...

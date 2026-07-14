@@ -18,7 +18,7 @@ from src.utils import GrokSessionStore
 # The current schema head. Bump this alongside any new migration — the
 # sequential-chain test below will fail loudly if the source and this pin
 # ever disagree.
-SCHEMA_HEAD = 16
+SCHEMA_HEAD = 17
 
 # Every table a fully migrated store must carry (sqlite internals and the
 # optional knowledge_fts shadow tables excluded — FTS5 availability is a
@@ -406,20 +406,29 @@ class TestV16TelemetryAttempts:
         conn = sqlite3.connect(path)
         try:
             conn.execute("DROP TABLE telemetry_attempts;")
+            conn.execute(
+                "ALTER TABLE provider_attempts DROP COLUMN harvest_document_json;"
+            )
+            conn.execute(
+                "ALTER TABLE provider_attempts DROP COLUMN harvest_document_digest;"
+            )
+            conn.execute(
+                "ALTER TABLE provider_attempts DROP COLUMN harvest_episode_id;"
+            )
             conn.execute("PRAGMA user_version = 15;")
             conn.commit()
         finally:
             conn.close()
 
     @pytest.mark.asyncio
-    async def test_v15_db_upgrades_to_digest_bound_attempt_rows(self, tmp_path):
+    async def test_v15_db_upgrades_through_v16_and_v17(self, tmp_path):
         db_path = tmp_path / "legacy_v15.db"
         await self._freeze_at_v15(db_path)
 
         store = GrokSessionStore(db_path=db_path)
         try:
             await store._ensure_initialized()
-            assert await _fetch_version(store) == 16
+            assert await _fetch_version(store) == 17
             assert await _fetch_columns(store, "telemetry_attempts") == {
                 "id",
                 "telemetry_id",
@@ -434,6 +443,11 @@ class TestV16TelemetryAttempts:
                     "telemetry_id",
                     "attempt_ordinal",
                 ]
+            assert {
+                "harvest_document_json",
+                "harvest_document_digest",
+                "harvest_episode_id",
+            } <= await _fetch_columns(store, "provider_attempts")
         finally:
             await store.close()
 
@@ -455,6 +469,142 @@ class TestV16TelemetryAttempts:
             assert await _fetch_version(store) == 15
         finally:
             await store.close()
+
+
+class TestV17ProviderAttemptCertification:
+    @staticmethod
+    async def _create_current(path):
+        store = GrokSessionStore(db_path=path)
+        await store._ensure_initialized()
+        await store.close()
+
+    @pytest.mark.asyncio
+    async def test_current_head_rejects_foreign_provider_attempt_column(self, tmp_path):
+        db_path = tmp_path / "foreign-v17-column.db"
+        await self._create_current(db_path)
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute("ALTER TABLE provider_attempts ADD COLUMN foreign_data TEXT;")
+            conn.commit()
+        finally:
+            conn.close()
+
+        store = GrokSessionStore(db_path=db_path)
+        try:
+            with pytest.raises(RuntimeError, match="v17 columns"):
+                await store._ensure_initialized()
+            assert await _fetch_version(store) == 17
+        finally:
+            await store.close()
+
+    @pytest.mark.asyncio
+    async def test_current_head_rejects_missing_provider_attempt_column(self, tmp_path):
+        db_path = tmp_path / "missing-v17-column.db"
+        await self._create_current(db_path)
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute(
+                "ALTER TABLE provider_attempts DROP COLUMN harvest_episode_id;"
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        store = GrokSessionStore(db_path=db_path)
+        try:
+            with pytest.raises(RuntimeError, match="v17 columns"):
+                await store._ensure_initialized()
+            assert await _fetch_version(store) == 17
+        finally:
+            await store.close()
+
+    @pytest.mark.parametrize(
+        ("index_name", "replacement_sql"),
+        (
+            (
+                "idx_provider_attempts_request",
+                "CREATE UNIQUE INDEX idx_provider_attempts_request "
+                "ON provider_attempts(request_id) WHERE request_id IS NOT NULL;",
+            ),
+            (
+                "idx_provider_attempts_harvest",
+                "CREATE INDEX idx_provider_attempts_harvest "
+                "ON provider_attempts(harvest_status, harvest_next_at, id) "
+                "WHERE harvest_status != 'held';",
+            ),
+        ),
+    )
+    @pytest.mark.asyncio
+    async def test_current_head_rejects_partial_required_index_without_mutation(
+        self, tmp_path, index_name, replacement_sql
+    ):
+        db_path = tmp_path / f"partial-{index_name}.db"
+        await self._create_current(db_path)
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute(f"DROP INDEX {index_name};")
+            conn.execute(replacement_sql)
+            conn.commit()
+            index_sql_before = conn.execute(
+                "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?",
+                (index_name,),
+            ).fetchone()[0]
+        finally:
+            conn.close()
+
+        store = GrokSessionStore(db_path=db_path)
+        try:
+            with pytest.raises(RuntimeError, match="v17 indexes"):
+                await store._ensure_initialized()
+        finally:
+            await store.close()
+        conn = sqlite3.connect(db_path)
+        try:
+            assert conn.execute("PRAGMA user_version;").fetchone()[0] == 17
+            assert (
+                conn.execute(
+                    "SELECT sql FROM sqlite_master "
+                    "WHERE type = 'index' AND name = ?",
+                    (index_name,),
+                ).fetchone()[0]
+                == index_sql_before
+            )
+        finally:
+            conn.close()
+
+    @pytest.mark.asyncio
+    async def test_future_schema_head_is_rejected_without_schema_mutation(self, tmp_path):
+        db_path = tmp_path / "future-v18.db"
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute("PRAGMA user_version = 18;")
+            conn.commit()
+            tables_before = {
+                row[0]
+                for row in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table'"
+                )
+            }
+        finally:
+            conn.close()
+
+        store = GrokSessionStore(db_path=db_path)
+        try:
+            with pytest.raises(RuntimeError, match="unsupported.*18"):
+                await store._ensure_initialized()
+        finally:
+            await store.close()
+        conn = sqlite3.connect(db_path)
+        try:
+            assert conn.execute("PRAGMA user_version;").fetchone()[0] == 18
+            assert {
+                row[0]
+                for row in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table'"
+                )
+            } == tables_before
+        finally:
+            conn.close()
 
 
 class TestMigrationFailureAtomicity:

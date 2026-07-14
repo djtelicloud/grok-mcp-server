@@ -882,6 +882,107 @@ async def fetch_provider_api_usage() -> Dict[str, Any]
 
 Optionally fetch today's team-wide API spend from xAI Management API.
 
+## provider_harvest.py {#provider_harvest}
+
+### Function: `worker_episode_collection_name` {#provider_harvest-worker_episode_collection_name}
+
+```python
+def worker_episode_collection_name() -> str
+```
+
+**Keywords:** worker, episode, collection, name
+
+Return a safe collection name that cannot alias verified task memory.
+
+### Function: `worker_episode_document_name` {#provider_harvest-worker_episode_document_name}
+
+```python
+def worker_episode_document_name(row: dict[str, Any]) -> str
+```
+
+**Keywords:** worker, episode, document, name
+
+Content-addressed logical name reused by every retry.
+
+### Function: `freeze_worker_episode_document` {#provider_harvest-freeze_worker_episode_document}
+
+```python
+def freeze_worker_episode_document(row: dict[str, Any]) -> FrozenWorkerEpisode
+```
+
+**Keywords:** freeze, worker, episode, document
+
+Create the one immutable cloud artifact for a terminal ledger row.
+
+### Function: `worker_episode_document` {#provider_harvest-worker_episode_document}
+
+```python
+def worker_episode_document(row: dict[str, Any]) -> bytes
+```
+
+**Keywords:** worker, episode, document
+
+Return and verify the exact document frozen at terminal transition.
+
+### Class: `XAIWorkerEpisodeUploader` {#provider_harvest-xaiworkerepisodeuploader}
+
+```python
+class XAIWorkerEpisodeUploader
+```
+
+**Keywords:** xai, worker, episode, uploader
+
+Synchronous, idempotent xAI Collections boundary.
+
+The xAI service chooses physical file IDs. UniGrok supplies a stable
+content-addressed name plus unique ``episode_id`` and ``document_digest``
+collection fields, and checks both before every upload. A timeout after a
+successful remote write is therefore recovered by lookup rather than a
+second logical row.
+
+### Method: `XAIWorkerEpisodeUploader.prepare_client` {#provider_harvest-xaiworkerepisodeuploader-prepare_client}
+
+```python
+def XAIWorkerEpisodeUploader.prepare_client(self) -> tuple[Any | None, str | None]
+```
+
+**Keywords:** xai, worker, episode, uploader, prepare, client
+
+Resolve local capability before any row is leased or cloud call occurs.
+
+### Method: `XAIWorkerEpisodeUploader.upload` {#provider_harvest-xaiworkerepisodeuploader-upload}
+
+```python
+def XAIWorkerEpisodeUploader.upload(self, client: Any, row: dict[str, Any], authority: _ProviderHarvestEffectAuthority) -> str
+```
+
+**Keywords:** xai, worker, episode, uploader, upload
+
+Upload or recover one logical episode and return its xAI file ID.
+
+### Class: `ProviderAttemptHarvester` {#provider_harvest-providerattemptharvester}
+
+```python
+class ProviderAttemptHarvester
+```
+
+**Keywords:** provider, attempt, harvester
+
+One explicitly invoked bounded pass over the provider-attempt outbox.
+
+Constructing this worker performs no effect, and this module does not
+schedule it. The future Grok-owned broker is responsible for invocation.
+
+### Method: `ProviderAttemptHarvester.run_once` {#provider_harvest-providerattemptharvester-run_once}
+
+```python
+async def ProviderAttemptHarvester.run_once(self, store: Any) -> ProviderHarvestRun
+```
+
+**Keywords:** provider, attempt, harvester, run, once
+
+Run at most one bounded batch; unavailable credentials lease nothing.
+
 ## providers/base.py {#providers-base}
 
 ### Class: `HTTPProviderAdapter` {#providers-base-httpprovideradapter}
@@ -3565,6 +3666,49 @@ async def GrokSessionStore.mark_stale_provider_attempts_indeterminate(self, stal
 **Keywords:** grok, session, store, mark, stale, provider, attempts, indeterminate
 
 Close crash-left starts without pretending the worker failed.
+
+### Method: `GrokSessionStore.lease_provider_attempts_for_harvest` {#utils-groksessionstore-lease_provider_attempts_for_harvest}
+
+```python
+async def GrokSessionStore.lease_provider_attempts_for_harvest(self, lease_id: str, lease_seconds: float=60.0, limit: int=25) -> List[Dict[str, Any]]
+```
+
+**Keywords:** grok, session, store, lease, provider, attempts, for, harvest
+
+Atomically lease due terminal episodes, including expired leases.
+
+A crashed uploader therefore never strands a row.  The retry count is
+intentionally unbounded: this outbox has no discard/dead-letter state.
+
+### Method: `GrokSessionStore.provider_attempt_harvest_lease_is_fresh` {#utils-groksessionstore-provider_attempt_harvest_lease_is_fresh}
+
+```python
+async def GrokSessionStore.provider_attempt_harvest_lease_is_fresh(self, attempt_id: str, lease_id: str, minimum_remaining_seconds: float=0.0) -> bool
+```
+
+**Keywords:** grok, session, store, provider, attempt, harvest, lease, is, fresh
+
+Check trusted-time ownership immediately before a cloud effect.
+
+### Method: `GrokSessionStore.mark_provider_attempt_harvest_synced` {#utils-groksessionstore-mark_provider_attempt_harvest_synced}
+
+```python
+async def GrokSessionStore.mark_provider_attempt_harvest_synced(self, attempt_id: str, lease_id: str, remote_file_id: str) -> bool
+```
+
+**Keywords:** grok, session, store, mark, provider, attempt, harvest, synced
+
+Commit one upload only when the caller still owns its lease.
+
+### Method: `GrokSessionStore.mark_provider_attempt_harvest_retry` {#utils-groksessionstore-mark_provider_attempt_harvest_retry}
+
+```python
+async def GrokSessionStore.mark_provider_attempt_harvest_retry(self, attempt_id: str, lease_id: str, error: str, backoff_seconds: float) -> bool
+```
+
+**Keywords:** grok, session, store, mark, provider, attempt, harvest, retry
+
+Release a failed lease into bounded backoff without discarding it.
 
 ### Method: `GrokSessionStore.save_fact` {#utils-groksessionstore-save_fact}
 
