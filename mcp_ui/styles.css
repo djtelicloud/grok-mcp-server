@@ -1835,6 +1835,19 @@ pre {
   gap: 8px;
 }
 
+.connect-snippet-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.connect-snippet-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 .connect-snippet {
   margin: 0;
   padding: 12px 14px;
@@ -1845,6 +1858,17 @@ pre {
   font-size: 12px;
   line-height: 1.55;
   color: var(--ink-soft);
+  max-height: 12rem;
+}
+
+.connect-snippet-prompt {
+  max-height: 10rem;
+  white-space: pre-wrap;
+}
+
+.connect-snippet:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
 }
 
 @container workbench (max-width: 980px) {

@@ -1,9 +1,9 @@
-import { parseMarkdown, sanitizeHref } from "./markdown.js?v=grok-v0.6.0-r8";
+import { parseMarkdown, sanitizeHref } from "./markdown.js?v=grok-v0.6.0-r9";
 
 // Must match the <meta name="unigrok-ui-version"> baked into index.html and
 // src/version.py UI_ASSET_VERSION; a mismatch means the browser paired a
 // cached page with a different script build (the stale-skew failure class).
-const UI_ASSET_VERSION = "grok-v0.6.0-r8";
+const UI_ASSET_VERSION = "grok-v0.6.0-r9";
 
 const LAYOUT_KEY = "unigrok.mcp.console.layout.v2";
 
@@ -870,13 +870,16 @@ function setupMetricsControls() {
 
 // --- Discover Self Onboarding ---
 async function runDiscoverSelfOnboarding() {
-  $("discoverSelfCode").innerText = "Calling discover_self...";
+  const code = $("discoverSelfCode");
+  const details = code?.closest("details");
+  if (details) details.open = true;
+  if (code) code.textContent = "Calling discover_self...";
   try {
     const res = await fetchMcpCall("grok_mcp_discover_self", {});
     const payload = extractToolPayload(res);
-    $("discoverSelfCode").innerText = JSON.stringify(payload, null, 2);
+    if (code) code.textContent = JSON.stringify(payload, null, 2);
   } catch (err) {
-    $("discoverSelfCode").innerText = `Error: ${err.message}`;
+    if (code) code.textContent = `Error: ${err.message}`;
   }
 }
 
@@ -976,7 +979,25 @@ function renderConnectSnippets() {
   const endpoint = resolveMcpEndpoint();
   if ($("mcpEndpointDisplay")) $("mcpEndpointDisplay").textContent = endpoint;
   if ($("mcpJsonSnippet")) $("mcpJsonSnippet").textContent = genericMcpJson(endpoint);
+  if ($("agentPromptSnippet")) $("agentPromptSnippet").textContent = agentSetupPrompt(endpoint);
   return endpoint;
+}
+
+/** Keep the hero primary CTA label aligned with readiness state. */
+function syncPrimaryCta(ready, detailText = null) {
+  const btn = $("copyPrimaryActionBtn");
+  if (!btn) return;
+  const offline = !ready && !detailText;
+  if (offline) {
+    btn.textContent = "Copy install commands";
+    btn.dataset.cta = "install";
+  } else if (!ready && detailText) {
+    btn.textContent = "Copy IDE MCP config";
+    btn.dataset.cta = "mcp";
+  } else {
+    btn.textContent = "Copy IDE MCP config";
+    btn.dataset.cta = "mcp";
+  }
 }
 
 function renderPlaneCards(contract) {
@@ -1006,19 +1027,21 @@ function renderPlaneCards(contract) {
 
 function renderSpendGlance(payload) {
   if (!payload?.usage) return;
-  const period = payload.usage.today || payload.usage.lifetime || {};
-  const summary = period.summary || {};
-  const planes = period.planes || {};
-  const api = planes.API || {};
-  const cli = planes.CLI || {};
-  const cliFb = planes["CLI-Fallback"] || {};
-  const cliReqs = Number(cli.requests || 0) + Number(cliFb.requests || 0);
+  const period = payload.usage.today ?? payload.usage.lifetime ?? {};
+  const summary = period.summary ?? {};
+  const planes = period.planes ?? {};
+  const api = planes.API ?? {};
+  const cli = planes.CLI ?? {};
+  const cliFb = planes["CLI-Fallback"] ?? {};
+  const cliReqs = Number(cli.requests ?? 0) + Number(cliFb.requests ?? 0);
   if ($("spendApiToday")) {
-    $("spendApiToday").textContent = `$${Number(summary.api_cost_usd || api.api_cost_usd || api.total_cost_usd || 0).toFixed(4)}`;
+    // Prefer nullish coalescing so a legitimate $0 cost is not skipped for a non-zero fallback.
+    const usd = summary.api_cost_usd ?? api.api_cost_usd ?? api.total_cost_usd ?? 0;
+    $("spendApiToday").textContent = `$${Number(usd).toFixed(4)}`;
   }
   if ($("spendCliRequests")) $("spendCliRequests").textContent = String(cliReqs);
-  const verified = Number(summary.verified_outcomes || 0);
-  const unverified = Number(summary.unverified_requests || 0);
+  const verified = Number(summary.verified_outcomes ?? 0);
+  const unverified = Number(summary.unverified_requests ?? 0);
   if ($("spendVerifiedSplit")) $("spendVerifiedSplit").textContent = `${verified} / ${unverified}`;
   if ($("spendHonesty")) {
     $("spendHonesty").textContent = verified
@@ -1034,7 +1057,7 @@ function renderSetupStatus(data, ready = true, detailText = null) {
   const contract = data?.credential_planes || {};
   const effective = contract.effective_plane || "none";
   const runtime = data?.runtime || "unknown";
-  const tools = $("toolCountChip")?.innerText?.replace(/^tools:\s*/i, "") || "…";
+  const tools = $("toolCountChip")?.textContent?.replace(/^tools:\s*/i, "") || "…";
   const notices = (contract.notices || []).filter((notice) => notice.prompt_user);
   const attention = notices.map((notice) => notice.message).join(" ");
 
@@ -1062,6 +1085,7 @@ function renderSetupStatus(data, ready = true, detailText = null) {
     $("probeAge").textContent = `probed ${new Date().toLocaleTimeString()}`;
   }
 
+  syncPrimaryCta(ready, detailText);
   renderPlaneCards(contract);
   renderConnectSnippets();
 
@@ -2341,7 +2365,7 @@ function init() {
   // Onboarding actions
   $("copyDiscoverBtn").addEventListener("click", runDiscoverSelfOnboarding);
   $("copyQuickStartBtn")?.addEventListener("click", function () {
-    copyTextToClipboard($("quickStartCommands")?.innerText || "", this);
+    copyTextToClipboard($("quickStartCommands")?.textContent || "", this);
   });
   $("copyEndpointBtn")?.addEventListener("click", function () {
     copyTextToClipboard(resolveMcpEndpoint(), this);
@@ -2353,9 +2377,9 @@ function init() {
     copyTextToClipboard(agentSetupPrompt(resolveMcpEndpoint()), this);
   });
   $("copyPrimaryActionBtn")?.addEventListener("click", function () {
-    // Ready → IDE config; offline → install commands when visible
-    if (!$("quickStartCard")?.classList.contains("hidden")) {
-      copyTextToClipboard($("quickStartCommands")?.innerText || "", this);
+    // Label and action stay aligned via syncPrimaryCta: install only when offline.
+    if (this.dataset.cta === "install" || !$("quickStartCard")?.classList.contains("hidden")) {
+      copyTextToClipboard($("quickStartCommands")?.textContent || "", this);
       return;
     }
     copyTextToClipboard(genericMcpJson(resolveMcpEndpoint()), this);

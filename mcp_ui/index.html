@@ -7,9 +7,9 @@
     <meta name="unigrok-ui-regions" content="navigation,workbench,rpc-inspector,rpc-logs,result-facts" />
     <!-- Version handshake: app.js compares this against its own build constant
          and self-heals a stale-cached page with one revalidating reload. -->
-    <meta name="unigrok-ui-version" content="grok-v0.6.0-r8" />
-  <link rel="stylesheet" href="./tokens.css?v=grok-v0.6.0-r8" />
-  <link rel="stylesheet" href="./styles.css?v=grok-v0.6.0-r8" />
+    <meta name="unigrok-ui-version" content="grok-v0.6.0-r9" />
+  <link rel="stylesheet" href="./tokens.css?v=grok-v0.6.0-r9" />
+  <link rel="stylesheet" href="./styles.css?v=grok-v0.6.0-r9" />
   </head>
   <body>
     <main class="app-shell">
@@ -574,13 +574,24 @@ docker compose up --build -d</code></pre>
                 <span class="panel-header-hint">Never put XAI_API_KEY in IDE MCP settings</span>
               </div>
               <p class="connect-endpoint">Endpoint <code id="mcpEndpointDisplay">http://localhost:4765/mcp</code></p>
+              <div class="connect-snippet-block">
+                <div class="connect-snippet-header">
+                  <span class="section-kicker">Generic MCP JSON</span>
+                  <button id="copyMcpJsonBtn" type="button" class="small-btn-glow">Copy</button>
+                </div>
+                <pre class="connect-snippet" tabindex="0"><code id="mcpJsonSnippet">{ }</code></pre>
+              </div>
+              <div class="connect-snippet-block">
+                <div class="connect-snippet-header">
+                  <span class="section-kicker">Agent setup prompt</span>
+                  <button id="copyAgentPromptBtn" type="button" class="small-btn-glow">Copy</button>
+                </div>
+                <pre class="connect-snippet connect-snippet-prompt" tabindex="0"><code id="agentPromptSnippet">…</code></pre>
+              </div>
               <div class="connect-actions">
-                <button id="copyMcpJsonBtn" type="button" class="small-btn-glow">Copy generic MCP JSON</button>
-                <button id="copyAgentPromptBtn" type="button" class="small-btn-glow">Copy agent setup prompt</button>
                 <button id="copyDiscoverBtn" type="button" class="small-btn">Run discover_self</button>
               </div>
-              <pre class="connect-snippet"><code id="mcpJsonSnippet">{ }</code></pre>
-              <details class="raw-telemetry-disclosure onboarding-box">
+              <details id="discoverSelfDetails" class="raw-telemetry-disclosure onboarding-box">
                 <summary><span>Agent-readable setup metadata</span><small>discover_self contract</small></summary>
                 <pre><code id="discoverSelfCode" class="json-code">Run discover_self to inspect the machine-readable contract.</code></pre>
               </details>
@@ -631,6 +642,6 @@ docker compose up --build -d</code></pre>
 
       </section>
     </main>
-  <script type="module" src="./app.js?v=grok-v0.6.0-r8"></script>
+  <script type="module" src="./app.js?v=grok-v0.6.0-r9"></script>
   </body>
 </html>
