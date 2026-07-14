@@ -1,9 +1,9 @@
-import { parseMarkdown, sanitizeHref } from "./markdown.js?v=grok-v0.6.0-r7";
+import { parseMarkdown, sanitizeHref } from "./markdown.js?v=grok-v0.6.0-r8";
 
 // Must match the <meta name="unigrok-ui-version"> baked into index.html and
 // src/version.py UI_ASSET_VERSION; a mismatch means the browser paired a
 // cached page with a different script build (the stale-skew failure class).
-const UI_ASSET_VERSION = "grok-v0.6.0-r7";
+const UI_ASSET_VERSION = "grok-v0.6.0-r8";
 
 const LAYOUT_KEY = "unigrok.mcp.console.layout.v2";
 
@@ -28,7 +28,7 @@ const LAYOUT_LIMITS = {
 const defaultLayout = {
   navPresence: "show",
   inspectorPresence: "hide",
-  navWidth: 200,
+  navWidth: 168,
   inspectorWidth: 280,
   density: "auto",
 };
@@ -630,6 +630,7 @@ async function fetchLiveMetrics() {
     }
     state.metricsSnapshot = payload;
     renderMetricsSnapshot();
+    renderSpendGlance(payload);
   } catch (err) {
     setText("rawMetricsReport", `Failed to fetch telemetry report: ${err.message}`);
     setText("metricsStatus", "Metrics unavailable — the MCP status call failed.");
@@ -924,27 +925,155 @@ async function runStartupCheck() {
   return false;
 }
 
+function resolveMcpEndpoint() {
+  // Public product endpoint for pasteable IDE config. Loopback UI always
+  // advertises Core :4765/mcp even when the browser preview is on another port
+  // (e.g. TestClient :8080 or a reverse proxy). Non-loopback keeps the host
+  // that served this page so cloud/deploy previews stay accurate.
+  try {
+    const u = new URL(window.location.href);
+    const host = u.hostname || "localhost";
+    const loopback = host === "localhost" || host === "127.0.0.1";
+    if (loopback) {
+      return `${u.protocol}//${host}:4765/mcp`;
+    }
+    u.pathname = "/mcp";
+    u.search = "";
+    u.hash = "";
+    return u.toString().replace(/\/$/, "");
+  } catch {
+    return "http://localhost:4765/mcp";
+  }
+}
+
+function genericMcpJson(endpoint) {
+  return JSON.stringify({
+    mcpServers: {
+      unigrok: {
+        url: endpoint,
+        headers: { "X-Client-ID": "ide" },
+      },
+    },
+  }, null, 2);
+}
+
+function agentSetupPrompt(endpoint) {
+  return [
+    "Configure UniGrok MCP for this machine:",
+    `- Streamable HTTP URL: ${endpoint}`,
+    "- Send a stable X-Client-ID header for this IDE (e.g. cursor, claude-code, vscode, codex)",
+    "- Never put XAI_API_KEY in IDE MCP settings; credentials stay in UniGrok's server .env",
+    "- After connecting, call tools/list and grok_mcp_discover_self",
+    "- Prefer the UniGrok agent tool when I say @grok or want a second opinion",
+    "- When I ask for a multi-step Implementation Plan, get a UniGrok second opinion",
+    "  (agent mode thinking or reasoning) and improve the plan before showing it —",
+    "  only if I want that habit; do not silently spend metered API credits",
+    "- Do not invent a second MCP port, Forge, or land workflow for ordinary use",
+  ].join("\n");
+}
+
+function renderConnectSnippets() {
+  const endpoint = resolveMcpEndpoint();
+  if ($("mcpEndpointDisplay")) $("mcpEndpointDisplay").textContent = endpoint;
+  if ($("mcpJsonSnippet")) $("mcpJsonSnippet").textContent = genericMcpJson(endpoint);
+  return endpoint;
+}
+
+function renderPlaneCards(contract) {
+  const cli = contract?.cli || {};
+  const api = contract?.api || {};
+  const setChip = (id, available, label) => {
+    const el = $(id);
+    if (!el) return;
+    el.textContent = available ? "ready" : (label || "not ready");
+    el.className = `state-chip ${available ? "ready" : ""}`;
+  };
+  setChip("cliPlaneState", Boolean(cli.available), cli.state || "unavailable");
+  setChip("apiPlaneState", Boolean(api.available), api.state || "unavailable");
+  if ($("cliPlaneDetail")) {
+    $("cliPlaneDetail").textContent = cli.available
+      ? "Subscription plane ready. Local request tracking only — provider quota is not exposed."
+      : (cli.state === "needs_auth" || cli.auth === "needs_auth")
+        ? "CLI OAuth not verified. Use device login on the gateway host, then recheck."
+        : "CLI plane unavailable on this machine.";
+  }
+  if ($("apiPlaneDetail")) {
+    $("apiPlaneDetail").textContent = api.available
+      ? "Metered developer API key present. Exact response cost tracked when the provider returns it."
+      : "No usable XAI_API_KEY in the gateway environment.";
+  }
+}
+
+function renderSpendGlance(payload) {
+  if (!payload?.usage) return;
+  const period = payload.usage.today || payload.usage.lifetime || {};
+  const summary = period.summary || {};
+  const planes = period.planes || {};
+  const api = planes.API || {};
+  const cli = planes.CLI || {};
+  const cliFb = planes["CLI-Fallback"] || {};
+  const cliReqs = Number(cli.requests || 0) + Number(cliFb.requests || 0);
+  if ($("spendApiToday")) {
+    $("spendApiToday").textContent = `$${Number(summary.api_cost_usd || api.api_cost_usd || api.total_cost_usd || 0).toFixed(4)}`;
+  }
+  if ($("spendCliRequests")) $("spendCliRequests").textContent = String(cliReqs);
+  const verified = Number(summary.verified_outcomes || 0);
+  const unverified = Number(summary.unverified_requests || 0);
+  if ($("spendVerifiedSplit")) $("spendVerifiedSplit").textContent = `${verified} / ${unverified}`;
+  if ($("spendHonesty")) {
+    $("spendHonesty").textContent = verified
+      ? `Verified success is of ${verified} receipt-verified outcome${verified === 1 ? "" : "s"} only — not of all requests.`
+      : "No receipt-verified outcomes yet. Most provider stops stay unverified until a receipt.";
+  }
+}
+
 function renderSetupStatus(data, ready = true, detailText = null) {
-  // The quick-start card is the onboarding action for a machine where the
-  // gateway is NOT REACHABLE. A reachable gateway failing a readiness check
-  // (detailText names it) is already installed and running — reinstall
-  // instructions would be the wrong remedy, so the card stays hidden and the
-  // named failing checks plus the credential alert carry the fix.
+  // Offline → show install card. Ready-but-degraded → named checks + credential alert.
   $("quickStartCard")?.classList.toggle("hidden", Boolean(ready) || Boolean(detailText));
   const target = $("setupStatusSummary");
-  if (!target) return;
   const contract = data?.credential_planes || {};
   const effective = contract.effective_plane || "none";
   const runtime = data?.runtime || "unknown";
+  const tools = $("toolCountChip")?.innerText?.replace(/^tools:\s*/i, "") || "…";
   const notices = (contract.notices || []).filter((notice) => notice.prompt_user);
   const attention = notices.map((notice) => notice.message).join(" ");
-  const title = document.createElement("strong");
-  title.textContent = ready ? "Gateway is live." : "Gateway needs attention.";
-  const detail = document.createElement("span");
-  detail.textContent = ready
-    ? `Runtime: ${runtime} · active credential plane: ${effective}.${attention ? ` ${attention}` : ""}`
-    : detailText || "The live readiness check failed. Restart or inspect the runtime before running a task.";
-  target.replaceChildren(title, document.createElement("br"), detail);
+
+  const hero = $("readinessHero");
+  const title = $("readinessTitle");
+  const detail = $("readinessDetail");
+  if (hero && title && detail) {
+    hero.classList.remove("state-checking", "state-ready", "state-attention", "state-offline");
+    if (ready) {
+      hero.classList.add("state-ready");
+      title.textContent = "Gateway is live";
+      detail.textContent = `Runtime ${runtime} · effective plane ${effective} · ${tools}.${attention ? ` ${attention}` : ""}`;
+    } else if (detailText) {
+      hero.classList.add("state-attention");
+      title.textContent = "Gateway needs attention";
+      detail.textContent = detailText;
+    } else {
+      hero.classList.add("state-offline");
+      title.textContent = "Gateway offline";
+      detail.textContent = "Cannot reach /readyz. Start the service, then recheck.";
+    }
+  }
+
+  if ($("probeAge")) {
+    $("probeAge").textContent = `probed ${new Date().toLocaleTimeString()}`;
+  }
+
+  renderPlaneCards(contract);
+  renderConnectSnippets();
+
+  if (target) {
+    const t = document.createElement("strong");
+    t.textContent = ready ? "Gateway is live." : "Gateway needs attention.";
+    const d = document.createElement("span");
+    d.textContent = ready
+      ? ` Runtime: ${runtime} · active credential plane: ${effective}.${attention ? ` ${attention}` : ""}`
+      : ` ${detailText || "The live readiness check failed. Restart or inspect the runtime before running a task."}`;
+    target.replaceChildren(t, d);
+  }
 }
 
 function renderSurfaceModeBadge(data) {
@@ -2214,6 +2343,25 @@ function init() {
   $("copyQuickStartBtn")?.addEventListener("click", function () {
     copyTextToClipboard($("quickStartCommands")?.innerText || "", this);
   });
+  $("copyEndpointBtn")?.addEventListener("click", function () {
+    copyTextToClipboard(resolveMcpEndpoint(), this);
+  });
+  $("copyMcpJsonBtn")?.addEventListener("click", function () {
+    copyTextToClipboard(genericMcpJson(resolveMcpEndpoint()), this);
+  });
+  $("copyAgentPromptBtn")?.addEventListener("click", function () {
+    copyTextToClipboard(agentSetupPrompt(resolveMcpEndpoint()), this);
+  });
+  $("copyPrimaryActionBtn")?.addEventListener("click", function () {
+    // Ready → IDE config; offline → install commands when visible
+    if (!$("quickStartCard")?.classList.contains("hidden")) {
+      copyTextToClipboard($("quickStartCommands")?.innerText || "", this);
+      return;
+    }
+    copyTextToClipboard(genericMcpJson(resolveMcpEndpoint()), this);
+  });
+  $("refreshSpendBtn")?.addEventListener("click", fetchLiveMetrics);
+  renderConnectSnippets();
   $("setupRecheckBtn")?.addEventListener("click", async () => {
     const ready = await runStartupCheck();
     const runtime = await fetchRuntimeStatus();
@@ -2247,6 +2395,7 @@ function init() {
     await loadModelsList();
     await loadPlaneModelCatalog();
     await fetchMcpListTools();
+    await fetchLiveMetrics();
     // WebMCP browser registration is optional/experimental; skip on Core glass.
   }, 100);
 }

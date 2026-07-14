@@ -47,9 +47,9 @@ def test_mcp_ui_static_files_are_served(monkeypatch):
     assert index.status_code == 200
     assert "<title>UniGrok Gateway Console v0.6.0</title>" in index.text
     assert '<span class="version-badge">v0.6.0</span>' in index.text
-    assert 'script type="module" src="./app.js?v=grok-v0.6.0-r7"' in index.text
-    assert '<link rel="stylesheet" href="./styles.css?v=grok-v0.6.0-r7" />' in index.text
-    assert '<link rel="stylesheet" href="./tokens.css?v=grok-v0.6.0-r7" />' in index.text
+    assert 'script type="module" src="./app.js?v=grok-v0.6.0-r8"' in index.text
+    assert '<link rel="stylesheet" href="./styles.css?v=grok-v0.6.0-r8" />' in index.text
+    assert '<link rel="stylesheet" href="./tokens.css?v=grok-v0.6.0-r8" />' in index.text
     assert "Console" in index.text
     assert 'id="surfaceModeBadge"' in index.text
     assert 'id="tab-btn-schemas"' not in index.text
@@ -84,6 +84,23 @@ def test_mcp_ui_static_files_are_served(monkeypatch):
     assert "authoritative: false" in script.text
     assert "Live MCP tools/list schemas are authoritative" in script.text
     assert "Health" in index.text
+    assert 'id="readinessHero"' in index.text
+    assert 'id="cliPlaneCard"' in index.text
+    assert 'id="apiPlaneCard"' in index.text
+    assert 'id="spendGlanceCard"' in index.text
+    assert 'id="mcpEndpointDisplay"' in index.text
+    assert 'id="copyMcpJsonBtn"' in index.text
+    assert 'id="copyAgentPromptBtn"' in index.text
+    assert 'id="copyPrimaryActionBtn"' in index.text
+    assert "resolveMcpEndpoint" in script.text
+    assert "renderPlaneCards" in script.text
+    assert "renderSpendGlance" in script.text
+    assert "genericMcpJson" in script.text
+    assert "agentSetupPrompt" in script.text
+    assert ".readiness-hero" in styles.text
+    assert ".glass-grid" in styles.text
+    assert ".plane-card" in styles.text
+    assert ".connect-panel" in styles.text
     assert "startup ingestion is not automatic" in index.text
     assert "before hitting the API" not in script.text
     assert "safely route this call" not in script.text
@@ -402,7 +419,7 @@ def test_mcp_ui_markdown_renderer_is_shared_and_escape_first():
     assert "\\u000E-\\u001F" in renderer.text
     # app.js imports the shared renderer at the current cache-bust version and
     # no longer defines its own.
-    assert 'from "./markdown.js?v=grok-v0.6.0-r7"' in script.text
+    assert 'from "./markdown.js?v=grok-v0.6.0-r8"' in script.text
     assert "import { parseMarkdown" in script.text
     assert "function parseMarkdown" not in script.text
     assert "renderMarkdownInto" in script.text

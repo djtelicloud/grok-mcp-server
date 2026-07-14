@@ -7,9 +7,9 @@
     <meta name="unigrok-ui-regions" content="navigation,workbench,rpc-inspector,rpc-logs,result-facts" />
     <!-- Version handshake: app.js compares this against its own build constant
          and self-heals a stale-cached page with one revalidating reload. -->
-    <meta name="unigrok-ui-version" content="grok-v0.6.0-r7" />
-  <link rel="stylesheet" href="./tokens.css?v=grok-v0.6.0-r7" />
-  <link rel="stylesheet" href="./styles.css?v=grok-v0.6.0-r7" />
+    <meta name="unigrok-ui-version" content="grok-v0.6.0-r8" />
+  <link rel="stylesheet" href="./tokens.css?v=grok-v0.6.0-r8" />
+  <link rel="stylesheet" href="./styles.css?v=grok-v0.6.0-r8" />
   </head>
   <body>
     <main class="app-shell">
@@ -43,8 +43,8 @@
           <p class="product-law">Chat lives in your IDE. This page is health, credentials, and connect snippets.</p>
         </div>
         <div class="layout-actions" aria-label="Workspace layout controls">
-          <button id="toggleNavBtn" type="button" class="chrome-btn" aria-controls="sidebarNav" aria-expanded="true" aria-pressed="true" title="Show or hide sections (⌘/Ctrl+B)"><span aria-hidden="true">◧</span><span class="chrome-label">Sections</span></button>
-          <button id="toggleInspectorBtn" type="button" class="chrome-btn" aria-controls="inspector" aria-expanded="false" aria-pressed="false" title="Show or hide inspector (⌘/Ctrl+Shift+I)"><span aria-hidden="true">◨</span><span class="chrome-label">Inspector</span></button>
+          <button id="toggleNavBtn" type="button" class="chrome-btn" aria-controls="sidebarNav" aria-expanded="true" aria-pressed="true" title="Show or hide nav (⌘/Ctrl+B)"><span aria-hidden="true">◧</span><span class="chrome-label">Nav</span></button>
+          <button id="toggleInspectorBtn" type="button" class="chrome-btn" aria-controls="inspector" aria-expanded="false" aria-pressed="false" title="Debug RPC inspector (optional)"><span aria-hidden="true">◨</span><span class="chrome-label">Debug</span></button>
           <button id="densityBtn" type="button" class="chrome-btn" aria-pressed="false" title="Toggle compact density"><span aria-hidden="true">↕</span><span class="chrome-label">Density</span></button>
         </div>
         <div class="signal-strip" aria-live="polite" aria-label="Gateway status">
@@ -505,17 +505,34 @@
           </div>
 
           <!-- TAB 8: Onboarding (Self) -->
-          <div id="tab-onboarding" class="tab-panel active">
-            <div class="panel-header">
-              <h2>Health &amp; connect</h2>
-              <button id="setupRecheckBtn" type="button" class="primary-btn-glow">Recheck</button>
+          <div id="tab-onboarding" class="tab-panel active" data-region="tab-onboarding">
+            <div class="panel-header health-glass-header">
+              <div>
+                <h2>Health</h2>
+                <p class="panel-desc health-lead">Machine truth for this gateway. Daily chat stays in your IDE.</p>
+              </div>
+              <div class="health-header-actions">
+                <span id="probeAge" class="probe-age">probe: …</span>
+                <button id="setupRecheckBtn" type="button" class="primary-btn-glow">Recheck</button>
+              </div>
             </div>
-            <p class="panel-desc">Is UniGrok up, which planes are ready, and what to paste into your IDE. Chat stays in the IDE.</p>
 
-            <div id="setupStatusSummary" class="setup-status-summary" aria-live="polite">Checking the live gateway…</div>
+            <section id="readinessHero" class="readiness-hero state-checking" aria-live="polite">
+              <div class="readiness-hero-main">
+                <span id="readinessDot" class="readiness-dot" aria-hidden="true"></span>
+                <div>
+                  <h3 id="readinessTitle" class="readiness-title">Checking gateway…</h3>
+                  <p id="readinessDetail" class="readiness-detail">Probing /readyz and /runtimez.</p>
+                </div>
+              </div>
+              <div class="readiness-hero-cta">
+                <button id="copyPrimaryActionBtn" type="button" class="primary-btn-glow">Copy IDE MCP config</button>
+                <button id="copyEndpointBtn" type="button" class="secondary-btn">Copy endpoint</button>
+              </div>
+            </section>
 
-            <!-- One plain-language onboarding action, shown only when the
-                 gateway is not ready. No environment variables required. -->
+            <div id="setupStatusSummary" class="setup-status-summary sr-only" aria-live="polite">Checking the live gateway…</div>
+
             <div id="quickStartCard" class="setup-quickstart hidden">
               <strong>Get the gateway running</strong>
               <p>Copy and run this in a terminal. You need Git, Docker Desktop, and uv — nothing else.</p>
@@ -525,15 +542,49 @@ uv run python main.py init
 docker compose up --build -d</code></pre>
               <div class="quickstart-actions">
                 <button id="copyQuickStartBtn" type="button" class="small-btn-glow">Copy commands</button>
-                <span class="quickstart-note">Already installed? Run <code>docker compose up --build -d</code> in the project folder, then Recheck setup.</span>
+                <span class="quickstart-note">Already installed? Run <code>docker compose up --build -d</code> in the project folder, then Recheck.</span>
               </div>
             </div>
 
-            <details class="raw-telemetry-disclosure onboarding-box">
-              <summary><span>Agent-readable setup metadata</span><small>discover_self manifest and OKF paths</small></summary>
-              <button id="copyDiscoverBtn" type="button" class="small-btn-glow">Run discover_self</button>
-              <pre><code id="discoverSelfCode" class="json-code">Run discover_self to inspect the machine-readable contract.</code></pre>
-            </details>
+            <section class="glass-grid" aria-label="Planes and spend">
+              <article class="plane-card" id="cliPlaneCard">
+                <header><span class="section-kicker">CLI subscription</span><span id="cliPlaneState" class="state-chip">…</span></header>
+                <strong id="cliPlaneHeadline">SuperGrok CLI</strong>
+                <p id="cliPlaneDetail">Checking OAuth plane…</p>
+              </article>
+              <article class="plane-card" id="apiPlaneCard">
+                <header><span class="section-kicker">Developer API</span><span id="apiPlaneState" class="state-chip">…</span></header>
+                <strong id="apiPlaneHeadline">xAI API</strong>
+                <p id="apiPlaneDetail">Checking API key plane…</p>
+              </article>
+              <article class="spend-card" id="spendGlanceCard">
+                <header><span class="section-kicker">Spend glance</span><button id="refreshSpendBtn" type="button" class="small-btn">Refresh</button></header>
+                <div class="spend-metrics">
+                  <div><span>API today</span><strong id="spendApiToday">—</strong></div>
+                  <div><span>CLI requests</span><strong id="spendCliRequests">—</strong></div>
+                  <div><span>Verified / unverified</span><strong id="spendVerifiedSplit">—</strong></div>
+                </div>
+                <p id="spendHonesty" class="spend-honesty">Success rates are of receipt-verified outcomes only.</p>
+              </article>
+            </section>
+
+            <section class="connect-panel" aria-label="IDE connect snippets">
+              <div class="panel-header compact">
+                <h3>Connect your IDE</h3>
+                <span class="panel-header-hint">Never put XAI_API_KEY in IDE MCP settings</span>
+              </div>
+              <p class="connect-endpoint">Endpoint <code id="mcpEndpointDisplay">http://localhost:4765/mcp</code></p>
+              <div class="connect-actions">
+                <button id="copyMcpJsonBtn" type="button" class="small-btn-glow">Copy generic MCP JSON</button>
+                <button id="copyAgentPromptBtn" type="button" class="small-btn-glow">Copy agent setup prompt</button>
+                <button id="copyDiscoverBtn" type="button" class="small-btn">Run discover_self</button>
+              </div>
+              <pre class="connect-snippet"><code id="mcpJsonSnippet">{ }</code></pre>
+              <details class="raw-telemetry-disclosure onboarding-box">
+                <summary><span>Agent-readable setup metadata</span><small>discover_self contract</small></summary>
+                <pre><code id="discoverSelfCode" class="json-code">Run discover_self to inspect the machine-readable contract.</code></pre>
+              </details>
+            </section>
           </div>
 
         </section>
@@ -580,6 +631,6 @@ docker compose up --build -d</code></pre>
 
       </section>
     </main>
-  <script type="module" src="./app.js?v=grok-v0.6.0-r7"></script>
+  <script type="module" src="./app.js?v=grok-v0.6.0-r8"></script>
   </body>
 </html>

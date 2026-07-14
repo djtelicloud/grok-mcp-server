@@ -1554,13 +1554,321 @@ pre {
 .console-grid[data-resizing="true"] .sidebar-nav,
 .console-grid[data-resizing="true"] .inspector { transition: none !important; }
 
+/* Visually hidden but available to assistive tech / aria-live. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.hidden {
+  display: none !important;
+}
+
 .setup-status-summary {
   padding: 16px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: rgba(255,255,255,.02);
+  background: rgba(255, 255, 255, 0.02);
   color: var(--ink-soft);
   line-height: 1.55;
+}
+
+/* —— Health glass (P2 one-page readiness) —— */
+.health-glass-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.health-lead {
+  margin-top: 4px;
+  max-width: 36rem;
+}
+
+.health-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.probe-age {
+  font-size: 11px;
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.panel-header.compact {
+  padding-bottom: 8px;
+  margin-bottom: 4px;
+}
+
+.panel-header.compact h3 {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.panel-header-hint {
+  font-size: 11px;
+  color: var(--ink-faint);
+}
+
+.readiness-hero {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+  padding: 18px 20px;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) + 2px);
+  background:
+    linear-gradient(135deg, rgba(79, 231, 255, 0.06), transparent 55%),
+    var(--surface);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.readiness-hero-main {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  min-width: 0;
+  flex: 1 1 240px;
+}
+
+.readiness-dot {
+  flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: var(--ink-faint);
+  box-shadow: 0 0 0 4px rgba(125, 147, 166, 0.12);
+}
+
+.readiness-hero.state-checking .readiness-dot {
+  background: var(--cyan);
+  box-shadow: 0 0 0 4px rgba(79, 231, 255, 0.15);
+  animation: readiness-pulse 1.4s ease-in-out infinite;
+}
+
+.readiness-hero.state-ready {
+  border-color: rgba(22, 240, 174, 0.35);
+  box-shadow: var(--glow-teal), var(--shadow);
+}
+
+.readiness-hero.state-ready .readiness-dot {
+  background: var(--teal);
+  box-shadow: 0 0 0 4px rgba(22, 240, 174, 0.18);
+}
+
+.readiness-hero.state-attention {
+  border-color: rgba(255, 140, 58, 0.4);
+  box-shadow: var(--glow-orange), var(--shadow);
+}
+
+.readiness-hero.state-attention .readiness-dot {
+  background: var(--orange);
+  box-shadow: 0 0 0 4px rgba(255, 140, 58, 0.18);
+}
+
+.readiness-hero.state-offline {
+  border-color: rgba(255, 95, 120, 0.4);
+}
+
+.readiness-hero.state-offline .readiness-dot {
+  background: var(--red);
+  box-shadow: 0 0 0 4px rgba(255, 95, 120, 0.16);
+}
+
+.readiness-title {
+  font-size: clamp(1.05rem, 1.6vw, 1.25rem);
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--ink);
+}
+
+.readiness-detail {
+  margin-top: 4px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--ink-soft);
+  max-width: 42rem;
+}
+
+.readiness-hero-cta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+@keyframes readiness-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.55; transform: scale(0.92); }
+}
+
+.glass-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.plane-card,
+.spend-card {
+  min-width: 0;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.plane-card header,
+.spend-card header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.section-kicker {
+  color: var(--ink-faint);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.plane-card strong,
+.spend-card strong {
+  font-size: 15px;
+  font-weight: 650;
+  color: var(--ink);
+}
+
+.plane-card p,
+.spend-honesty {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--ink-soft);
+}
+
+.spend-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.spend-metrics div {
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: rgba(3, 6, 9, 0.28);
+}
+
+.spend-metrics span {
+  display: block;
+  font-size: 10px;
+  color: var(--ink-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.spend-metrics strong {
+  display: block;
+  margin-top: 4px;
+  font-family: ui-monospace, "JetBrains Mono", monospace;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.connect-panel {
+  margin-top: 14px;
+  padding: 16px 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background:
+    linear-gradient(180deg, rgba(79, 231, 255, 0.04), transparent 40%),
+    var(--surface-soft);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.connect-endpoint {
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+
+.connect-endpoint code {
+  color: var(--cyan);
+  font-family: ui-monospace, "JetBrains Mono", monospace;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.connect-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.connect-snippet {
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: rgba(3, 6, 9, 0.55);
+  overflow-x: auto;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--ink-soft);
+}
+
+@container workbench (max-width: 980px) {
+  .glass-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+  .spend-card {
+    grid-column: 1 / -1;
+  }
+}
+
+@container workbench (max-width: 620px) {
+  .glass-grid {
+    grid-template-columns: 1fr;
+  }
+  .spend-card {
+    grid-column: auto;
+  }
+  .spend-metrics {
+    grid-template-columns: 1fr;
+  }
+  .readiness-hero {
+    padding: 14px;
+  }
 }
 
 /* One-action onboarding card, shown only while the gateway is not ready. */

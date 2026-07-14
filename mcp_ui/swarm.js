@@ -10,7 +10,7 @@
 // Must match src/version.py UI_ASSET_VERSION and the query token on the
 // swarm.js reference in swarm.html. The sample uses the same token so a
 // revalidated page cannot pair new logic with a heuristically cached payload.
-const UI_ASSET_VERSION = "grok-v0.6.0-r7";
+const UI_ASSET_VERSION = "grok-v0.6.0-r8";
 
 const $ = (id) => document.getElementById(id);
 const SVG_NS = "http://www.w3.org/2000/svg";
