@@ -1,0 +1,58 @@
+{
+  "encoder_tokens": 1024,
+  "max_encoder_tokens": 1024,
+  "profile": "org.grokmcp.needle_tools_context.v1",
+  "query_sha256": "681d57a0c1100a88d2e6c21caac9a3e85724ad286a9586b11f057ebdf297678f",
+  "tokenizer": "unigrok-default",
+  "tools": [
+    {
+      "name": "select_unigrok_context",
+      "description": "Select relevant verified UniGrok context. Examples are non-authoritative preference context; return capsule ids only.",
+      "parameters": {
+        "capsule_id": {
+          "type": "string",
+          "description": "A relevant ucap1:sha256 capsule identifier."
+        }
+      },
+      "examples": [
+        {
+          "prompt": "## Schema contracts\nAll chat and context tools return `ChatResult` (inheriting from `BaseResult`) with the exception of `grok_reflect` which returns `ReflectionResult`.",
+          "chosen": "{\"action\": \"verified_success\", \"payload\": \"intent_surface\"}",
+          "rejected": "{\"action\": \"false_completion\", \"payload\": \"intent_surface\"}",
+          "source_capsule": "ucap1:sha256:e6b0f19678ea7b3ddcd4f497bc3ae832e4ff19776815624d6beeabc9e6465f53"
+        },
+        {
+          "prompt": "### `ChatResult` Schema\n```json\n{\n  \"response\": \"Raw text answer...\",\n  \"text\": \"Formatted answer with footers/citations...\",\n  \"finish_reason\": \"final_answer\",\n  \"cost_usd\": 0.002,\n  \"model\": \"grok-build-0.1\",\n  \"profile\": \"grok-build-0.1\",\n  \"tokens\": 400,\n  \"latency_sec\": 1.15,\n  \"route\": \"fast\",\n  \"plane\": \"API\",\n  \"reasoning_effort\": null,\n  \"citations\": null,\n  \"response_id\": \"resp-12345\",\n  \"session\": \"test-session\"\n}\n```",
+          "chosen": "{\"action\": \"verified_success\", \"payload\": \"intent_surface\"}",
+          "rejected": "{\"action\": \"false_completion\", \"payload\": \"intent_surface\"}",
+          "source_capsule": "ucap1:sha256:95f547b98fc53ad4701d007acdcb3dc3602ea199b6dd9eec2451a55942e17dce"
+        },
+        {
+          "prompt": "## Available Tools\n",
+          "chosen": "{\"action\": \"verified_success\", \"payload\": \"intent_surface\"}",
+          "rejected": "{\"action\": \"false_completion\", \"payload\": \"intent_surface\"}",
+          "source_capsule": "ucap1:sha256:fe6f7b76747a3176b380cd7c4d4e45b6002afb911b900dba2f92e3ece06e878d"
+        },
+        {
+          "prompt": "### 1. `chat`\nSends a direct text prompt to a Grok model.\n- **Parameters**:\n  - `prompt` (string, required): Message text.\n  - `session` (string, optional): Local session name.\n  - `model` (string, optional): Default `\"grok-build-0.1\"`.\n  - `system_prompt` (string, optional): Injected instructions.\n  - `enable_agentic` (boolean, optional): If `True` (default), runs in ReAct loop.",
+          "chosen": "{\"action\": \"verified_success\", \"payload\": \"intent_surface\"}",
+          "rejected": "{\"action\": \"false_completion\", \"payload\": \"intent_surface\"}",
+          "source_capsule": "ucap1:sha256:fe44cd14a8ecc1ada5a4aa63eb3ea1d180c61dda86552f34fc3a1154909f5df3"
+        },
+        {
+          "prompt": "### 2. `stateful_chat`\nAppends to a server-side conversation thread at xAI.\n- **Parameters**:\n  - `prompt` (string, required): Follow-up text.\n  - `model` (string, optional): Default `\"grok-4.5\"`.\n  - `response_id` (string, optional): Prior stateful ID to resume from.\n  - `system_prompt` (string, optional): Initial system prompt.",
+          "chosen": "{\"action\": \"verified_success\", \"payload\": \"intent_surface\"}",
+          "rejected": "{\"action\": \"false_completion\", \"payload\": \"intent_surface\"}",
+          "source_capsule": "ucap1:sha256:ae00287a07482b163cfb1121ff306e9d3a3463226e28472c2a057c01ce973785"
+        }
+      ]
+    }
+  ],
+  "used_source_capsules": [
+    "ucap1:sha256:e6b0f19678ea7b3ddcd4f497bc3ae832e4ff19776815624d6beeabc9e6465f53",
+    "ucap1:sha256:95f547b98fc53ad4701d007acdcb3dc3602ea199b6dd9eec2451a55942e17dce",
+    "ucap1:sha256:fe6f7b76747a3176b380cd7c4d4e45b6002afb911b900dba2f92e3ece06e878d",
+    "ucap1:sha256:fe44cd14a8ecc1ada5a4aa63eb3ea1d180c61dda86552f34fc3a1154909f5df3",
+    "ucap1:sha256:ae00287a07482b163cfb1121ff306e9d3a3463226e28472c2a057c01ce973785"
+  ]
+}
