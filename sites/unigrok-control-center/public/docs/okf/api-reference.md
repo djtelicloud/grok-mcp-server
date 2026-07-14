@@ -745,6 +745,159 @@ async def fetch_provider_api_usage() -> Dict[str, Any]
 
 Optionally fetch today's team-wide API spend from xAI Management API.
 
+## providers/base.py {#providers-base}
+
+### Class: `HTTPProviderAdapter` {#providers-base-httpprovideradapter}
+
+```python
+class HTTPProviderAdapter
+```
+
+**Keywords:** http, provider, adapter
+
+Base for one-shot first-party JSON APIs.
+
+An injected AsyncClient makes every wire interaction deterministic in tests.
+Production clients are short-lived, do not inherit proxy environment state,
+and never follow redirects carrying credentials.
+
+### Method: `HTTPProviderAdapter.complete` {#providers-base-httpprovideradapter-complete}
+
+```python
+async def HTTPProviderAdapter.complete(self, request: ProviderRequest) -> ProviderResponse
+```
+
+**Keywords:** http, provider, adapter, complete
+
+Run the complete worker call under one absolute supervisor deadline.
+
+### Method: `HTTPProviderAdapter.attempt` {#providers-base-httpprovideradapter-attempt}
+
+```python
+async def HTTPProviderAdapter.attempt(self, request: ProviderRequest) -> ProviderAttemptResult
+```
+
+**Keywords:** http, provider, adapter, attempt
+
+Return a complete worker result without granting it semantic authority.
+
+### Function: `opaque_fingerprint` {#providers-base-opaque_fingerprint}
+
+```python
+def opaque_fingerprint(value: str) -> str
+```
+
+**Keywords:** opaque, fingerprint
+
+Identify a non-secret account/project without exposing its raw value.
+
+## providers/config.py {#providers-config}
+
+### Function: `load_model_pins` {#providers-config-load_model_pins}
+
+```python
+def load_model_pins(channel: ProviderChannel, environ: Mapping[str, str]) -> ProviderModelPins
+```
+
+**Keywords:** load, model, pins
+
+Resolve route pin > provider pin > stable first-party default.
+
+Invalid values fail closed while naming only the environment variable, never
+its content.
+
+## providers/contracts.py {#providers-contracts}
+
+### Class: `GrokSupervisorBinding` {#providers-contracts-groksupervisorbinding}
+
+```python
+class GrokSupervisorBinding
+```
+
+**Keywords:** grok, supervisor, binding
+
+Opaque Grok-owned state copied into every worker receipt.
+
+Adapters may bind outputs to this state, but cannot create, extend, route,
+verify, harvest, or finalize it.
+
+### Class: `WorkerAuthority` {#providers-contracts-workerauthority}
+
+```python
+class WorkerAuthority
+```
+
+**Keywords:** worker, authority
+
+Mechanical denial of supervisor authority to external model workers.
+
+### Class: `ProviderFailureReceipt` {#providers-contracts-providerfailurereceipt}
+
+```python
+class ProviderFailureReceipt
+```
+
+**Keywords:** provider, failure, receipt
+
+Bounded, secret-safe failure evidence returned to the Grok supervisor.
+
+### Class: `ProviderAttemptResult` {#providers-contracts-providerattemptresult}
+
+```python
+class ProviderAttemptResult
+```
+
+**Keywords:** provider, attempt, result
+
+One subordinate worker return or failure for Grok synthesis.
+
+### Function: `is_safe_model_id` {#providers-contracts-is_safe_model_id}
+
+```python
+def is_safe_model_id(value: str) -> bool
+```
+
+**Keywords:** is, safe, model, id
+
+Return whether a provider-supplied model ID is safe to put in a receipt.
+
+### Function: `is_safe_response_id` {#providers-contracts-is_safe_response_id}
+
+```python
+def is_safe_response_id(value: str) -> bool
+```
+
+**Keywords:** is, safe, response, id
+
+Return whether an upstream response ID is safe to put in a receipt.
+
+## providers/registry.py {#providers-registry}
+
+### Function: `build_provider_registry` {#providers-registry-build_provider_registry}
+
+```python
+def build_provider_registry(*, environ: Mapping[str, str] | None=None, clients: Mapping[ProviderChannel, httpx.AsyncClient] | None=None, vertex_token_provider: ADCTokenProvider | None=None, clock: Clock | None=None) -> dict[ProviderChannel, ProviderAdapter]
+```
+
+**Keywords:** build, provider, registry
+
+Build adapters without performing discovery or provider calls.
+
+## providers/vertex.py {#providers-vertex}
+
+### Function: `load_google_adc_identity` {#providers-vertex-load_google_adc_identity}
+
+```python
+async def load_google_adc_identity(timeout_seconds: float=60.0) -> ADCIdentity
+```
+
+**Keywords:** load, google, adc, identity
+
+Resolve and refresh ADC off the event loop.
+
+All third-party exception details are suppressed at the adapter boundary so
+credential paths, token fragments, and account identifiers cannot escape.
+
 ## rag.py {#rag}
 
 ### Function: `task_rag_mode` {#rag-task_rag_mode}
