@@ -41,6 +41,23 @@ search grounding was used.
 - Tasks needing self-critique → `thinking`.
 - Current-events or source-cited answers → `research` (uses web + X search).
 
+## Parallel ship (product + intelligence)
+
+When the operator wants **both** public product work and intelligence/research
+without midwifing git:
+
+1. Split **Lane P** (product) and **Lane I** (intelligence) with path isolation.
+2. Route UniGrok modes per lane (P: fast/reasoning/thinking; I: research/thinking).
+3. Put coordination on the git DAG: agent-prefixed branch, draft PR, exact head,
+   verification notes — so Codex can land without human git chat.
+4. Prefer CLI plane for free-compatible critique; use API + same_plane when
+   Deep-Think or hosted twin work requires it.
+5. Full playbook: `.grok/playbooks/parallel-ship-dag.md` and skill
+   `grok-parallel-ship` (contributor repo only).
+
+Do **not** invent multi-provider public chat tools. UniGrok’s public `agent`
+remains Grok-routed; other providers stay behind Grok-supervised adapters.
+
 ## Plan critique habit (opt-in)
 
 When the user is about to see a multi-step **Implementation Plan**, prefer:
