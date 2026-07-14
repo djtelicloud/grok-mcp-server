@@ -14,7 +14,9 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
 ]
 dependencies = [
-    "mcp[cli]>=1.13.1",
+    # Stateful session cleanup uses a narrowly isolated, version-checked SDK
+    # 1.26 private registry adapter. Review that adapter before widening this.
+    "mcp[cli]>=1.26,<1.27",
     "httpx>=0.28.1",
     "google-auth[requests]>=2.40,<3",
     "python-dotenv>=1.2.2",
