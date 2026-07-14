@@ -27,9 +27,12 @@ jobs:
        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association) &&
        contains(github.event.comment.body, '@grok review'))
     name: UniGrok review
-    # Default is the existing trusted local runner. A repository admin may set
-    # UNIGROK_REVIEW_RUNNER_JSON to the JSON string "ubuntu-latest" only after
-    # configuring the authenticated API-plane endpoint documented below.
+    # Production (hosted): set repository variables
+    #   UNIGROK_REVIEW_RUNNER_JSON = "ubuntu-latest"
+    #   UNIGROK_REVIEW_MCP_URL     = https://mcp.grokmcp.org/mcp
+    #   UNIGROK_REVIEW_PLANE       = api
+    # Lab fallback when vars unset: self-hosted + loopback CLI (Mac required).
+    # See docs/design/hosted-review-p0.md and docs/chatgpt-github-app.md.
     runs-on: ${{ fromJSON(vars.UNIGROK_REVIEW_RUNNER_JSON || '["self-hosted","unigrok-review"]') }}
     timeout-minutes: 10
     steps:
@@ -49,7 +52,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           INPUT_PR_NUMBER: ${{ inputs.pr_number }}
+          # Hosted production: set UNIGROK_REVIEW_MCP_URL to https://mcp.grokmcp.org/mcp
           UNIGROK_MCP_URL: ${{ vars.UNIGROK_REVIEW_MCP_URL || 'http://127.0.0.1:4765/mcp' }}
           UNIGROK_REVIEW_PLANE: ${{ vars.UNIGROK_REVIEW_PLANE || 'cli' }}
+          # Temporary client bridge only — never XAI_API_KEY. Prefer OAuth mint (P1).
           UNIGROK_CLIENT_TOKEN: ${{ secrets.UNIGROK_CLIENT_TOKEN }}
         run: uv run python scripts/github-grok-review.py
