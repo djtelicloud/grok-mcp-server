@@ -9,7 +9,7 @@ which adapter may be called.
 from __future__ import annotations
 
 import re
-from datetime import datetime
+from datetime import UTC, datetime
 from decimal import Decimal
 from enum import Enum
 from typing import Annotated, Literal, Protocol, runtime_checkable
@@ -127,6 +127,78 @@ class ProviderRequest(StrictContract):
             raise ValueError("messages must contain at least one user turn")
         if sum(len(message.content) for message in self.messages) > MAX_REQUEST_CHARS:
             raise ValueError("combined message content exceeds the request bound")
+        return self
+
+
+def model_visible_messages(request: ProviderRequest) -> tuple[ProviderMessage, ...]:
+    """Return the exact normalized messages shown to a subordinate worker.
+
+    The supervisor deadline is model-visible and shared by every transport.
+    Keeping this construction in the contract module lets the adapter, the
+    attempt ledger, and the Grok broker layer hash the same logical request.
+    """
+
+    expires = (
+        request.supervision.ttl_expires_at.astimezone(UTC)
+        .isoformat(timespec="seconds")
+        .replace("+00:00", "Z")
+    )
+    ttl_fact = ProviderMessage(
+        role="system",
+        content=f"Supervisor TTL expires at {expires}; do not claim work after it.",
+    )
+    return (ttl_fact, *request.messages)
+
+
+class ProviderAttemptStart(StrictContract):
+    """Grok-authorized identity for one physical subordinate channel call."""
+
+    version: Literal["provider-attempt-start/v1"] = "provider-attempt-start/v1"
+    attempt_id: Annotated[str, Field(min_length=1, max_length=128)]
+    delegation_id: Annotated[str, Field(min_length=1, max_length=128)]
+    attempt_ordinal: Annotated[int, Field(ge=1, le=128)]
+    supervisor_plane: Literal["CLI", "API"]
+    supervisor_model: Annotated[str, Field(min_length=1, max_length=192)]
+    provider: ProviderId
+    channel: ProviderChannel
+    credential_plane: CredentialPlane
+    requested_model: Annotated[str, Field(min_length=1, max_length=192)]
+    request: ProviderRequest
+
+    @model_validator(mode="after")
+    def validate_start(self) -> "ProviderAttemptStart":
+        for value in (self.attempt_id, self.delegation_id):
+            if not _SAFE_IDENTIFIER_RE.fullmatch(value):
+                raise ValueError("attempt identifiers must be opaque and safe")
+        for value in (self.supervisor_model, self.requested_model):
+            if not _SAFE_MODEL_RE.fullmatch(value):
+                raise ValueError("attempt model identifiers must be safe")
+        if not self.supervisor_model.casefold().startswith("grok-"):
+            raise ValueError("subordinate attempts require an exact Grok supervisor model")
+        if self.provider == ProviderId.XAI:
+            raise ValueError("xAI planes are supervisor attempts, not subordinate workers")
+        if self.request.model is not None and self.request.model != self.requested_model:
+            raise ValueError("explicit request model must match requested_model")
+        allowed_channels = {
+            ProviderId.OPENAI: {ProviderChannel.OPENAI_API},
+            ProviderId.ANTHROPIC: {ProviderChannel.ANTHROPIC_API},
+            ProviderId.GOOGLE: {
+                ProviderChannel.GEMINI_API_KEY,
+                ProviderChannel.VERTEX_ADC,
+            },
+        }
+        if self.channel not in allowed_channels[self.provider]:
+            raise ValueError("provider and physical channel do not match")
+        expected_plane = {
+            ProviderChannel.GROK_CLI: CredentialPlane.SUBSCRIPTION,
+            ProviderChannel.XAI_API: CredentialPlane.METERED_API,
+            ProviderChannel.OPENAI_API: CredentialPlane.METERED_API,
+            ProviderChannel.ANTHROPIC_API: CredentialPlane.METERED_API,
+            ProviderChannel.GEMINI_API_KEY: CredentialPlane.METERED_API,
+            ProviderChannel.VERTEX_ADC: CredentialPlane.METERED_API,
+        }[self.channel]
+        if self.credential_plane != expected_plane:
+            raise ValueError("channel and credential plane do not match")
         return self
 
 

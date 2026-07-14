@@ -12,6 +12,7 @@ from .contracts import (
     GrokSupervisorBinding,
     ProviderAdapter,
     ProviderAttemptResult,
+    ProviderAttemptStart,
     ProviderChannel,
     ProviderDescriptor,
     ProviderFailureReceipt,
@@ -24,6 +25,7 @@ from .contracts import (
     ProviderTokenUsage,
     RouteClass,
     WorkerAuthority,
+    model_visible_messages,
 )
 from .errors import (
     ProviderConfigurationError,
@@ -46,6 +48,7 @@ __all__ = [
     "OpenAIAdapter",
     "ProviderAdapter",
     "ProviderAttemptResult",
+    "ProviderAttemptStart",
     "ProviderChannel",
     "ProviderConfigurationError",
     "ProviderDescriptor",
@@ -64,5 +67,6 @@ __all__ = [
     "VertexADCAdapter",
     "build_provider_registry",
     "load_google_adc_identity",
+    "model_visible_messages",
     "WorkerAuthority",
 ]

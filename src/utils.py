@@ -22,7 +22,7 @@ import asyncio
 import functools
 import concurrent.futures
 import aiosqlite
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Optional, List, Dict, Any, Literal, Callable, Awaitable
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field as PydanticField
@@ -1165,6 +1165,105 @@ def _bounded_redacted(text: str, limit: int) -> str:
     if len(value) <= limit:
         return value
     return value[:limit] + f"\n[...truncated {len(value) - limit} chars]"
+
+
+_PROVIDER_SECRET_ENV_NAMES = (
+    "XAI_API_KEY",
+    "XAI_MANAGEMENT_API_KEY",
+    "GROK_API_KEY",
+    "OPENAI_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "GEMINI_API_KEY",
+    "GOOGLE_API_KEY",
+)
+_PROVIDER_CONTENT_WITHHELD = "[CONTENT_WITHHELD_BY_SECRET_GUARD]"
+
+
+def _redact_provider_episode_text(text: Any) -> tuple[str, str]:
+    """Return content safe for the Grok-owned provider-attempt ledger.
+
+    Provider credentials are never copied into an episode. Exact configured
+    secret values are removed in addition to the gateway's normal secret
+    patterns. A defensive failure retains the attempt identity while
+    withholding the content itself.
+    """
+
+    try:
+        original = str(text or "")
+        redacted = redact_secrets(original)
+        for name in _PROVIDER_SECRET_ENV_NAMES:
+            secret = str(os.environ.get(name) or "")
+            if len(secret) >= 8 and secret in redacted:
+                redacted = redacted.replace(secret, "[REDACTED]")
+        return redacted, "redacted" if redacted != original else "clean"
+    except Exception:
+        return _PROVIDER_CONTENT_WITHHELD, "withheld"
+
+
+def _canonical_json_text(value: Any) -> str:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+
+def _content_sha256(text: str) -> str:
+    return "sha256:" + hashlib.sha256(text.encode("utf-8", errors="strict")).hexdigest()
+
+
+_PROVIDER_ATTEMPT_COLUMNS = frozenset({
+    "id",
+    "attempt_id",
+    "delegation_id",
+    "attempt_ordinal",
+    "start_json",
+    "start_digest",
+    "completion_json",
+    "completion_digest",
+    "supervisor",
+    "supervisor_session_id",
+    "objective_id",
+    "route_decision_id",
+    "supervisor_plane",
+    "supervisor_model",
+    "ttl_expires_at",
+    "request_id",
+    "provider",
+    "channel",
+    "credential_plane",
+    "route",
+    "requested_model",
+    "resolved_model",
+    "model_source",
+    "transport_status",
+    "finish_reason",
+    "error_kind",
+    "error_code",
+    "prompt_text",
+    "prompt_digest",
+    "prompt_chars",
+    "prompt_redaction",
+    "output_text",
+    "output_digest",
+    "output_chars",
+    "output_redaction",
+    "receipt_json",
+    "receipt_digest",
+    "duration_ms",
+    "input_tokens",
+    "output_tokens",
+    "total_tokens",
+    "usage_source",
+    "cost_usd",
+    "cost_source",
+    "started_at",
+    "completed_at",
+    "harvest_status",
+    "harvest_attempts",
+    "harvest_next_at",
+    "harvest_lease_id",
+    "harvest_lease_expires_at",
+    "harvest_error",
+    "remote_file_id",
+    "harvested_at",
+})
 
 
 def _normalize_verified_outcome(value: Optional[int]) -> Optional[int]:
@@ -2678,6 +2777,167 @@ class GrokSessionStore:
                     await self._conn.rollback()
                     raise
 
+            if version < 15:
+                # Grok-owned subordinate-provider evidence. One row represents
+                # one physical credential-channel attempt; a subscription
+                # failure and same-provider API retry therefore remain two
+                # ordered facts. Transport state is intentionally separate
+                # from semantic outcome and from verified task memory.
+                await self._conn.execute("BEGIN IMMEDIATE;")
+                try:
+                    async with self._conn.execute(
+                        "SELECT 1 FROM sqlite_master "
+                        "WHERE type = 'table' AND name = 'provider_attempts'"
+                    ) as cursor:
+                        preexisting_attempts = await cursor.fetchone()
+                    if preexisting_attempts is not None:
+                        raise RuntimeError(
+                            "provider_attempts predates v15; refusing to certify unknown schema"
+                        )
+                    await self._conn.execute("""
+                        CREATE TABLE provider_attempts (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            attempt_id TEXT NOT NULL UNIQUE,
+                            delegation_id TEXT NOT NULL,
+                            attempt_ordinal INTEGER NOT NULL,
+                            start_json TEXT NOT NULL,
+                            start_digest TEXT NOT NULL,
+                            completion_json TEXT,
+                            completion_digest TEXT,
+                            supervisor TEXT NOT NULL DEFAULT 'grok'
+                                CHECK(supervisor = 'grok'),
+                            supervisor_session_id TEXT NOT NULL,
+                            objective_id TEXT NOT NULL,
+                            route_decision_id TEXT NOT NULL,
+                            supervisor_plane TEXT NOT NULL
+                                CHECK(supervisor_plane IN ('CLI', 'API')),
+                            supervisor_model TEXT NOT NULL,
+                            ttl_expires_at TEXT NOT NULL,
+                            request_id TEXT NOT NULL,
+                            provider TEXT NOT NULL,
+                            channel TEXT NOT NULL,
+                            credential_plane TEXT NOT NULL,
+                            route TEXT NOT NULL,
+                            requested_model TEXT NOT NULL,
+                            resolved_model TEXT,
+                            model_source TEXT,
+                            transport_status TEXT NOT NULL DEFAULT 'started'
+                                CHECK(transport_status IN
+                                    ('started', 'returned', 'failed', 'indeterminate')),
+                            finish_reason TEXT,
+                            error_kind TEXT,
+                            error_code TEXT,
+                            prompt_text TEXT NOT NULL,
+                            prompt_digest TEXT NOT NULL,
+                            prompt_chars INTEGER NOT NULL,
+                            prompt_redaction TEXT NOT NULL
+                                CHECK(prompt_redaction IN ('clean', 'redacted', 'withheld')),
+                            output_text TEXT,
+                            output_digest TEXT,
+                            output_chars INTEGER,
+                            output_redaction TEXT
+                                CHECK(output_redaction IS NULL OR output_redaction IN
+                                    ('clean', 'redacted', 'withheld')),
+                            receipt_json TEXT,
+                            receipt_digest TEXT,
+                            duration_ms INTEGER,
+                            input_tokens INTEGER,
+                            output_tokens INTEGER,
+                            total_tokens INTEGER,
+                            usage_source TEXT NOT NULL DEFAULT 'unavailable',
+                            cost_usd TEXT,
+                            cost_source TEXT NOT NULL DEFAULT 'unavailable',
+                            started_at TEXT NOT NULL,
+                            completed_at TEXT,
+                            harvest_status TEXT NOT NULL DEFAULT 'held'
+                                CHECK(harvest_status IN
+                                    ('held', 'pending', 'leased', 'retry_wait', 'synced')),
+                            harvest_attempts INTEGER NOT NULL DEFAULT 0,
+                            harvest_next_at TEXT,
+                            harvest_lease_id TEXT,
+                            harvest_lease_expires_at TEXT,
+                            harvest_error TEXT,
+                            remote_file_id TEXT,
+                            harvested_at TEXT,
+                            UNIQUE(delegation_id, attempt_ordinal)
+                        )
+                    """)
+                    async with self._conn.execute(
+                        "PRAGMA table_info(provider_attempts);"
+                    ) as cursor:
+                        actual_columns = {row["name"] for row in await cursor.fetchall()}
+                    if actual_columns != _PROVIDER_ATTEMPT_COLUMNS:
+                        raise RuntimeError(
+                            "provider_attempts schema is incompatible; refusing to stamp v15"
+                        )
+                    await self._conn.execute(
+                        "CREATE INDEX idx_provider_attempts_delegation "
+                        "ON provider_attempts(delegation_id, attempt_ordinal);"
+                    )
+                    await self._conn.execute(
+                        "CREATE UNIQUE INDEX idx_provider_attempts_request "
+                        "ON provider_attempts(request_id);"
+                    )
+                    await self._conn.execute(
+                        "CREATE INDEX idx_provider_attempts_session "
+                        "ON provider_attempts(supervisor_session_id, id);"
+                    )
+                    await self._conn.execute(
+                        "CREATE INDEX idx_provider_attempts_harvest "
+                        "ON provider_attempts(harvest_status, harvest_next_at, id);"
+                    )
+                    async with self._conn.execute(
+                        "SELECT sql FROM sqlite_master "
+                        "WHERE type = 'table' AND name = 'provider_attempts'"
+                    ) as cursor:
+                        ddl_row = await cursor.fetchone()
+                    normalized_ddl = re.sub(
+                        r"\s+", " ", str(ddl_row["sql"] if ddl_row else "").casefold()
+                    )
+                    required_checks = (
+                        "attempt_id text not null unique",
+                        "check(supervisor = 'grok')",
+                        "check(supervisor_plane in ('cli', 'api'))",
+                        "check(transport_status in ('started', 'returned', 'failed', 'indeterminate'))",
+                        "unique(delegation_id, attempt_ordinal)",
+                    )
+                    if any(marker not in normalized_ddl for marker in required_checks):
+                        raise RuntimeError(
+                            "provider_attempts constraints are incompatible; refusing to stamp v15"
+                        )
+                    async with self._conn.execute(
+                        "PRAGMA index_list(provider_attempts);"
+                    ) as cursor:
+                        index_rows = await cursor.fetchall()
+                    request_index = next(
+                        (
+                            row
+                            for row in index_rows
+                            if row["name"] == "idx_provider_attempts_request"
+                            and int(row["unique"]) == 1
+                        ),
+                        None,
+                    )
+                    if request_index is None:
+                        raise RuntimeError(
+                            "provider_attempts request identity is not unique"
+                        )
+                    async with self._conn.execute(
+                        "PRAGMA index_info(idx_provider_attempts_request);"
+                    ) as cursor:
+                        request_index_columns = [
+                            row["name"] for row in await cursor.fetchall()
+                        ]
+                    if request_index_columns != ["request_id"]:
+                        raise RuntimeError(
+                            "provider_attempts request index is incompatible"
+                        )
+                    await self._conn.execute("PRAGMA user_version = 15;")
+                    await self._conn.commit()
+                except Exception:
+                    await self._conn.rollback()
+                    raise
+
             # knowledge_fts is (re)checked on EVERY init, not just inside the
             # v7 gate: FTS5 is a compile-time SQLite option, so a db created
             # on a build WITH it can be reopened by one WITHOUT it (and vice
@@ -3513,6 +3773,632 @@ class GrokSessionStore:
                 raise
             await self._on_write_completed()
         return count
+
+    # ── Grok-owned subordinate provider attempts (v15) ────────────────────
+
+    @staticmethod
+    def _decode_provider_attempt_row(row: Any) -> Dict[str, Any]:
+        item = dict(row)
+        start_raw = item.get("start_json")
+        if not isinstance(start_raw, str) or not start_raw:
+            raise ValueError("provider attempt is missing its canonical start record")
+        if _content_sha256(start_raw) != item.get("start_digest"):
+            raise ValueError("provider attempt start digest mismatch")
+        try:
+            start_record = json.loads(start_raw)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("provider attempt start record is malformed") from exc
+
+        request_record = start_record.get("request") or {}
+        supervision = request_record.get("supervision") or {}
+        expected_columns = {
+            "attempt_id": start_record.get("attempt_id"),
+            "delegation_id": start_record.get("delegation_id"),
+            "attempt_ordinal": start_record.get("attempt_ordinal"),
+            "supervisor_plane": start_record.get("supervisor_plane"),
+            "supervisor_model": start_record.get("supervisor_model"),
+            "provider": start_record.get("provider"),
+            "channel": start_record.get("channel"),
+            "credential_plane": start_record.get("credential_plane"),
+            "requested_model": start_record.get("requested_model"),
+            "request_id": request_record.get("request_id"),
+            "route": request_record.get("route"),
+            "supervisor_session_id": supervision.get("session_id"),
+            "objective_id": supervision.get("objective_id"),
+            "route_decision_id": supervision.get("route_decision_id"),
+        }
+        for column, expected in expected_columns.items():
+            if str(item.get(column)) != str(expected):
+                raise ValueError(f"provider attempt start field mismatch: {column}")
+        if item.get("supervisor") != "grok" or supervision.get("supervisor") != "grok":
+            raise ValueError("provider attempt is not Grok-owned")
+        try:
+            row_ttl = datetime.fromisoformat(str(item.get("ttl_expires_at")))
+            record_ttl = datetime.fromisoformat(str(supervision.get("ttl_expires_at")))
+        except ValueError as exc:
+            raise ValueError("provider attempt TTL is malformed") from exc
+        if row_ttl != record_ttl:
+            raise ValueError("provider attempt TTL does not match its start record")
+
+        prompt_text = item.get("prompt_text")
+        if not isinstance(prompt_text, str):
+            raise ValueError("provider attempt prompt is missing")
+        if _content_sha256(prompt_text) != item.get("prompt_digest"):
+            raise ValueError("provider attempt prompt digest mismatch")
+        if int(item.get("prompt_chars") or 0) != len(prompt_text):
+            raise ValueError("provider attempt prompt length mismatch")
+        if start_record.get("model_visible_prompt_digest") != item.get("prompt_digest"):
+            raise ValueError("provider attempt prompt is not bound to its start record")
+        if (
+            item.get("prompt_redaction") != "clean"
+            or start_record.get("prompt_redaction") != "clean"
+        ):
+            raise ValueError("provider attempt prompt redaction state is invalid")
+        if item.get("started_at") != start_record.get("started_at"):
+            raise ValueError("provider attempt start time is not bound to its start record")
+        try:
+            started_at = datetime.fromisoformat(str(item.get("started_at")))
+        except ValueError as exc:
+            raise ValueError("provider attempt start time is malformed") from exc
+        if started_at.tzinfo is None:
+            raise ValueError("provider attempt start time lacks timezone")
+
+        status = str(item.get("transport_status") or "")
+        if status == "started":
+            terminal_columns = (
+                "completion_json",
+                "completion_digest",
+                "resolved_model",
+                "model_source",
+                "finish_reason",
+                "error_kind",
+                "error_code",
+                "output_text",
+                "output_digest",
+                "output_chars",
+                "output_redaction",
+                "receipt_json",
+                "receipt_digest",
+                "duration_ms",
+                "input_tokens",
+                "output_tokens",
+                "total_tokens",
+                "cost_usd",
+                "completed_at",
+            )
+            if any(item.get(column) is not None for column in terminal_columns):
+                raise ValueError("started provider attempt has terminal evidence")
+            if (
+                item.get("usage_source") != "unavailable"
+                or item.get("cost_source") != "unavailable"
+                or item.get("harvest_status") != "held"
+            ):
+                raise ValueError("started provider attempt has terminal projection state")
+            item["receipt"] = None
+            return item
+
+        completion_raw = item.get("completion_json")
+        if not isinstance(completion_raw, str) or not completion_raw:
+            raise ValueError("terminal provider attempt is missing completion evidence")
+        if _content_sha256(completion_raw) != item.get("completion_digest"):
+            raise ValueError("provider attempt completion digest mismatch")
+        try:
+            completion_record = json.loads(completion_raw)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("provider attempt completion record is malformed") from exc
+        if completion_raw != _canonical_json_text(completion_record):
+            raise ValueError("provider attempt completion record is not canonical")
+        if item.get("completed_at") != completion_record.get("completed_at"):
+            raise ValueError("provider attempt completion time is not bound")
+        try:
+            completed_at = datetime.fromisoformat(str(item.get("completed_at")))
+        except ValueError as exc:
+            raise ValueError("terminal provider attempt completion time is malformed") from exc
+        if completed_at.tzinfo is None or completed_at < started_at:
+            raise ValueError("terminal provider attempt completion time is invalid")
+
+        output_text = item.get("output_text")
+        output_digest = item.get("output_digest")
+        if output_text is not None:
+            if not isinstance(output_text, str) or _content_sha256(output_text) != output_digest:
+                raise ValueError("provider attempt output digest mismatch")
+            if int(item.get("output_chars") or 0) != len(output_text):
+                raise ValueError("provider attempt output length mismatch")
+            if item.get("output_redaction") not in {"clean", "redacted", "withheld"}:
+                raise ValueError("provider attempt output redaction state is invalid")
+        elif (
+            output_digest is not None
+            or item.get("output_chars") is not None
+            or item.get("output_redaction") is not None
+        ):
+            raise ValueError("provider attempt has orphaned output metadata")
+
+        if status == "indeterminate":
+            if item.get("receipt_json") is not None or output_text is not None:
+                raise ValueError("indeterminate provider attempt has fabricated return data")
+            if (
+                item.get("error_kind") != "internal"
+                or item.get("error_code") != "attempt_interrupted"
+            ):
+                raise ValueError("indeterminate provider attempt has invalid error state")
+            if any(
+                item.get(column) is not None
+                for column in (
+                    "resolved_model",
+                    "model_source",
+                    "finish_reason",
+                    "receipt_digest",
+                    "duration_ms",
+                    "input_tokens",
+                    "output_tokens",
+                    "total_tokens",
+                    "cost_usd",
+                )
+            ) or item.get("usage_source") != "unavailable" or item.get(
+                "cost_source"
+            ) != "unavailable":
+                raise ValueError("indeterminate provider attempt has return projections")
+            expected_completion = {
+                "attempt_id": item["attempt_id"],
+                "start_digest": item["start_digest"],
+                "status": status,
+                "error_kind": "internal",
+                "error_code": item.get("error_code"),
+                "output_redaction": None,
+                "completed_at": item.get("completed_at"),
+            }
+            if completion_record != expected_completion:
+                raise ValueError("indeterminate completion projection mismatch")
+            item["receipt"] = None
+            return item
+        if status not in {"returned", "failed"}:
+            raise ValueError("provider attempt has an unknown transport status")
+
+        receipt_raw = item.get("receipt_json")
+        if not isinstance(receipt_raw, str) or not receipt_raw:
+            raise ValueError("terminal provider return is missing its receipt")
+        if _content_sha256(receipt_raw) != item.get("receipt_digest"):
+            raise ValueError("provider attempt receipt digest mismatch")
+        try:
+            receipt_record = json.loads(receipt_raw)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("provider attempt receipt is malformed") from exc
+        if receipt_raw != _canonical_json_text(receipt_record):
+            raise ValueError("provider attempt receipt is not canonical")
+        from .providers.contracts import ProviderFailureReceipt, ProviderReceipt
+
+        try:
+            receipt = (
+                ProviderReceipt.model_validate_json(receipt_raw)
+                if status == "returned"
+                else ProviderFailureReceipt.model_validate_json(receipt_raw)
+            )
+        except Exception as exc:
+            raise ValueError("provider attempt receipt violates its contract") from exc
+        item["receipt"] = receipt.model_dump(mode="json")
+        if receipt_record != item["receipt"]:
+            raise ValueError("provider attempt receipt normalization mismatch")
+
+        receipt_bindings = {
+            "request_id": receipt.request_id,
+            "provider": receipt.provider.value,
+            "channel": receipt.channel.value,
+            "credential_plane": receipt.credential_plane.value,
+            "route": receipt.route.value,
+            "requested_model": receipt.requested_model,
+            "supervisor_session_id": receipt.supervision.session_id,
+            "objective_id": receipt.supervision.objective_id,
+            "route_decision_id": receipt.supervision.route_decision_id,
+            "duration_ms": receipt.duration_ms,
+            "input_tokens": receipt.usage.input_tokens,
+            "output_tokens": receipt.usage.output_tokens,
+            "total_tokens": receipt.usage.total_tokens,
+            "usage_source": receipt.usage.source,
+            "cost_usd": (
+                str(receipt.cost_usd) if receipt.cost_usd is not None else None
+            ),
+            "cost_source": receipt.cost_source,
+        }
+        for column, expected in receipt_bindings.items():
+            if item.get(column) != expected:
+                raise ValueError(f"provider receipt projection mismatch: {column}")
+        if receipt.supervision.supervisor != "grok":
+            raise ValueError("provider receipt is not Grok-owned")
+        if datetime.fromisoformat(str(item["ttl_expires_at"])) != receipt.supervision.ttl_expires_at:
+            raise ValueError("provider receipt TTL projection mismatch")
+
+        expected_completion = {
+            "attempt_id": item["attempt_id"],
+            "start_digest": item["start_digest"],
+            "status": status,
+            "receipt": receipt.model_dump(mode="json"),
+            "receipt_digest": item["receipt_digest"],
+            "output_digest": output_digest,
+            "output_redaction": item.get("output_redaction"),
+            "resolved_model": (
+                receipt.resolved_model if status == "returned" else None
+            ),
+            "model_source": receipt.model_source if status == "returned" else None,
+            "finish_reason": item.get("finish_reason") if status == "returned" else None,
+            "error_kind": receipt.error_kind if status == "failed" else None,
+            "error_code": receipt.error_code if status == "failed" else None,
+            "completed_at": item.get("completed_at"),
+        }
+        if completion_record != expected_completion:
+            raise ValueError("provider attempt completion projection mismatch")
+        if status == "returned" and output_text is None:
+            raise ValueError("returned provider attempt is missing normalized output")
+        if status == "failed" and output_text is not None:
+            raise ValueError("failed provider attempt has fabricated output")
+        if item.get("resolved_model") != expected_completion["resolved_model"]:
+            raise ValueError("provider receipt projection mismatch: resolved_model")
+        if item.get("model_source") != expected_completion["model_source"]:
+            raise ValueError("provider receipt projection mismatch: model_source")
+        if item.get("error_kind") != expected_completion["error_kind"]:
+            raise ValueError("provider receipt projection mismatch: error_kind")
+        if item.get("error_code") != expected_completion["error_code"]:
+            raise ValueError("provider receipt projection mismatch: error_code")
+        if status == "failed" and item.get("finish_reason") is not None:
+            raise ValueError("failed provider attempt has a finish reason")
+        if status == "returned" and item.get("finish_reason") not in {
+            "stop",
+            "length",
+            "tool_calls",
+            "content_filter",
+            "unknown",
+        }:
+            raise ValueError("returned provider attempt has an invalid finish reason")
+        return item
+
+    @_with_write_retry_async
+    async def begin_provider_attempt(self, start: Any) -> bool:
+        """Durably record Grok authorization before a worker channel effect.
+
+        Returns True for a new row and False for an exact idempotent replay.
+        Reusing either identity for different work fails closed.
+        """
+
+        from .providers.contracts import ProviderAttemptStart, model_visible_messages
+
+        if not isinstance(start, ProviderAttemptStart):
+            start = ProviderAttemptStart.model_validate(start)
+        visible_messages = [
+            message.model_dump(mode="json")
+            for message in model_visible_messages(start.request)
+        ]
+        prompt_raw = _canonical_json_text(visible_messages)
+        prompt_text, prompt_redaction = _redact_provider_episode_text(prompt_raw)
+        if prompt_redaction != "clean":
+            raise ValueError(
+                "model-visible provider prompt contains secret-like content"
+            )
+        prompt_digest = _content_sha256(prompt_text)
+        now = datetime.now(UTC).isoformat()
+
+        start_payload = start.model_dump(mode="json")
+        start_payload["request"].pop("messages", None)
+        start_payload["model_visible_prompt_digest"] = prompt_digest
+        start_payload["prompt_redaction"] = prompt_redaction
+        start_payload["started_at"] = now
+        start_json = _canonical_json_text(start_payload)
+        start_digest = _content_sha256(start_json)
+        supervision = start.request.supervision
+
+        await self._ensure_initialized()
+        async with self._lock:
+            await self._conn.execute("BEGIN IMMEDIATE;")
+            try:
+                await self._conn.execute(
+                    """
+                    INSERT INTO provider_attempts (
+                        attempt_id, delegation_id, attempt_ordinal,
+                        start_json, start_digest, supervisor, supervisor_session_id,
+                        objective_id, route_decision_id, supervisor_plane,
+                        supervisor_model, ttl_expires_at, request_id, provider,
+                        channel, credential_plane, route, requested_model,
+                        transport_status, prompt_text, prompt_digest,
+                        prompt_chars, prompt_redaction, usage_source,
+                        cost_source, started_at, harvest_status
+                    ) VALUES (
+                        ?, ?, ?, ?, ?, 'grok', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                        'started', ?, ?, ?, ?, 'unavailable', 'unavailable', ?, 'held'
+                    )
+                    """,
+                    (
+                        start.attempt_id,
+                        start.delegation_id,
+                        start.attempt_ordinal,
+                        start_json,
+                        start_digest,
+                        supervision.session_id,
+                        supervision.objective_id,
+                        supervision.route_decision_id,
+                        start.supervisor_plane,
+                        start.supervisor_model,
+                        supervision.ttl_expires_at.isoformat(),
+                        start.request.request_id,
+                        start.provider.value,
+                        start.channel.value,
+                        start.credential_plane.value,
+                        start.request.route.value,
+                        start.requested_model,
+                        prompt_text,
+                        prompt_digest,
+                        len(prompt_text),
+                        prompt_redaction,
+                        now,
+                    ),
+                )
+                await self._conn.commit()
+            except (sqlite3.IntegrityError, aiosqlite.IntegrityError):
+                await self._conn.rollback()
+                async with self._conn.execute(
+                    "SELECT * FROM provider_attempts "
+                    "WHERE attempt_id = ? OR "
+                    "(delegation_id = ? AND attempt_ordinal = ?) OR request_id = ?",
+                    (
+                        start.attempt_id,
+                        start.delegation_id,
+                        start.attempt_ordinal,
+                        start.request.request_id,
+                    ),
+                ) as cursor:
+                    row = await cursor.fetchone()
+                decoded = self._decode_provider_attempt_row(row) if row is not None else None
+                replay_digest = None
+                if decoded is not None:
+                    replay_payload = dict(start_payload)
+                    replay_payload["started_at"] = decoded["started_at"]
+                    replay_digest = _content_sha256(
+                        _canonical_json_text(replay_payload)
+                    )
+                if (
+                    decoded is not None
+                    and decoded["attempt_id"] == start.attempt_id
+                    and decoded["start_digest"] == replay_digest
+                ):
+                    return False
+                raise ValueError("provider attempt identity conflicts with existing work") from None
+            except Exception:
+                await self._conn.rollback()
+                raise
+            await self._on_write_completed()
+        return True
+
+    @_with_write_retry_async
+    async def complete_provider_attempt(self, attempt_id: str, result: Any) -> bool:
+        """Bind one normalized transport result to its exact Grok start row."""
+
+        from .providers.contracts import ProviderAttemptResult
+
+        if not isinstance(result, ProviderAttemptResult):
+            result = ProviderAttemptResult.model_validate(result)
+        attempt_key = str(attempt_id or "").strip()
+        if not attempt_key:
+            raise ValueError("attempt_id is required")
+
+        await self._ensure_initialized()
+        async with self._lock:
+            await self._conn.execute("BEGIN IMMEDIATE;")
+            try:
+                async with self._conn.execute(
+                    "SELECT * FROM provider_attempts WHERE attempt_id = ?",
+                    (attempt_key,),
+                ) as cursor:
+                    row = await cursor.fetchone()
+                if row is None:
+                    raise KeyError(f"unknown provider attempt: {attempt_key}")
+                stored = self._decode_provider_attempt_row(row)
+
+                response = result.response
+                failure = result.failure
+                receipt = response.receipt if response is not None else failure
+                if receipt is None:  # Defensive; ProviderAttemptResult forbids it.
+                    raise ValueError("provider result has no receipt")
+                supervision = receipt.supervision
+                expected = {
+                    "request_id": receipt.request_id,
+                    "provider": receipt.provider.value,
+                    "channel": receipt.channel.value,
+                    "credential_plane": receipt.credential_plane.value,
+                    "route": receipt.route.value,
+                    "requested_model": receipt.requested_model,
+                    "supervisor_session_id": supervision.session_id,
+                    "objective_id": supervision.objective_id,
+                    "route_decision_id": supervision.route_decision_id,
+                }
+                for column, value in expected.items():
+                    if str(stored[column]) != str(value):
+                        raise ValueError(
+                            f"provider receipt does not match attempt field {column}"
+                        )
+                if supervision.supervisor != "grok":
+                    raise ValueError("provider receipt is not bound to Grok")
+                stored_ttl = datetime.fromisoformat(str(stored["ttl_expires_at"]))
+                if stored_ttl != supervision.ttl_expires_at:
+                    raise ValueError("provider receipt TTL does not match attempt")
+
+                receipt_record = receipt.model_dump(mode="json")
+                receipt_json = _canonical_json_text(receipt_record)
+                receipt_digest = _content_sha256(receipt_json)
+                output_text = None
+                output_digest = None
+                output_chars = None
+                output_redaction = None
+                if response is not None:
+                    output_text, output_redaction = _redact_provider_episode_text(
+                        response.text
+                    )
+                    output_digest = _content_sha256(output_text)
+                    output_chars = len(output_text)
+
+                current_status = str(stored["transport_status"])
+                completed_at = (
+                    str(stored["completed_at"])
+                    if current_status != "started"
+                    else datetime.now(UTC).isoformat()
+                )
+
+                completion_record = {
+                    "attempt_id": attempt_key,
+                    "start_digest": stored["start_digest"],
+                    "status": result.status,
+                    "receipt": receipt_record,
+                    "receipt_digest": receipt_digest,
+                    "output_digest": output_digest,
+                    "output_redaction": output_redaction,
+                    "resolved_model": response.model if response is not None else None,
+                    "model_source": receipt.model_source if response is not None else None,
+                    "finish_reason": response.finish_reason if response is not None else None,
+                    "error_kind": failure.error_kind if failure is not None else None,
+                    "error_code": failure.error_code if failure is not None else None,
+                    "completed_at": completed_at,
+                }
+                completion_json = _canonical_json_text(completion_record)
+                completion_digest = _content_sha256(completion_json)
+                if current_status != "started":
+                    if str(stored["completion_digest"] or "") == completion_digest:
+                        await self._conn.rollback()
+                        return False
+                    raise ValueError("provider attempt already has a different terminal result")
+
+                usage = receipt.usage
+                cost_usd = str(receipt.cost_usd) if receipt.cost_usd is not None else None
+                await self._conn.execute(
+                    """
+                    UPDATE provider_attempts SET
+                        completion_json = ?, completion_digest = ?,
+                        resolved_model = ?, model_source = ?,
+                        transport_status = ?, finish_reason = ?, error_kind = ?,
+                        error_code = ?, output_text = ?, output_digest = ?,
+                        output_chars = ?, output_redaction = ?, receipt_json = ?,
+                        receipt_digest = ?, duration_ms = ?, input_tokens = ?,
+                        output_tokens = ?, total_tokens = ?, usage_source = ?,
+                        cost_usd = ?, cost_source = ?, completed_at = ?,
+                        harvest_status = 'pending', harvest_next_at = ?,
+                        harvest_error = NULL
+                    WHERE attempt_id = ? AND transport_status = 'started'
+                    """,
+                    (
+                        completion_json,
+                        completion_digest,
+                        response.model if response is not None else None,
+                        receipt.model_source if response is not None else None,
+                        result.status,
+                        response.finish_reason if response is not None else None,
+                        failure.error_kind if failure is not None else None,
+                        failure.error_code if failure is not None else None,
+                        output_text,
+                        output_digest,
+                        output_chars,
+                        output_redaction,
+                        receipt_json,
+                        receipt_digest,
+                        receipt.duration_ms,
+                        usage.input_tokens,
+                        usage.output_tokens,
+                        usage.total_tokens,
+                        usage.source,
+                        cost_usd,
+                        receipt.cost_source,
+                        completed_at,
+                        completed_at,
+                        attempt_key,
+                    ),
+                )
+                await self._conn.commit()
+            except Exception:
+                await self._conn.rollback()
+                raise
+            await self._on_write_completed()
+        return True
+
+    @_with_write_retry_async
+    async def mark_stale_provider_attempts_indeterminate(
+        self, stale_before: datetime
+    ) -> int:
+        """Close crash-left starts without pretending the worker failed."""
+
+        if stale_before.tzinfo is None:
+            raise ValueError("stale_before must be timezone-aware")
+        await self._ensure_initialized()
+        completed_at = datetime.now(UTC).isoformat()
+        count = 0
+        async with self._lock:
+            await self._conn.execute("BEGIN IMMEDIATE;")
+            try:
+                async with self._conn.execute(
+                    "SELECT * FROM provider_attempts "
+                    "WHERE transport_status = 'started' AND started_at < ? "
+                    "ORDER BY id ASC",
+                    (stale_before.astimezone(UTC).isoformat(),),
+                ) as cursor:
+                    rows = await cursor.fetchall()
+                for row in rows:
+                    stored = self._decode_provider_attempt_row(row)
+                    attempt_key = str(stored["attempt_id"])
+                    completion_json = _canonical_json_text({
+                        "attempt_id": attempt_key,
+                        "start_digest": stored["start_digest"],
+                        "status": "indeterminate",
+                        "error_kind": "internal",
+                        "error_code": "attempt_interrupted",
+                        "output_redaction": None,
+                        "completed_at": completed_at,
+                    })
+                    completion_digest = _content_sha256(completion_json)
+                    cursor = await self._conn.execute(
+                        """
+                        UPDATE provider_attempts SET
+                            completion_json = ?, completion_digest = ?,
+                            transport_status = 'indeterminate',
+                            error_kind = 'internal',
+                            error_code = 'attempt_interrupted',
+                            completed_at = ?, harvest_status = 'pending',
+                            harvest_next_at = ?
+                        WHERE attempt_id = ? AND transport_status = 'started'
+                        """,
+                        (
+                            completion_json,
+                            completion_digest,
+                            completed_at,
+                            completed_at,
+                            attempt_key,
+                        ),
+                    )
+                    count += self._safe_db_int(cursor.rowcount)
+                await self._conn.commit()
+            except Exception:
+                await self._conn.rollback()
+                raise
+            if count:
+                await self._on_write_completed()
+        return count
+
+    @_with_read_retry_async
+    async def list_provider_attempts(
+        self,
+        supervisor_session_id: Optional[str] = None,
+        delegation_id: Optional[str] = None,
+        limit: int = 100,
+    ) -> List[Dict[str, Any]]:
+        await self._ensure_initialized()
+        query = "SELECT * FROM provider_attempts WHERE 1 = 1"
+        params: List[Any] = []
+        if supervisor_session_id:
+            query += " AND supervisor_session_id = ?"
+            params.append(str(supervisor_session_id))
+        if delegation_id:
+            query += " AND delegation_id = ?"
+            params.append(str(delegation_id))
+            query += " ORDER BY attempt_ordinal ASC, id ASC LIMIT ?"
+        else:
+            query += " ORDER BY id ASC LIMIT ?"
+        params.append(max(1, min(int(limit or 100), 1000)))
+        async with self._read_conn() as conn:
+            async with conn.execute(query, params) as cursor:
+                rows = await cursor.fetchall()
+        return [self._decode_provider_attempt_row(row) for row in rows]
 
     # ── Commit-anchored workspace evidence (v11) ───────────────────────────
 
