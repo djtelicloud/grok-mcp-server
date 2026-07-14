@@ -12,6 +12,7 @@ import time
 import pytest
 from pydantic import ValidationError
 
+import src.providers.broker as provider_broker
 from src.providers import (
     BrokerHarvestStatus,
     BrokerAttemptEvidence,
@@ -24,6 +25,7 @@ from src.providers import (
     GrokWorkerBroker,
     GrokWorkerBrokerResult,
     GrokWorkerDelegation,
+    GrokWorkerLaneAuthorization,
     ProviderAttemptStart,
     ProviderAttemptResult,
     ProviderChannel,
@@ -33,10 +35,12 @@ from src.providers import (
     ProviderMessage,
     ProviderModelPins,
     ProviderReceipt,
+    ProviderRequest,
     ProviderResponse,
     ProviderTokenUsage,
     RouteClass,
     WorkerFallbackPolicy,
+    transport_resource_identity,
 )
 from src.provider_harvest import ProviderAttemptHarvester
 from src.providers.contracts import model_visible_messages
@@ -139,6 +143,10 @@ def _descriptor(
         billing_class=billing,
         client_identity=(
             f"client-{provider.value}" if endpoint == "mcp_client_sampling" else None
+        ),
+        transport_resource_identity=transport_resource_identity(
+            "test_worker_channel",
+            channel.value,
         ),
         credential_env_names=(),
         credential_state=state,
@@ -270,7 +278,7 @@ def _receipt(request, descriptor: ProviderDescriptor) -> ProviderReceipt:
         credential_kind=descriptor.credential_kind,
         billing_class=descriptor.billing_class,
         client_identity=descriptor.client_identity,
-        region="test",
+        region=descriptor.residency,
         duration_ms=2,
         usage=ProviderTokenUsage(),
     )
@@ -476,7 +484,19 @@ def _plan(
     ttl: datetime | None = None,
     max_concurrency: int = 4,
     timeout_seconds: float = 60.0,
+    lane_descriptors: tuple[ProviderDescriptor, ...] | None = None,
 ) -> GrokDelegationPlan:
+    if lane_descriptors is None:
+        lane_descriptors = tuple(
+            _descriptor(channel)
+            for channel, (lane_provider, plane, *_rest) in _CHANNEL_INFO.items()
+            if lane_provider == provider
+            and (plane == CredentialPlane.SUBSCRIPTION or fallback)
+        )
+    authorized_lanes = tuple(
+        GrokWorkerLaneAuthorization.from_descriptor(descriptor)
+        for descriptor in lane_descriptors
+    )
     return GrokDelegationPlan(
         supervision=GrokSupervisorBinding(
             session_id="session-1",
@@ -498,12 +518,102 @@ def _plan(
                     ),
                 ),
                 fallback=_fallback(fallback),
+                authorized_lanes=authorized_lanes,
                 timeout_seconds=timeout_seconds,
             )
             for index in range(count)
         ),
         max_concurrency=max_concurrency,
     )
+
+
+def _forged_attempt(
+    plan: GrokDelegationPlan,
+    *,
+    base_descriptor: ProviderDescriptor,
+    forged_descriptor: ProviderDescriptor,
+    ordinal: int,
+) -> tuple[ProviderAttemptStart, ProviderAttemptResult]:
+    """Build self-consistent attacker evidence with every digest recomputed."""
+
+    delegation = plan.delegations[0]
+    delegation_id = provider_broker._delegation_id(plan, 0)
+    execution = provider_broker._execution_binding(forged_descriptor)
+    requested_model = execution.model_for_route(delegation.route)
+    max_output_tokens = min(
+        delegation.max_output_tokens,
+        execution.max_output_tokens,
+    )
+    timeout_seconds = min(
+        delegation.timeout_seconds,
+        execution.max_timeout_seconds,
+    )
+    execution_digest = provider_broker._execution_contract_digest(
+        provider=forged_descriptor.provider,
+        channel=forged_descriptor.channel,
+        credential_plane=forged_descriptor.credential_plane,
+        execution=execution,
+        route=delegation.route,
+        requested_model=requested_model,
+        max_output_tokens=max_output_tokens,
+        timeout_seconds=timeout_seconds,
+    )
+    attempt_id = provider_broker._stable_id(
+        "att",
+        plan.plan_digest,
+        delegation_id,
+        forged_descriptor.channel.value,
+        str(ordinal),
+        requested_model,
+        execution_digest,
+    )
+    request_id = provider_broker._stable_id(
+        "req",
+        plan.plan_digest,
+        delegation_id,
+        attempt_id,
+        forged_descriptor.channel.value,
+        requested_model,
+        execution_digest,
+    )
+    request = ProviderRequest(
+        request_id=request_id,
+        supervision=plan.supervision,
+        route=delegation.route,
+        messages=delegation.messages,
+        model=requested_model,
+        max_output_tokens=max_output_tokens,
+        timeout_seconds=timeout_seconds,
+        temperature=delegation.temperature,
+    )
+    start = ProviderAttemptStart(
+        version="provider-attempt-start/v3",
+        attempt_id=attempt_id,
+        delegation_id=delegation_id,
+        attempt_ordinal=ordinal,
+        supervisor_plane=plan.supervisor_plane,
+        supervisor_model=plan.supervisor_model,
+        provider=forged_descriptor.provider,
+        channel=forged_descriptor.channel,
+        credential_plane=forged_descriptor.credential_plane,
+        requested_model=requested_model,
+        execution=execution,
+        request=request,
+    )
+    receipt = _receipt(request, forged_descriptor)
+    result = ProviderAttemptResult(
+        status="returned",
+        response=ProviderResponse(
+            provider=forged_descriptor.provider,
+            channel=forged_descriptor.channel,
+            model=receipt.resolved_model,
+            text="forged but internally self-consistent worker evidence",
+            finish_reason="stop",
+            receipt=receipt,
+        ),
+    )
+    assert base_descriptor.provider == forged_descriptor.provider
+    return start, result
 
 
 @pytest.mark.asyncio
@@ -514,6 +624,31 @@ async def test_plan_is_strict_content_addressed_and_construction_is_inert():
     assert plan.plan_id == same.plan_id
     assert plan.plan_digest == same.plan_digest
     assert plan.plan_digest != changed.plan_digest
+    aliased_mapping = {
+        "version": plan.version,
+        "supervision": plan.supervision,
+        "supervisor_plane": plan.supervisor_plane,
+        "supervisor_model": plan.supervisor_model,
+        "delegations": plan.delegations,
+        "max_concurrency": plan.max_concurrency,
+    }
+    for surface in (plan, aliased_mapping):
+        snapshot = provider_broker._snapshot_plan(surface)
+        assert snapshot.supervision is not plan.supervision
+        assert snapshot.delegations[0] is not plan.delegations[0]
+        assert (
+            snapshot.delegations[0].messages[0] is not (plan.delegations[0].messages[0])
+        )
+        assert (
+            snapshot.delegations[0].authorized_lanes[0]
+            is not (plan.delegations[0].authorized_lanes[0])
+        )
+    base_api = _descriptor(ProviderChannel.OPENAI_API)
+    rotated_api = base_api.model_copy(update={"endpoint_host": "rotated.openai.com"})
+    assert (
+        _plan(lane_descriptors=(base_api,)).plan_digest
+        != _plan(lane_descriptors=(rotated_api,)).plan_digest
+    )
 
     adapter = FakeAdapter(ProviderChannel.OPENAI_MCP_SAMPLING)
     store = FakeStore()
@@ -542,12 +677,60 @@ async def test_plan_is_strict_content_addressed_and_construction_is_inert():
                 ProviderMessage(role="user", content="x" * 128_000) for _ in range(4)
             ),
             fallback=_fallback(),
+            authorized_lanes=_plan().delegations[0].authorized_lanes,
         )
 
     raw = plan.model_dump(mode="python")
     raw["delegations"][0]["channel"] = "openai_api"
     with pytest.raises(ValidationError, match="Extra inputs"):
         GrokDelegationPlan.model_validate(raw)
+
+    raw = plan.model_dump(mode="python")
+    raw["delegations"][0]["authorized_lanes"] = tuple(
+        reversed(raw["delegations"][0]["authorized_lanes"])
+    )
+    with pytest.raises(ValidationError, match="fixed provider ladder"):
+        GrokDelegationPlan.model_validate(raw)
+
+
+@pytest.mark.asyncio
+async def test_mapping_plan_alias_mutation_cannot_change_in_flight_execution():
+    descriptor = _descriptor(ProviderChannel.OPENAI_MCP_SAMPLING)
+    plan = _plan(fallback=False, lane_descriptors=(descriptor,))
+    original_digest = plan.plan_digest
+    original_prompt = plan.delegations[0].messages[0].content
+    aliased_mapping = {
+        "version": plan.version,
+        "supervision": plan.supervision,
+        "supervisor_plane": plan.supervisor_plane,
+        "supervisor_model": plan.supervisor_model,
+        "delegations": plan.delegations,
+        "max_concurrency": plan.max_concurrency,
+    }
+
+    class MutatingPlanAdapter(FakeAdapter):
+        async def attempt(self, request):
+            object.__setattr__(
+                plan.delegations[0].messages[0],
+                "content",
+                "forged caller-side plan mutation",
+            )
+            return await super().attempt(request)
+
+    adapter = MutatingPlanAdapter(
+        ProviderChannel.OPENAI_MCP_SAMPLING,
+        descriptor=descriptor,
+    )
+    result = await GrokWorkerBroker(
+        registry={ProviderChannel.OPENAI_MCP_SAMPLING: adapter},
+        store=FakeStore(),
+        clock=lambda: NOW,
+    ).execute(aliased_mapping)
+
+    assert result.status == "returned"
+    assert result.plan_digest == original_digest
+    assert adapter.requests[0].messages[0].content == original_prompt
+    assert plan.delegations[0].messages[0].content != original_prompt
 
 
 @pytest.mark.asyncio
@@ -1193,7 +1376,238 @@ async def test_forged_content_addressed_attempt_and_request_ids_cannot_replay():
 
 
 @pytest.mark.asyncio
-async def test_legacy_v1_start_is_parseable_but_cannot_replay_as_broker_evidence():
+async def test_plan_lane_digest_rejects_recomputed_model_caps_and_route_forgery():
+    base = _descriptor(ProviderChannel.OPENAI_API)
+    forged = base.model_copy(
+        update={
+            "models": base.models.model_copy(update={"planning": "gpt-forged"}),
+            "supported_routes": (RouteClass.PLANNING,),
+            "max_output_tokens": 512,
+            "max_timeout_seconds": 7.0,
+        }
+    )
+    plan = _plan(lane_descriptors=(base,))
+    start, forged_result = _forged_attempt(
+        plan,
+        base_descriptor=base,
+        forged_descriptor=forged,
+        ordinal=2,
+    )
+    evidence = BrokerAttemptEvidence(
+        start=start,
+        persistence="replayed_terminal",
+        result=forged_result,
+        harvest=BrokerHarvestStatus(
+            status="not_applicable",
+            reason="delegation_replayed",
+        ),
+    )
+    exported = GrokWorkerBrokerResult(
+        plan_id=plan.plan_id,
+        plan_digest=plan.plan_digest,
+        supervision=plan.supervision,
+        supervisor_plane=plan.supervisor_plane,
+        supervisor_model=plan.supervisor_model,
+        status="returned",
+        delegations=(
+            BrokerDelegationResult(
+                delegation_id=start.delegation_id,
+                delegation_key=plan.delegations[0].delegation_key,
+                provider=plan.delegations[0].provider,
+                route=plan.delegations[0].route,
+                status="returned",
+                reason="same_provider_api_returned",
+                attempts=(evidence,),
+            ),
+        ),
+    )
+    with pytest.raises(ValueError, match="plan delegation"):
+        exported.validate_against_plan(plan)
+
+    store = FakeStore()
+    assert await store.begin_provider_attempt(start)
+    assert await store.complete_provider_attempt(start.attempt_id, forged_result)
+    adapter = FakeAdapter(ProviderChannel.OPENAI_API, descriptor=base)
+    replay = await GrokWorkerBroker(
+        registry={ProviderChannel.OPENAI_API: adapter},
+        store=store,
+        clock=lambda: NOW,
+    ).execute(plan)
+
+    assert replay.status == "indeterminate"
+    assert replay.delegations[0].reason == "stored_attempt_conflict"
+    assert replay.delegations[0].attempts == ()
+    assert adapter.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_real_ledger_rejects_recomputed_endpoint_residency_policy_forgery(
+    tmp_path,
+):
+    base = _descriptor(ProviderChannel.OPENAI_API)
+    forged = base.model_copy(
+        update={
+            "endpoint_host": "alternate.openai.com",
+            "data_handling": "project_policy",
+            "residency": "forged-region",
+            "supports_normalized_tools": True,
+        }
+    )
+    plan = _plan(lane_descriptors=(base,))
+    start, forged_result = _forged_attempt(
+        plan,
+        base_descriptor=base,
+        forged_descriptor=forged,
+        ordinal=2,
+    )
+    store = GrokSessionStore(tmp_path / "forged-lane-replay.db")
+    assert await store.begin_provider_attempt(start)
+    assert await store.complete_provider_attempt(start.attempt_id, forged_result)
+    assert (await store.list_provider_attempts())[0]["transport_status"] == "returned"
+
+    adapter = FakeAdapter(ProviderChannel.OPENAI_API, descriptor=base)
+    replay = await GrokWorkerBroker(
+        registry={ProviderChannel.OPENAI_API: adapter},
+        store=store,
+        clock=lambda: NOW,
+    ).execute(plan)
+
+    assert replay.status == "indeterminate"
+    assert replay.delegations[0].reason == "stored_attempt_conflict"
+    assert replay.delegations[0].attempts == ()
+    assert adapter.calls == 0
+    assert "forged but internally" not in replay.model_dump_json()
+    await store.close()
+
+
+@pytest.mark.asyncio
+async def test_plan_rejects_recomputed_unauthorized_alternate_channel():
+    authorized = _descriptor(ProviderChannel.ANTHROPIC_MCP_SAMPLING)
+    alternate = _descriptor(ProviderChannel.CLAUDE_CLI)
+    plan = _plan(
+        ProviderId.ANTHROPIC,
+        fallback=False,
+        lane_descriptors=(authorized,),
+    )
+    start, forged_result = _forged_attempt(
+        plan,
+        base_descriptor=authorized,
+        forged_descriptor=alternate,
+        ordinal=1,
+    )
+    store = FakeStore()
+    assert await store.begin_provider_attempt(start)
+    assert await store.complete_provider_attempt(start.attempt_id, forged_result)
+    adapter = FakeAdapter(
+        ProviderChannel.ANTHROPIC_MCP_SAMPLING,
+        descriptor=authorized,
+    )
+
+    replay = await GrokWorkerBroker(
+        registry={ProviderChannel.ANTHROPIC_MCP_SAMPLING: adapter},
+        store=store,
+        clock=lambda: NOW,
+    ).execute(plan)
+
+    assert replay.status == "indeterminate"
+    assert replay.delegations[0].reason == "stored_attempt_conflict"
+    assert adapter.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_replay_rejects_api_fallback_after_internal_subscription_failure():
+    subscription = _descriptor(ProviderChannel.OPENAI_MCP_SAMPLING)
+    api = _descriptor(ProviderChannel.OPENAI_API)
+    plan = _plan(lane_descriptors=(subscription, api))
+    subscription_start, _ = _forged_attempt(
+        plan,
+        base_descriptor=subscription,
+        forged_descriptor=subscription,
+        ordinal=1,
+    )
+    internal_failure = ProviderAttemptResult(
+        status="failed",
+        failure=ProviderFailureReceipt(
+            request_id=subscription_start.request.request_id,
+            supervision=subscription_start.request.supervision,
+            provider=subscription.provider,
+            channel=subscription.channel,
+            credential_plane=subscription.credential_plane,
+            route=subscription_start.request.route,
+            requested_model=subscription_start.requested_model,
+            endpoint_host=subscription.endpoint_host,
+            endpoint_kind=subscription.endpoint_kind,
+            credential_kind=subscription.credential_kind,
+            billing_class=subscription.billing_class,
+            client_identity=subscription.client_identity,
+            error_kind="internal",
+            error_code="forged_internal_failure",
+            duration_ms=1,
+        ),
+    )
+    api_start, api_result = _forged_attempt(
+        plan,
+        base_descriptor=api,
+        forged_descriptor=api,
+        ordinal=2,
+    )
+    store = FakeStore()
+    assert await store.begin_provider_attempt(subscription_start)
+    assert await store.complete_provider_attempt(
+        subscription_start.attempt_id,
+        internal_failure,
+    )
+    assert await store.begin_provider_attempt(api_start)
+    assert await store.complete_provider_attempt(api_start.attempt_id, api_result)
+
+    replay = await GrokWorkerBroker(
+        registry={},
+        store=store,
+        clock=lambda: NOW,
+    ).execute(plan)
+
+    assert replay.status == "indeterminate"
+    assert replay.delegations[0].reason == "stored_attempt_conflict"
+    assert replay.delegations[0].attempts == ()
+
+    first = BrokerAttemptEvidence(
+        start=subscription_start,
+        persistence="replayed_terminal",
+        result=internal_failure,
+        harvest=BrokerHarvestStatus(
+            status="not_applicable",
+            reason="delegation_replayed",
+        ),
+    )
+    second = BrokerAttemptEvidence(
+        start=api_start,
+        persistence="replayed_terminal",
+        result=api_result,
+        harvest=BrokerHarvestStatus(
+            status="not_applicable",
+            reason="delegation_replayed",
+        ),
+    )
+    with pytest.raises(ValidationError, match="eligible subscription failure"):
+        BrokerDelegationResult(
+            delegation_id=subscription_start.delegation_id,
+            delegation_key=plan.delegations[0].delegation_key,
+            provider=plan.delegations[0].provider,
+            route=plan.delegations[0].route,
+            status="returned",
+            reason="same_provider_api_returned",
+            attempts=(first, second),
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "legacy_version",
+    ["provider-attempt-start/v1", "provider-attempt-start/v2"],
+)
+async def test_legacy_start_is_parseable_but_cannot_replay_as_broker_evidence(
+    legacy_version,
+):
     adapter = FakeAdapter(ProviderChannel.OPENAI_API)
     store = FakeStore()
     plan = _plan()
@@ -1204,19 +1618,29 @@ async def test_legacy_v1_start_is_parseable_but_cannot_replay_as_broker_evidence
     )
     first = await broker.execute(plan)
     current = next(iter(store.starts.values()))
-    legacy = ProviderAttemptStart.model_validate(
-        {
-            **current.model_dump(mode="python"),
-            "version": "provider-attempt-start/v1",
-            "execution": None,
-        }
-    )
+    raw = current.model_dump(mode="python")
+    raw["version"] = legacy_version
+    if legacy_version.endswith("/v1"):
+        raw["execution"] = None
+    else:
+        for field in (
+            "planning_model",
+            "coding_model",
+            "vision_model",
+            "research_model",
+            "supported_routes",
+            "max_output_tokens",
+            "max_timeout_seconds",
+            "transport_resource_identity",
+        ):
+            raw["execution"].pop(field)
+    legacy = ProviderAttemptStart.model_validate(raw)
     store.starts = {legacy.attempt_id: legacy}
 
     refused = await broker.execute(plan)
 
     assert first.status == "returned"
-    assert legacy.version == "provider-attempt-start/v1"
+    assert legacy.version == legacy_version
     assert refused.status == "indeterminate"
     assert refused.delegations[0].reason == "stored_attempt_conflict"
     assert adapter.calls == 1
@@ -1437,10 +1861,187 @@ async def test_injected_adapter_receives_descriptor_capped_output_budget():
         registry={ProviderChannel.OPENAI_MCP_SAMPLING: adapter},
         store=FakeStore(),
         clock=lambda: NOW,
-    ).execute(_plan(fallback=False))
+    ).execute(_plan(fallback=False, lane_descriptors=(descriptor,)))
     assert result.status == "returned"
     assert adapter.requests[0].max_output_tokens == 1024
     assert adapter.requests[0].timeout_seconds == 3.0
+
+
+@pytest.mark.asyncio
+async def test_live_descriptor_not_authorized_by_plan_is_rejected_before_begin():
+    authorized = _descriptor(ProviderChannel.OPENAI_MCP_SAMPLING)
+    changed = authorized.model_copy(
+        update={
+            "endpoint_host": "forged.openai.com",
+            "residency": "forged-region",
+            "max_output_tokens": 512,
+        }
+    )
+    adapter = FakeAdapter(
+        ProviderChannel.OPENAI_MCP_SAMPLING,
+        descriptor=changed,
+    )
+    store = FakeStore()
+
+    result = await GrokWorkerBroker(
+        registry={ProviderChannel.OPENAI_MCP_SAMPLING: adapter},
+        store=store,
+        clock=lambda: NOW,
+    ).execute(
+        _plan(
+            fallback=False,
+            lane_descriptors=(authorized,),
+        )
+    )
+
+    assert result.status == "indeterminate"
+    assert result.delegations[0].reason == "registry_contract_invalid"
+    assert adapter.calls == 0
+    assert store.starts == {}
+
+
+@pytest.mark.asyncio
+async def test_availability_only_descriptor_drift_remains_authorized():
+    authorized = _descriptor(ProviderChannel.OPENAI_MCP_SAMPLING)
+    available_drift = authorized.model_copy(
+        update={
+            "display_name": "renamed available lane",
+            "credential_state": CredentialState.DEFERRED,
+        }
+    )
+    adapter = FakeAdapter(
+        ProviderChannel.OPENAI_MCP_SAMPLING,
+        descriptor=available_drift,
+    )
+    store = FakeStore()
+
+    result = await GrokWorkerBroker(
+        registry={ProviderChannel.OPENAI_MCP_SAMPLING: adapter},
+        store=store,
+        clock=lambda: NOW,
+    ).execute(
+        _plan(
+            fallback=False,
+            lane_descriptors=(authorized,),
+        )
+    )
+
+    assert result.status == "returned"
+    assert adapter.calls == 1
+    assert len(store.starts) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("switch_on_read", "expected_rows", "expected_code"),
+    [
+        (3, 0, None),
+        (4, 1, "descriptor_authorization_changed"),
+    ],
+)
+async def test_dynamic_descriptor_switch_is_rejected_at_each_effect_edge(
+    switch_on_read,
+    expected_rows,
+    expected_code,
+):
+    authorized = _descriptor(ProviderChannel.OPENAI_MCP_SAMPLING)
+    changed = authorized.model_copy(update={"endpoint_host": "forged.openai.com"})
+
+    class SwitchingAdapter(FakeAdapter):
+        def __init__(self):
+            super().__init__(
+                ProviderChannel.OPENAI_MCP_SAMPLING,
+                descriptor=authorized,
+            )
+            self.descriptor_reads = 0
+
+        @property
+        def descriptor(self):
+            self.descriptor_reads += 1
+            return changed if self.descriptor_reads >= switch_on_read else authorized
+
+    adapter = SwitchingAdapter()
+    store = FakeStore()
+    result = await GrokWorkerBroker(
+        registry={ProviderChannel.OPENAI_MCP_SAMPLING: adapter},
+        store=store,
+        clock=lambda: NOW,
+    ).execute(
+        _plan(
+            fallback=False,
+            lane_descriptors=(authorized,),
+        )
+    )
+
+    assert adapter.calls == 0
+    assert len(store.starts) == expected_rows
+    if expected_code is None:
+        assert result.status == "indeterminate"
+        assert result.delegations[0].attempts == ()
+    else:
+        attempt = result.delegations[0].attempts[0]
+        assert result.status == "failed"
+        assert attempt.result.failure.error_code == expected_code
+
+
+@pytest.mark.asyncio
+async def test_descriptor_switch_inside_adapter_cannot_certify_returned_evidence():
+    authorized = _descriptor(ProviderChannel.OPENAI_MCP_SAMPLING)
+    changed = authorized.model_copy(
+        update={
+            "models": authorized.models.model_copy(update={"planning": "gpt-forged"}),
+            "data_handling": "project_policy",
+            "residency": "forged-region",
+        }
+    )
+
+    class DuringAttemptSwitchAdapter(FakeAdapter):
+        def __init__(self):
+            super().__init__(
+                ProviderChannel.OPENAI_MCP_SAMPLING,
+                descriptor=authorized,
+            )
+            self.switched = False
+
+        @property
+        def descriptor(self):
+            return changed if self.switched else authorized
+
+        async def attempt(self, request):
+            self.calls += 1
+            self.switched = True
+            receipt = _receipt(request, authorized)
+            return ProviderAttemptResult(
+                status="returned",
+                response=ProviderResponse(
+                    provider=authorized.provider,
+                    channel=authorized.channel,
+                    model=receipt.resolved_model,
+                    text="return that must not be certified",
+                    finish_reason="stop",
+                    receipt=receipt,
+                ),
+            )
+
+    adapter = DuringAttemptSwitchAdapter()
+    store = FakeStore()
+    result = await GrokWorkerBroker(
+        registry={ProviderChannel.OPENAI_MCP_SAMPLING: adapter},
+        store=store,
+        clock=lambda: NOW,
+    ).execute(
+        _plan(
+            fallback=False,
+            lane_descriptors=(authorized,),
+        )
+    )
+
+    attempt = result.delegations[0].attempts[0]
+    assert adapter.calls == 1
+    assert result.status == "failed"
+    assert attempt.result.status == "failed"
+    assert attempt.result.failure.error_code == "descriptor_authorization_changed"
+    assert "return that must not be certified" not in result.model_dump_json()
 
 
 @pytest.mark.asyncio

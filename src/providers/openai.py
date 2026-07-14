@@ -16,6 +16,7 @@ from .contracts import (
     ProviderId,
     ProviderRequest,
     ProviderResponse,
+    transport_resource_identity,
 )
 from .errors import ProviderProtocolError
 
@@ -45,6 +46,10 @@ class OpenAIAdapter(HTTPProviderAdapter):
             endpoint_host=OPENAI_HOST,
             endpoint_kind="first_party_api",
             credential_kind="api_key",
+            transport_resource_identity=transport_resource_identity(
+                "openai_api_endpoint",
+                OPENAI_ENDPOINT,
+            ),
             credential_env_names=OPENAI_KEY_NAMES,
             credential_state=self._credential_state(OPENAI_KEY_NAMES),
             models=load_model_pins(self.channel, self._environ),
@@ -88,12 +93,16 @@ class OpenAIAdapter(HTTPProviderAdapter):
         output = data.get("output")
         if isinstance(output, list):
             for item in output:
-                if not isinstance(item, dict) or not isinstance(item.get("content"), list):
+                if not isinstance(item, dict) or not isinstance(
+                    item.get("content"), list
+                ):
                     continue
                 for part in item["content"]:
                     if not isinstance(part, dict):
                         continue
-                    if part.get("type") == "output_text" and isinstance(part.get("text"), str):
+                    if part.get("type") == "output_text" and isinstance(
+                        part.get("text"), str
+                    ):
                         text_parts.append(part["text"])
                     elif part.get("type") == "refusal":
                         refusal_seen = True

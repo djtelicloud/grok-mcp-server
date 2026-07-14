@@ -100,11 +100,46 @@ class WorkerFallbackPolicy(StrictContract):
         return self
 
 
+class GrokWorkerLaneAuthorization(StrictContract):
+    """Plan-bound authorization for one immutable provider lane snapshot."""
+
+    channel: ProviderChannel
+    contract_digest: Annotated[str, Field(pattern=r"^sha256:[0-9a-f]{64}$")]
+
+    @model_validator(mode="after")
+    def validate_worker_channel(self) -> "GrokWorkerLaneAuthorization":
+        if self.channel not in _ALL_WORKER_CHANNELS:
+            raise ValueError("lane authorization requires a subordinate channel")
+        return self
+
+    @classmethod
+    def from_descriptor(
+        cls,
+        descriptor: ProviderDescriptor,
+    ) -> "GrokWorkerLaneAuthorization":
+        """Freeze a reviewed descriptor into digest-only plan authority."""
+
+        if descriptor.transport_resource_identity is None:
+            raise ValueError(
+                "broker lane requires a pinned transport resource identity"
+            )
+        return cls(
+            channel=descriptor.channel,
+            contract_digest=_lane_contract_digest(
+                provider=descriptor.provider,
+                channel=descriptor.channel,
+                credential_plane=descriptor.credential_plane,
+                execution=_execution_binding(descriptor),
+            ),
+        )
+
+
 class GrokWorkerDelegation(StrictContract):
     """One semantic worker request chosen by the Grok supervisor.
 
-    Physical channels are intentionally absent.  The broker applies the fixed
-    same-provider channel ladder from its injected registry.
+    The Grok-owned plan carries only content digests for reviewed physical
+    lane snapshots. The broker still applies the fixed same-provider ladder,
+    while starts carry the full material needed to verify those digests.
     """
 
     delegation_key: Annotated[
@@ -121,6 +156,10 @@ class GrokWorkerDelegation(StrictContract):
         tuple[ProviderMessage, ...], Field(min_length=1, max_length=100)
     ]
     fallback: WorkerFallbackPolicy
+    authorized_lanes: Annotated[
+        tuple[GrokWorkerLaneAuthorization, ...],
+        Field(min_length=1, max_length=3),
+    ]
     max_output_tokens: Annotated[int, Field(ge=1, le=MAX_OUTPUT_TOKENS)] = 4096
     timeout_seconds: Annotated[float, Field(ge=1.0, le=MAX_TIMEOUT_SECONDS)] = 60.0
     temperature: Annotated[float, Field(ge=0.0, le=2.0)] | None = None
@@ -131,6 +170,17 @@ class GrokWorkerDelegation(StrictContract):
             raise ValueError("delegation messages require a user turn")
         if sum(len(message.content) for message in self.messages) > MAX_REQUEST_CHARS:
             raise ValueError("combined delegation content exceeds the request bound")
+        channels = tuple(lane.channel for lane in self.authorized_lanes)
+        if len(set(channels)) != len(channels):
+            raise ValueError("authorized lane channels must be unique")
+        allowed = _SUBSCRIPTION_LADDERS[self.provider]
+        if self.fallback.max_metered_api_attempts == 1:
+            allowed = (*allowed, *_API_LADDERS[self.provider])
+        if any(channel not in allowed for channel in channels):
+            raise ValueError("authorized lane violates provider fallback policy")
+        ordered = tuple(channel for channel in allowed if channel in set(channels))
+        if channels != ordered:
+            raise ValueError("authorized lanes must follow the fixed provider ladder")
         return self
 
 
@@ -142,7 +192,7 @@ class GrokDelegationPlan(StrictContract):
     from its trusted Grok session state, never directly from an MCP caller.
     """
 
-    version: Literal["grok-delegation-plan/v1"] = "grok-delegation-plan/v1"
+    version: Literal["grok-delegation-plan/v2"] = "grok-delegation-plan/v2"
     supervision: GrokSupervisorBinding
     supervisor_plane: Literal["CLI", "API"]
     supervisor_model: Annotated[
@@ -175,6 +225,19 @@ class GrokDelegationPlan(StrictContract):
     @property
     def plan_id(self) -> str:
         return f"gdp:{self.plan_digest.removeprefix('sha256:')}"
+
+
+def _snapshot_plan(
+    plan: GrokDelegationPlan | Mapping[str, Any],
+) -> GrokDelegationPlan:
+    """Deeply revalidate one plan so caller aliases cannot change execution."""
+
+    validated = (
+        plan
+        if isinstance(plan, GrokDelegationPlan)
+        else GrokDelegationPlan.model_validate(plan)
+    )
+    return GrokDelegationPlan.model_validate_json(validated.model_dump_json())
 
 
 class BrokerHarvestStatus(StrictContract):
@@ -245,6 +308,18 @@ class BrokerDelegationResult(StrictContract):
         ordinals = [attempt.start.attempt_ordinal for attempt in self.attempts]
         if ordinals not in ([], [1], [2], [1, 2]):
             raise ValueError("attempt ordinals must be unique and in execution order")
+        if ordinals == [1, 2]:
+            first = self.attempts[0].result
+            if (
+                first is None
+                or first.status != "failed"
+                or first.failure is None
+                or first.failure.error_kind
+                not in {"configuration", "transport", "protocol"}
+            ):
+                raise ValueError(
+                    "API fallback requires an eligible subscription failure"
+                )
         for attempt in self.attempts:
             if attempt.start.delegation_id != self.delegation_id:
                 raise ValueError("attempt is bound to a different delegation")
@@ -345,11 +420,7 @@ class GrokWorkerBrokerResult(StrictContract):
         trusting delegation labels or attempt identities.
         """
 
-        validated = (
-            plan
-            if isinstance(plan, GrokDelegationPlan)
-            else GrokDelegationPlan.model_validate(plan)
-        )
+        validated = _snapshot_plan(plan)
         if (
             self.plan_id != validated.plan_id
             or self.plan_digest != validated.plan_digest
@@ -450,17 +521,46 @@ def _attempt_start_matches_plan(
     else:
         return False
     execution = start.execution
-    if start.version != "provider-attempt-start/v2" or execution is None:
+    if (
+        start.version != "provider-attempt-start/v3"
+        or execution is None
+        or not execution.has_lane_material
+    ):
         return False
-    execution_digest = _execution_contract_digest(
+    authorization = next(
+        (lane for lane in delegation.authorized_lanes if lane.channel == start.channel),
+        None,
+    )
+    if authorization is None:
+        return False
+    lane_contract_digest = _lane_contract_digest(
         provider=start.provider,
         channel=start.channel,
         credential_plane=start.credential_plane,
         execution=execution,
-        route=start.request.route,
-        requested_model=start.requested_model,
-        max_output_tokens=start.request.max_output_tokens,
-        timeout_seconds=start.request.timeout_seconds,
+    )
+    if authorization.contract_digest != lane_contract_digest:
+        return False
+    if delegation.route not in execution.supported_routes:
+        return False
+    expected_model = execution.model_for_route(delegation.route)
+    expected_output_tokens = min(
+        delegation.max_output_tokens,
+        execution.max_output_tokens,
+    )
+    expected_timeout_seconds = min(
+        delegation.timeout_seconds,
+        execution.max_timeout_seconds,
+    )
+    execution_digest = _execution_contract_digest(
+        provider=delegation.provider,
+        channel=start.channel,
+        credential_plane=expected_plane,
+        execution=execution,
+        route=delegation.route,
+        requested_model=expected_model,
+        max_output_tokens=expected_output_tokens,
+        timeout_seconds=expected_timeout_seconds,
     )
     expected_attempt_id = _stable_id(
         "att",
@@ -468,7 +568,7 @@ def _attempt_start_matches_plan(
         start.delegation_id,
         start.channel.value,
         str(start.attempt_ordinal),
-        start.requested_model,
+        expected_model,
         execution_digest,
     )
     expected_request_id = _stable_id(
@@ -477,7 +577,7 @@ def _attempt_start_matches_plan(
         start.delegation_id,
         expected_attempt_id,
         start.channel.value,
-        start.requested_model,
+        expected_model,
         execution_digest,
     )
     return all(
@@ -491,9 +591,10 @@ def _attempt_start_matches_plan(
             start.request.supervision == plan.supervision,
             start.request.route == delegation.route,
             tuple(start.request.messages) == delegation.messages,
-            start.request.model == start.requested_model,
-            start.request.max_output_tokens <= delegation.max_output_tokens,
-            start.request.timeout_seconds <= delegation.timeout_seconds,
+            start.requested_model == expected_model,
+            start.request.model == expected_model,
+            start.request.max_output_tokens == expected_output_tokens,
+            start.request.timeout_seconds == expected_timeout_seconds,
             start.request.temperature == delegation.temperature,
             start.attempt_id == expected_attempt_id,
             start.request.request_id == expected_request_id,
@@ -508,10 +609,43 @@ def _execution_binding(descriptor: ProviderDescriptor) -> ProviderExecutionBindi
         credential_kind=descriptor.credential_kind,
         billing_class=descriptor.billing_class,
         client_identity=descriptor.client_identity,
+        transport_resource_identity=descriptor.transport_resource_identity,
         data_handling=descriptor.data_handling,
         residency=descriptor.residency,
         supports_normalized_tools=descriptor.supports_normalized_tools,
+        planning_model=descriptor.models.planning,
+        coding_model=descriptor.models.coding,
+        vision_model=descriptor.models.vision,
+        research_model=descriptor.models.research,
+        supported_routes=descriptor.supported_routes,
+        max_output_tokens=descriptor.max_output_tokens,
+        max_timeout_seconds=descriptor.max_timeout_seconds,
     )
+
+
+def _lane_contract_digest(
+    *,
+    provider: ProviderId,
+    channel: ProviderChannel,
+    credential_plane: CredentialPlane,
+    execution: ProviderExecutionBinding,
+) -> str:
+    if not execution.has_lane_material:
+        raise ValueError("lane contract digest requires complete lane material")
+    payload = {
+        "provider": provider.value,
+        "channel": channel.value,
+        "credential_plane": credential_plane.value,
+        "execution": execution.model_dump(mode="json"),
+    }
+    canonical = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    )
+    return _content_digest(canonical)
 
 
 def _execution_contract_digest(
@@ -528,21 +662,16 @@ def _execution_contract_digest(
     """Hash effect semantics while excluding mutable availability metadata."""
 
     payload = {
-        "provider": provider.value,
-        "channel": channel.value,
-        "credential_plane": credential_plane.value,
-        "endpoint_host": execution.endpoint_host,
-        "endpoint_kind": execution.endpoint_kind,
-        "credential_kind": execution.credential_kind,
-        "billing_class": execution.billing_class,
-        "client_identity": execution.client_identity,
+        "lane_contract_digest": _lane_contract_digest(
+            provider=provider,
+            channel=channel,
+            credential_plane=credential_plane,
+            execution=execution,
+        ),
         "route": route.value,
         "requested_model": requested_model,
         "max_output_tokens": max_output_tokens,
         "timeout_seconds": timeout_seconds,
-        "data_handling": execution.data_handling,
-        "residency": execution.residency,
-        "supports_normalized_tools": execution.supports_normalized_tools,
     }
     canonical = json.dumps(
         payload,
@@ -631,32 +760,95 @@ class GrokWorkerBroker:
             if descriptor.credential_plane != expected_plane:
                 raise ValueError("registry channel and credential plane do not match")
 
+    @staticmethod
+    def _snapshot_descriptor(descriptor: ProviderDescriptor) -> ProviderDescriptor:
+        """Detach trusted effect material from adapter-owned object identity."""
+
+        return ProviderDescriptor.model_validate_json(descriptor.model_dump_json())
+
+    @staticmethod
+    def _descriptor_is_authorized(
+        *,
+        delegation: GrokWorkerDelegation,
+        channel: ProviderChannel,
+        plane: CredentialPlane,
+        descriptor: ProviderDescriptor,
+    ) -> bool:
+        authorization = next(
+            (lane for lane in delegation.authorized_lanes if lane.channel == channel),
+            None,
+        )
+        if authorization is None:
+            return False
+        try:
+            return all(
+                (
+                    descriptor.channel == channel,
+                    descriptor.provider == delegation.provider,
+                    descriptor.credential_plane == plane,
+                    authorization.contract_digest
+                    == _lane_contract_digest(
+                        provider=descriptor.provider,
+                        channel=descriptor.channel,
+                        credential_plane=descriptor.credential_plane,
+                        execution=_execution_binding(descriptor),
+                    ),
+                )
+            )
+        except Exception:
+            return False
+
+    def _descriptor_matches_start(
+        self,
+        *,
+        plan: GrokDelegationPlan,
+        index: int,
+        start: ProviderAttemptStart,
+        descriptor: ProviderDescriptor,
+    ) -> bool:
+        delegation = plan.delegations[index]
+        return all(
+            (
+                self._descriptor_is_authorized(
+                    delegation=delegation,
+                    channel=start.channel,
+                    plane=start.credential_plane,
+                    descriptor=descriptor,
+                ),
+                _execution_binding(descriptor) == start.execution,
+                descriptor.credential_state != CredentialState.MISSING,
+                delegation.route in descriptor.supported_routes,
+            )
+        )
+
     def _select_channel(
         self,
         *,
-        provider: ProviderId,
-        route: RouteClass,
+        delegation: GrokWorkerDelegation,
         plane: CredentialPlane,
     ) -> tuple[ProviderChannel, ProviderAdapter, ProviderDescriptor] | None:
         ladder = (
-            _SUBSCRIPTION_LADDERS[provider]
+            _SUBSCRIPTION_LADDERS[delegation.provider]
             if plane == CredentialPlane.SUBSCRIPTION
-            else _API_LADDERS[provider]
+            else _API_LADDERS[delegation.provider]
         )
         for channel in ladder:
+            if not any(lane.channel == channel for lane in delegation.authorized_lanes):
+                continue
             adapter = self._registry.get(channel)
             if adapter is None:
                 continue
-            descriptor = adapter.descriptor
-            if (
-                descriptor.channel != channel
-                or descriptor.provider != provider
-                or descriptor.credential_plane != plane
+            descriptor = self._snapshot_descriptor(adapter.descriptor)
+            if not self._descriptor_is_authorized(
+                delegation=delegation,
+                channel=channel,
+                plane=plane,
+                descriptor=descriptor,
             ):
-                raise ValueError("adapter descriptor changed after registry validation")
+                raise ValueError("live descriptor is not authorized by the Grok plan")
             if descriptor.credential_state == CredentialState.MISSING:
                 continue
-            if route not in descriptor.supported_routes:
+            if delegation.route not in descriptor.supported_routes:
                 continue
             return channel, adapter, descriptor
         return None
@@ -672,16 +864,33 @@ class GrokWorkerBroker:
     ) -> ProviderAttemptStart:
         delegation = plan.delegations[index]
         delegation_id = _delegation_id(plan, index)
-        requested_model = descriptor.models.for_route(delegation.route)
+        execution = _execution_binding(descriptor)
+        requested_model = execution.model_for_route(delegation.route)
         effective_output_tokens = min(
             delegation.max_output_tokens,
-            descriptor.max_output_tokens,
+            execution.max_output_tokens,
         )
         effective_timeout_seconds = min(
             delegation.timeout_seconds,
-            descriptor.max_timeout_seconds,
+            execution.max_timeout_seconds,
         )
-        execution = _execution_binding(descriptor)
+        authorization = next(
+            (
+                lane
+                for lane in delegation.authorized_lanes
+                if lane.channel == descriptor.channel
+            ),
+            None,
+        )
+        if authorization is None or authorization.contract_digest != (
+            _lane_contract_digest(
+                provider=descriptor.provider,
+                channel=descriptor.channel,
+                credential_plane=descriptor.credential_plane,
+                execution=execution,
+            )
+        ):
+            raise ValueError("descriptor is not authorized by the Grok plan")
         descriptor_digest = _execution_contract_digest(
             provider=descriptor.provider,
             channel=descriptor.channel,
@@ -721,7 +930,7 @@ class GrokWorkerBroker:
             temperature=delegation.temperature,
         )
         return ProviderAttemptStart(
-            version="provider-attempt-start/v2",
+            version="provider-attempt-start/v3",
             attempt_id=attempt_id,
             delegation_id=delegation_id,
             attempt_ordinal=ordinal,
@@ -799,6 +1008,29 @@ class GrokWorkerBroker:
                 error_code="start_contract_mismatch",
                 duration_ms=0,
             )
+        try:
+            current_descriptor = self._snapshot_descriptor(adapter.descriptor)
+        except Exception:
+            return self._normalized_failure(
+                start=start,
+                descriptor=descriptor,
+                error_kind="protocol",
+                error_code="descriptor_authorization_changed",
+                duration_ms=0,
+            )
+        if not self._descriptor_matches_start(
+            plan=plan,
+            index=index,
+            start=start,
+            descriptor=current_descriptor,
+        ):
+            return self._normalized_failure(
+                start=start,
+                descriptor=descriptor,
+                error_kind="protocol",
+                error_code="descriptor_authorization_changed",
+                duration_ms=0,
+            )
         remaining = self._remaining(plan)
         if remaining <= 0:
             return self._normalized_failure(
@@ -862,6 +1094,23 @@ class GrokWorkerBroker:
                 descriptor=descriptor,
                 error_kind="internal",
                 error_code="unexpected_adapter_exception",
+                duration_ms=round((time.monotonic() - started) * 1000),
+            )
+        try:
+            completed_descriptor = self._snapshot_descriptor(adapter.descriptor)
+        except Exception:
+            completed_descriptor = None
+        if completed_descriptor is None or not self._descriptor_matches_start(
+            plan=plan,
+            index=index,
+            start=start,
+            descriptor=completed_descriptor,
+        ):
+            return self._normalized_failure(
+                start=start,
+                descriptor=descriptor,
+                error_kind="protocol",
+                error_code="descriptor_authorization_changed",
                 duration_ms=round((time.monotonic() - started) * 1000),
             )
         if physical_request != start.request:
@@ -1329,6 +1578,20 @@ class GrokWorkerBroker:
         descriptor: ProviderDescriptor,
         ordinal: Literal[1, 2],
     ) -> BrokerAttemptEvidence:
+        delegation = plan.delegations[index]
+        current_descriptor = self._snapshot_descriptor(adapter.descriptor)
+        if (
+            not self._descriptor_is_authorized(
+                delegation=delegation,
+                channel=channel,
+                plane=current_descriptor.credential_plane,
+                descriptor=current_descriptor,
+            )
+            or current_descriptor.credential_state == CredentialState.MISSING
+            or delegation.route not in current_descriptor.supported_routes
+        ):
+            raise ValueError("descriptor authorization changed before durable begin")
+        descriptor = current_descriptor
         start = self._start(
             plan=plan,
             index=index,
@@ -1449,14 +1712,12 @@ class GrokWorkerBroker:
                 )
             try:
                 subscription = self._select_channel(
-                    provider=delegation.provider,
-                    route=delegation.route,
+                    delegation=delegation,
                     plane=CredentialPlane.SUBSCRIPTION,
                 )
                 api = (
                     self._select_channel(
-                        provider=delegation.provider,
-                        route=delegation.route,
+                        delegation=delegation,
                         plane=CredentialPlane.METERED_API,
                     )
                     if delegation.fallback.max_metered_api_attempts == 1
@@ -1612,11 +1873,7 @@ class GrokWorkerBroker:
     ) -> GrokWorkerBrokerResult:
         """Run one plan and return transport evidence for Grok synthesis only."""
 
-        validated = (
-            plan
-            if isinstance(plan, GrokDelegationPlan)
-            else GrokDelegationPlan.model_validate(plan)
-        )
+        validated = _snapshot_plan(plan)
         self._now()
         semaphore = asyncio.Semaphore(validated.max_concurrency)
         tasks = [

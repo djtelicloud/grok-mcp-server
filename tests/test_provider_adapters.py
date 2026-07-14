@@ -15,6 +15,7 @@ from src.providers import (
     CredentialState,
     GeminiAdapter,
     GrokSupervisorBinding,
+    GrokWorkerLaneAuthorization,
     OpenAIAdapter,
     ProviderAdapter,
     ProviderChannel,
@@ -969,6 +970,7 @@ def test_registry_is_inert_complete_and_secret_free():
         "CLAUDE_API_KEY": "claude-secret",
         "GEMINI_API_KEY": "gemini-secret",
         "GOOGLE_APPLICATION_CREDENTIALS": "/private/adc-secret.json",
+        "UNIGROK_VERTEX_PROJECT": "configured-project",
     }
     registry = build_provider_registry(environ=secret_values)
     assert set(registry) == {
@@ -999,11 +1001,43 @@ def test_registry_is_inert_complete_and_secret_free():
         == ProviderId.GOOGLE
     )
     assert registry[ProviderChannel.VERTEX_ADC].descriptor.provider == ProviderId.GOOGLE
+    assert all(
+        adapter.descriptor.transport_resource_identity is not None
+        for adapter in registry.values()
+    )
+    assert all(
+        GrokWorkerLaneAuthorization.from_descriptor(adapter.descriptor).contract_digest
+        for adapter in registry.values()
+    )
     rendered = "\n".join(
         adapter.descriptor.model_dump_json() for adapter in registry.values()
     )
     for value in secret_values.values():
         assert value not in rendered
+
+
+def test_vertex_broker_lane_requires_one_explicit_secret_safe_project_identity():
+    unresolved = VertexADCAdapter(environ={}).descriptor
+    assert unresolved.transport_resource_identity is None
+    with pytest.raises(ValueError, match="pinned transport resource"):
+        GrokWorkerLaneAuthorization.from_descriptor(unresolved)
+
+    first = VertexADCAdapter(
+        environ={"UNIGROK_VERTEX_PROJECT": "project-one"}
+    ).descriptor
+    second = VertexADCAdapter(
+        environ={"UNIGROK_VERTEX_PROJECT": "project-two"}
+    ).descriptor
+    assert first.transport_resource_identity is not None
+    assert second.transport_resource_identity is not None
+    assert first.transport_resource_identity != second.transport_resource_identity
+    assert (
+        GrokWorkerLaneAuthorization.from_descriptor(first).contract_digest
+        != GrokWorkerLaneAuthorization.from_descriptor(second).contract_digest
+    )
+    rendered = first.model_dump_json() + second.model_dump_json()
+    assert "project-one" not in rendered
+    assert "project-two" not in rendered
 
 
 def test_current_stable_model_defaults_are_route_specific():

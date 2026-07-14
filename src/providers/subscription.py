@@ -39,6 +39,7 @@ from .contracts import (
     ProviderResponse,
     ProviderTokenUsage,
     is_safe_model_id,
+    transport_resource_identity,
 )
 from .errors import (
     ProviderConfigurationError,
@@ -480,6 +481,7 @@ class ClaudeCLIAdapter(HTTPProviderAdapter):
             raise ProviderConfigurationError(self.provider, "invalid_cli_executable")
         self._executable = executable
         self._runner = runner or _run_bounded_process
+        self._child_env = _claude_subscription_environment(self._environ)
         self._descriptor = ProviderDescriptor(
             provider=self.provider,
             channel=self.channel,
@@ -489,9 +491,19 @@ class ClaudeCLIAdapter(HTTPProviderAdapter):
             endpoint_kind="local_cli",
             credential_kind="host_oauth",
             billing_class="subscription",
+            transport_resource_identity=(
+                transport_resource_identity(
+                    "claude_cli_executable",
+                    str(executable_path),
+                )
+                if executable_path.is_absolute()
+                else None
+            ),
             credential_env_names=(),
             # Availability is learned only by the bounded call.  Construction
-            # never probes the binary, keychain, or OAuth files.
+            # never probes the binary, keychain, or OAuth files. An unresolved
+            # PATH command remains standalone-only; broker plans require an
+            # absolute executable identity.
             credential_state=CredentialState.DEFERRED,
             models=models,
             max_output_tokens=32_768,
@@ -508,7 +520,7 @@ class ClaudeCLIAdapter(HTTPProviderAdapter):
         model = self._model(request)
         _, timeout = self._limits(request)
         argv = _claude_argv(self._executable, model)
-        child_env = _claude_subscription_environment(self._environ)
+        child_env = dict(self._child_env)
         prompt = _claude_prompt(request)
         try:
             with tempfile.TemporaryDirectory(prefix="unigrok-claude-worker-") as cwd:
@@ -718,6 +730,10 @@ class MCPClientSamplingAdapter(HTTPProviderAdapter):
             credential_kind="mcp_client_subscription",
             billing_class="subscription",
             client_identity=binding.capability.client_id,
+            transport_resource_identity=transport_resource_identity(
+                "mcp_sampling_client",
+                binding.capability.client_id,
+            ),
             credential_env_names=(),
             credential_state=(
                 CredentialState.DEFERRED

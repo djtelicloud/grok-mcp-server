@@ -19,6 +19,7 @@ from src.providers import (
     CredentialPlane,
     CredentialState,
     GrokSupervisorBinding,
+    GrokWorkerLaneAuthorization,
     MCPClientSamplingAdapter,
     ProviderAttemptStart,
     ProviderChannel,
@@ -828,3 +829,62 @@ def test_subscription_registry_is_inert_request_scoped_and_has_no_codex_cli():
             },
         )
     assert effects == 0
+
+
+def test_subscription_lane_identities_are_pinned_without_exposing_paths():
+    environ = {"PATH": "/trusted/bin", "HOME": "/trusted/home"}
+    unresolved = ClaudeCLIAdapter(environ=environ)
+    assert unresolved.descriptor.transport_resource_identity is None
+    assert unresolved._child_env["PATH"] == "/trusted/bin"
+    environ["PATH"] = "/tmp/attacker/bin"
+    assert unresolved._child_env["PATH"] == "/trusted/bin"
+    with pytest.raises(ValueError, match="pinned transport resource"):
+        GrokWorkerLaneAuthorization.from_descriptor(unresolved.descriptor)
+
+    trusted = ClaudeCLIAdapter(executable="/trusted/bin/claude", environ={})
+    attacker = ClaudeCLIAdapter(executable="/tmp/attacker/claude", environ={})
+    assert trusted.descriptor.transport_resource_identity is not None
+    assert attacker.descriptor.transport_resource_identity is not None
+    assert trusted.descriptor.transport_resource_identity != (
+        attacker.descriptor.transport_resource_identity
+    )
+    assert (
+        GrokWorkerLaneAuthorization.from_descriptor(trusted.descriptor).contract_digest
+        != GrokWorkerLaneAuthorization.from_descriptor(
+            attacker.descriptor
+        ).contract_digest
+    )
+    rendered = (
+        trusted.descriptor.model_dump_json() + attacker.descriptor.model_dump_json()
+    )
+    assert "/trusted/bin/claude" not in rendered
+    assert "/tmp/attacker/claude" not in rendered
+
+    async def callback(_request):
+        raise AssertionError("lane construction must remain inert")
+
+    sampling = (
+        (
+            ProviderId.OPENAI,
+            ProviderChannel.OPENAI_MCP_SAMPLING,
+            "codex-client",
+        ),
+        (
+            ProviderId.ANTHROPIC,
+            ProviderChannel.ANTHROPIC_MCP_SAMPLING,
+            "claude-client",
+        ),
+        (
+            ProviderId.GOOGLE,
+            ProviderChannel.GOOGLE_MCP_SAMPLING,
+            "antigravity-client",
+        ),
+    )
+    for provider, channel, client_id in sampling:
+        descriptor = MCPClientSamplingAdapter(
+            provider=provider,
+            channel=channel,
+            binding=_sampling_binding(callback, client_id=client_id),
+        ).descriptor
+        assert descriptor.transport_resource_identity is not None
+        assert GrokWorkerLaneAuthorization.from_descriptor(descriptor).contract_digest

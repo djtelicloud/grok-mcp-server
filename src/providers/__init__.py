@@ -15,6 +15,7 @@ from .broker import (
     GrokWorkerBroker,
     GrokWorkerBrokerResult,
     GrokWorkerDelegation,
+    GrokWorkerLaneAuthorization,
     ProviderAttemptHarvestTrigger,
     ProviderAttemptStore,
     WorkerFallbackPolicy,
@@ -44,6 +45,7 @@ from .contracts import (
     WorkerAuthority,
     model_visible_messages,
     provider_result_matches_start,
+    transport_resource_identity,
 )
 from .errors import (
     ProviderConfigurationError,
@@ -96,6 +98,7 @@ __all__ = [
     "GrokWorkerBroker",
     "GrokWorkerBrokerResult",
     "GrokWorkerDelegation",
+    "GrokWorkerLaneAuthorization",
     "OpenAIAdapter",
     "MCPClientSamplingAdapter",
     "ProviderAdapter",
@@ -133,6 +136,7 @@ __all__ = [
     "load_google_adc_identity",
     "model_visible_messages",
     "provider_result_matches_start",
+    "transport_resource_identity",
     "WorkerAuthority",
     "WorkerFallbackPolicy",
 ]

@@ -1056,6 +1056,26 @@ class WorkerFallbackPolicy
 
 Bound one delegation to subscription-only or one metered fallback.
 
+### Class: `GrokWorkerLaneAuthorization` {#providers-broker-grokworkerlaneauthorization}
+
+```python
+class GrokWorkerLaneAuthorization
+```
+
+**Keywords:** grok, worker, lane, authorization
+
+Plan-bound authorization for one immutable provider lane snapshot.
+
+### Method: `GrokWorkerLaneAuthorization.from_descriptor` {#providers-broker-grokworkerlaneauthorization-from_descriptor}
+
+```python
+def GrokWorkerLaneAuthorization.from_descriptor(cls, descriptor: ProviderDescriptor) -> 'GrokWorkerLaneAuthorization'
+```
+
+**Keywords:** grok, worker, lane, authorization, from, descriptor
+
+Freeze a reviewed descriptor into digest-only plan authority.
+
 ### Class: `GrokWorkerDelegation` {#providers-broker-grokworkerdelegation}
 
 ```python
@@ -1066,8 +1086,9 @@ class GrokWorkerDelegation
 
 One semantic worker request chosen by the Grok supervisor.
 
-Physical channels are intentionally absent.  The broker applies the fixed
-same-provider channel ladder from its injected registry.
+The Grok-owned plan carries only content digests for reviewed physical
+lane snapshots. The broker still applies the fixed same-provider ladder,
+while starts carry the full material needed to verify those digests.
 
 ### Class: `GrokDelegationPlan` {#providers-broker-grokdelegationplan}
 
@@ -1145,6 +1166,16 @@ its content.
 
 ## providers/contracts.py {#providers-contracts}
 
+### Function: `transport_resource_identity` {#providers-contracts-transport_resource_identity}
+
+```python
+def transport_resource_identity(namespace: str, value: str) -> str
+```
+
+**Keywords:** transport, resource, identity
+
+Return a secret-safe stable identity for one configured transport resource.
+
 ### Class: `GrokSupervisorBinding` {#providers-contracts-groksupervisorbinding}
 
 ```python
@@ -1190,7 +1221,12 @@ class ProviderExecutionBinding
 
 **Keywords:** provider, execution, binding
 
-Stable physical-lane material frozen into a v2 attempt start.
+Stable physical-lane material frozen into a provider attempt start.
+
+Availability metadata and credential names are intentionally excluded.
+Model pins, supported routes, and physical caps are included so a trusted
+plan can authorize the exact lane snapshot without depending on a live
+registry during durable replay.
 
 ### Class: `ProviderAttemptStart` {#providers-contracts-providerattemptstart}
 
@@ -1202,9 +1238,9 @@ class ProviderAttemptStart
 
 Grok-authorized identity for one physical subordinate channel call.
 
-Version 1 remains parseable for ledger inspection and migration tooling.
-Broker evidence and replay intentionally fail closed unless the start is
-version 2 with its complete execution binding.
+Versions 1 and 2 remain parseable for ledger inspection and migration
+tooling. Broker evidence and replay intentionally fail closed unless the
+start is version 3 with complete plan-bound lane material.
 
 ### Class: `ProviderFailureReceipt` {#providers-contracts-providerfailurereceipt}
 

@@ -8,6 +8,7 @@ which adapter may be called.
 
 from __future__ import annotations
 
+import hashlib
 import re
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -26,6 +27,15 @@ MAX_TIMEOUT_SECONDS = 120.0
 _SAFE_IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _SAFE_MODEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/@-]{0,191}$")
 _SAFE_HOST_RE = re.compile(r"^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$")
+
+
+def transport_resource_identity(namespace: str, value: str) -> str:
+    """Return a secret-safe stable identity for one configured transport resource."""
+
+    if not namespace or not value:
+        raise ValueError("transport resource identity inputs must be nonempty")
+    material = f"{namespace}\x00{value}".encode("utf-8", errors="strict")
+    return "sha256:" + hashlib.sha256(material).hexdigest()
 
 
 class ProviderId(str, Enum):
@@ -275,7 +285,13 @@ def model_visible_messages(request: ProviderRequest) -> tuple[ProviderMessage, .
 
 
 class ProviderExecutionBinding(StrictContract):
-    """Stable physical-lane material frozen into a v2 attempt start."""
+    """Stable physical-lane material frozen into a provider attempt start.
+
+    Availability metadata and credential names are intentionally excluded.
+    Model pins, supported routes, and physical caps are included so a trusted
+    plan can authorize the exact lane snapshot without depending on a live
+    registry during durable replay.
+    """
 
     endpoint_host: Annotated[str, Field(min_length=3, max_length=253)]
     endpoint_kind: EndpointKind
@@ -292,9 +308,27 @@ class ProviderExecutionBinding(StrictContract):
         ]
         | None
     ) = None
+    transport_resource_identity: (
+        Annotated[str, Field(pattern=r"^sha256:[0-9a-f]{64}$")] | None
+    ) = None
     data_handling: Literal["provider_managed", "project_policy"]
     residency: Annotated[str, Field(min_length=1, max_length=64)]
     supports_normalized_tools: bool = False
+    planning_model: Annotated[str, Field(min_length=1, max_length=192)] | None = None
+    coding_model: Annotated[str, Field(min_length=1, max_length=192)] | None = None
+    vision_model: Annotated[str, Field(min_length=1, max_length=192)] | None = None
+    research_model: Annotated[str, Field(min_length=1, max_length=192)] | None = None
+    supported_routes: (
+        Annotated[
+            tuple[RouteClass, ...],
+            Field(min_length=1, max_length=len(RouteClass)),
+        ]
+        | None
+    ) = None
+    max_output_tokens: Annotated[int, Field(ge=1, le=MAX_OUTPUT_TOKENS)] | None = None
+    max_timeout_seconds: (
+        Annotated[float, Field(ge=1.0, le=MAX_TIMEOUT_SECONDS)] | None
+    ) = None
 
     @model_validator(mode="after")
     def validate_binding(self) -> "ProviderExecutionBinding":
@@ -303,20 +337,67 @@ class ProviderExecutionBinding(StrictContract):
             self.client_identity is not None
         ):
             raise ValueError("only MCP sampling bindings require client_identity")
+        lane_material = (
+            self.planning_model,
+            self.coding_model,
+            self.vision_model,
+            self.research_model,
+            self.supported_routes,
+            self.max_output_tokens,
+            self.max_timeout_seconds,
+            self.transport_resource_identity,
+        )
+        if any(value is not None for value in lane_material) and not all(
+            value is not None for value in lane_material
+        ):
+            raise ValueError("execution lane material must be complete or absent")
+        models = lane_material[:4]
+        if all(model is not None for model in models) and not all(
+            _SAFE_MODEL_RE.fullmatch(str(model)) for model in models
+        ):
+            raise ValueError("execution model pins must be safe identifiers")
+        if self.supported_routes is not None and len(set(self.supported_routes)) != len(
+            self.supported_routes
+        ):
+            raise ValueError("execution supported routes must be unique")
         return self
+
+    @property
+    def has_lane_material(self) -> bool:
+        return all(
+            value is not None
+            for value in (
+                self.planning_model,
+                self.coding_model,
+                self.vision_model,
+                self.research_model,
+                self.supported_routes,
+                self.max_output_tokens,
+                self.max_timeout_seconds,
+                self.transport_resource_identity,
+            )
+        )
+
+    def model_for_route(self, route: RouteClass) -> str:
+        model = getattr(self, f"{route.value}_model")
+        if model is None:
+            raise ValueError("legacy execution binding has no lane model pins")
+        return str(model)
 
 
 class ProviderAttemptStart(StrictContract):
     """Grok-authorized identity for one physical subordinate channel call.
 
-    Version 1 remains parseable for ledger inspection and migration tooling.
-    Broker evidence and replay intentionally fail closed unless the start is
-    version 2 with its complete execution binding.
+    Versions 1 and 2 remain parseable for ledger inspection and migration
+    tooling. Broker evidence and replay intentionally fail closed unless the
+    start is version 3 with complete plan-bound lane material.
     """
 
-    version: Literal["provider-attempt-start/v1", "provider-attempt-start/v2"] = (
-        "provider-attempt-start/v1"
-    )
+    version: Literal[
+        "provider-attempt-start/v1",
+        "provider-attempt-start/v2",
+        "provider-attempt-start/v3",
+    ] = "provider-attempt-start/v1"
     attempt_id: Annotated[str, Field(min_length=1, max_length=128)]
     delegation_id: Annotated[str, Field(min_length=1, max_length=128)]
     attempt_ordinal: Annotated[int, Field(ge=1, le=128)]
@@ -360,9 +441,14 @@ class ProviderAttemptStart(StrictContract):
             ),
             billing_class=(self.execution.billing_class if self.execution else None),
         )
-        is_v2 = self.version == "provider-attempt-start/v2"
-        if is_v2 != (self.execution is not None):
-            raise ValueError("v2 attempt starts require one execution binding")
+        if self.version == "provider-attempt-start/v1":
+            if self.execution is not None:
+                raise ValueError("v1 attempt starts cannot contain execution binding")
+        elif self.version == "provider-attempt-start/v2":
+            if self.execution is None or self.execution.has_lane_material:
+                raise ValueError("v2 attempt starts require the legacy execution shape")
+        elif self.execution is None or not self.execution.has_lane_material:
+            raise ValueError("v3 attempt starts require complete lane material")
         return self
 
 
@@ -402,6 +488,9 @@ class ProviderDescriptor(StrictContract):
             ),
         ]
         | None
+    ) = None
+    transport_resource_identity: (
+        Annotated[str, Field(pattern=r"^sha256:[0-9a-f]{64}$")] | None
     ) = None
     credential_env_names: tuple[str, ...]
     credential_state: CredentialState
@@ -679,7 +768,12 @@ def provider_result_matches_start(
 
     execution = start.execution
     receipt = result.response.receipt if result.response is not None else result.failure
-    if execution is None or receipt is None:
+    if (
+        start.version != "provider-attempt-start/v3"
+        or execution is None
+        or not execution.has_lane_material
+        or receipt is None
+    ):
         return False
     if not all(
         (
