@@ -324,9 +324,22 @@ async def main() -> None:
     )
 
 
+def _format_exc(exc: BaseException) -> str:
+    """Surface nested ExceptionGroup / TaskGroup causes for Actions logs."""
+    parts = [f"{type(exc).__name__}: {exc}"]
+    if isinstance(exc, BaseExceptionGroup):
+        for i, sub in enumerate(exc.exceptions, 1):
+            parts.append(f"  [{i}] {_format_exc(sub)}")
+    cause = exc.__cause__ or exc.__context__
+    if cause is not None and cause is not exc:
+        parts.append(f"  caused by: {_format_exc(cause)}")
+    return "
+".join(parts)
+
+
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except Exception as exc:
-        print(f"error: {exc}", file=sys.stderr)
+        print(f"error: {_format_exc(exc)}", file=sys.stderr)
         raise SystemExit(1) from exc
