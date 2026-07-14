@@ -624,6 +624,8 @@ _PROTOCOL_MEMBERS = (
     "mark_task_memory_sync_failed", "get_task_memories_by_remote_ids",
     "count_unsynced_task_memories", "reset_task_memory_sync",
     "begin_provider_attempt", "complete_provider_attempt",
+    "complete_projected_provider_attempt",
+    "revoke_provider_attempt_projection",
     "mark_stale_provider_attempts_indeterminate", "list_provider_attempts",
     "lease_provider_attempts_for_harvest",
     "provider_attempt_harvest_lease_is_fresh",

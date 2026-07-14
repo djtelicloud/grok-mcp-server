@@ -116,7 +116,14 @@ def _result(start: ProviderAttemptStart, text: str = "Subordinate observation.")
 async def _completed(store: GrokSessionStore, index: int = 1) -> dict:
     start = _start(index)
     await store.begin_provider_attempt(start)
-    await store.complete_provider_attempt(start.attempt_id, _result(start))
+    projection = store.canonical_provider_attempt_result(
+        start.attempt_id,
+        _result(start),
+    )
+    await store.complete_projected_provider_attempt(
+        start.attempt_id,
+        projection,
+    )
     return (await store.list_provider_attempts(delegation_id=start.delegation_id))[0]
 
 

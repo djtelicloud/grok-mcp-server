@@ -7,7 +7,9 @@ import logging
 import threading
 import time
 import hashlib
+import hmac
 import re
+import secrets
 import uuid
 import subprocess
 import signal
@@ -1249,7 +1251,11 @@ _PROVIDER_HARVEST_CORRUPT_SCAN_OVERHEAD = 25
 _PROVIDER_HARVEST_CORRUPT_ERROR = "integrity:provider_attempt_decode_failed"
 
 
-def _redact_provider_episode_text(text: Any) -> tuple[str, str]:
+def _redact_provider_episode_text(
+    text: Any,
+    *,
+    configured_secrets: Optional[tuple[str, ...]] = None,
+) -> tuple[str, str]:
     """Return content safe for the Grok-owned provider-attempt ledger.
 
     Provider credentials are never copied into an episode. Exact configured
@@ -1261,8 +1267,13 @@ def _redact_provider_episode_text(text: Any) -> tuple[str, str]:
     try:
         original = str(text or "")
         redacted = redact_secrets(original)
-        for name in SERVER_OWNED_SECRET_ENV_NAMES:
-            secret = str(os.environ.get(name) or "")
+        secret_values = configured_secrets
+        if secret_values is None:
+            secret_values = tuple(
+                str(os.environ.get(name) or "")
+                for name in SERVER_OWNED_SECRET_ENV_NAMES
+            )
+        for secret in secret_values:
             if len(secret) >= 8 and secret in redacted:
                 redacted = redacted.replace(secret, "[REDACTED]")
         return redacted, "redacted" if redacted != original else "clean"
@@ -2552,6 +2563,20 @@ class GrokSessionStore:
         self._lock = asyncio.Lock()
         self._initialized = False
         self._clock = clock or (lambda: datetime.now(UTC))
+        # Process-local authority for canonical provider-attempt projections.
+        # It is never persisted or exposed through the public store API.
+        self._provider_projection_key = secrets.token_bytes(32)
+        self._provider_projection_lock = threading.Lock()
+        self._provider_projection_async_lock = asyncio.Lock()
+        self._provider_projection_leases: dict[
+            str,
+            tuple[tuple[str, ...], str],
+        ] = {}
+        self._provider_projection_generations: dict[str, str] = {}
+        self._provider_projection_authorizations: dict[
+            str,
+            tuple[str, str, Optional[str], str],
+        ] = {}
         # Read pool: independent read-only connections against the same WAL
         # db so reads never serialize through the write lock. _read_lock
         # guards only the checkout/lazy open, never the query itself.
@@ -3532,18 +3557,32 @@ class GrokSessionStore:
             return False
 
     async def close(self):
-        # Close readers first so the truncating checkpoint below is not
-        # blocked by pooled read snapshots.
-        await self._close_read_pool()
-        async with self._lock:
-            if self._conn:
-                try:
-                    await self._conn.execute("PRAGMA wal_checkpoint(TRUNCATE);")
-                except Exception:
-                    pass
-                await self._conn.close()
-                self._conn = None
-            self._initialized = False
+        async with self._provider_projection_async_lock:
+            with self._provider_projection_lock:
+                self._provider_projection_leases.clear()
+                self._provider_projection_generations.clear()
+                self._provider_projection_authorizations.clear()
+                self._provider_projection_key = secrets.token_bytes(32)
+            # Close readers first so the truncating checkpoint below is not
+            # blocked by pooled read snapshots.
+            await self._close_read_pool()
+            async with self._lock:
+                if self._conn:
+                    try:
+                        await self._conn.execute("PRAGMA wal_checkpoint(TRUNCATE);")
+                    except Exception:
+                        pass
+                    await self._conn.close()
+                    self._conn = None
+                self._initialized = False
+                # A begin/projection already inside the store lock may have
+                # raced the eager revocation above. Revoke again while closing
+                # the persistence generation so no capability survives reopen.
+                with self._provider_projection_lock:
+                    self._provider_projection_leases.clear()
+                    self._provider_projection_generations.clear()
+                    self._provider_projection_authorizations.clear()
+                    self._provider_projection_key = secrets.token_bytes(32)
 
     async def _on_write_completed(self):
         if str(self.db_path) == ":memory:":
@@ -4823,7 +4862,12 @@ class GrokSessionStore:
             raise ValueError("provider attempt receipt is malformed") from exc
         if receipt_raw != _canonical_json_text(receipt_record):
             raise ValueError("provider attempt receipt is not canonical")
-        from .providers.contracts import ProviderFailureReceipt, ProviderReceipt
+        from .providers.contracts import (
+            ProviderAttemptResult,
+            ProviderFailureReceipt,
+            ProviderReceipt,
+            ProviderResponse,
+        )
 
         try:
             receipt = (
@@ -4882,6 +4926,15 @@ class GrokSessionStore:
             "error_code": receipt.error_code if status == "failed" else None,
             "completed_at": item.get("completed_at"),
         }
+        canonical_result_digest = completion_record.get(
+            "canonical_result_digest"
+        )
+        if canonical_result_digest is not None:
+            if not re.fullmatch(r"sha256:[0-9a-f]{64}", str(canonical_result_digest)):
+                raise ValueError("provider canonical result digest is malformed")
+            expected_completion["canonical_result_digest"] = (
+                canonical_result_digest
+            )
         if completion_record != expected_completion:
             raise ValueError("provider attempt completion projection mismatch")
         if status == "returned" and output_text is None:
@@ -4896,6 +4949,30 @@ class GrokSessionStore:
             raise ValueError("provider receipt projection mismatch: error_kind")
         if item.get("error_code") != expected_completion["error_code"]:
             raise ValueError("provider receipt projection mismatch: error_code")
+        canonical_result = (
+            ProviderAttemptResult(
+                status="returned",
+                response=ProviderResponse(
+                    provider=receipt.provider,
+                    channel=receipt.channel,
+                    model=str(item.get("resolved_model") or ""),
+                    text=str(output_text or ""),
+                    finish_reason=item.get("finish_reason"),
+                    receipt=receipt,
+                ),
+            )
+            if status == "returned"
+            else ProviderAttemptResult(status="failed", failure=receipt)
+        )
+        recomputed_result_digest = _content_sha256(
+            _canonical_json_text(canonical_result.model_dump(mode="json"))
+        )
+        if (
+            canonical_result_digest is not None
+            and canonical_result_digest != recomputed_result_digest
+        ):
+            raise ValueError("provider canonical result digest mismatch")
+        item["canonical_result_digest"] = canonical_result_digest
         if status == "failed" and item.get("finish_reason") is not None:
             raise ValueError("failed provider attempt has a finish reason")
         if status == "returned" and item.get("finish_reason") not in {
@@ -4934,6 +5011,11 @@ class GrokSessionStore:
             raise ValueError(
                 "model-visible provider prompt contains secret-like content"
             )
+        projection_secrets = tuple(
+            str(os.environ.get(name) or "")
+            for name in SERVER_OWNED_SECRET_ENV_NAMES
+            if len(str(os.environ.get(name) or "")) >= 8
+        )
         prompt_digest = _content_sha256(prompt_text)
         now = datetime.now(UTC).isoformat()
 
@@ -4947,7 +5029,7 @@ class GrokSessionStore:
         supervision = start.request.supervision
 
         await self._ensure_initialized()
-        async with self._lock:
+        async with self._provider_projection_async_lock, self._lock:
             await self._conn.execute("BEGIN IMMEDIATE;")
             try:
                 await self._conn.execute(
@@ -4992,6 +5074,15 @@ class GrokSessionStore:
                     ),
                 )
                 await self._conn.commit()
+                with self._provider_projection_lock:
+                    projection_generation = secrets.token_hex(32)
+                    self._provider_projection_generations[start.attempt_id] = (
+                        projection_generation
+                    )
+                    self._provider_projection_leases[start.attempt_id] = (
+                        projection_secrets,
+                        projection_generation,
+                    )
             except (sqlite3.IntegrityError, aiosqlite.IntegrityError):
                 await self._conn.rollback()
                 async with self._conn.execute(
@@ -5027,20 +5118,240 @@ class GrokSessionStore:
             await self._on_write_completed()
         return True
 
+    def _provider_projection_authorization_tag(
+        self,
+        *,
+        attempt_id: str,
+        result_digest: str,
+        output_redaction: Optional[str],
+        key: Optional[bytes] = None,
+    ) -> str:
+        payload = _canonical_json_text(
+            {
+                "version": "provider-attempt-canonical-projection/v1",
+                "attempt_id": attempt_id,
+                "result_digest": result_digest,
+                "output_redaction": output_redaction,
+            }
+        ).encode("utf-8", errors="strict")
+        return "hmac-sha256:" + hmac.new(
+            key if key is not None else self._provider_projection_key,
+            payload,
+            hashlib.sha256,
+        ).hexdigest()
+
+    def canonical_provider_attempt_result(
+        self,
+        attempt_id: str,
+        result: Any,
+        redaction_snapshot: Any = None,
+    ) -> Any:
+        """Mint an attempt-bound capability for the exact redacted payload."""
+
+        from .providers.contracts import (
+            ProviderAttemptCanonicalProjection,
+            ProviderAttemptResult,
+        )
+        from .provider_redaction import ProviderRedactionSnapshot
+
+        attempt_key = str(attempt_id or "").strip()
+        with self._provider_projection_lock:
+            lease = self._provider_projection_leases.pop(
+                attempt_key,
+                None,
+            )
+            projection_key = self._provider_projection_key
+        if lease is None:
+            raise PermissionError(
+                "provider attempt has no live canonical-projection lease"
+            )
+        configured_secrets, projection_generation = lease
+        if redaction_snapshot is None:
+            post_effect_secrets: tuple[str, ...] = ()
+        elif isinstance(redaction_snapshot, ProviderRedactionSnapshot):
+            post_effect_secrets = redaction_snapshot.secret_values()
+        else:
+            raise TypeError("provider redaction snapshot is invalid")
+        configured_secrets = tuple(
+            dict.fromkeys((*configured_secrets, *post_effect_secrets))
+        )
+        canonical_result = (
+            ProviderAttemptResult.model_validate_json(
+                result.model_dump_json(warnings="error")
+            )
+            if isinstance(result, ProviderAttemptResult)
+            else ProviderAttemptResult.model_validate(result)
+        )
+        output_redaction = None
+        if canonical_result.response is not None:
+            safe_text, output_redaction = _redact_provider_episode_text(
+                canonical_result.response.text,
+                configured_secrets=configured_secrets,
+            )
+            canonical_result = canonical_result.model_copy(
+                update={
+                    "response": canonical_result.response.model_copy(
+                        update={"text": safe_text}
+                    )
+                }
+            )
+        result_digest = _content_sha256(
+            _canonical_json_text(canonical_result.model_dump(mode="json"))
+        )
+        authorization_tag = self._provider_projection_authorization_tag(
+            attempt_id=attempt_key,
+            result_digest=result_digest,
+            output_redaction=output_redaction,
+            key=projection_key,
+        )
+        projection = ProviderAttemptCanonicalProjection(
+            attempt_id=attempt_key,
+            result=canonical_result,
+            result_digest=result_digest,
+            output_redaction=output_redaction,
+            authorization_tag=authorization_tag,
+        )
+        with self._provider_projection_lock:
+            if not hmac.compare_digest(
+                self._provider_projection_key,
+                projection_key,
+            ) or self._provider_projection_generations.get(
+                attempt_key
+            ) != projection_generation:
+                raise PermissionError("provider projection lease was revoked")
+            self._provider_projection_authorizations[authorization_tag] = (
+                attempt_key,
+                result_digest,
+                output_redaction,
+                projection_generation,
+            )
+        return projection
+
+    async def revoke_provider_attempt_projection(self, attempt_id: str) -> None:
+        """Revoke any uncommitted process-local authority for one attempt."""
+
+        attempt_key = str(attempt_id or "").strip()
+        async with self._provider_projection_async_lock:
+            with self._provider_projection_lock:
+                self._provider_projection_leases.pop(attempt_key, None)
+                self._provider_projection_generations.pop(attempt_key, None)
+                revoked = [
+                    tag
+                    for tag, authorization in (
+                        self._provider_projection_authorizations.items()
+                    )
+                    if authorization[0] == attempt_key
+                ]
+                for tag in revoked:
+                    self._provider_projection_authorizations.pop(tag, None)
+
+    def _provider_projection_is_authorized(
+        self,
+        *,
+        attempt_id: str,
+        result_digest: str,
+        output_redaction: Optional[str],
+        authorization_tag: str,
+    ) -> bool:
+        with self._provider_projection_lock:
+            expected_tag = self._provider_projection_authorization_tag(
+                attempt_id=attempt_id,
+                result_digest=result_digest,
+                output_redaction=output_redaction,
+            )
+            authorization = self._provider_projection_authorizations.get(
+                authorization_tag
+            )
+            projection_generation = self._provider_projection_generations.get(
+                attempt_id
+            )
+        return hmac.compare_digest(authorization_tag, expected_tag) and (
+            authorization
+            == (
+                attempt_id,
+                result_digest,
+                output_redaction,
+                projection_generation,
+            )
+            and projection_generation is not None
+        )
+
+    def _consume_provider_projection_authority(
+        self,
+        *,
+        attempt_id: str,
+        authorization_tag: str,
+    ) -> None:
+        """Consume one exact projection after its durable terminal transition."""
+
+        with self._provider_projection_lock:
+            authorization = self._provider_projection_authorizations.get(
+                authorization_tag
+            )
+            if authorization is None or authorization[0] != attempt_id:
+                raise ValueError("canonical projection authority is not live")
+            self._provider_projection_authorizations.pop(
+                authorization_tag,
+                None,
+            )
+            self._provider_projection_leases.pop(attempt_id, None)
+            self._provider_projection_generations.pop(attempt_id, None)
+
+    async def complete_provider_attempt(
+        self,
+        attempt_id: str,
+        result: Any,
+    ) -> bool:
+        """Reject terminal writes that bypass the broker projection lifecycle."""
+
+        del attempt_id, result
+        raise PermissionError(
+            "direct provider-attempt completion is disabled; "
+            "use a live store-minted canonical projection"
+        )
+
     @_with_write_retry_async
-    async def complete_provider_attempt(self, attempt_id: str, result: Any) -> bool:
-        """Bind one normalized transport result to its exact Grok start row."""
+    async def complete_projected_provider_attempt(
+        self,
+        attempt_id: str,
+        projection: Any,
+    ) -> bool:
+        """Atomically bind one store-authorized canonical result to its start."""
 
-        from .providers.contracts import ProviderAttemptResult
+        from .providers.contracts import ProviderAttemptCanonicalProjection
 
-        if not isinstance(result, ProviderAttemptResult):
-            result = ProviderAttemptResult.model_validate(result)
+        projection = (
+            ProviderAttemptCanonicalProjection.model_validate_json(
+                projection.model_dump_json(warnings="error")
+            )
+            if isinstance(projection, ProviderAttemptCanonicalProjection)
+            else ProviderAttemptCanonicalProjection.model_validate(projection)
+        )
         attempt_key = str(attempt_id or "").strip()
         if not attempt_key:
             raise ValueError("attempt_id is required")
+        if projection.attempt_id != attempt_key:
+            raise ValueError("canonical projection is bound to a different attempt")
+        if not self._provider_projection_is_authorized(
+            attempt_id=attempt_key,
+            result_digest=projection.result_digest,
+            output_redaction=projection.output_redaction,
+            authorization_tag=projection.authorization_tag,
+        ):
+            raise ValueError("canonical projection authorization is invalid")
+        result = projection.result
+        canonical_result_digest = projection.result_digest
+        canonical_output_redaction = projection.output_redaction
 
         await self._ensure_initialized()
-        async with self._lock:
+        async with self._provider_projection_async_lock, self._lock:
+            if not self._provider_projection_is_authorized(
+                attempt_id=attempt_key,
+                result_digest=projection.result_digest,
+                output_redaction=projection.output_redaction,
+                authorization_tag=projection.authorization_tag,
+            ):
+                raise ValueError("canonical projection authorization was revoked")
             await self._conn.execute("BEGIN IMMEDIATE;")
             try:
                 async with self._conn.execute(
@@ -5088,9 +5399,8 @@ class GrokSessionStore:
                 output_chars = None
                 output_redaction = None
                 if response is not None:
-                    output_text, output_redaction = _redact_provider_episode_text(
-                        response.text
-                    )
+                    output_text = response.text
+                    output_redaction = canonical_output_redaction
                     output_digest = _content_sha256(output_text)
                     output_chars = len(output_text)
 
@@ -5107,6 +5417,7 @@ class GrokSessionStore:
                     "status": result.status,
                     "receipt": receipt_record,
                     "receipt_digest": receipt_digest,
+                    "canonical_result_digest": canonical_result_digest,
                     "output_digest": output_digest,
                     "output_redaction": output_redaction,
                     "resolved_model": response.model if response is not None else None,
@@ -5121,6 +5432,10 @@ class GrokSessionStore:
                 if current_status != "started":
                     if str(stored["completion_digest"] or "") == completion_digest:
                         await self._conn.rollback()
+                        self._consume_provider_projection_authority(
+                            attempt_id=attempt_key,
+                            authorization_tag=projection.authorization_tag,
+                        )
                         return False
                     raise ValueError("provider attempt already has a different terminal result")
 
@@ -5176,6 +5491,10 @@ class GrokSessionStore:
                 await self._conn.rollback()
                 raise
             await self._on_write_completed()
+            self._consume_provider_projection_authority(
+                attempt_id=attempt_key,
+                authorization_tag=projection.authorization_tag,
+            )
         return True
 
     @_with_write_retry_async

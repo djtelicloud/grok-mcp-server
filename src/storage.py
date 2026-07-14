@@ -134,8 +134,22 @@ class SessionStoreProtocol(Protocol):
 
     # ── Grok-owned subordinate provider attempts / xAI outbox ──────────────
     async def begin_provider_attempt(self, start: Any) -> bool: ...
+    def canonical_provider_attempt_result(
+        self,
+        attempt_id: str,
+        result: Any,
+        redaction_snapshot: Any = None,
+    ) -> Any: ...
+    async def revoke_provider_attempt_projection(self, attempt_id: str) -> None: ...
     async def complete_provider_attempt(
-        self, attempt_id: str, result: Any
+        self,
+        attempt_id: str,
+        result: Any,
+    ) -> bool: ...
+    async def complete_projected_provider_attempt(
+        self,
+        attempt_id: str,
+        projection: Any,
     ) -> bool: ...
     async def mark_stale_provider_attempts_indeterminate(
         self, stale_before: Any

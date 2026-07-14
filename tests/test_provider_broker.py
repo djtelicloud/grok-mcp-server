@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 import hashlib
 import json
@@ -9,8 +10,10 @@ from types import SimpleNamespace
 from typing import Any
 import time
 
+import mcp.types as mcp_types
 import pytest
 from pydantic import ValidationError
+from starlette.requests import Request
 
 import src.providers.broker as provider_broker
 from src.providers import (
@@ -26,6 +29,14 @@ from src.providers import (
     GrokWorkerBrokerResult,
     GrokWorkerDelegation,
     GrokWorkerLaneAuthorization,
+    MCP_PROVIDER_CAPABILITIES_SCOPE_KEY,
+    MCP_PROVIDER_GRANTS_SCOPE_KEY,
+    MCP_SESSION_AUTHORIZATION_SCOPE_KEY,
+    MCP_SESSION_RUNTIME_SCOPE_KEY,
+    MCPSamplingSessionRuntime,
+    MCPSessionAuthorization,
+    ProviderAttemptAdapterSource,
+    ProviderAttemptCanonicalProjection,
     ProviderAttemptStart,
     ProviderAttemptResult,
     ProviderChannel,
@@ -39,7 +50,11 @@ from src.providers import (
     ProviderResponse,
     ProviderTokenUsage,
     RouteClass,
+    TrustedMCPProviderCapability,
+    TrustedMCPProviderGrant,
     WorkerFallbackPolicy,
+    create_stateful_mcp_sampling_lease,
+    provider_request_digest,
     transport_resource_identity,
 )
 from src.provider_harvest import ProviderAttemptHarvester
@@ -271,6 +286,35 @@ class FakeAdapter:
                 self.tracker["active"] -= 1
 
 
+class FakeAdapterSource:
+    def __init__(
+        self,
+        adapter: FakeAdapter,
+        *,
+        events: list[str] | None = None,
+    ) -> None:
+        self.adapter = adapter
+        self.events = events if events is not None else []
+        self.opens = 0
+        self.closes = 0
+        self.starts: list[ProviderAttemptStart] = []
+
+    @property
+    def descriptor(self) -> ProviderDescriptor:
+        return self.adapter.descriptor
+
+    @asynccontextmanager
+    async def open_attempt(self, start: ProviderAttemptStart):
+        self.opens += 1
+        self.starts.append(start)
+        self.events.append(f"open:{start.channel.value}")
+        try:
+            yield self.adapter
+        finally:
+            self.closes += 1
+            self.events.append(f"close:{start.channel.value}")
+
+
 def _receipt(request, descriptor: ProviderDescriptor) -> ProviderReceipt:
     return ProviderReceipt(
         request_id=request.request_id,
@@ -306,6 +350,11 @@ class FakeStore:
         self.fail_complete = fail_complete
         self.starts: dict[str, Any] = {}
         self.results: dict[str, ProviderAttemptResult] = {}
+        self.canonical_result_digests: dict[str, str] = {}
+        self.canonical_projections: dict[
+            str, ProviderAttemptCanonicalProjection
+        ] = {}
+        self.projection_leases: set[str] = set()
 
     async def begin_provider_attempt(self, start) -> bool:
         self.events.append(f"begin:{start.channel.value}")
@@ -323,18 +372,96 @@ class FakeStore:
         ):
             raise ValueError("delegation ordinal identity conflict")
         self.starts[start.attempt_id] = start
+        self.projection_leases.add(start.attempt_id)
         return True
 
-    async def complete_provider_attempt(self, attempt_id, result) -> bool:
+    def canonical_provider_attempt_result(
+        self,
+        attempt_id,
+        result,
+        redaction_snapshot=None,
+    ):
+        del redaction_snapshot
+        if attempt_id not in self.projection_leases:
+            raise PermissionError("no live canonical-projection lease")
+        self.projection_leases.remove(attempt_id)
+        projected = (
+            ProviderAttemptResult.model_validate_json(
+                result.model_dump_json(warnings="error")
+            )
+            if isinstance(result, ProviderAttemptResult)
+            else ProviderAttemptResult.model_validate(result)
+        )
+        result_digest = provider_broker._provider_result_digest(projected)
+        nonce = len(self.canonical_projections)
+        material = json.dumps(
+            [attempt_id, result_digest, nonce, id(self)],
+            separators=(",", ":"),
+        )
+        authorization_tag = "hmac-sha256:" + hashlib.sha256(
+            material.encode("utf-8")
+        ).hexdigest()
+        projection = ProviderAttemptCanonicalProjection(
+            attempt_id=attempt_id,
+            result=projected,
+            result_digest=result_digest,
+            output_redaction=("clean" if projected.response is not None else None),
+            authorization_tag=authorization_tag,
+        )
+        self.canonical_projections[authorization_tag] = projection
+        return projection
+
+    async def revoke_provider_attempt_projection(self, attempt_id):
+        self.projection_leases.discard(attempt_id)
+        revoked = [
+            tag
+            for tag, projection in self.canonical_projections.items()
+            if projection.attempt_id == attempt_id
+        ]
+        for tag in revoked:
+            self.canonical_projections.pop(tag, None)
+
+    async def complete_provider_attempt(
+        self,
+        attempt_id,
+        result,
+    ) -> bool:
+        del attempt_id, result
+        raise PermissionError("direct provider-attempt completion is disabled")
+
+    async def complete_projected_provider_attempt(
+        self,
+        attempt_id,
+        projection,
+    ) -> bool:
         self.events.append(f"complete:{self.starts[attempt_id].channel.value}")
         if self.fail_complete:
             raise RuntimeError("terminal unavailable")
+        projection = (
+            ProviderAttemptCanonicalProjection.model_validate_json(
+                projection.model_dump_json(warnings="error")
+            )
+            if isinstance(projection, ProviderAttemptCanonicalProjection)
+            else ProviderAttemptCanonicalProjection.model_validate(projection)
+        )
+        approved = self.canonical_projections.get(projection.authorization_tag)
+        if approved != projection or projection.attempt_id != attempt_id:
+            raise ValueError("canonical projection authorization mismatch")
+        result = projection.result
+        approved_digest = projection.result_digest
         existing = self.results.get(attempt_id)
         if existing is not None:
-            if existing != result:
+            if (
+                existing != result
+                or self.canonical_result_digests.get(attempt_id)
+                != approved_digest
+            ):
                 raise ValueError("terminal conflict")
+            self.canonical_projections.pop(projection.authorization_tag, None)
             return False
         self.results[attempt_id] = result
+        self.canonical_result_digests[attempt_id] = approved_digest
+        self.canonical_projections.pop(projection.authorization_tag, None)
         return True
 
     async def list_provider_attempts(
@@ -424,30 +551,61 @@ class FakeStore:
                         if result.response is not None
                         else None
                     ),
+                    "canonical_result_digest": (
+                        self.canonical_result_digests[attempt_id]
+                    ),
                 }
             )
         return rows[:limit]
 
 
 class BlockingCompleteStore(FakeStore):
-    def __init__(self, *, fail_after_release: bool = False) -> None:
-        super().__init__()
+    def __init__(
+        self,
+        *,
+        fail_after_release: bool = False,
+        events: list[str] | None = None,
+    ) -> None:
+        super().__init__(events=events)
         self.fail_after_release = fail_after_release
         self.complete_entered = asyncio.Event()
         self.complete_release = asyncio.Event()
 
-    async def complete_provider_attempt(self, attempt_id, result) -> bool:
+    async def complete_projected_provider_attempt(
+        self,
+        attempt_id,
+        projection,
+    ) -> bool:
         self.events.append(f"complete:{self.starts[attempt_id].channel.value}")
         self.complete_entered.set()
         await self.complete_release.wait()
         if self.fail_after_release:
             raise RuntimeError("terminal write failed after release")
+        projection = (
+            ProviderAttemptCanonicalProjection.model_validate_json(
+                projection.model_dump_json(warnings="error")
+            )
+            if isinstance(projection, ProviderAttemptCanonicalProjection)
+            else ProviderAttemptCanonicalProjection.model_validate(projection)
+        )
+        approved = self.canonical_projections.get(projection.authorization_tag)
+        if approved != projection or projection.attempt_id != attempt_id:
+            raise ValueError("canonical projection authorization mismatch")
+        result = projection.result
+        approved_digest = projection.result_digest
         existing = self.results.get(attempt_id)
         if existing is not None:
-            if existing != result:
+            if (
+                existing != result
+                or self.canonical_result_digests.get(attempt_id)
+                != approved_digest
+            ):
                 raise ValueError("terminal conflict")
+            self.canonical_projections.pop(projection.authorization_tag, None)
             return False
         self.results[attempt_id] = result
+        self.canonical_result_digests[attempt_id] = approved_digest
+        self.canonical_projections.pop(projection.authorization_tag, None)
         return True
 
 
@@ -488,6 +646,7 @@ def _fallback(enabled: bool = True) -> WorkerFallbackPolicy:
 def _plan(
     provider: ProviderId = ProviderId.OPENAI,
     *,
+    route: RouteClass = RouteClass.PLANNING,
     count: int = 1,
     fallback: bool = True,
     ttl: datetime | None = None,
@@ -519,7 +678,7 @@ def _plan(
             GrokWorkerDelegation(
                 delegation_key=f"work-{index}",
                 provider=provider,
-                route=RouteClass.PLANNING,
+                route=route,
                 messages=(
                     ProviderMessage(
                         role="user",
@@ -777,6 +936,1008 @@ async def test_subscription_success_prevents_api_and_is_durable_before_harvest()
     assert result.synthesized is False
     assert result.authority.may_finalize is False
     assert evidence.authority.may_route is False
+
+
+@pytest.mark.asyncio
+async def test_attempt_adapter_source_opens_only_after_new_durable_begin():
+    events: list[str] = []
+    source_impl = FakeAdapterSource(
+        FakeAdapter(ProviderChannel.OPENAI_MCP_SAMPLING, events=events),
+        events=events,
+    )
+    source: ProviderAttemptAdapterSource = source_impl
+    store = FakeStore(events=events)
+
+    result = await GrokWorkerBroker(
+        registry={ProviderChannel.OPENAI_MCP_SAMPLING: source},
+        store=store,
+        clock=lambda: NOW,
+    ).execute(_plan(fallback=False))
+
+    assert result.status == "returned"
+    assert events == [
+        "begin:openai_mcp_sampling",
+        "open:openai_mcp_sampling",
+        "effect:openai_mcp_sampling",
+        "close:openai_mcp_sampling",
+        "complete:openai_mcp_sampling",
+    ]
+    assert source_impl.opens == source_impl.closes == 1
+    assert source_impl.starts == [next(iter(store.starts.values()))]
+
+
+@pytest.mark.asyncio
+async def test_attempt_adapter_source_never_opens_on_begin_failure_or_replay():
+    failed_source = FakeAdapterSource(
+        FakeAdapter(ProviderChannel.OPENAI_MCP_SAMPLING)
+    )
+    failed = await GrokWorkerBroker(
+        registry={ProviderChannel.OPENAI_MCP_SAMPLING: failed_source},
+        store=FakeStore(fail_begin=True),
+        clock=lambda: NOW,
+    ).execute(_plan(fallback=False))
+    assert failed.status == "indeterminate"
+    assert failed_source.opens == 0
+
+    plan = _plan(fallback=False)
+    store = FakeStore()
+    first_source = FakeAdapterSource(
+        FakeAdapter(ProviderChannel.OPENAI_MCP_SAMPLING)
+    )
+    first = await GrokWorkerBroker(
+        registry={ProviderChannel.OPENAI_MCP_SAMPLING: first_source},
+        store=store,
+        clock=lambda: NOW,
+    ).execute(plan)
+    replay_source = FakeAdapterSource(
+        FakeAdapter(ProviderChannel.OPENAI_MCP_SAMPLING)
+    )
+    replay = await GrokWorkerBroker(
+        registry={ProviderChannel.OPENAI_MCP_SAMPLING: replay_source},
+        store=store,
+        clock=lambda: NOW,
+    ).execute(plan)
+
+    assert first.status == replay.status == "returned"
+    assert first_source.opens == 1
+    assert replay_source.opens == 0
+    assert replay.delegations[0].attempts[0].persistence == "replayed_terminal"
+
+
+@pytest.mark.asyncio
+async def test_attempt_adapter_source_never_opens_when_ttl_expires_during_begin():
+    clock_now = [NOW]
+
+    class ExpiringBeginStore(FakeStore):
+        async def begin_provider_attempt(self, start):
+            is_new = await super().begin_provider_attempt(start)
+            clock_now[0] = NOW + timedelta(seconds=2)
+            return is_new
+
+    source = FakeAdapterSource(FakeAdapter(ProviderChannel.OPENAI_MCP_SAMPLING))
+    store = ExpiringBeginStore()
+    api = FakeAdapter(ProviderChannel.OPENAI_API)
+    result = await GrokWorkerBroker(
+        registry={
+            ProviderChannel.OPENAI_MCP_SAMPLING: source,
+            ProviderChannel.OPENAI_API: api,
+        },
+        store=store,
+        clock=lambda: clock_now[0],
+    ).execute(_plan(fallback=False, ttl=NOW + timedelta(seconds=1)))
+
+    assert result.status == "failed"
+    assert source.opens == 0
+    assert api.calls == 0
+    terminal = next(iter(store.results.values()))
+    assert terminal.failure.error_code == "ttl_expired"
+
+
+@pytest.mark.asyncio
+async def test_static_adapter_and_attempt_source_preserve_attempt_identity():
+    descriptor = _descriptor(ProviderChannel.OPENAI_MCP_SAMPLING)
+    plan = _plan(fallback=False, lane_descriptors=(descriptor,))
+    static = await GrokWorkerBroker(
+        registry={
+            ProviderChannel.OPENAI_MCP_SAMPLING: FakeAdapter(
+                ProviderChannel.OPENAI_MCP_SAMPLING,
+                descriptor=descriptor,
+            )
+        },
+        store=FakeStore(),
+        clock=lambda: NOW,
+    ).execute(plan)
+    sourced = await GrokWorkerBroker(
+        registry={
+            ProviderChannel.OPENAI_MCP_SAMPLING: FakeAdapterSource(
+                FakeAdapter(
+                    ProviderChannel.OPENAI_MCP_SAMPLING,
+                    descriptor=descriptor,
+                )
+            )
+        },
+        store=FakeStore(),
+        clock=lambda: NOW,
+    ).execute(plan)
+
+    static_start = static.delegations[0].attempts[0].start
+    sourced_start = sourced.delegations[0].attempts[0].start
+    assert static.status == sourced.status == "returned"
+    assert static_start == sourced_start
+    assert static_start.request.request_id == sourced_start.request.request_id
+    assert static_start.execution == sourced_start.execution
+
+
+@pytest.mark.asyncio
+async def test_started_attempt_replay_never_reopens_dynamic_source():
+    plan = _plan(fallback=False)
+    store = FakeStore(fail_complete=True)
+    first_source = FakeAdapterSource(
+        FakeAdapter(ProviderChannel.OPENAI_MCP_SAMPLING)
+    )
+    first = await GrokWorkerBroker(
+        registry={ProviderChannel.OPENAI_MCP_SAMPLING: first_source},
+        store=store,
+        clock=lambda: NOW,
+    ).execute(plan)
+    replay_source = FakeAdapterSource(
+        FakeAdapter(ProviderChannel.OPENAI_MCP_SAMPLING)
+    )
+    replay = await GrokWorkerBroker(
+        registry={ProviderChannel.OPENAI_MCP_SAMPLING: replay_source},
+        store=store,
+        clock=lambda: NOW,
+    ).execute(plan)
+
+    assert first.status == replay.status == "indeterminate"
+    assert first_source.opens == 1
+    assert replay_source.opens == 0
+    assert replay.delegations[0].reason == "stored_attempt_indeterminate"
+
+
+def test_registry_rejects_ambiguous_adapter_and_source_surface():
+    class AmbiguousEntry(FakeAdapter):
+        @asynccontextmanager
+        async def open_attempt(self, start):
+            del start
+            yield self
+
+    with pytest.raises(ValueError, match="exactly one adapter or adapter source"):
+        GrokWorkerBroker(
+            registry={
+                ProviderChannel.OPENAI_MCP_SAMPLING: AmbiguousEntry(
+                    ProviderChannel.OPENAI_MCP_SAMPLING
+                )
+            },
+            store=FakeStore(),
+        )
+
+
+@pytest.mark.asyncio
+async def test_source_entry_consumes_same_absolute_attempt_deadline():
+    events: list[str] = []
+    adapter = FakeAdapter(ProviderChannel.OPENAI_MCP_SAMPLING)
+
+    class BlockingEntrySource:
+        descriptor = adapter.descriptor
+
+        def __init__(self):
+            self.entered = 0
+            self.exits = 0
+            self.acquired = False
+
+        def open_attempt(self, start):
+            del start
+            source = self
+
+            class Manager:
+                async def __aenter__(self):
+                    source.entered += 1
+                    source.acquired = True
+                    events.append("entry_acquired:openai_mcp_sampling")
+                    await asyncio.sleep(10)
+                    return adapter
+
+                async def __aexit__(self, exc_type, exc, traceback):
+                    del exc_type, exc, traceback
+                    source.exits += 1
+                    source.acquired = False
+                    events.append("entry_revoked:openai_mcp_sampling")
+                    return None
+
+            return Manager()
+
+    source = BlockingEntrySource()
+    started = time.monotonic()
+    result = await GrokWorkerBroker(
+        registry={ProviderChannel.OPENAI_MCP_SAMPLING: source},
+        store=FakeStore(events=events),
+    ).execute(
+        _plan(
+            fallback=False,
+            ttl=datetime.now(UTC) + timedelta(seconds=0.05),
+        )
+    )
+
+    assert time.monotonic() - started < 0.5
+    assert result.status == "failed"
+    assert source.entered == 1
+    assert source.exits == 1
+    assert source.acquired is False
+    assert adapter.calls == 0
+    assert events.index("entry_revoked:openai_mcp_sampling") < events.index(
+        "complete:openai_mcp_sampling"
+    )
+    assert result.delegations[0].attempts[0].result.failure.error_code == (
+        "ttl_expired"
+    )
+
+
+@pytest.mark.asyncio
+async def test_partial_source_entry_cleanup_failure_stays_nonterminal():
+    adapter = FakeAdapter(ProviderChannel.OPENAI_MCP_SAMPLING)
+
+    class UnsafePartialEntrySource:
+        descriptor = adapter.descriptor
+
+        def open_attempt(self, start):
+            del start
+
+            class Manager:
+                async def __aenter__(self):
+                    await asyncio.sleep(10)
+                    return adapter
+
+                async def __aexit__(self, exc_type, exc, traceback):
+                    del exc_type, exc, traceback
+                    raise RuntimeError("partial authority revocation failed")
+
+            return Manager()
+
+    store = FakeStore()
+    result = await GrokWorkerBroker(
+        registry={
+            ProviderChannel.OPENAI_MCP_SAMPLING: UnsafePartialEntrySource()
+        },
+        store=store,
+    ).execute(
+        _plan(
+            fallback=False,
+            ttl=datetime.now(UTC) + timedelta(seconds=0.05),
+        )
+    )
+
+    evidence = result.delegations[0].attempts[0]
+    assert result.status == "indeterminate"
+    assert evidence.persistence == "terminal_indeterminate"
+    assert evidence.harvest.reason == "adapter_source_cleanup_failed"
+    assert store.results == {}
+    assert adapter.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_blocking_adapter_return_after_monotonic_deadline_is_not_certified():
+    class BlockingReturnAdapter(FakeAdapter):
+        async def attempt(self, request):
+            result = await super().attempt(request)
+            time.sleep(1.1)
+            return result
+
+    subscription = BlockingReturnAdapter(
+        ProviderChannel.OPENAI_MCP_SAMPLING,
+        claim_on_attempt=True,
+        response_text="late output must not be certified",
+    )
+    api = FakeAdapter(ProviderChannel.OPENAI_API)
+    store = FakeStore()
+    result = await GrokWorkerBroker(
+        registry={
+            ProviderChannel.OPENAI_MCP_SAMPLING: subscription,
+            ProviderChannel.OPENAI_API: api,
+        },
+        store=store,
+        clock=lambda: NOW,
+    ).execute(_plan(timeout_seconds=1.0))
+
+    evidence = result.delegations[0].attempts[0]
+    assert result.status == "failed"
+    assert evidence.result.failure.error_kind == "internal"
+    assert evidence.result.failure.error_code == "sampling_effect_indeterminate"
+    assert "late output must not be certified" not in result.model_dump_json()
+    assert subscription.calls == 1
+    assert api.calls == 0
+    assert len(store.results) == 1
+
+
+@pytest.mark.asyncio
+async def test_ttl_is_rechecked_after_source_context_enter_before_effect():
+    clock_now = [NOW]
+    adapter = FakeAdapter(ProviderChannel.OPENAI_MCP_SAMPLING)
+
+    class ExpiringEnterSource(FakeAdapterSource):
+        @asynccontextmanager
+        async def open_attempt(self, start):
+            self.opens += 1
+            self.starts.append(start)
+            clock_now[0] = NOW + timedelta(seconds=2)
+            try:
+                yield self.adapter
+            finally:
+                self.closes += 1
+
+    source = ExpiringEnterSource(adapter)
+    result = await GrokWorkerBroker(
+        registry={ProviderChannel.OPENAI_MCP_SAMPLING: source},
+        store=FakeStore(),
+        clock=lambda: clock_now[0],
+    ).execute(
+        _plan(
+            fallback=False,
+            ttl=NOW + timedelta(seconds=1),
+        )
+    )
+
+    assert result.status == "failed"
+    assert adapter.calls == 0
+    assert source.opens == source.closes == 1
+    assert result.delegations[0].attempts[0].result.failure.error_code == (
+        "ttl_expired"
+    )
+
+
+@pytest.mark.asyncio
+async def test_source_start_mutation_is_rejected_before_effect():
+    adapter = FakeAdapter(ProviderChannel.OPENAI_MCP_SAMPLING)
+
+    class MutatingStartSource(FakeAdapterSource):
+        @asynccontextmanager
+        async def open_attempt(self, start):
+            self.opens += 1
+            self.starts.append(start)
+            object.__setattr__(start.request, "request_id", "forged-request")
+            try:
+                yield self.adapter
+            finally:
+                self.closes += 1
+
+    source = MutatingStartSource(adapter)
+    result = await GrokWorkerBroker(
+        registry={ProviderChannel.OPENAI_MCP_SAMPLING: source},
+        store=FakeStore(),
+        clock=lambda: NOW,
+    ).execute(_plan(fallback=False))
+
+    assert result.status == "failed"
+    assert adapter.calls == 0
+    assert source.opens == source.closes == 1
+    assert result.delegations[0].attempts[0].result.failure.error_code == (
+        "adapter_source_start_mutation"
+    )
+
+
+@pytest.mark.asyncio
+async def test_source_descriptor_change_during_begin_never_opens_or_falls_back():
+    authorized = _descriptor(ProviderChannel.OPENAI_MCP_SAMPLING)
+    changed = authorized.model_copy(update={"endpoint_host": "forged.openai.com"})
+
+    class SwitchingSource(FakeAdapterSource):
+        switched = False
+
+        @property
+        def descriptor(self):
+            return changed if self.switched else authorized
+
+    source = SwitchingSource(
+        FakeAdapter(
+            ProviderChannel.OPENAI_MCP_SAMPLING,
+            descriptor=authorized,
+        )
+    )
+
+    class SwitchingBeginStore(FakeStore):
+        async def begin_provider_attempt(self, start):
+            is_new = await super().begin_provider_attempt(start)
+            source.switched = True
+            return is_new
+
+    api = FakeAdapter(ProviderChannel.OPENAI_API)
+    result = await GrokWorkerBroker(
+        registry={
+            ProviderChannel.OPENAI_MCP_SAMPLING: source,
+            ProviderChannel.OPENAI_API: api,
+        },
+        store=SwitchingBeginStore(),
+        clock=lambda: NOW,
+    ).execute(_plan(lane_descriptors=(authorized, api.descriptor)))
+
+    assert result.status == "failed"
+    assert source.opens == 0
+    assert api.calls == 0
+    assert result.delegations[0].attempts[0].result.failure.error_code == (
+        "adapter_source_descriptor_changed"
+    )
+
+
+@pytest.mark.asyncio
+async def test_source_post_close_descriptor_mutation_stays_indeterminate():
+    authorized = _descriptor(ProviderChannel.OPENAI_MCP_SAMPLING)
+    changed = authorized.model_copy(update={"endpoint_host": "forged.openai.com"})
+    adapter = FakeAdapter(
+        ProviderChannel.OPENAI_MCP_SAMPLING,
+        descriptor=authorized,
+        response_text="uncertified source output",
+    )
+
+    class PostCloseMutationSource(FakeAdapterSource):
+        switched = False
+
+        @property
+        def descriptor(self):
+            return changed if self.switched else authorized
+
+        @asynccontextmanager
+        async def open_attempt(self, start):
+            self.opens += 1
+            self.starts.append(start)
+            try:
+                yield self.adapter
+            finally:
+                self.switched = True
+                self.closes += 1
+
+    source = PostCloseMutationSource(adapter)
+    api = FakeAdapter(ProviderChannel.OPENAI_API)
+    result = await GrokWorkerBroker(
+        registry={
+            ProviderChannel.OPENAI_MCP_SAMPLING: source,
+            ProviderChannel.OPENAI_API: api,
+        },
+        store=FakeStore(),
+        clock=lambda: NOW,
+    ).execute(
+        _plan(lane_descriptors=(authorized, api.descriptor))
+    )
+
+    assert result.status == "indeterminate"
+    assert adapter.calls == 1
+    assert api.calls == 0
+    assert "uncertified source output" not in result.model_dump_json()
+    evidence = result.delegations[0].attempts[0]
+    assert evidence.persistence == "terminal_indeterminate"
+    assert evidence.result is None
+    assert evidence.harvest.reason == (
+        "terminal_authority_changed_after_projection"
+    )
+
+
+@pytest.mark.asyncio
+async def test_raw_cancellation_waits_for_one_close_before_terminal_persistence():
+    events: list[str] = []
+    adapter = FakeAdapter(
+        ProviderChannel.OPENAI_MCP_SAMPLING,
+        delay=10,
+        events=events,
+    )
+    close_started = asyncio.Event()
+    close_release = asyncio.Event()
+
+    class BlockingCloseSource(FakeAdapterSource):
+        @asynccontextmanager
+        async def open_attempt(self, start):
+            self.opens += 1
+            self.starts.append(start)
+            self.events.append("open:openai_mcp_sampling")
+            try:
+                yield self.adapter
+            finally:
+                self.closes += 1
+                self.events.append("close_started:openai_mcp_sampling")
+                close_started.set()
+                await close_release.wait()
+                self.events.append("close_done:openai_mcp_sampling")
+
+    source = BlockingCloseSource(adapter, events=events)
+    store = FakeStore(events=events)
+    task = asyncio.create_task(
+        GrokWorkerBroker(
+            registry={ProviderChannel.OPENAI_MCP_SAMPLING: source},
+            store=store,
+            clock=lambda: NOW,
+        ).execute(_plan(fallback=False))
+    )
+    async with asyncio.timeout(1):
+        while adapter.calls == 0:
+            await asyncio.sleep(0)
+    task.cancel()
+    await asyncio.wait_for(close_started.wait(), timeout=1)
+    task.cancel()
+    await asyncio.sleep(0)
+    assert store.results == {}
+
+    close_release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(task, timeout=1)
+
+    assert source.closes == 1
+    assert len(store.results) == 1
+    assert events.index("close_done:openai_mcp_sampling") < events.index(
+        "complete:openai_mcp_sampling"
+    )
+    assert next(iter(store.results.values())).failure.error_code == (
+        "broker_cancelled"
+    )
+
+
+@pytest.mark.asyncio
+async def test_source_cleanup_failure_is_explicit_and_never_api_falls_back():
+    adapter = FakeAdapter(ProviderChannel.OPENAI_MCP_SAMPLING)
+
+    class FailingCloseSource(FakeAdapterSource):
+        authority_live = False
+
+        @asynccontextmanager
+        async def open_attempt(self, start):
+            self.opens += 1
+            self.starts.append(start)
+            self.authority_live = True
+            try:
+                yield self.adapter
+            finally:
+                self.closes += 1
+                raise RuntimeError("private cleanup failure")
+
+    source = FailingCloseSource(adapter)
+    api = FakeAdapter(ProviderChannel.OPENAI_API)
+    store = FakeStore()
+    result = await GrokWorkerBroker(
+        registry={
+            ProviderChannel.OPENAI_MCP_SAMPLING: source,
+            ProviderChannel.OPENAI_API: api,
+        },
+        store=store,
+        clock=lambda: NOW,
+    ).execute(_plan())
+
+    evidence = result.delegations[0].attempts[0]
+    assert result.status == "indeterminate"
+    assert source.opens == source.closes == 1
+    assert source.authority_live is True
+    assert api.calls == 0
+    assert evidence.persistence == "terminal_indeterminate"
+    assert evidence.result is None
+    assert evidence.harvest.reason == "adapter_source_cleanup_failed"
+    assert store.results == {}
+
+
+@pytest.mark.asyncio
+async def test_cancelled_cleanup_failure_refuses_terminal_persistence():
+    events: list[str] = []
+    adapter = FakeAdapter(
+        ProviderChannel.OPENAI_MCP_SAMPLING,
+        delay=10,
+        events=events,
+    )
+
+    class FailingCancelledCloseSource(FakeAdapterSource):
+        authority_live = False
+
+        @asynccontextmanager
+        async def open_attempt(self, start):
+            self.opens += 1
+            self.starts.append(start)
+            self.events.append("open:openai_mcp_sampling")
+            self.authority_live = True
+            try:
+                yield self.adapter
+            finally:
+                self.closes += 1
+                self.events.append("close:openai_mcp_sampling")
+                raise RuntimeError("private cancelled cleanup failure")
+
+    source = FailingCancelledCloseSource(adapter, events=events)
+    store = FakeStore(events=events)
+    task = asyncio.create_task(
+        GrokWorkerBroker(
+            registry={ProviderChannel.OPENAI_MCP_SAMPLING: source},
+            store=store,
+            clock=lambda: NOW,
+        ).execute(_plan(fallback=False))
+    )
+    async with asyncio.timeout(1):
+        while adapter.calls == 0:
+            await asyncio.sleep(0)
+    task.cancel()
+    with pytest.raises(
+        BrokerCancellationPersistenceError,
+        match="cleanup did not complete",
+    ):
+        await asyncio.wait_for(task, timeout=1)
+
+    assert source.closes == 1
+    assert source.authority_live is True
+    assert store.results == {}
+    assert "complete:openai_mcp_sampling" not in events
+
+
+@pytest.mark.asyncio
+async def test_source_cleanup_timeout_is_nonterminal_and_never_falls_back():
+    adapter = FakeAdapter(ProviderChannel.OPENAI_MCP_SAMPLING)
+    cleanup_cancelled = asyncio.Event()
+
+    class HangingCloseSource(FakeAdapterSource):
+        @asynccontextmanager
+        async def open_attempt(self, start):
+            self.opens += 1
+            self.starts.append(start)
+            try:
+                yield self.adapter
+            finally:
+                self.closes += 1
+                try:
+                    await asyncio.Event().wait()
+                finally:
+                    cleanup_cancelled.set()
+
+    source = HangingCloseSource(adapter)
+    api = FakeAdapter(ProviderChannel.OPENAI_API)
+    store = FakeStore()
+    result = await GrokWorkerBroker(
+        registry={
+            ProviderChannel.OPENAI_MCP_SAMPLING: source,
+            ProviderChannel.OPENAI_API: api,
+        },
+        store=store,
+        clock=lambda: NOW,
+        adapter_cleanup_timeout_seconds=0.1,
+    ).execute(_plan())
+
+    await asyncio.wait_for(cleanup_cancelled.wait(), timeout=1)
+    assert result.status == "indeterminate"
+    assert result.delegations[0].reason == "attempt_state_indeterminate"
+    evidence = result.delegations[0].attempts[0]
+    assert evidence.persistence == "terminal_indeterminate"
+    assert evidence.harvest.reason == "adapter_source_cleanup_timed_out"
+    assert store.results == {}
+    assert api.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_blocking_source_cleanup_cannot_overrun_absolute_bound():
+    adapter = FakeAdapter(ProviderChannel.OPENAI_MCP_SAMPLING)
+
+    class BlockingCloseSource(FakeAdapterSource):
+        @asynccontextmanager
+        async def open_attempt(self, start):
+            self.opens += 1
+            self.starts.append(start)
+            try:
+                yield self.adapter
+            finally:
+                self.closes += 1
+                time.sleep(0.5)
+
+    source = BlockingCloseSource(adapter)
+    store = FakeStore()
+    started = time.monotonic()
+    result = await GrokWorkerBroker(
+        registry={ProviderChannel.OPENAI_MCP_SAMPLING: source},
+        store=store,
+        clock=lambda: NOW,
+        adapter_cleanup_timeout_seconds=0.1,
+    ).execute(_plan(fallback=False))
+
+    evidence = result.delegations[0].attempts[0]
+    assert time.monotonic() - started >= 0.5
+    assert result.status == "indeterminate"
+    assert evidence.persistence == "terminal_indeterminate"
+    assert evidence.harvest.reason == "adapter_source_cleanup_timed_out"
+    assert store.results == {}
+
+
+@pytest.mark.asyncio
+async def test_cancelled_cleanup_timeout_is_explicit_and_never_terminalizes():
+    adapter = FakeAdapter(
+        ProviderChannel.OPENAI_MCP_SAMPLING,
+        delay=10,
+    )
+    cleanup_started = asyncio.Event()
+    cleanup_cancelled = asyncio.Event()
+
+    class HangingCancelledCloseSource(FakeAdapterSource):
+        @asynccontextmanager
+        async def open_attempt(self, start):
+            self.opens += 1
+            self.starts.append(start)
+            try:
+                yield self.adapter
+            finally:
+                self.closes += 1
+                cleanup_started.set()
+                try:
+                    await asyncio.Event().wait()
+                finally:
+                    cleanup_cancelled.set()
+
+    source = HangingCancelledCloseSource(adapter)
+    store = FakeStore()
+    task = asyncio.create_task(
+        GrokWorkerBroker(
+            registry={ProviderChannel.OPENAI_MCP_SAMPLING: source},
+            store=store,
+            clock=lambda: NOW,
+            adapter_cleanup_timeout_seconds=0.1,
+        ).execute(_plan(fallback=False))
+    )
+    async with asyncio.timeout(1):
+        while adapter.calls == 0:
+            await asyncio.sleep(0)
+    task.cancel()
+    await asyncio.wait_for(cleanup_started.wait(), timeout=1)
+
+    with pytest.raises(
+        BrokerCancellationPersistenceError,
+        match="cleanup did not complete",
+    ):
+        await asyncio.wait_for(task, timeout=1)
+
+    await asyncio.wait_for(cleanup_cancelled.wait(), timeout=1)
+    assert source.closes == 1
+    assert store.results == {}
+
+
+@pytest.mark.asyncio
+async def test_source_open_failure_is_internal_and_never_api_falls_back():
+    descriptor = _descriptor(ProviderChannel.OPENAI_MCP_SAMPLING)
+
+    class FailingOpenSource:
+        @property
+        def descriptor(self):
+            return descriptor
+
+        def open_attempt(self, start):
+            del start
+
+            class Manager:
+                async def __aenter__(self):
+                    raise RuntimeError("private open failure")
+
+                async def __aexit__(self, exc_type, exc, traceback):
+                    del exc_type, exc, traceback
+                    return None
+
+            return Manager()
+
+    api = FakeAdapter(ProviderChannel.OPENAI_API)
+    result = await GrokWorkerBroker(
+        registry={
+            ProviderChannel.OPENAI_MCP_SAMPLING: FailingOpenSource(),
+            ProviderChannel.OPENAI_API: api,
+        },
+        store=FakeStore(),
+        clock=lambda: NOW,
+    ).execute(_plan())
+
+    assert result.status == "failed"
+    assert api.calls == 0
+    failure = result.delegations[0].attempts[0].result.failure
+    assert failure.error_kind == "internal"
+    assert failure.error_code == "adapter_source_open_failed"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("inspector_mode", ["missing", "throws", "non_bool"])
+async def test_dynamic_source_unknown_mcp_claim_state_never_falls_back(
+    inspector_mode,
+):
+    adapter = FakeAdapter(ProviderChannel.OPENAI_MCP_SAMPLING)
+    if inspector_mode == "missing":
+        adapter.effect_claimed = None
+    elif inspector_mode == "throws":
+
+        def broken_inspector():
+            raise RuntimeError("private claim state failure")
+
+        adapter.effect_claimed = broken_inspector
+    else:
+        adapter.effect_claimed = lambda: "false"
+    source = FakeAdapterSource(adapter)
+    api = FakeAdapter(ProviderChannel.OPENAI_API)
+    result = await GrokWorkerBroker(
+        registry={
+            ProviderChannel.OPENAI_MCP_SAMPLING: source,
+            ProviderChannel.OPENAI_API: api,
+        },
+        store=FakeStore(),
+        clock=lambda: NOW,
+    ).execute(_plan())
+
+    failure = result.delegations[0].attempts[0].result.failure
+    assert failure.error_kind == "internal"
+    assert failure.error_code == "sampling_effect_indeterminate"
+    assert adapter.calls == 0
+    assert source.opens == source.closes == 1
+    assert api.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_real_capability_source_mints_grant_only_after_durable_begin():
+    events: list[str] = []
+    authorization = MCPSessionAuthorization(
+        binding_id="binding-broker-1",
+        mcp_session_id="mcp-session-broker-1",
+        principal="http:anon",
+        client_label="antigravity",
+        mcp_client_name="Antigravity",
+        trust="verified_local",
+        issued_at=NOW - timedelta(seconds=5),
+        expires_at=NOW + timedelta(minutes=10),
+    )
+    models = ProviderModelPins(
+        planning="gemini-planning",
+        coding="gemini-coding",
+        vision="gemini-vision",
+        research="gemini-research",
+    )
+    capability = TrustedMCPProviderCapability(
+        session_authorization_digest=authorization.authorization_digest,
+        provider=ProviderId.GOOGLE,
+        channel=ProviderChannel.GOOGLE_MCP_SAMPLING,
+        models=models,
+        supported_routes=(
+            RouteClass.PLANNING,
+            RouteClass.CODING,
+            RouteClass.RESEARCH,
+        ),
+    )
+    pregrant_descriptor = capability.descriptor
+    pregrant_lane = GrokWorkerLaneAuthorization.from_descriptor(
+        pregrant_descriptor
+    )
+    runtime = MCPSamplingSessionRuntime(authorization)
+
+    class Session:
+        def __init__(self):
+            self.calls: list[dict[str, Any]] = []
+            self.client_params = SimpleNamespace(
+                capabilities=SimpleNamespace(sampling=object()),
+                clientInfo=SimpleNamespace(name="Antigravity"),
+            )
+
+        async def create_message(self, **kwargs):
+            self.calls.append(kwargs)
+            events.append("effect:google_mcp_sampling")
+            return mcp_types.CreateMessageResult(
+                role="assistant",
+                content=mcp_types.TextContent(
+                    type="text",
+                    text="Lease-owned broker observation.",
+                ),
+                model=models.coding,
+                stopReason="endTurn",
+            )
+
+    session = Session()
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/mcp",
+        "headers": [
+            (b"mcp-session-id", authorization.mcp_session_id.encode()),
+            (b"x-client-id", authorization.client_label.encode()),
+        ],
+        MCP_SESSION_AUTHORIZATION_SCOPE_KEY: authorization,
+        MCP_PROVIDER_CAPABILITIES_SCOPE_KEY: (capability,),
+        MCP_PROVIDER_GRANTS_SCOPE_KEY: (),
+        MCP_SESSION_RUNTIME_SCOPE_KEY: runtime,
+    }
+    request = Request(scope)
+    related_request_id = "tool-request-77"
+    request_context = SimpleNamespace(
+        request=request,
+        session=session,
+        request_id=related_request_id,
+    )
+    ctx = SimpleNamespace(
+        fastmcp=SimpleNamespace(settings=SimpleNamespace(stateless_http=False)),
+        request_context=request_context,
+        session=session,
+    )
+    store = FakeStore(events=events)
+
+    class CapabilitySource:
+        def __init__(self):
+            self.starts: list[ProviderAttemptStart] = []
+            self.grants: list[TrustedMCPProviderGrant] = []
+            self.adapter_descriptor: ProviderDescriptor | None = None
+            self.binding_route: RouteClass | None = None
+
+        @property
+        def descriptor(self):
+            return capability.descriptor
+
+        @asynccontextmanager
+        async def open_attempt(self, start):
+            assert start.attempt_id in store.starts
+            assert store.starts[start.attempt_id] == start
+            assert scope[MCP_PROVIDER_GRANTS_SCOPE_KEY] == ()
+            self.starts.append(start)
+            events.append("open:google_mcp_sampling")
+            grant = TrustedMCPProviderGrant(
+                grant_id="grant-" + start.attempt_id[-64:],
+                session_authorization_digest=authorization.authorization_digest,
+                session_capability_digest=capability.capability_digest,
+                supervision=start.request.supervision,
+                provider_request_id=start.request.request_id,
+                provider_request_digest=provider_request_digest(start.request),
+                mcp_related_request_id=related_request_id,
+                provider=start.provider,
+                channel=start.channel,
+                route=start.request.route,
+                models=capability.models,
+                issued_at=NOW - timedelta(seconds=1),
+                expires_at=NOW + timedelta(minutes=2),
+            )
+            self.grants.append(grant)
+            scope[MCP_PROVIDER_GRANTS_SCOPE_KEY] = (grant,)
+            lease = create_stateful_mcp_sampling_lease(
+                ctx,
+                provider=start.provider,
+                channel=start.channel,
+                provider_request=start.request,
+                clock=lambda: NOW,
+            )
+            try:
+                async with lease:
+                    adapter = lease.adapter
+                    self.adapter_descriptor = adapter.descriptor
+                    authority = object.__getattribute__(
+                        adapter,
+                        "_sampling_authority",
+                    )
+                    self.binding_route = authority.route
+                    yield adapter
+            finally:
+                scope[MCP_PROVIDER_GRANTS_SCOPE_KEY] = ()
+                events.append("close:google_mcp_sampling")
+
+    source = CapabilitySource()
+    plan = _plan(
+        ProviderId.GOOGLE,
+        route=RouteClass.CODING,
+        fallback=False,
+        lane_descriptors=(pregrant_descriptor,),
+    )
+    result = await GrokWorkerBroker(
+        registry={ProviderChannel.GOOGLE_MCP_SAMPLING: source},
+        store=store,
+        clock=lambda: NOW,
+    ).execute(plan)
+
+    assert result.status == "returned"
+    assert events == [
+        "begin:google_mcp_sampling",
+        "open:google_mcp_sampling",
+        "effect:google_mcp_sampling",
+        "close:google_mcp_sampling",
+        "complete:google_mcp_sampling",
+    ]
+    start = next(iter(store.starts.values()))
+    assert source.starts == [start]
+    assert len(source.grants) == 1
+    assert source.grants[0].provider_request_id == start.request.request_id
+    assert source.grants[0].route == source.binding_route == RouteClass.CODING
+    assert source.adapter_descriptor == pregrant_descriptor
+    assert (
+        GrokWorkerLaneAuthorization.from_descriptor(source.adapter_descriptor)
+        == pregrant_lane
+    )
+    assert set(source.adapter_descriptor.supported_routes) == {
+        RouteClass.PLANNING,
+        RouteClass.CODING,
+        RouteClass.RESEARCH,
+    }
+    assert start.request.model == models.coding
+    assert session.calls[0]["model_preferences"].hints[0].name == models.coding
 
 
 @pytest.mark.asyncio
@@ -1081,9 +2242,10 @@ async def test_begin_failure_has_zero_provider_effect_and_no_harvest():
 async def test_terminal_store_failure_is_indeterminate_and_withholds_worker_output():
     adapter = FakeAdapter(ProviderChannel.OPENAI_MCP_SAMPLING)
     harvester = FakeHarvester()
+    store = FakeStore(fail_complete=True)
     result = await GrokWorkerBroker(
         registry={ProviderChannel.OPENAI_MCP_SAMPLING: adapter},
-        store=FakeStore(fail_complete=True),
+        store=store,
         harvester=harvester,
         clock=lambda: NOW,
     ).execute(_plan(fallback=False))
@@ -1094,6 +2256,8 @@ async def test_terminal_store_failure_is_indeterminate_and_withholds_worker_outp
     assert evidence.result is None
     assert evidence.harvest.status == "not_applicable"
     assert harvester.calls == 0
+    assert store.projection_leases == set()
+    assert store.canonical_projections == {}
 
 
 @pytest.mark.asyncio
@@ -1212,6 +2376,9 @@ async def test_first_return_uses_same_redacted_durable_result_as_replay(
     plan = _plan(fallback=False)
 
     first = await broker.execute(plan)
+    assert store._provider_projection_leases == {}
+    assert store._provider_projection_generations == {}
+    assert store._provider_projection_authorizations == {}
     replay = await broker.execute(plan)
     first_attempt = first.delegations[0].attempts[0]
     replay_attempt = replay.delegations[0].attempts[0]
@@ -1224,6 +2391,247 @@ async def test_first_return_uses_same_redacted_durable_result_as_replay(
     assert first_attempt.persistence == "durable_terminal"
     assert replay_attempt.persistence == "replayed_terminal"
     await store.close()
+
+
+@pytest.mark.asyncio
+async def test_broker_projection_survives_secret_rotation_before_atomic_write(
+    tmp_path,
+    monkeypatch,
+):
+    old_secret = "old-local-gateway-secret-12345"
+    new_secret = "new-local-gateway-secret-67890"
+    monkeypatch.setenv("UNIGROK_API_KEYS", old_secret)
+
+    class RotatingProjectionStore(GrokSessionStore):
+        def __init__(self, path):
+            super().__init__(path)
+            self.projection_calls = 0
+
+        def canonical_provider_attempt_result(
+            self,
+            attempt_id,
+            result,
+            redaction_snapshot=None,
+        ):
+            projected = super().canonical_provider_attempt_result(
+                attempt_id,
+                result,
+                redaction_snapshot,
+            )
+            self.projection_calls += 1
+            if self.projection_calls == 1:
+                monkeypatch.setenv("UNIGROK_API_KEYS", new_secret)
+            return projected
+
+    adapter = FakeAdapter(
+        ProviderChannel.OPENAI_MCP_SAMPLING,
+        response_text=f"Worker echoed {old_secret}",
+    )
+    store = RotatingProjectionStore(tmp_path / "broker-rotated-secret.db")
+    broker = GrokWorkerBroker(
+        registry={ProviderChannel.OPENAI_MCP_SAMPLING: adapter},
+        store=store,
+        clock=lambda: NOW,
+    )
+    plan = _plan(fallback=False)
+
+    first = await broker.execute(plan)
+    replay = await broker.execute(plan)
+    async with store._conn.execute(
+        "SELECT output_text, completion_json FROM provider_attempts"
+    ) as cursor:
+        raw_row = await cursor.fetchone()
+
+    assert first.status == replay.status == "returned"
+    assert adapter.calls == 1
+    assert store.projection_calls == 1
+    assert first.delegations[0].attempts[0].result == (
+        replay.delegations[0].attempts[0].result
+    )
+    assert old_secret not in first.model_dump_json()
+    assert old_secret not in replay.model_dump_json()
+    assert old_secret not in str(tuple(raw_row))
+    await store.close()
+
+
+@pytest.mark.asyncio
+async def test_blocking_projection_never_delays_source_cleanup_or_terminalizes():
+    projection_started = threading.Event()
+    projection_release = threading.Event()
+    projection_finished = threading.Event()
+
+    class BlockingProjectionStore(FakeStore):
+        def canonical_provider_attempt_result(
+            self,
+            attempt_id,
+            result,
+            redaction_snapshot=None,
+        ):
+            projection_started.set()
+            projection_release.wait()
+            try:
+                return super().canonical_provider_attempt_result(
+                    attempt_id,
+                    result,
+                    redaction_snapshot,
+                )
+            finally:
+                projection_finished.set()
+
+    source = FakeAdapterSource(
+        FakeAdapter(ProviderChannel.OPENAI_MCP_SAMPLING)
+    )
+    store = BlockingProjectionStore()
+    broker = GrokWorkerBroker(
+        registry={ProviderChannel.OPENAI_MCP_SAMPLING: source},
+        store=store,
+        clock=lambda: NOW,
+    )
+    plan = _plan(
+        fallback=False,
+        ttl=NOW + timedelta(seconds=0.15),
+    )
+    started_at = time.monotonic()
+    execution = asyncio.create_task(broker.execute(plan))
+    try:
+        assert await asyncio.to_thread(projection_started.wait, 1.0)
+        async with asyncio.timeout(0.1):
+            while source.closes != 1:
+                await asyncio.sleep(0)
+        assert not projection_release.is_set()
+        result = await asyncio.wait_for(execution, timeout=1.0)
+    finally:
+        projection_release.set()
+        if not execution.done():
+            execution.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await execution
+
+    assert await asyncio.to_thread(projection_finished.wait, 1.0)
+
+    evidence = result.delegations[0].attempts[0]
+    assert time.monotonic() - started_at < 0.75
+    assert source.opens == source.closes == 1
+    assert result.status == "indeterminate"
+    assert evidence.persistence == "terminal_indeterminate"
+    assert evidence.result is None
+    assert evidence.harvest.reason == "terminal_projection_timed_out"
+    assert store.results == {}
+    assert store.projection_leases == set()
+    assert store.canonical_projections == {}
+
+
+@pytest.mark.asyncio
+async def test_dynamic_source_cleanup_cannot_rotate_past_result_redaction(
+    tmp_path,
+    monkeypatch,
+):
+    old_secret = "old-dynamic-source-secret-12345"
+    new_secret = "new-dynamic-source-secret-67890"
+    monkeypatch.setenv("UNIGROK_API_KEYS", old_secret)
+    adapter = FakeAdapter(
+        ProviderChannel.OPENAI_MCP_SAMPLING,
+        response_text=f"Worker echoed {old_secret}",
+    )
+
+    class RotatingCloseSource(FakeAdapterSource):
+        @asynccontextmanager
+        async def open_attempt(self, start):
+            self.opens += 1
+            self.starts.append(start)
+            try:
+                yield self.adapter
+            finally:
+                self.closes += 1
+                monkeypatch.setenv("UNIGROK_API_KEYS", new_secret)
+
+    source = RotatingCloseSource(adapter)
+    store = GrokSessionStore(tmp_path / "broker-cleanup-rotation.db")
+    broker = GrokWorkerBroker(
+        registry={ProviderChannel.OPENAI_MCP_SAMPLING: source},
+        store=store,
+        clock=lambda: NOW,
+    )
+    plan = _plan(fallback=False)
+
+    first = await broker.execute(plan)
+    replay = await broker.execute(plan)
+    async with store._conn.execute(
+        "SELECT output_text, completion_json FROM provider_attempts"
+    ) as cursor:
+        raw_row = await cursor.fetchone()
+
+    assert first.status == replay.status == "returned"
+    assert adapter.calls == 1
+    assert source.opens == source.closes == 1
+    assert first.delegations[0].attempts[0].result == (
+        replay.delegations[0].attempts[0].result
+    )
+    assert old_secret not in first.model_dump_json()
+    assert old_secret not in replay.model_dump_json()
+    assert old_secret not in str(tuple(raw_row))
+    await store.close()
+
+
+@pytest.mark.asyncio
+async def test_entry_rotation_is_captured_before_cleanup_and_never_persisted(
+    tmp_path,
+    monkeypatch,
+):
+    begin_secret = "begin-source-secret-12345"
+    active_secret = "active-source-secret-67890"
+    closed_secret = "closed-source-secret-24680"
+    monkeypatch.setenv("UNIGROK_API_KEYS", begin_secret)
+    adapter = FakeAdapter(
+        ProviderChannel.OPENAI_MCP_SAMPLING,
+        response_text=f"Worker echoed {active_secret}",
+    )
+
+    class EntryRotatingSource(FakeAdapterSource):
+        @asynccontextmanager
+        async def open_attempt(self, start):
+            self.opens += 1
+            self.starts.append(start)
+            monkeypatch.setenv("UNIGROK_API_KEYS", active_secret)
+            try:
+                yield self.adapter
+            finally:
+                self.closes += 1
+                monkeypatch.setenv("UNIGROK_API_KEYS", closed_secret)
+
+    source = EntryRotatingSource(adapter)
+    db_path = tmp_path / "broker-entry-rotation.db"
+    store = GrokSessionStore(db_path)
+    broker = GrokWorkerBroker(
+        registry={ProviderChannel.OPENAI_MCP_SAMPLING: source},
+        store=store,
+        clock=lambda: NOW,
+    )
+    plan = _plan(fallback=False)
+
+    first = await broker.execute(plan)
+    replay = await broker.execute(plan)
+    async with store._conn.execute(
+        "SELECT output_text, completion_json FROM provider_attempts"
+    ) as cursor:
+        raw_row = await cursor.fetchone()
+
+    assert first.status == replay.status == "returned"
+    assert adapter.calls == 1
+    assert source.opens == source.closes == 1
+    assert first.delegations[0].attempts[0].result == (
+        replay.delegations[0].attempts[0].result
+    )
+    assert active_secret not in first.model_dump_json()
+    assert active_secret not in replay.model_dump_json()
+    assert active_secret not in str(tuple(raw_row))
+    await store.close()
+
+    persisted = b"".join(
+        path.read_bytes()
+        for path in tmp_path.glob(f"{db_path.name}*")
+    )
+    assert active_secret.encode() not in persisted
 
 
 @pytest.mark.asyncio
@@ -1616,6 +3024,11 @@ async def test_forged_content_addressed_attempt_and_request_ids_cannot_replay():
     forged_result = original_result.model_copy(update={"response": forged_response})
     store.starts = {forged_start.attempt_id: forged_start}
     store.results = {forged_start.attempt_id: forged_result}
+    store.canonical_result_digests = {
+        forged_start.attempt_id: provider_broker._provider_result_digest(
+            forged_result
+        )
+    }
 
     refused = await broker.execute(plan)
     assert first.status == "returned"
@@ -1675,7 +3088,12 @@ async def test_plan_lane_digest_rejects_recomputed_model_caps_and_route_forgery(
 
     store = FakeStore()
     assert await store.begin_provider_attempt(start)
-    assert await store.complete_provider_attempt(start.attempt_id, forged_result)
+    projection = store.canonical_provider_attempt_result(
+        start.attempt_id, forged_result
+    )
+    assert await store.complete_projected_provider_attempt(
+        start.attempt_id, projection
+    )
     adapter = FakeAdapter(ProviderChannel.OPENAI_API, descriptor=base)
     replay = await GrokWorkerBroker(
         registry={ProviderChannel.OPENAI_API: adapter},
@@ -1711,7 +3129,12 @@ async def test_real_ledger_rejects_recomputed_endpoint_residency_policy_forgery(
     )
     store = GrokSessionStore(tmp_path / "forged-lane-replay.db")
     assert await store.begin_provider_attempt(start)
-    assert await store.complete_provider_attempt(start.attempt_id, forged_result)
+    projection = store.canonical_provider_attempt_result(
+        start.attempt_id, forged_result
+    )
+    assert await store.complete_projected_provider_attempt(
+        start.attempt_id, projection
+    )
     assert (await store.list_provider_attempts())[0]["transport_status"] == "returned"
 
     adapter = FakeAdapter(ProviderChannel.OPENAI_API, descriptor=base)
@@ -1727,6 +3150,52 @@ async def test_real_ledger_rejects_recomputed_endpoint_residency_policy_forgery(
     assert adapter.calls == 0
     assert "forged but internally" not in replay.model_dump_json()
     await store.close()
+
+
+@pytest.mark.asyncio
+async def test_restart_cannot_mint_or_replay_fabricated_terminal_evidence(tmp_path):
+    descriptor = _descriptor(ProviderChannel.OPENAI_API)
+    plan = _plan(lane_descriptors=(descriptor,))
+    start, fabricated = _forged_attempt(
+        plan,
+        base_descriptor=descriptor,
+        forged_descriptor=descriptor,
+        ordinal=2,
+    )
+    db_path = tmp_path / "restart-projection-lease.db"
+    first_process = GrokSessionStore(db_path)
+    assert await first_process.begin_provider_attempt(start)
+    stale_projection = first_process.canonical_provider_attempt_result(
+        start.attempt_id,
+        fabricated,
+    )
+    await first_process.close()
+    with pytest.raises(ValueError, match="authorization is invalid"):
+        await first_process.complete_projected_provider_attempt(
+            start.attempt_id,
+            stale_projection,
+        )
+
+    restarted = GrokSessionStore(db_path)
+    with pytest.raises(PermissionError, match="direct provider-attempt completion"):
+        await restarted.complete_provider_attempt(start.attempt_id, fabricated)
+    with pytest.raises(PermissionError, match="no live canonical-projection lease"):
+        restarted.canonical_provider_attempt_result(start.attempt_id, fabricated)
+
+    adapter = FakeAdapter(ProviderChannel.OPENAI_API, descriptor=descriptor)
+    replay = await GrokWorkerBroker(
+        registry={ProviderChannel.OPENAI_API: adapter},
+        store=restarted,
+        clock=lambda: NOW,
+    ).execute(plan)
+
+    assert replay.status == "indeterminate"
+    assert adapter.calls == 0
+    assert "forged but internally" not in replay.model_dump_json()
+    assert (await restarted.list_provider_attempts())[0][
+        "transport_status"
+    ] == "started"
+    await restarted.close()
 
 
 @pytest.mark.asyncio
@@ -1746,7 +3215,12 @@ async def test_plan_rejects_recomputed_unauthorized_alternate_channel():
     )
     store = FakeStore()
     assert await store.begin_provider_attempt(start)
-    assert await store.complete_provider_attempt(start.attempt_id, forged_result)
+    projection = store.canonical_provider_attempt_result(
+        start.attempt_id, forged_result
+    )
+    assert await store.complete_projected_provider_attempt(
+        start.attempt_id, projection
+    )
     adapter = FakeAdapter(
         ProviderChannel.ANTHROPIC_MCP_SAMPLING,
         descriptor=authorized,
@@ -1802,12 +3276,21 @@ async def test_replay_rejects_api_fallback_after_internal_subscription_failure()
     )
     store = FakeStore()
     assert await store.begin_provider_attempt(subscription_start)
-    assert await store.complete_provider_attempt(
+    subscription_projection = store.canonical_provider_attempt_result(
         subscription_start.attempt_id,
         internal_failure,
     )
+    assert await store.complete_projected_provider_attempt(
+        subscription_start.attempt_id,
+        subscription_projection,
+    )
     assert await store.begin_provider_attempt(api_start)
-    assert await store.complete_provider_attempt(api_start.attempt_id, api_result)
+    api_projection = store.canonical_provider_attempt_result(
+        api_start.attempt_id, api_result
+    )
+    assert await store.complete_projected_provider_attempt(
+        api_start.attempt_id, api_projection
+    )
 
     replay = await GrokWorkerBroker(
         registry={},
@@ -1979,6 +3462,64 @@ async def test_claimed_mcp_late_result_is_internal_indeterminate():
 
 
 @pytest.mark.asyncio
+async def test_adapter_owned_result_mutation_after_return_cannot_enable_fallback():
+    mutation_done = asyncio.Event()
+
+    class DeferredMutationAdapter(FakeAdapter):
+        async def attempt(self, request):
+            result = await super().attempt(request)
+            failure = ProviderFailureReceipt(
+                request_id=request.request_id,
+                supervision=request.supervision,
+                provider=self.descriptor.provider,
+                channel=self.descriptor.channel,
+                credential_plane=self.descriptor.credential_plane,
+                route=request.route,
+                requested_model=request.model,
+                endpoint_host=self.descriptor.endpoint_host,
+                endpoint_kind=self.descriptor.endpoint_kind,
+                credential_kind=self.descriptor.credential_kind,
+                billing_class=self.descriptor.billing_class,
+                client_identity=self.descriptor.client_identity,
+                error_kind="transport",
+                error_code="timeout",
+                duration_ms=2,
+            )
+
+            def mutate_returned_object():
+                object.__setattr__(result, "status", "failed")
+                object.__setattr__(result, "response", None)
+                object.__setattr__(result, "failure", failure)
+                mutation_done.set()
+
+            asyncio.get_running_loop().call_soon(mutate_returned_object)
+            return result
+
+    subscription = DeferredMutationAdapter(
+        ProviderChannel.OPENAI_MCP_SAMPLING,
+        claim_on_attempt=True,
+    )
+    api = FakeAdapter(ProviderChannel.OPENAI_API)
+    store = FakeStore()
+    result = await GrokWorkerBroker(
+        registry={
+            ProviderChannel.OPENAI_MCP_SAMPLING: subscription,
+            ProviderChannel.OPENAI_API: api,
+        },
+        store=store,
+        clock=lambda: NOW,
+    ).execute(_plan())
+
+    await asyncio.wait_for(mutation_done.wait(), timeout=1)
+    assert subscription.claim_state is True
+    assert subscription.calls == 1
+    assert api.calls == 0
+    assert result.status == "returned"
+    terminal = next(iter(store.results.values()))
+    assert terminal.status == "returned"
+
+
+@pytest.mark.asyncio
 async def test_external_cancellation_terminalizes_started_attempt_then_propagates():
     adapter = FakeAdapter(
         ProviderChannel.OPENAI_MCP_SAMPLING,
@@ -2092,6 +3633,49 @@ async def test_cancellation_during_terminal_write_preserves_exact_provider_resul
 
 
 @pytest.mark.asyncio
+async def test_repeated_cancellation_cannot_bypass_dynamic_source_terminal_write():
+    events: list[str] = []
+    adapter = FakeAdapter(
+        ProviderChannel.OPENAI_MCP_SAMPLING,
+        delay=10,
+        events=events,
+    )
+    source = FakeAdapterSource(adapter, events=events)
+    store = BlockingCompleteStore(events=events)
+    task = asyncio.create_task(
+        GrokWorkerBroker(
+            registry={ProviderChannel.OPENAI_MCP_SAMPLING: source},
+            store=store,
+            clock=lambda: NOW,
+        ).execute(_plan(fallback=False))
+    )
+    async with asyncio.timeout(1):
+        while adapter.calls == 0:
+            await asyncio.sleep(0)
+
+    task.cancel()
+    await asyncio.wait_for(store.complete_entered.wait(), timeout=1)
+    task.cancel()
+    await asyncio.sleep(0)
+    task.cancel()
+    await asyncio.sleep(0)
+    assert store.results == {}
+
+    store.complete_release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(task, timeout=1)
+
+    assert source.closes == 1
+    assert len(store.results) == 1
+    assert events.index("close:openai_mcp_sampling") < events.index(
+        "complete:openai_mcp_sampling"
+    )
+    terminal = next(iter(store.results.values()))
+    assert terminal.status == "failed"
+    assert terminal.failure.error_code == "broker_cancelled"
+
+
+@pytest.mark.asyncio
 async def test_cancelled_blocked_terminal_write_failure_stays_explicit():
     adapter = FakeAdapter(ProviderChannel.OPENAI_MCP_SAMPLING)
     store = BlockingCompleteStore(fail_after_release=True)
@@ -2111,6 +3695,206 @@ async def test_cancelled_blocked_terminal_write_failure_stays_explicit():
         match="could not be terminalized",
     ):
         await task
+
+
+@pytest.mark.asyncio
+async def test_blocking_terminal_replay_cannot_overrun_absolute_bound():
+    class BlockingReplayStore(FakeStore):
+        async def list_provider_attempts(self, *args, **kwargs):
+            if self.results:
+                time.sleep(0.5)
+            return await super().list_provider_attempts(*args, **kwargs)
+
+    store = BlockingReplayStore()
+    started = time.monotonic()
+    result = await GrokWorkerBroker(
+        registry={
+            ProviderChannel.OPENAI_MCP_SAMPLING: FakeAdapter(
+                ProviderChannel.OPENAI_MCP_SAMPLING
+            )
+        },
+        store=store,
+        clock=lambda: NOW,
+        terminal_write_timeout_seconds=0.1,
+    ).execute(_plan(fallback=False))
+
+    evidence = result.delegations[0].attempts[0]
+    assert time.monotonic() - started >= 0.5
+    assert result.status == "indeterminate"
+    assert evidence.persistence == "terminal_indeterminate"
+    assert evidence.result is None
+    assert evidence.harvest.reason == "terminal_persistence_failed"
+    assert len(store.results) == 1
+
+
+@pytest.mark.asyncio
+async def test_terminal_replay_must_equal_predeclared_canonical_projection():
+    class DifferentReplayStore(FakeStore):
+        async def list_provider_attempts(self, *args, **kwargs):
+            rows = await super().list_provider_attempts(*args, **kwargs)
+            if self.results:
+                for row in rows:
+                    if row.get("transport_status") == "returned":
+                        row["output_text"] = "different contract-valid response"
+            return rows
+
+    store = DifferentReplayStore()
+    adapter = FakeAdapter(ProviderChannel.OPENAI_MCP_SAMPLING)
+    broker = GrokWorkerBroker(
+        registry={
+            ProviderChannel.OPENAI_MCP_SAMPLING: adapter
+        },
+        store=store,
+        clock=lambda: NOW,
+    )
+    plan = _plan(fallback=False)
+    result = await broker.execute(plan)
+    replay = await broker.execute(plan)
+
+    evidence = result.delegations[0].attempts[0]
+    assert result.status == "indeterminate"
+    assert evidence.persistence == "terminal_indeterminate"
+    assert evidence.result is None
+    assert evidence.harvest.reason == "terminal_persistence_failed"
+    assert "different contract-valid response" not in result.model_dump_json()
+    assert replay.status == "indeterminate"
+    assert replay.delegations[0].reason == "stored_attempt_conflict"
+    assert "different contract-valid response" not in replay.model_dump_json()
+    assert adapter.calls == 1
+    assert len(store.results) == 1
+
+
+@pytest.mark.asyncio
+async def test_complete_cannot_substitute_broker_approved_canonical_result():
+    class DifferentCompleteStore(FakeStore):
+        async def complete_projected_provider_attempt(
+            self,
+            attempt_id,
+            projection,
+        ):
+            substituted_result = projection.result.model_copy(
+                update={
+                    "response": projection.result.response.model_copy(
+                        update={"text": "different complete result"}
+                    )
+                }
+            )
+            substituted = projection.model_copy(
+                update={"result": substituted_result}
+            )
+            return await super().complete_projected_provider_attempt(
+                attempt_id,
+                substituted,
+            )
+
+    store = DifferentCompleteStore()
+    adapter = FakeAdapter(ProviderChannel.OPENAI_MCP_SAMPLING)
+    broker = GrokWorkerBroker(
+        registry={ProviderChannel.OPENAI_MCP_SAMPLING: adapter},
+        store=store,
+        clock=lambda: NOW,
+    )
+    plan = _plan(fallback=False)
+    first = await broker.execute(plan)
+    second = await broker.execute(plan)
+
+    assert first.status == second.status == "indeterminate"
+    assert first.delegations[0].attempts[0].persistence == (
+        "terminal_indeterminate"
+    )
+    assert second.delegations[0].reason == "stored_attempt_indeterminate"
+    assert "different complete result" not in first.model_dump_json()
+    assert "different complete result" not in second.model_dump_json()
+    assert adapter.calls == 1
+    assert store.results == {}
+
+
+@pytest.mark.asyncio
+async def test_canonical_projection_may_only_transform_response_text():
+    class AuthorityChangingProjectionStore(FakeStore):
+        def canonical_provider_attempt_result(
+            self,
+            attempt_id,
+            result,
+            redaction_snapshot=None,
+        ):
+            projection = super().canonical_provider_attempt_result(
+                attempt_id,
+                result,
+                redaction_snapshot,
+            )
+            changed = projection.result.model_copy(
+                update={
+                    "response": projection.result.response.model_copy(
+                        update={"model": "different-model"}
+                    )
+                }
+            )
+            return projection.model_copy(update={"result": changed})
+
+    store = AuthorityChangingProjectionStore()
+    result = await GrokWorkerBroker(
+        registry={
+            ProviderChannel.OPENAI_MCP_SAMPLING: FakeAdapter(
+                ProviderChannel.OPENAI_MCP_SAMPLING
+            )
+        },
+        store=store,
+        clock=lambda: NOW,
+    ).execute(_plan(fallback=False))
+
+    evidence = result.delegations[0].attempts[0]
+    assert result.status == "indeterminate"
+    assert evidence.persistence == "terminal_indeterminate"
+    assert evidence.result is None
+    assert store.results == {}
+
+
+@pytest.mark.asyncio
+async def test_claimed_mcp_failure_rejects_projection_mutation_and_never_falls_back():
+    class InPlaceMutationStore(FakeStore):
+        projection_calls = 0
+
+        def canonical_provider_attempt_result(
+            self,
+            attempt_id,
+            result,
+            redaction_snapshot=None,
+        ):
+            self.projection_calls += 1
+            object.__setattr__(result.failure, "error_kind", "transport")
+            object.__setattr__(result.failure, "error_code", "timeout")
+            return super().canonical_provider_attempt_result(
+                attempt_id,
+                result,
+                redaction_snapshot,
+            )
+
+    subscription = FakeAdapter(
+        ProviderChannel.OPENAI_MCP_SAMPLING,
+        outcome="failed",
+        claim_on_attempt=True,
+    )
+    api = FakeAdapter(ProviderChannel.OPENAI_API)
+    store = InPlaceMutationStore()
+    result = await GrokWorkerBroker(
+        registry={
+            ProviderChannel.OPENAI_MCP_SAMPLING: subscription,
+            ProviderChannel.OPENAI_API: api,
+        },
+        store=store,
+        clock=lambda: NOW,
+    ).execute(_plan())
+
+    evidence = result.delegations[0].attempts[0]
+    assert subscription.claim_state is True
+    assert subscription.calls == 1
+    assert api.calls == 0
+    assert store.projection_calls == 1
+    assert result.status == "indeterminate"
+    assert evidence.persistence == "terminal_indeterminate"
+    assert evidence.result is None
+    assert store.results == {}
 
 
 @pytest.mark.asyncio
@@ -2371,6 +4155,7 @@ async def test_descriptor_switch_inside_adapter_cannot_certify_returned_evidence
         async def attempt(self, request):
             self.calls += 1
             self.switched = True
+            await asyncio.sleep(0.01)
             receipt = _receipt(request, authorized)
             return ProviderAttemptResult(
                 status="returned",
@@ -2400,6 +4185,7 @@ async def test_descriptor_switch_inside_adapter_cannot_certify_returned_evidence
     attempt = result.delegations[0].attempts[0]
     assert adapter.calls == 1
     assert result.status == "failed"
+    assert attempt.persistence == "durable_terminal"
     assert attempt.result.status == "failed"
     assert attempt.result.failure.error_code == "descriptor_authorization_changed"
     assert "return that must not be certified" not in result.model_dump_json()
@@ -2428,6 +4214,7 @@ async def test_claimed_mcp_descriptor_change_is_internal_and_cannot_fallback():
         async def attempt(self, request):
             self.claim_state = True
             self.switched = True
+            await asyncio.sleep(0.01)
             receipt = _receipt(request, authorized)
             return ProviderAttemptResult(
                 status="returned",
@@ -2452,7 +4239,9 @@ async def test_claimed_mcp_descriptor_change_is_internal_and_cannot_fallback():
         clock=lambda: NOW,
     ).execute(_plan(lane_descriptors=(authorized, api.descriptor)))
 
-    failure = result.delegations[0].attempts[0].result.failure
+    attempt = result.delegations[0].attempts[0]
+    assert attempt.persistence == "durable_terminal"
+    failure = attempt.result.failure
     assert failure.error_kind == "internal"
     assert failure.error_code == "sampling_effect_indeterminate"
     assert api.calls == 0
