@@ -356,7 +356,7 @@ class XAIWorkerEpisodeUploader:
     def __init__(
         self,
         *,
-        client_factory: Callable[[], Any] = _utils.get_xai_client,
+        client_factory: Callable[[], Any] = _utils.get_xai_management_client,
         unavailable_reason: Callable[[], str | None] | None = None,
         collection_name: str | None = None,
     ) -> None:
@@ -371,7 +371,7 @@ class XAIWorkerEpisodeUploader:
 
     @staticmethod
     def _default_unavailable_reason() -> str | None:
-        if not os.environ.get("XAI_MANAGEMENT_API_KEY", "").strip():
+        if not _utils.xai_management_key_configured():
             return "management_key_missing"
         if not str(_utils.XAI_API_KEY or "").strip():
             return "inference_client_missing"
@@ -392,7 +392,7 @@ class XAIWorkerEpisodeUploader:
         try:
             client = self._client_factory()
         except Exception:
-            return None, "inference_client_unavailable"
+            return None, "management_client_unavailable"
         service = getattr(client, "collections", None)
         if service is None or not all(
             callable(getattr(service, name, None))

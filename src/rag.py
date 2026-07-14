@@ -43,8 +43,9 @@ from .utils import (
     _collections_capable,
     _env_timeout,
     _task_hash,
-    get_xai_client,
+    get_xai_management_client,
     run_blocking,
+    xai_management_key_configured,
 )
 
 _LOGGER = "GrokMCP"
@@ -114,11 +115,12 @@ def has_management_key() -> bool:
     """xAI Collections is a MANAGEMENT API: the inference key alone cannot
     create/upload/search collections, and xAI exposes no public embedding
     models to inference keys (/v1/embedding-models returns []). Most users
-    therefore run WITHOUT this key — the semantic routing evidence works
-    fully locally (task_memory_fts bm25 + recency + per-model success); the
-    cloud mirror is an optional boost gated on this check so keyless setups
-    never spawn doomed sync work or remote searches."""
-    return bool(os.environ.get("XAI_MANAGEMENT_API_KEY", "").strip())
+    therefore run WITHOUT either supported management-key alias — the
+    semantic routing evidence works fully locally (task_memory_fts bm25 +
+    recency + per-model success); the cloud mirror is an optional boost gated
+    on this check so keyless setups never spawn doomed sync work or remote
+    searches."""
+    return xai_management_key_configured()
 
 
 def task_rag_timeout() -> float:
@@ -203,7 +205,7 @@ class TaskMemoryMirror:
     """Best-effort cloud mirror for task_memory rows.
 
     Modeled on the knowledge collections adapter (find-or-create by name,
-    single XAI_API_KEY client, run_blocking offload, warn-once) but with
+    role-separated xAI management client, run_blocking offload, warn-once) but with
     instance state instead of module globals, soft-disable with exponential
     backoff instead of unbounded retries, and a token bucket bounding
     remote searches under bursty borderline traffic. Never raises."""
@@ -336,11 +338,11 @@ class TaskMemoryMirror:
             # Not an error: the mirror is an optional boost. Report the
             # reason without burning a probe or tripping failure backoff.
             self.last_known_ready = False
-            self._last_error = "XAI_MANAGEMENT_API_KEY not set (cloud mirror is optional)"
+            self._last_error = "xAI management key not set (cloud mirror is optional)"
             return False
 
         def _probe():
-            client = get_xai_client()
+            client = get_xai_management_client()
             if not _collections_capable(client):
                 raise RuntimeError("installed xai_sdk lacks the collections service surface")
             if not self._resolve_collection_id(client):
@@ -363,7 +365,7 @@ class TaskMemoryMirror:
             return None
 
         def _upload():
-            client = get_xai_client()
+            client = get_xai_management_client()
             if not _collections_capable(client):
                 raise RuntimeError("installed xai_sdk lacks the collections service surface")
             collection_id = self._resolve_collection_id(client)
@@ -401,7 +403,7 @@ class TaskMemoryMirror:
             return []
 
         def _search():
-            client = get_xai_client()
+            client = get_xai_management_client()
             if not _collections_capable(client):
                 raise RuntimeError("installed xai_sdk lacks the collections service surface")
             collection_id = self._resolve_collection_id(client)
@@ -698,7 +700,7 @@ async def gather_semantic_evidence(
             prompt, context_id=context_id, limit=10, verified_only=True
         )
         local = [row for row in local if row.get("success") in (0, 1)]
-        # Keyless setups (no XAI_MANAGEMENT_API_KEY — the common case) run
+        # Keyless setups (no xAI management key — the common case) run
         # pure local evidence: fusion and the decision signal work the same
         # with an empty remote component.
         remote_hits: List[Dict[str, Any]] = []
@@ -817,10 +819,13 @@ async def _rag_status(store: Any, out: TextIO) -> int:
     elif not has_management_key():
         print(
             "cloud mirror: disabled — optional; set XAI_MANAGEMENT_API_KEY "
-            "(xAI console) to sync/search collections",
+            "(or SDK alias XAI_MANAGEMENT_KEY) to sync/search collections",
             file=out,
         )
-        print("ready: no (XAI_MANAGEMENT_API_KEY not set; cloud mirror is optional)", file=out)
+        print(
+            "ready: no (xAI management key not set; cloud mirror is optional)",
+            file=out,
+        )
     elif await mirror.ready():
         print("cloud mirror: enabled", file=out)
         print("ready: yes", file=out)
@@ -858,9 +863,9 @@ async def _rag_backfill(
     if not has_management_key() and not dry_run:
         # --dry-run stays available keyless (purely local outbox inspection).
         print(
-            "The cloud mirror needs XAI_MANAGEMENT_API_KEY (created in the xAI "
-            "console, separate from the inference key). It is OPTIONAL: local "
-            "semantic routing evidence already works without it.",
+            "The cloud mirror needs XAI_MANAGEMENT_API_KEY (or SDK alias "
+            "XAI_MANAGEMENT_KEY), separate from the inference key. It is "
+            "OPTIONAL: local semantic routing evidence already works without it.",
             file=out,
         )
         return 1

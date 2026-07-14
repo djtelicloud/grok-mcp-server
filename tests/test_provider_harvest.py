@@ -416,7 +416,7 @@ async def test_missing_credentials_or_client_leave_rows_pending_without_cloud_ca
     )
     result = await ProviderAttemptHarvester(uploader=absent_client).run_once(store)
     assert result.status == "unavailable"
-    assert result.reason == "inference_client_unavailable"
+    assert result.reason == "management_client_unavailable"
     assert factory_calls == 1
     row = (await store.list_provider_attempts())[0]
     assert row["harvest_status"] == "pending"

@@ -1218,10 +1218,11 @@ def has_management_key() -> bool
 xAI Collections is a MANAGEMENT API: the inference key alone cannot
 create/upload/search collections, and xAI exposes no public embedding
 models to inference keys (/v1/embedding-models returns []). Most users
-therefore run WITHOUT this key — the semantic routing evidence works
-fully locally (task_memory_fts bm25 + recency + per-model success); the
-cloud mirror is an optional boost gated on this check so keyless setups
-never spawn doomed sync work or remote searches.
+therefore run WITHOUT either supported management-key alias — the
+semantic routing evidence works fully locally (task_memory_fts bm25 +
+recency + per-model success); the cloud mirror is an optional boost gated
+on this check so keyless setups never spawn doomed sync work or remote
+searches.
 
 ### Class: `TaskMemoryMirror` {#rag-taskmemorymirror}
 
@@ -1234,7 +1235,7 @@ class TaskMemoryMirror
 Best-effort cloud mirror for task_memory rows.
 
 Modeled on the knowledge collections adapter (find-or-create by name,
-single XAI_API_KEY client, run_blocking offload, warn-once) but with
+role-separated xAI management client, run_blocking offload, warn-once) but with
 instance state instead of module globals, soft-disable with exponential
 backoff instead of unbounded retries, and a token bucket bounding
 remote searches under bursty borderline traffic. Never raises.
@@ -3402,6 +3403,88 @@ async def build_model_catalog(include_cli: bool=True) -> Dict[str, Any]
 **Keywords:** build, model, catalog
 
 Build a structured catalog for API models, local CLI models, and profiles.
+
+### Function: `xai_management_key_configured` {#utils-xai_management_key_configured}
+
+```python
+def xai_management_key_configured() -> bool
+```
+
+**Keywords:** xai, management, key, configured
+
+Return whether one unambiguous xAI management credential is configured.
+
+### Function: `get_xai_inference_client` {#utils-get_xai_inference_client}
+
+```python
+def get_xai_inference_client()
+```
+
+**Keywords:** get, xai, inference, client
+
+Return the cached inference-only xAI SDK client.
+
+The installed SDK reads ``XAI_MANAGEMENT_KEY`` whenever its management
+argument is falsey.  Pass a fixed, non-provider isolation canary instead of
+mutating process environment, then deny Collections on the returned
+surface.  Real management credentials can therefore never enter this
+client's channel or inference call paths.
+
+### Function: `get_xai_client` {#utils-get_xai_client}
+
+```python
+def get_xai_client()
+```
+
+**Keywords:** get, xai, client
+
+Compatibility alias for the inference-only xAI client factory.
+
+### Function: `get_xai_management_client` {#utils-get_xai_management_client}
+
+```python
+def get_xai_management_client()
+```
+
+**Keywords:** get, xai, management, client
+
+Return the cached xAI Collections/admin client.
+
+The installed SDK requires the inference key alongside the management key
+when constructing its Collections service.  This factory is therefore the
+only place where both credentials may enter one SDK client, and callers are
+restricted to the RAG, knowledge, task-memory, and provider-harvest admin
+surfaces.
+
+### Function: `close_xai_inference_client` {#utils-close_xai_inference_client}
+
+```python
+def close_xai_inference_client()
+```
+
+**Keywords:** close, xai, inference, client
+
+Close only the inference client cache.
+
+### Function: `close_xai_management_client` {#utils-close_xai_management_client}
+
+```python
+def close_xai_management_client()
+```
+
+**Keywords:** close, xai, management, client
+
+Close only the Collections/admin client cache.
+
+### Function: `close_xai_client` {#utils-close_xai_client}
+
+```python
+def close_xai_client()
+```
+
+**Keywords:** close, xai, client
+
+Compatibility shutdown hook that closes both role-separated caches.
 
 ### Class: `CircuitBreakerOpenError` {#utils-circuitbreakeropenerror}
 

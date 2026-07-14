@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
@@ -16,6 +17,17 @@ def test_cli_auth_setup_scrubs_server_credentials_but_keeps_oauth_path():
         assert f"-u {name}" in CLI_AUTH_SETUP_COMMAND
     assert "-u GROK_AUTH_PATH" not in CLI_AUTH_SETUP_COMMAND
     assert "-u GOOGLE_CLOUD_PROJECT" not in CLI_AUTH_SETUP_COMMAND
+
+
+def test_compose_cli_auth_scrubs_every_canonical_server_credential():
+    compose = (Path(__file__).resolve().parents[1] / "docker-compose.yml").read_text(
+        encoding="utf-8"
+    )
+    auth_service = compose.split("  grok-cli-auth:", 1)[1].split("\nvolumes:", 1)[0]
+
+    for name in SERVER_OWNED_SECRET_ENV_NAMES:
+        assert f"-u {name}" in auth_service
+    assert "grok login --device-auth" in auth_service
 
 
 READY_CLI = {
@@ -147,12 +159,12 @@ def test_inference_key_alone_never_satisfies_management_readiness(monkeypatch):
     created = {}
 
     class FakeClient:
-        def __init__(self, api_key=None, management_api_key=None):
-            created["api_key"] = api_key
-            created["management_api_key"] = management_api_key
+        def __init__(self, **kwargs):
+            created.update(kwargs)
 
     monkeypatch.setenv("XAI_API_KEY", "xai-inference-only")
     monkeypatch.delenv("XAI_MANAGEMENT_API_KEY", raising=False)
+    monkeypatch.delenv("XAI_MANAGEMENT_KEY", raising=False)
     monkeypatch.setattr(utils, "XAI_API_KEY", "xai-inference-only")
     monkeypatch.setattr(utils, "_client", None)
     monkeypatch.setattr("xai_sdk.Client", FakeClient)
@@ -162,7 +174,7 @@ def test_inference_key_alone_never_satisfies_management_readiness(monkeypatch):
     utils.get_xai_client()
     assert created == {
         "api_key": "xai-inference-only",
-        "management_api_key": None,
+        "management_api_key": utils._XAI_INFERENCE_MANAGEMENT_ISOLATION_KEY,
     }
 
 

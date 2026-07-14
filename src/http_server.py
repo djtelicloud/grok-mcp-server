@@ -28,6 +28,7 @@ from starlette.staticfiles import StaticFiles
 
 from .version import UI_ASSET_VERSION
 
+from .credentials import UPSTREAM_PROVIDER_SECRET_ENV_NAMES
 from .identity import (
     _ACTIVE_CLIENT_ID,
     _ACTIVE_SESSION_ID,
@@ -349,11 +350,13 @@ def _tokens_match(candidate: str, expected: str) -> bool:
 def _token_is_allowed(token: Optional[str]) -> bool:
     if not token:
         return False
-    xai_key = os.environ.get("XAI_API_KEY", "")
-    # The upstream xAI key is never a valid client credential: leaking it into
-    # a client config must not grant gateway access.
-    if xai_key and _tokens_match(token, xai_key):
-        return False
+    # Server-owned upstream provider credentials are never valid gateway
+    # client credentials.  Reject accidental aliases even when an operator
+    # also copied the same value into UNIGROK_API_KEYS.
+    for env_name in UPSTREAM_PROVIDER_SECRET_ENV_NAMES:
+        upstream_secret = os.environ.get(env_name, "").strip()
+        if upstream_secret and _tokens_match(token, upstream_secret):
+            return False
     return any(_tokens_match(token, key) for key in _api_keys())
 
 
