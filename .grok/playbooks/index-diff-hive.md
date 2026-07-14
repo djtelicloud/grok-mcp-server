@@ -74,7 +74,9 @@ Default **mechanical** aggregator (donor-aligned UCB1 / majority, not invented A
 
 Deep-Think and Claude both flagged raw “ARGPO over index scores” as **UGLY/undefined** until a formal update rule exists. Ship majority+UCB1 first.
 
-## Parallel “silent thinking”
+## Parallel polls (emit surface only)
+
+Index-diff is a **micro-emit format**, not the intelligence engine.
 
 | Step | Who | Tokens |
 | --- | --- | --- |
@@ -86,11 +88,15 @@ Deep-Think and Claude both flagged raw “ARGPO over index scores” as **UGLY/u
 
 This is **not** multi-vendor essay democracy. It is **index consensus** then optional expensive reflection on disagreements only.
 
+**Real force:** silent-think harness — high internal thinking budget, `include_thoughts=false`, tiny structured emit (pydantic / index-diff / any fixed shape). See [silent-think-harness.md](silent-think-harness.md). Token counts that prove work are **thought tokens in usage**, not printed CoT.
+
 ## Donor physics this reuses
 
 - **omni_router** TF-IDF vector spaces over skills/synapses/models (cheap local).  
 - **UCB1** champion selection (`swarm_rank_models` / `ucb_router`).  
-- **optimize_params** forces small models with catalog-bounded hyperparams.  
+- **optimize_params** `thinking_budget` vs `max_output_tokens` split (compute ≠ print).  
+- **Recursive maxing** evolution loop: compress `max_output_tokens` until fitness holds.  
+- **response_schema + pydantic** tiny emit after silent work.  
 - **synapse_recorder / walrus notes** for immutable harvest.  
 - **Chrysalis** AST gate before anything becomes real code.  
 - Public never sees hive; insiders opt into GitHub-auth cloud mind.
