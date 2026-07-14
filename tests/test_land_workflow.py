@@ -124,22 +124,25 @@ def test_land_fast_forwards_visible_main(repo_with_agent, monkeypatch):
     assert receipt.read_bytes() == original_receipt
 
 
-def test_land_rebases_behind_agent_before_testing(repo_with_agent, monkeypatch):
+def test_land_refuses_behind_reviewed_head(repo_with_agent, monkeypatch):
     main, agent = repo_with_agent
     write(main / "main-only.txt", "other agent\n")
     git(main, "add", "main-only.txt")
     git(main, "commit", "-m", "other agent")
-    commit(agent, "agent change\n")
+    reviewed_head = commit(agent, "agent change\n")
+    current_main = git(main, "rev-parse", "HEAD")
     configure_fast_test(monkeypatch)
 
-    landed = land.land(agent)
+    with pytest.raises(land.LandError, match="obtain exact-head review"):
+        land.land(agent)
 
-    assert git(main, "rev-parse", "HEAD") == landed
+    assert git(main, "rev-parse", "HEAD") == current_main
+    assert git(agent, "rev-parse", "HEAD") == reviewed_head
     assert (main / "main-only.txt").read_text(encoding="utf-8") == "other agent\n"
-    assert (main / "file.txt").read_text(encoding="utf-8") == "agent change\n"
+    assert (main / "file.txt").read_text(encoding="utf-8") == "base\n"
 
 
-def test_land_retests_when_main_advances_during_tests(repo_with_agent, monkeypatch, tmp_path):
+def test_land_refuses_when_main_advances_during_tests(repo_with_agent, monkeypatch, tmp_path):
     main, agent = repo_with_agent
     commit(agent, "agent change\n")
     marker = tmp_path / "advanced"
@@ -158,12 +161,14 @@ def test_land_retests_when_main_advances_during_tests(repo_with_agent, monkeypat
     monkeypatch.setattr(land, "run_tests", advance_once)
     monkeypatch.setattr(land, "reconcile_runtime", lambda repo, paths: "test skipped")
 
-    landed = land.land(agent)
+    with pytest.raises(land.LandError, match="obtain exact-head review"):
+        land.land(agent)
 
-    assert git(main, "rev-parse", "HEAD") == landed
     assert (main / "raced.txt").read_text(encoding="utf-8") == "landed while tests ran\n"
-    assert (main / "file.txt").read_text(encoding="utf-8") == "agent change\n"
-    assert calls == 2
+    assert (main / "file.txt").read_text(encoding="utf-8") == "base\n"
+    assert calls == 1
+    receipt_dir = main / ".git" / "unigrok-land" / "receipts"
+    assert not receipt_dir.exists() or not any(receipt_dir.iterdir())
 
 
 def test_land_refuses_dirty_visible_main(repo_with_agent, monkeypatch):

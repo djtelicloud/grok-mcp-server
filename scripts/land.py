@@ -410,57 +410,53 @@ def land(repo: Path) -> str:
     require_clean(repo, include_untracked=True, label="agent worktree")
     main_path = main_worktree(repo)
     common_dir = common_git_dir(repo)
-    attempts = 5
-
-    for attempt in range(1, attempts + 1):
-        baseline = git(main_path, "rev-parse", "HEAD")
-        ancestor = run(
-            ["git", "merge-base", "--is-ancestor", baseline, "HEAD"],
-            cwd=repo,
-            check=False,
+    baseline = git(main_path, "rev-parse", "HEAD")
+    ancestor = run(
+        ["git", "merge-base", "--is-ancestor", baseline, "HEAD"],
+        cwd=repo,
+        check=False,
+    )
+    if ancestor.returncode:
+        raise LandError(
+            "reviewed branch is behind current main; rebase, publish the new head, "
+            "and obtain exact-head review before landing"
         )
-        if ancestor.returncode:
-            print(f"Rebasing {branch} onto current main {baseline[:12]}", flush=True)
-            run(["git", "rebase", baseline], cwd=repo, capture=False)
 
-        tested_head = git(repo, "rev-parse", "HEAD")
-        run_tests(repo, tested_head)
+    tested_head = git(repo, "rev-parse", "HEAD")
+    run_tests(repo, tested_head)
 
-        with directory_lock(common_dir / "unigrok-land.lock"):
-            current_main = git(main_path, "rev-parse", "HEAD")
-            if current_main != baseline:
-                print(
-                    f"Main advanced to {current_main[:12]} while tests ran; retrying ({attempt}/{attempts}).",
-                    flush=True,
-                )
-                continue
-            require_clean(main_path, include_untracked=False, label="shared main worktree")
-            run(["git", "merge", "--ff-only", tested_head], cwd=main_path, capture=False)
-            if git(main_path, "rev-parse", "HEAD") != tested_head:
-                raise LandError("shared main did not reach the tested commit")
-            paths, runtime_marker, certified_base = runtime_changes(
-                common_dir,
-                main_path,
-                fallback=baseline,
-                target=tested_head,
+    with directory_lock(common_dir / "unigrok-land.lock"):
+        current_main = git(main_path, "rev-parse", "HEAD")
+        if current_main != baseline:
+            raise LandError(
+                "main advanced while tests ran; rebase the reviewed branch onto current main, "
+                "publish the new head, and obtain exact-head review before landing"
             )
-            runtime = reconcile_runtime(main_path, paths)
-            runtime_marker.write_text(tested_head + "\n", encoding="utf-8")
-            # The receipt is the workspace-memory trust boundary. Write it
-            # only after tests, fast-forward, and runtime reconciliation all
-            # succeed — exactly when this command can emit LANDED TO MAIN.
-            write_receipt(
-                common_dir,
-                head=tested_head,
-                branch=branch,
-                main_path=main_path,
-                previous_main=certified_base,
-                changed_paths=paths,
-            )
-        print(f"Runtime: {runtime}", flush=True)
-        return tested_head
-
-    raise LandError(f"main kept advancing; gave up after {attempts} tested attempts")
+        require_clean(main_path, include_untracked=False, label="shared main worktree")
+        run(["git", "merge", "--ff-only", tested_head], cwd=main_path, capture=False)
+        if git(main_path, "rev-parse", "HEAD") != tested_head:
+            raise LandError("shared main did not reach the tested commit")
+        paths, runtime_marker, certified_base = runtime_changes(
+            common_dir,
+            main_path,
+            fallback=baseline,
+            target=tested_head,
+        )
+        runtime = reconcile_runtime(main_path, paths)
+        runtime_marker.write_text(tested_head + "\n", encoding="utf-8")
+        # The receipt is the workspace-memory trust boundary. Write it
+        # only after tests, fast-forward, and runtime reconciliation all
+        # succeed — exactly when this command can emit LANDED TO MAIN.
+        write_receipt(
+            common_dir,
+            head=tested_head,
+            branch=branch,
+            main_path=main_path,
+            previous_main=certified_base,
+            changed_paths=paths,
+        )
+    print(f"Runtime: {runtime}", flush=True)
+    return tested_head
 
 
 def main() -> int:
