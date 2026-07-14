@@ -173,6 +173,8 @@ class FakeAdapter:
         tracker: dict[str, int] | None = None,
         descriptor: ProviderDescriptor | None = None,
         response_text: str | None = None,
+        claim_state: Any = False,
+        claim_on_attempt: bool = False,
     ) -> None:
         self._descriptor = descriptor or _descriptor(channel)
         self.outcome = outcome
@@ -181,12 +183,17 @@ class FakeAdapter:
         self.events = events if events is not None else []
         self.tracker = tracker
         self.response_text = response_text
+        self.claim_state = claim_state
+        self.claim_on_attempt = claim_on_attempt
         self.calls = 0
         self.requests: list[Any] = []
 
     @property
     def descriptor(self) -> ProviderDescriptor:
         return self._descriptor
+
+    def effect_claimed(self) -> bool:
+        return self.claim_state
 
     async def complete(self, request):
         result = await self.attempt(request)
@@ -195,6 +202,8 @@ class FakeAdapter:
         return result.response
 
     async def attempt(self, request) -> ProviderAttemptResult:
+        if self.claim_on_attempt:
+            self.claim_state = True
         self.calls += 1
         self.requests.append(request)
         self.events.append(f"effect:{self.descriptor.channel.value}")
@@ -831,6 +840,186 @@ async def test_internal_subscription_failure_does_not_fallback_or_cross_provider
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("claim_on_attempt", "expected_api_calls", "expected_kind", "expected_code"),
+    [
+        (True, 0, "internal", "sampling_effect_indeterminate"),
+        (False, 1, "transport", "timeout"),
+    ],
+)
+async def test_mcp_sampling_outer_timeout_uses_claim_state_before_api_fallback(
+    claim_on_attempt,
+    expected_api_calls,
+    expected_kind,
+    expected_code,
+):
+    subscription = FakeAdapter(
+        ProviderChannel.OPENAI_MCP_SAMPLING,
+        delay=1.2,
+        claim_on_attempt=claim_on_attempt,
+    )
+    api = FakeAdapter(ProviderChannel.OPENAI_API)
+    result = await GrokWorkerBroker(
+        registry={
+            ProviderChannel.OPENAI_MCP_SAMPLING: subscription,
+            ProviderChannel.OPENAI_API: api,
+        },
+        store=FakeStore(),
+        clock=lambda: NOW,
+    ).execute(_plan(timeout_seconds=1.0))
+
+    first = result.delegations[0].attempts[0]
+    assert subscription.calls == 1
+    assert api.calls == expected_api_calls
+    assert first.result.failure.error_kind == expected_kind
+    assert first.result.failure.error_code == expected_code
+    assert len(result.delegations[0].attempts) == 1 + expected_api_calls
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure_kind", ["configuration", "transport", "protocol"])
+async def test_claimed_mcp_adapter_failure_is_internal_and_never_falls_back(
+    failure_kind,
+):
+    subscription = FakeAdapter(
+        ProviderChannel.OPENAI_MCP_SAMPLING,
+        outcome="failed",
+        failure_kind=failure_kind,
+        claim_on_attempt=True,
+    )
+    api = FakeAdapter(ProviderChannel.OPENAI_API)
+    plan = _plan()
+    broker = GrokWorkerBroker(
+        registry={
+            ProviderChannel.OPENAI_MCP_SAMPLING: subscription,
+            ProviderChannel.OPENAI_API: api,
+        },
+        store=FakeStore(),
+        clock=lambda: NOW,
+    )
+
+    first = await broker.execute(plan)
+    replay = await broker.execute(plan)
+
+    for result in (first, replay):
+        evidence = result.delegations[0].attempts[0]
+        assert result.status == "failed"
+        assert evidence.result.failure.error_kind == "internal"
+        assert evidence.result.failure.error_code == "sampling_effect_indeterminate"
+    assert first.delegations[0].attempts[0].persistence == "durable_terminal"
+    assert replay.delegations[0].attempts[0].persistence == "replayed_terminal"
+    assert subscription.calls == 1
+    assert api.calls == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("inspector_mode", ["missing", "throws", "non_bool"])
+async def test_mcp_sampling_inspector_ambiguity_fails_closed(inspector_mode):
+    subscription = FakeAdapter(
+        ProviderChannel.OPENAI_MCP_SAMPLING,
+        outcome="failed",
+        failure_kind="transport",
+    )
+    if inspector_mode == "missing":
+        subscription.effect_claimed = None
+    elif inspector_mode == "throws":
+
+        def broken_inspector():
+            raise RuntimeError("untrusted inspector failure")
+
+        subscription.effect_claimed = broken_inspector
+    else:
+        subscription.effect_claimed = lambda: "false"
+    api = FakeAdapter(ProviderChannel.OPENAI_API)
+
+    result = await GrokWorkerBroker(
+        registry={
+            ProviderChannel.OPENAI_MCP_SAMPLING: subscription,
+            ProviderChannel.OPENAI_API: api,
+        },
+        store=FakeStore(),
+        clock=lambda: NOW,
+    ).execute(_plan())
+
+    failure = result.delegations[0].attempts[0].result.failure
+    assert result.status == "failed"
+    assert failure.error_kind == "internal"
+    assert failure.error_code == "sampling_effect_indeterminate"
+    assert subscription.calls == 0
+    assert api.calls == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("inspector_mode", ["missing", "throws", "non_bool"])
+async def test_mcp_sampling_inspector_ambiguity_after_dispatch_fails_closed(
+    inspector_mode,
+):
+    class CorruptingInspectorAdapter(FakeAdapter):
+        async def attempt(self, request):
+            result = await super().attempt(request)
+            if inspector_mode == "missing":
+                self.effect_claimed = None
+            elif inspector_mode == "throws":
+
+                def broken_inspector():
+                    raise RuntimeError("post-dispatch inspector failure")
+
+                self.effect_claimed = broken_inspector
+            else:
+                self.effect_claimed = lambda: "true"
+            return result
+
+    subscription = CorruptingInspectorAdapter(
+        ProviderChannel.OPENAI_MCP_SAMPLING,
+        outcome="failed",
+        failure_kind="transport",
+        claim_on_attempt=True,
+    )
+    api = FakeAdapter(ProviderChannel.OPENAI_API)
+    result = await GrokWorkerBroker(
+        registry={
+            ProviderChannel.OPENAI_MCP_SAMPLING: subscription,
+            ProviderChannel.OPENAI_API: api,
+        },
+        store=FakeStore(),
+        clock=lambda: NOW,
+    ).execute(_plan())
+
+    failure = result.delegations[0].attempts[0].result.failure
+    assert result.status == "failed"
+    assert failure.error_kind == "internal"
+    assert failure.error_code == "sampling_effect_indeterminate"
+    assert subscription.calls == 1
+    assert api.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_non_mcp_subscription_failure_behavior_is_unchanged():
+    cli = FakeAdapter(
+        ProviderChannel.CLAUDE_CLI,
+        outcome="failed",
+        failure_kind="transport",
+        claim_state=True,
+    )
+    api = FakeAdapter(ProviderChannel.ANTHROPIC_API)
+    result = await GrokWorkerBroker(
+        registry={
+            ProviderChannel.CLAUDE_CLI: cli,
+            ProviderChannel.ANTHROPIC_API: api,
+        },
+        store=FakeStore(),
+        clock=lambda: NOW,
+    ).execute(_plan(ProviderId.ANTHROPIC))
+
+    first = result.delegations[0].attempts[0]
+    assert result.status == "returned"
+    assert first.result.failure.error_kind == "transport"
+    assert first.result.failure.error_code == "test_failure"
+    assert cli.calls == 1
+    assert api.calls == 1
+
+
+@pytest.mark.asyncio
 async def test_google_uses_vertex_or_gemini_but_never_two_metered_attempts():
     vertex = FakeAdapter(ProviderChannel.VERTEX_ADC, outcome="failed")
     gemini = FakeAdapter(ProviderChannel.GEMINI_API_KEY)
@@ -929,6 +1118,31 @@ async def test_adapter_exception_and_spoof_are_normalized_and_recorded():
         assert evidence.result.failure.error_kind == expected_kind
         assert evidence.result.failure.error_code == expected_code
         assert store.results[evidence.start.attempt_id] == evidence.result
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("outcome", ["raise", "spoof"])
+async def test_claimed_mcp_exception_or_result_mismatch_is_indeterminate(outcome):
+    subscription = FakeAdapter(
+        ProviderChannel.OPENAI_MCP_SAMPLING,
+        outcome=outcome,
+        claim_on_attempt=True,
+    )
+    api = FakeAdapter(ProviderChannel.OPENAI_API)
+    result = await GrokWorkerBroker(
+        registry={
+            ProviderChannel.OPENAI_MCP_SAMPLING: subscription,
+            ProviderChannel.OPENAI_API: api,
+        },
+        store=FakeStore(),
+        clock=lambda: NOW,
+    ).execute(_plan())
+
+    failure = result.delegations[0].attempts[0].result.failure
+    assert result.status == "failed"
+    assert failure.error_kind == "internal"
+    assert failure.error_code == "sampling_effect_indeterminate"
+    assert api.calls == 0
 
 
 @pytest.mark.asyncio
@@ -1100,6 +1314,41 @@ async def test_effect_edge_rejects_forced_prompt_mutation_without_changing_ledge
     reconstructed = broker._reconstruct_stored_start(rows[0])
     assert reconstructed.request.messages == plan.delegations[0].messages
     await store.close()
+
+
+@pytest.mark.asyncio
+async def test_claimed_mcp_request_mutation_is_indeterminate_and_cannot_fallback():
+    class ClaimedMutationAdapter(FakeAdapter):
+        def __init__(self):
+            super().__init__(
+                ProviderChannel.OPENAI_MCP_SAMPLING,
+                claim_on_attempt=True,
+            )
+
+        async def attempt(self, request):
+            self.claim_state = True
+            object.__setattr__(
+                request.messages[0],
+                "content",
+                "forged physical prompt after sampling claim",
+            )
+            return await super().attempt(request)
+
+    subscription = ClaimedMutationAdapter()
+    api = FakeAdapter(ProviderChannel.OPENAI_API)
+    result = await GrokWorkerBroker(
+        registry={
+            ProviderChannel.OPENAI_MCP_SAMPLING: subscription,
+            ProviderChannel.OPENAI_API: api,
+        },
+        store=FakeStore(),
+        clock=lambda: NOW,
+    ).execute(_plan())
+
+    failure = result.delegations[0].attempts[0].result.failure
+    assert failure.error_kind == "internal"
+    assert failure.error_code == "sampling_effect_indeterminate"
+    assert api.calls == 0
 
 
 @pytest.mark.asyncio
@@ -1697,6 +1946,39 @@ async def test_broker_timeout_is_recorded_and_late_result_is_not_exposed():
 
 
 @pytest.mark.asyncio
+async def test_claimed_mcp_late_result_is_internal_indeterminate():
+    clock_now = [NOW]
+
+    class ClaimedLateAdapter(FakeAdapter):
+        def __init__(self):
+            super().__init__(
+                ProviderChannel.OPENAI_MCP_SAMPLING,
+                claim_on_attempt=True,
+            )
+
+        async def attempt(self, request):
+            result = await super().attempt(request)
+            clock_now[0] = NOW + timedelta(seconds=2)
+            return result
+
+    subscription = ClaimedLateAdapter()
+    api = FakeAdapter(ProviderChannel.OPENAI_API)
+    result = await GrokWorkerBroker(
+        registry={
+            ProviderChannel.OPENAI_MCP_SAMPLING: subscription,
+            ProviderChannel.OPENAI_API: api,
+        },
+        store=FakeStore(),
+        clock=lambda: clock_now[0],
+    ).execute(_plan(ttl=NOW + timedelta(seconds=1)))
+
+    failure = result.delegations[0].attempts[0].result.failure
+    assert failure.error_kind == "internal"
+    assert failure.error_code == "sampling_effect_indeterminate"
+    assert api.calls == 0
+
+
+@pytest.mark.asyncio
 async def test_external_cancellation_terminalizes_started_attempt_then_propagates():
     adapter = FakeAdapter(
         ProviderChannel.OPENAI_MCP_SAMPLING,
@@ -1721,6 +2003,44 @@ async def test_external_cancellation_terminalizes_started_attempt_then_propagate
     assert terminal.status == "failed"
     assert terminal.failure.error_kind == "transport"
     assert terminal.failure.error_code == "broker_cancelled"
+
+
+@pytest.mark.asyncio
+async def test_claimed_mcp_cancellation_persists_internal_and_replay_cannot_fallback():
+    subscription = FakeAdapter(
+        ProviderChannel.OPENAI_MCP_SAMPLING,
+        delay=10.0,
+        claim_on_attempt=True,
+    )
+    api = FakeAdapter(ProviderChannel.OPENAI_API)
+    store = FakeStore()
+    broker = GrokWorkerBroker(
+        registry={
+            ProviderChannel.OPENAI_MCP_SAMPLING: subscription,
+            ProviderChannel.OPENAI_API: api,
+        },
+        store=store,
+        clock=lambda: NOW,
+    )
+    plan = _plan()
+    task = asyncio.create_task(broker.execute(plan))
+    async with asyncio.timeout(1.0):
+        while subscription.calls == 0:
+            await asyncio.sleep(0)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    terminal = next(iter(store.results.values()))
+    assert terminal.failure.error_kind == "internal"
+    assert terminal.failure.error_code == "sampling_effect_indeterminate"
+    replay = await broker.execute(plan)
+    replay_evidence = replay.delegations[0].attempts[0]
+    assert replay.status == "failed"
+    assert replay_evidence.persistence == "replayed_terminal"
+    assert replay_evidence.result == terminal
+    assert subscription.calls == 1
+    assert api.calls == 0
 
 
 @pytest.mark.asyncio
@@ -1985,6 +2305,47 @@ async def test_dynamic_descriptor_switch_is_rejected_at_each_effect_edge(
 
 
 @pytest.mark.asyncio
+async def test_known_claim_before_dispatch_blocks_descriptor_failure_fallback():
+    authorized = _descriptor(ProviderChannel.OPENAI_MCP_SAMPLING)
+    changed = authorized.model_copy(update={"endpoint_host": "forged.openai.com"})
+
+    class ClaimedBeforeDispatchAdapter(FakeAdapter):
+        def __init__(self):
+            super().__init__(
+                ProviderChannel.OPENAI_MCP_SAMPLING,
+                descriptor=authorized,
+                claim_state=True,
+            )
+            self.descriptor_reads = 0
+
+        @property
+        def descriptor(self):
+            self.descriptor_reads += 1
+            return changed if self.descriptor_reads >= 4 else authorized
+
+    subscription = ClaimedBeforeDispatchAdapter()
+    api = FakeAdapter(ProviderChannel.OPENAI_API)
+    store = FakeStore()
+    plan = _plan(lane_descriptors=(authorized, api.descriptor))
+    result = await GrokWorkerBroker(
+        registry={
+            ProviderChannel.OPENAI_MCP_SAMPLING: subscription,
+            ProviderChannel.OPENAI_API: api,
+        },
+        store=store,
+        clock=lambda: NOW,
+    ).execute(plan)
+
+    attempt = result.delegations[0].attempts[0]
+    assert result.status == "failed"
+    assert attempt.persistence == "durable_terminal"
+    assert attempt.result.failure.error_kind == "internal"
+    assert attempt.result.failure.error_code == "sampling_effect_indeterminate"
+    assert subscription.calls == 0
+    assert api.calls == 0
+
+
+@pytest.mark.asyncio
 async def test_descriptor_switch_inside_adapter_cannot_certify_returned_evidence():
     authorized = _descriptor(ProviderChannel.OPENAI_MCP_SAMPLING)
     changed = authorized.model_copy(
@@ -2042,6 +2403,59 @@ async def test_descriptor_switch_inside_adapter_cannot_certify_returned_evidence
     assert attempt.result.status == "failed"
     assert attempt.result.failure.error_code == "descriptor_authorization_changed"
     assert "return that must not be certified" not in result.model_dump_json()
+
+
+@pytest.mark.asyncio
+async def test_claimed_mcp_descriptor_change_is_internal_and_cannot_fallback():
+    authorized = _descriptor(ProviderChannel.OPENAI_MCP_SAMPLING)
+    changed = authorized.model_copy(
+        update={"models": authorized.models.model_copy(update={"planning": "gpt-forged"})}
+    )
+
+    class ClaimedDescriptorSwitchAdapter(FakeAdapter):
+        def __init__(self):
+            super().__init__(
+                ProviderChannel.OPENAI_MCP_SAMPLING,
+                descriptor=authorized,
+                claim_on_attempt=True,
+            )
+            self.switched = False
+
+        @property
+        def descriptor(self):
+            return changed if self.switched else authorized
+
+        async def attempt(self, request):
+            self.claim_state = True
+            self.switched = True
+            receipt = _receipt(request, authorized)
+            return ProviderAttemptResult(
+                status="returned",
+                response=ProviderResponse(
+                    provider=authorized.provider,
+                    channel=authorized.channel,
+                    model=receipt.resolved_model,
+                    text="claimed return under a changed descriptor",
+                    finish_reason="stop",
+                    receipt=receipt,
+                ),
+            )
+
+    subscription = ClaimedDescriptorSwitchAdapter()
+    api = FakeAdapter(ProviderChannel.OPENAI_API)
+    result = await GrokWorkerBroker(
+        registry={
+            ProviderChannel.OPENAI_MCP_SAMPLING: subscription,
+            ProviderChannel.OPENAI_API: api,
+        },
+        store=FakeStore(),
+        clock=lambda: NOW,
+    ).execute(_plan(lane_descriptors=(authorized, api.descriptor)))
+
+    failure = result.delegations[0].attempts[0].result.failure
+    assert failure.error_kind == "internal"
+    assert failure.error_code == "sampling_effect_indeterminate"
+    assert api.calls == 0
 
 
 @pytest.mark.asyncio
