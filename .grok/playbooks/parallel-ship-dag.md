@@ -2,6 +2,9 @@
 
 Human speaks product intent only. Agents own git. Codex owns land on `main`.
 
+**Public users:** root-as-lava, simple MCP product, no security theatre, no hive mind.
+**GitHub-auth insiders only:** shared cloud mind, index-diff hive, multi-agent DAG (opt-in). See `index-diff-hive.md`.
+
 ## Session physics (non-negotiable)
 
 1. **Do not stop to ask the human** about choices that are already decided by
