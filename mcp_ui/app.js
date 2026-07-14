@@ -1,9 +1,9 @@
-import { parseMarkdown, sanitizeHref } from "./markdown.js?v=grok-v0.6.0-r5";
+import { parseMarkdown, sanitizeHref } from "./markdown.js?v=grok-v0.6.0-r6";
 
 // Must match the <meta name="unigrok-ui-version"> baked into index.html and
 // src/version.py UI_ASSET_VERSION; a mismatch means the browser paired a
 // cached page with a different script build (the stale-skew failure class).
-const UI_ASSET_VERSION = "grok-v0.6.0-r5";
+const UI_ASSET_VERSION = "grok-v0.6.0-r6";
 
 const LAYOUT_KEY = "unigrok.mcp.console.layout.v2";
 
@@ -966,11 +966,13 @@ function renderSurfaceModeBadge(data) {
     badge.title = "Public product path. Swarm apply and land workflows are insider-only.";
     badge.dataset.surface = "core";
   }
+  const contributorTitle = $("nav-group-contributor");
   const swarmLink = $("nav-link-swarm");
+  const isForge = badge.dataset.surface === "forge";
+  if (contributorTitle) contributorTitle.hidden = !isForge;
+  if (swarmLink) swarmLink.hidden = !isForge;
   if (swarmLink) {
-    if (badge.dataset.surface === "core") {
-      swarmLink.title = "Swarm Optimizer (best on Contributor Forge :4766; opens local page)";
-    } else {
+    if (isForge) {
       swarmLink.title = "Swarm Optimizer — Pareto Playground";
     }
   }
