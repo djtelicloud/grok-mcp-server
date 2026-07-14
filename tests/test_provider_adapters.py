@@ -43,10 +43,10 @@ def normalized_request(**overrides) -> ProviderRequest:
             ttl_expires_at=datetime(2030, 1, 1, tzinfo=UTC),
         ),
         "route": RouteClass.PLANNING,
-        "messages": [
+        "messages": (
             ProviderMessage(role="system", content="Be concise."),
             ProviderMessage(role="user", content="Explain the result."),
-        ],
+        ),
         "max_output_tokens": 32_768,
         "timeout_seconds": 120.0,
     }
@@ -68,12 +68,17 @@ def async_client(handler) -> httpx.AsyncClient:
 
 
 def test_request_contract_is_strict_and_bounded():
+    legacy_list = normalized_request(
+        messages=[ProviderMessage(role="user", content="legacy Python caller")]
+    )
+    assert isinstance(legacy_list.messages, tuple)
+
     with pytest.raises(ValidationError):
         ProviderRequest(
             request_id="req-1",
             supervision=normalized_request().supervision,
             route=RouteClass.CODING,
-            messages=[ProviderMessage(role="assistant", content="no user")],
+            messages=(ProviderMessage(role="assistant", content="no user"),),
         )
     with pytest.raises(ValidationError):
         ProviderMessage(role="tool", content="not normalized")
@@ -82,7 +87,7 @@ def test_request_contract_is_strict_and_bounded():
             request_id="req-1",
             supervision=normalized_request().supervision,
             route=RouteClass.CODING,
-            messages=[ProviderMessage(role="user", content="hello")],
+            messages=(ProviderMessage(role="user", content="hello"),),
             max_output_tokens=32_769,
         )
     with pytest.raises(ValidationError):
@@ -90,7 +95,7 @@ def test_request_contract_is_strict_and_bounded():
             request_id="req-1",
             supervision=normalized_request().supervision,
             route=RouteClass.CODING,
-            messages=[ProviderMessage(role="user", content="hello")],
+            messages=(ProviderMessage(role="user", content="hello"),),
             unexpected=True,
         )
 
@@ -195,9 +200,7 @@ async def test_timeout_is_capped_to_remaining_ttl_and_ttl_is_model_visible():
             client=client,
             environ={"OPENAI_API_KEY": "key"},
             clock=lambda: now,
-        ).complete(
-            normalized_request(supervision=supervisor_binding(deadline))
-        )
+        ).complete(normalized_request(supervision=supervisor_binding(deadline)))
     finally:
         await client.aclose()
 
@@ -356,9 +359,7 @@ async def test_ttl_is_rechecked_at_response_emission_boundary():
             client=client,
             environ={"OPENAI_API_KEY": "key"},
             clock=lambda: current[0],
-        ).attempt(
-            normalized_request(supervision=supervisor_binding(deadline))
-        )
+        ).attempt(normalized_request(supervision=supervisor_binding(deadline)))
     finally:
         await client.aclose()
     assert result.status == "failed"
@@ -455,9 +456,7 @@ async def test_openai_refusal_and_length_are_normalized():
                 "model": "gpt-5.1",
                 "status": "incomplete",
                 "incomplete_details": {"reason": "max_output_tokens"},
-                "output": [
-                    {"content": [{"type": "output_text", "text": "Partial"}]}
-                ],
+                "output": [{"content": [{"type": "output_text", "text": "Partial"}]}],
             },
             {
                 "id": "resp_unknown",
@@ -477,12 +476,8 @@ async def test_openai_refusal_and_length_are_normalized():
     try:
         adapter = OpenAIAdapter(client=client, environ={"OPENAI_API_KEY": "key"})
         refusal = await adapter.attempt(normalized_request())
-        length = await adapter.attempt(
-            normalized_request(request_id="req-provider-2")
-        )
-        unknown = await adapter.attempt(
-            normalized_request(request_id="req-provider-3")
-        )
+        length = await adapter.attempt(normalized_request(request_id="req-provider-2"))
+        unknown = await adapter.attempt(normalized_request(request_id="req-provider-3"))
     finally:
         await client.aclose()
     assert refusal.status == "returned"
@@ -644,7 +639,9 @@ async def test_anthropic_claude_key_alias_works_by_itself():
 
     client = async_client(handler)
     try:
-        adapter = AnthropicAdapter(client=client, environ={"CLAUDE_API_KEY": "claude-alias"})
+        adapter = AnthropicAdapter(
+            client=client, environ={"CLAUDE_API_KEY": "claude-alias"}
+        )
         response = await adapter.complete(normalized_request(route=RouteClass.CODING))
     finally:
         await client.aclose()
@@ -820,7 +817,9 @@ async def test_vertex_adc_uses_fixed_regional_endpoint_and_opaque_project_receip
     assert "vertex-access-token" not in receipt
     assert "configured-project" not in receipt
     assert "identity-project" not in receipt
-    assert response.receipt.account_fingerprint == opaque_fingerprint("configured-project")
+    assert response.receipt.account_fingerprint == opaque_fingerprint(
+        "configured-project"
+    )
     assert response.receipt.region == "us-central1"
 
 
@@ -891,9 +890,9 @@ async def test_missing_key_and_http_error_bodies_never_escape():
     client = async_client(handler)
     try:
         with pytest.raises(ProviderTransportError) as failed:
-            await OpenAIAdapter(client=client, environ={"OPENAI_API_KEY": "key"}).complete(
-                normalized_request()
-            )
+            await OpenAIAdapter(
+                client=client, environ={"OPENAI_API_KEY": "key"}
+            ).complete(normalized_request())
     finally:
         await client.aclose()
     assert secret not in str(failed.value)
@@ -910,9 +909,9 @@ async def test_transport_exception_is_sanitized_and_redirect_is_not_followed():
     client = async_client(broken)
     try:
         with pytest.raises(ProviderTransportError) as failed:
-            await GeminiAdapter(client=client, environ={"GEMINI_API_KEY": "key"}).complete(
-                normalized_request()
-            )
+            await GeminiAdapter(
+                client=client, environ={"GEMINI_API_KEY": "key"}
+            ).complete(normalized_request())
     finally:
         await client.aclose()
     assert secret not in str(failed.value)
@@ -955,9 +954,9 @@ async def test_response_size_and_shape_are_bounded():
     client = async_client(huge)
     try:
         with pytest.raises(ProviderProtocolError) as failed:
-            await OpenAIAdapter(client=client, environ={"OPENAI_API_KEY": "key"}).complete(
-                normalized_request()
-            )
+            await OpenAIAdapter(
+                client=client, environ={"OPENAI_API_KEY": "key"}
+            ).complete(normalized_request())
     finally:
         await client.aclose()
     assert failed.value.code == "response_too_large"
@@ -979,11 +978,26 @@ def test_registry_is_inert_complete_and_secret_free():
         ProviderChannel.VERTEX_ADC,
     }
     assert all(isinstance(adapter, ProviderAdapter) for adapter in registry.values())
-    assert registry[ProviderChannel.OPENAI_API].descriptor.credential_state == CredentialState.CONFIGURED
-    assert registry[ProviderChannel.ANTHROPIC_API].descriptor.credential_state == CredentialState.CONFIGURED
-    assert registry[ProviderChannel.GEMINI_API_KEY].descriptor.credential_state == CredentialState.CONFIGURED
-    assert registry[ProviderChannel.VERTEX_ADC].descriptor.credential_state == CredentialState.DEFERRED
-    assert registry[ProviderChannel.GEMINI_API_KEY].descriptor.provider == ProviderId.GOOGLE
+    assert (
+        registry[ProviderChannel.OPENAI_API].descriptor.credential_state
+        == CredentialState.CONFIGURED
+    )
+    assert (
+        registry[ProviderChannel.ANTHROPIC_API].descriptor.credential_state
+        == CredentialState.CONFIGURED
+    )
+    assert (
+        registry[ProviderChannel.GEMINI_API_KEY].descriptor.credential_state
+        == CredentialState.CONFIGURED
+    )
+    assert (
+        registry[ProviderChannel.VERTEX_ADC].descriptor.credential_state
+        == CredentialState.DEFERRED
+    )
+    assert (
+        registry[ProviderChannel.GEMINI_API_KEY].descriptor.provider
+        == ProviderId.GOOGLE
+    )
     assert registry[ProviderChannel.VERTEX_ADC].descriptor.provider == ProviderId.GOOGLE
     rendered = "\n".join(
         adapter.descriptor.model_dump_json() for adapter in registry.values()
@@ -995,7 +1009,19 @@ def test_registry_is_inert_complete_and_secret_free():
 def test_current_stable_model_defaults_are_route_specific():
     registry = build_provider_registry(environ={})
     assert registry[ProviderChannel.OPENAI_API].descriptor.models.planning == "gpt-5.1"
-    assert registry[ProviderChannel.ANTHROPIC_API].descriptor.models.planning == "claude-fable-5"
-    assert registry[ProviderChannel.ANTHROPIC_API].descriptor.models.coding == "claude-sonnet-5"
-    assert registry[ProviderChannel.GEMINI_API_KEY].descriptor.models.coding == "gemini-3.5-flash"
-    assert registry[ProviderChannel.VERTEX_ADC].descriptor.models.research == "gemini-3.5-flash"
+    assert (
+        registry[ProviderChannel.ANTHROPIC_API].descriptor.models.planning
+        == "claude-fable-5"
+    )
+    assert (
+        registry[ProviderChannel.ANTHROPIC_API].descriptor.models.coding
+        == "claude-sonnet-5"
+    )
+    assert (
+        registry[ProviderChannel.GEMINI_API_KEY].descriptor.models.coding
+        == "gemini-3.5-flash"
+    )
+    assert (
+        registry[ProviderChannel.VERTEX_ADC].descriptor.models.research
+        == "gemini-3.5-flash"
+    )

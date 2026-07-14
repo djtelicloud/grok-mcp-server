@@ -48,7 +48,7 @@ def _request(
         request_id=request_id,
         supervision=_binding(session=session),
         route=RouteClass.PLANNING,
-        messages=[ProviderMessage(role="user", content=content)],
+        messages=(ProviderMessage(role="user", content=content),),
         model=model,
     )
 
@@ -108,9 +108,7 @@ def _returned(
             else "vertex_ai"
         ),
         credential_kind=(
-            "google_adc"
-            if start.channel == ProviderChannel.VERTEX_ADC
-            else "api_key"
+            "google_adc" if start.channel == ProviderChannel.VERTEX_ADC else "api_key"
         ),
         cost_usd=cost,
         cost_source=cost_source,
@@ -284,7 +282,10 @@ async def test_each_physical_channel_attempt_has_its_own_ordered_row(tmp_path):
     await store.complete_provider_attempt(second.attempt_id, _returned(second))
 
     rows = await store.list_provider_attempts(delegation_id="delegation-google")
-    assert [(row["attempt_ordinal"], row["channel"], row["transport_status"]) for row in rows] == [
+    assert [
+        (row["attempt_ordinal"], row["channel"], row["transport_status"])
+        for row in rows
+    ] == [
         (1, "gemini_api_key", "failed"),
         (2, "vertex_adc", "returned"),
     ]
@@ -450,7 +451,9 @@ async def test_lifecycle_times_and_redaction_states_are_digest_bound(tmp_path):
         (interrupted.attempt_id,),
     )
     await store._conn.commit()
-    with pytest.raises(ValueError, match="completion time|orphaned output|invalid error"):
+    with pytest.raises(
+        ValueError, match="completion time|orphaned output|invalid error"
+    ):
         await store.list_provider_attempts()
     await store.close()
 
@@ -466,7 +469,9 @@ async def test_started_and_terminal_rows_reject_schema_invalid_receipts(tmp_path
         ("sha256:" + hashlib.sha256(b"{}").hexdigest(), started.attempt_id),
     )
     await store._conn.commit()
-    with pytest.raises(ValueError, match="started provider attempt has terminal evidence"):
+    with pytest.raises(
+        ValueError, match="started provider attempt has terminal evidence"
+    ):
         await store.list_provider_attempts()
     await store.close()
 
@@ -533,7 +538,9 @@ async def test_v15_refuses_to_certify_an_incompatible_preexisting_table(tmp_path
         assert connection.execute("PRAGMA user_version").fetchone()[0] == 14
         columns = {
             row[1]
-            for row in connection.execute("PRAGMA table_info(provider_attempts)").fetchall()
+            for row in connection.execute(
+                "PRAGMA table_info(provider_attempts)"
+            ).fetchall()
         }
         assert columns == {
             "id",

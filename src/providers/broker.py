@@ -35,6 +35,7 @@ from .contracts import (
     ProviderAttemptStart,
     ProviderChannel,
     ProviderDescriptor,
+    ProviderExecutionBinding,
     ProviderFailureReceipt,
     ProviderId,
     ProviderMessage,
@@ -45,6 +46,7 @@ from .contracts import (
     StrictContract,
     WorkerAuthority,
     model_visible_messages,
+    provider_result_matches_start,
 )
 
 
@@ -215,6 +217,8 @@ class BrokerAttemptEvidence(StrictContract):
         durable = self.persistence in {"durable_terminal", "replayed_terminal"}
         if durable != (self.result is not None):
             raise ValueError("only durable terminal attempts may expose a result")
+        if durable and not provider_result_matches_start(self.start, self.result):
+            raise ValueError("durable result does not match its exact attempt start")
         if not durable and self.harvest.status != "not_applicable":
             raise ValueError("non-durable attempts cannot claim a harvest run")
         return self
@@ -285,7 +289,14 @@ class GrokWorkerBrokerResult(StrictContract):
     plan_digest: Annotated[str, Field(pattern=r"^sha256:[0-9a-f]{64}$")]
     supervision: GrokSupervisorBinding
     supervisor_plane: Literal["CLI", "API"]
-    supervisor_model: Annotated[str, Field(min_length=1, max_length=192)]
+    supervisor_model: Annotated[
+        str,
+        Field(
+            min_length=1,
+            max_length=192,
+            pattern=r"^grok-[A-Za-z0-9._:/@-]{1,186}$",
+        ),
+    ]
     status: Literal["returned", "mixed", "failed", "indeterminate", "expired"]
     delegations: Annotated[
         tuple[BrokerDelegationResult, ...],
@@ -320,6 +331,49 @@ class GrokWorkerBrokerResult(StrictContract):
                     )
         if self.status != _global_status(self.delegations):
             raise ValueError("broker status does not match delegation statuses")
+        return self
+
+    def validate_against_plan(
+        self,
+        plan: GrokDelegationPlan | Mapping[str, Any],
+    ) -> "GrokWorkerBrokerResult":
+        """Bind exported evidence to one exact originating Grok plan.
+
+        The result intentionally does not duplicate model-visible prompts or
+        fallback policy. Consumers holding the originating plan must cross the
+        same explicit boundary used by :meth:`GrokWorkerBroker.execute` before
+        trusting delegation labels or attempt identities.
+        """
+
+        validated = (
+            plan
+            if isinstance(plan, GrokDelegationPlan)
+            else GrokDelegationPlan.model_validate(plan)
+        )
+        if (
+            self.plan_id != validated.plan_id
+            or self.plan_digest != validated.plan_digest
+            or self.supervision != validated.supervision
+            or self.supervisor_plane != validated.supervisor_plane
+            or self.supervisor_model != validated.supervisor_model
+            or len(self.delegations) != len(validated.delegations)
+        ):
+            raise ValueError("broker result does not match its originating plan")
+        for index, (result, delegation) in enumerate(
+            zip(self.delegations, validated.delegations, strict=True)
+        ):
+            if (
+                result.delegation_id != _delegation_id(validated, index)
+                or result.delegation_key != delegation.delegation_key
+                or result.provider != delegation.provider
+                or result.route != delegation.route
+            ):
+                raise ValueError("broker delegation does not match its plan entry")
+            if not all(
+                _attempt_start_matches_plan(attempt.start, validated, index)
+                for attempt in result.attempts
+            ):
+                raise ValueError("broker attempt does not match its plan delegation")
         return self
 
 
@@ -379,9 +433,93 @@ def _delegation_id(plan: GrokDelegationPlan, index: int) -> str:
     return _stable_id("dlg", plan.plan_digest, str(index), canonical)
 
 
+def _attempt_start_matches_plan(
+    start: ProviderAttemptStart,
+    plan: GrokDelegationPlan,
+    index: int,
+) -> bool:
+    delegation = plan.delegations[index]
+    if start.attempt_ordinal == 1:
+        expected_channels = _SUBSCRIPTION_LADDERS[delegation.provider]
+        expected_plane = CredentialPlane.SUBSCRIPTION
+    elif start.attempt_ordinal == 2:
+        if delegation.fallback.max_metered_api_attempts != 1:
+            return False
+        expected_channels = _API_LADDERS[delegation.provider]
+        expected_plane = CredentialPlane.METERED_API
+    else:
+        return False
+    execution = start.execution
+    if start.version != "provider-attempt-start/v2" or execution is None:
+        return False
+    execution_digest = _execution_contract_digest(
+        provider=start.provider,
+        channel=start.channel,
+        credential_plane=start.credential_plane,
+        execution=execution,
+        route=start.request.route,
+        requested_model=start.requested_model,
+        max_output_tokens=start.request.max_output_tokens,
+        timeout_seconds=start.request.timeout_seconds,
+    )
+    expected_attempt_id = _stable_id(
+        "att",
+        plan.plan_digest,
+        start.delegation_id,
+        start.channel.value,
+        str(start.attempt_ordinal),
+        start.requested_model,
+        execution_digest,
+    )
+    expected_request_id = _stable_id(
+        "req",
+        plan.plan_digest,
+        start.delegation_id,
+        expected_attempt_id,
+        start.channel.value,
+        start.requested_model,
+        execution_digest,
+    )
+    return all(
+        (
+            start.delegation_id == _delegation_id(plan, index),
+            start.provider == delegation.provider,
+            start.channel in expected_channels,
+            start.credential_plane == expected_plane,
+            start.supervisor_plane == plan.supervisor_plane,
+            start.supervisor_model == plan.supervisor_model,
+            start.request.supervision == plan.supervision,
+            start.request.route == delegation.route,
+            tuple(start.request.messages) == delegation.messages,
+            start.request.model == start.requested_model,
+            start.request.max_output_tokens <= delegation.max_output_tokens,
+            start.request.timeout_seconds <= delegation.timeout_seconds,
+            start.request.temperature == delegation.temperature,
+            start.attempt_id == expected_attempt_id,
+            start.request.request_id == expected_request_id,
+        )
+    )
+
+
+def _execution_binding(descriptor: ProviderDescriptor) -> ProviderExecutionBinding:
+    return ProviderExecutionBinding(
+        endpoint_host=descriptor.endpoint_host,
+        endpoint_kind=descriptor.endpoint_kind,
+        credential_kind=descriptor.credential_kind,
+        billing_class=descriptor.billing_class,
+        client_identity=descriptor.client_identity,
+        data_handling=descriptor.data_handling,
+        residency=descriptor.residency,
+        supports_normalized_tools=descriptor.supports_normalized_tools,
+    )
+
+
 def _execution_contract_digest(
-    descriptor: ProviderDescriptor,
     *,
+    provider: ProviderId,
+    channel: ProviderChannel,
+    credential_plane: CredentialPlane,
+    execution: ProviderExecutionBinding,
     route: RouteClass,
     requested_model: str,
     max_output_tokens: int,
@@ -390,21 +528,21 @@ def _execution_contract_digest(
     """Hash effect semantics while excluding mutable availability metadata."""
 
     payload = {
-        "provider": descriptor.provider.value,
-        "channel": descriptor.channel.value,
-        "credential_plane": descriptor.credential_plane.value,
-        "endpoint_host": descriptor.endpoint_host,
-        "endpoint_kind": descriptor.endpoint_kind,
-        "credential_kind": descriptor.credential_kind,
-        "billing_class": descriptor.billing_class,
-        "client_identity": descriptor.client_identity,
+        "provider": provider.value,
+        "channel": channel.value,
+        "credential_plane": credential_plane.value,
+        "endpoint_host": execution.endpoint_host,
+        "endpoint_kind": execution.endpoint_kind,
+        "credential_kind": execution.credential_kind,
+        "billing_class": execution.billing_class,
+        "client_identity": execution.client_identity,
         "route": route.value,
         "requested_model": requested_model,
         "max_output_tokens": max_output_tokens,
         "timeout_seconds": timeout_seconds,
-        "data_handling": descriptor.data_handling,
-        "residency": descriptor.residency,
-        "supports_normalized_tools": descriptor.supports_normalized_tools,
+        "data_handling": execution.data_handling,
+        "residency": execution.residency,
+        "supports_normalized_tools": execution.supports_normalized_tools,
     }
     canonical = json.dumps(
         payload,
@@ -543,8 +681,12 @@ class GrokWorkerBroker:
             delegation.timeout_seconds,
             descriptor.max_timeout_seconds,
         )
+        execution = _execution_binding(descriptor)
         descriptor_digest = _execution_contract_digest(
-            descriptor,
+            provider=descriptor.provider,
+            channel=descriptor.channel,
+            credential_plane=descriptor.credential_plane,
+            execution=execution,
             route=delegation.route,
             requested_model=requested_model,
             max_output_tokens=effective_output_tokens,
@@ -572,13 +714,14 @@ class GrokWorkerBroker:
             request_id=request_id,
             supervision=plan.supervision,
             route=delegation.route,
-            messages=list(delegation.messages),
+            messages=delegation.messages,
             model=requested_model,
             max_output_tokens=effective_output_tokens,
             timeout_seconds=effective_timeout_seconds,
             temperature=delegation.temperature,
         )
         return ProviderAttemptStart(
+            version="provider-attempt-start/v2",
             attempt_id=attempt_id,
             delegation_id=delegation_id,
             attempt_ordinal=ordinal,
@@ -588,6 +731,7 @@ class GrokWorkerBroker:
             channel=channel,
             credential_plane=descriptor.credential_plane,
             requested_model=requested_model,
+            execution=execution,
             request=request,
         )
 
@@ -627,39 +771,34 @@ class GrokWorkerBroker:
         start: ProviderAttemptStart,
         descriptor: ProviderDescriptor,
     ) -> bool:
-        receipt = (
-            result.response.receipt if result.response is not None else result.failure
+        return all(
+            (
+                start.execution == _execution_binding(descriptor),
+                start.provider == descriptor.provider,
+                start.channel == descriptor.channel,
+                start.credential_plane == descriptor.credential_plane,
+                provider_result_matches_start(start, result),
+            )
         )
-        if receipt is None:
-            return False
-        expected = (
-            receipt.request_id == start.request.request_id,
-            receipt.supervision == start.request.supervision,
-            receipt.provider == start.provider == descriptor.provider,
-            receipt.channel == start.channel == descriptor.channel,
-            receipt.credential_plane
-            == start.credential_plane
-            == descriptor.credential_plane,
-            receipt.route == start.request.route,
-            receipt.requested_model == start.requested_model,
-            receipt.endpoint_host == descriptor.endpoint_host,
-            receipt.endpoint_kind == descriptor.endpoint_kind,
-            receipt.credential_kind == descriptor.credential_kind,
-            receipt.billing_class == descriptor.billing_class,
-            receipt.client_identity == descriptor.client_identity,
-            receipt.authority == WorkerAuthority(),
-        )
-        return all(expected)
 
     async def _invoke_adapter(
         self,
         *,
         plan: GrokDelegationPlan,
+        index: int,
         adapter: ProviderAdapter,
         descriptor: ProviderDescriptor,
         start: ProviderAttemptStart,
     ) -> ProviderAttemptResult:
         started = time.monotonic()
+        if not _attempt_start_matches_plan(start, plan, index):
+            return self._normalized_failure(
+                start=start,
+                descriptor=descriptor,
+                error_kind="protocol",
+                error_code="start_contract_mismatch",
+                duration_ms=0,
+            )
         remaining = self._remaining(plan)
         if remaining <= 0:
             return self._normalized_failure(
@@ -680,15 +819,28 @@ class GrokWorkerBroker:
             <= min(start.request.timeout_seconds, descriptor.max_timeout_seconds)
             else "timeout"
         )
+        # Keep the durable start isolated from adapter-owned code.  Frozen
+        # Pydantic models prevent ordinary mutation; the deep copy plus the
+        # post-effect equality check also catches adapters that deliberately
+        # bypass ``frozen`` through Python object internals.
+        physical_request = start.request.model_copy(deep=True)
         try:
             async with asyncio.timeout(physical_timeout):
-                raw_result = await adapter.attempt(start.request)
+                raw_result = await adapter.attempt(physical_request)
             result = (
                 raw_result
                 if isinstance(raw_result, ProviderAttemptResult)
                 else ProviderAttemptResult.model_validate(raw_result)
             )
         except TimeoutError:
+            if physical_request != start.request:
+                return self._normalized_failure(
+                    start=start,
+                    descriptor=descriptor,
+                    error_kind="protocol",
+                    error_code="adapter_request_mutation",
+                    duration_ms=round((time.monotonic() - started) * 1000),
+                )
             return self._normalized_failure(
                 start=start,
                 descriptor=descriptor,
@@ -697,11 +849,27 @@ class GrokWorkerBroker:
                 duration_ms=round((time.monotonic() - started) * 1000),
             )
         except Exception:
+            if physical_request != start.request:
+                return self._normalized_failure(
+                    start=start,
+                    descriptor=descriptor,
+                    error_kind="protocol",
+                    error_code="adapter_request_mutation",
+                    duration_ms=round((time.monotonic() - started) * 1000),
+                )
             return self._normalized_failure(
                 start=start,
                 descriptor=descriptor,
                 error_kind="internal",
                 error_code="unexpected_adapter_exception",
+                duration_ms=round((time.monotonic() - started) * 1000),
+            )
+        if physical_request != start.request:
+            return self._normalized_failure(
+                start=start,
+                descriptor=descriptor,
+                error_kind="protocol",
+                error_code="adapter_request_mutation",
                 duration_ms=round((time.monotonic() - started) * 1000),
             )
         if self._remaining(plan) <= 0:
@@ -712,7 +880,9 @@ class GrokWorkerBroker:
                 error_code="late_result_rejected",
                 duration_ms=round((time.monotonic() - started) * 1000),
             )
-        if not self._result_matches_start(result, start, descriptor):
+        if not _attempt_start_matches_plan(
+            start, plan, index
+        ) or not self._result_matches_start(result, start, descriptor):
             return self._normalized_failure(
                 start=start,
                 descriptor=descriptor,
@@ -848,34 +1018,7 @@ class GrokWorkerBroker:
         plan: GrokDelegationPlan,
         index: int,
     ) -> bool:
-        delegation = plan.delegations[index]
-        expected_channels = (
-            _SUBSCRIPTION_LADDERS[delegation.provider]
-            if start.attempt_ordinal == 1
-            else _API_LADDERS[delegation.provider]
-        )
-        return all(
-            (
-                start.delegation_id == _delegation_id(plan, index),
-                start.provider == delegation.provider,
-                start.channel in expected_channels,
-                start.credential_plane
-                == (
-                    CredentialPlane.SUBSCRIPTION
-                    if start.attempt_ordinal == 1
-                    else CredentialPlane.METERED_API
-                ),
-                start.supervisor_plane == plan.supervisor_plane,
-                start.supervisor_model == plan.supervisor_model,
-                start.request.supervision == plan.supervision,
-                start.request.route == delegation.route,
-                tuple(start.request.messages) == delegation.messages,
-                start.request.model == start.requested_model,
-                start.request.max_output_tokens <= delegation.max_output_tokens,
-                start.request.timeout_seconds <= delegation.timeout_seconds,
-                start.request.temperature == delegation.temperature,
-            )
-        )
+        return _attempt_start_matches_plan(start, plan, index)
 
     def _decode_stored_result(
         self,
@@ -908,21 +1051,7 @@ class GrokWorkerBroker:
                 return None, "replay_status_invalid"
         except Exception:
             return None, "replay_decode_failed"
-        receipt = (
-            result.response.receipt if result.response is not None else result.failure
-        )
-        if receipt is None or not all(
-            (
-                receipt.request_id == start.request.request_id,
-                receipt.supervision == start.request.supervision,
-                receipt.provider == start.provider,
-                receipt.channel == start.channel,
-                receipt.credential_plane == start.credential_plane,
-                receipt.route == start.request.route,
-                receipt.requested_model == start.requested_model,
-                receipt.authority == WorkerAuthority(),
-            )
-        ):
+        if not provider_result_matches_start(start, result):
             return None, "replay_contract_mismatch"
         return result, None
 
@@ -1154,7 +1283,6 @@ class GrokWorkerBroker:
         *,
         start: ProviderAttemptStart,
         result: ProviderAttemptResult,
-        descriptor: ProviderDescriptor,
     ) -> bool:
         """Bound and shield only the authoritative terminal ledger write.
 
@@ -1173,14 +1301,13 @@ class GrokWorkerBroker:
             )
         except asyncio.CancelledError:
             try:
-                stored = await asyncio.wait_for(
+                await asyncio.wait_for(
                     asyncio.shield(write),
                     timeout=self._terminal_write_timeout_seconds,
                 )
-                if not stored:
-                    replay, _ = await self._stored_result(start)
-                    if replay != result:
-                        raise ValueError("cancelled terminal replay does not match")
+                replay, _ = await self._stored_result(start)
+                if replay is None:
+                    raise ValueError("cancelled terminal result is not durable")
             except BaseException as exc:
                 await self._stop_write_task(write)
                 raise BrokerCancellationPersistenceError(
@@ -1247,6 +1374,7 @@ class GrokWorkerBroker:
         try:
             result = await self._invoke_adapter(
                 plan=plan,
+                index=index,
                 adapter=adapter,
                 descriptor=descriptor,
                 start=start,
@@ -1263,7 +1391,6 @@ class GrokWorkerBroker:
                 await self._write_terminal(
                     start=start,
                     result=result,
-                    descriptor=descriptor,
                 )
             except BrokerCancellationPersistenceError:
                 raise
@@ -1273,15 +1400,13 @@ class GrokWorkerBroker:
                 ) from exc
             raise
         try:
-            stored = await self._write_terminal(
+            await self._write_terminal(
                 start=start,
                 result=result,
-                descriptor=descriptor,
             )
-            if not stored:
-                replay, _ = await self._stored_result(start)
-                if replay != result:
-                    raise ValueError("terminal replay does not match result")
+            durable_result, _ = await self._stored_result(start)
+            if durable_result is None:
+                raise ValueError("terminal result is not durably returnable")
         except BrokerCancellationPersistenceError:
             raise
         except Exception:
@@ -1293,6 +1418,7 @@ class GrokWorkerBroker:
                     reason="terminal_persistence_failed",
                 ),
             )
+        result = durable_result
         return BrokerAttemptEvidence(
             start=start,
             persistence="durable_terminal",
@@ -1517,7 +1643,7 @@ class GrokWorkerBroker:
             ):
                 raise persistence_failure from original
             raise
-        return GrokWorkerBrokerResult(
+        result = GrokWorkerBrokerResult(
             plan_id=validated.plan_id,
             plan_digest=validated.plan_digest,
             supervision=validated.supervision,
@@ -1526,3 +1652,4 @@ class GrokWorkerBroker:
             status=_global_status(results),
             delegations=results,
         )
+        return result.validate_against_plan(validated)

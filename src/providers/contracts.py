@@ -14,7 +14,7 @@ from decimal import Decimal
 from enum import Enum
 from typing import Annotated, Literal, Protocol, runtime_checkable
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 MAX_MESSAGE_CHARS = 128_000
@@ -25,9 +25,7 @@ MAX_TIMEOUT_SECONDS = 120.0
 
 _SAFE_IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _SAFE_MODEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/@-]{0,191}$")
-_SAFE_HOST_RE = re.compile(
-    r"^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$"
-)
+_SAFE_HOST_RE = re.compile(r"^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$")
 
 
 class ProviderId(str, Enum):
@@ -226,11 +224,22 @@ class ProviderRequest(StrictContract):
     request_id: Annotated[str, Field(min_length=1, max_length=128)]
     supervision: GrokSupervisorBinding
     route: RouteClass
-    messages: Annotated[list[ProviderMessage], Field(min_length=1, max_length=100)]
+    messages: Annotated[
+        tuple[ProviderMessage, ...], Field(min_length=1, max_length=100)
+    ]
     model: Annotated[str, Field(min_length=1, max_length=192)] | None = None
     max_output_tokens: Annotated[int, Field(ge=1, le=MAX_OUTPUT_TOKENS)] = 4096
     timeout_seconds: Annotated[float, Field(ge=1.0, le=MAX_TIMEOUT_SECONDS)] = 60.0
     temperature: Annotated[float, Field(ge=0.0, le=2.0)] | None = None
+
+    @field_validator("messages", mode="before")
+    @classmethod
+    def freeze_messages(cls, value):
+        # Preserve the original Python construction surface while ensuring the
+        # validated request handed to an adapter is deeply immutable.
+        if isinstance(value, list):
+            return tuple(value)
+        return value
 
     @model_validator(mode="after")
     def validate_semantics(self) -> "ProviderRequest":
@@ -265,10 +274,49 @@ def model_visible_messages(request: ProviderRequest) -> tuple[ProviderMessage, .
     return (ttl_fact, *request.messages)
 
 
-class ProviderAttemptStart(StrictContract):
-    """Grok-authorized identity for one physical subordinate channel call."""
+class ProviderExecutionBinding(StrictContract):
+    """Stable physical-lane material frozen into a v2 attempt start."""
 
-    version: Literal["provider-attempt-start/v1"] = "provider-attempt-start/v1"
+    endpoint_host: Annotated[str, Field(min_length=3, max_length=253)]
+    endpoint_kind: EndpointKind
+    credential_kind: CredentialKind
+    billing_class: BillingClass
+    client_identity: (
+        Annotated[
+            str,
+            Field(
+                min_length=1,
+                max_length=128,
+                pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+            ),
+        ]
+        | None
+    ) = None
+    data_handling: Literal["provider_managed", "project_policy"]
+    residency: Annotated[str, Field(min_length=1, max_length=64)]
+    supports_normalized_tools: bool = False
+
+    @model_validator(mode="after")
+    def validate_binding(self) -> "ProviderExecutionBinding":
+        _validate_endpoint_locator(self.endpoint_kind, self.endpoint_host)
+        if (self.endpoint_kind == "mcp_client_sampling") != (
+            self.client_identity is not None
+        ):
+            raise ValueError("only MCP sampling bindings require client_identity")
+        return self
+
+
+class ProviderAttemptStart(StrictContract):
+    """Grok-authorized identity for one physical subordinate channel call.
+
+    Version 1 remains parseable for ledger inspection and migration tooling.
+    Broker evidence and replay intentionally fail closed unless the start is
+    version 2 with its complete execution binding.
+    """
+
+    version: Literal["provider-attempt-start/v1", "provider-attempt-start/v2"] = (
+        "provider-attempt-start/v1"
+    )
     attempt_id: Annotated[str, Field(min_length=1, max_length=128)]
     delegation_id: Annotated[str, Field(min_length=1, max_length=128)]
     attempt_ordinal: Annotated[int, Field(ge=1, le=128)]
@@ -278,6 +326,7 @@ class ProviderAttemptStart(StrictContract):
     channel: ProviderChannel
     credential_plane: CredentialPlane
     requested_model: Annotated[str, Field(min_length=1, max_length=192)]
+    execution: ProviderExecutionBinding | None = None
     request: ProviderRequest
 
     @model_validator(mode="after")
@@ -289,16 +338,31 @@ class ProviderAttemptStart(StrictContract):
             if not _SAFE_MODEL_RE.fullmatch(value):
                 raise ValueError("attempt model identifiers must be safe")
         if not self.supervisor_model.casefold().startswith("grok-"):
-            raise ValueError("subordinate attempts require an exact Grok supervisor model")
+            raise ValueError(
+                "subordinate attempts require an exact Grok supervisor model"
+            )
         if self.provider == ProviderId.XAI:
-            raise ValueError("xAI planes are supervisor attempts, not subordinate workers")
-        if self.request.model is not None and self.request.model != self.requested_model:
+            raise ValueError(
+                "xAI planes are supervisor attempts, not subordinate workers"
+            )
+        if (
+            self.request.model is not None
+            and self.request.model != self.requested_model
+        ):
             raise ValueError("explicit request model must match requested_model")
         _validate_channel_binding(
             provider=self.provider,
             channel=self.channel,
             credential_plane=self.credential_plane,
+            endpoint_kind=(self.execution.endpoint_kind if self.execution else None),
+            credential_kind=(
+                self.execution.credential_kind if self.execution else None
+            ),
+            billing_class=(self.execution.billing_class if self.execution else None),
         )
+        is_v2 = self.version == "provider-attempt-start/v2"
+        if is_v2 != (self.execution is not None):
+            raise ValueError("v2 attempt starts require one execution binding")
         return self
 
 
@@ -381,7 +445,9 @@ class ProviderDescriptor(StrictContract):
             )
         for name in self.credential_env_names:
             if not re.fullmatch(r"[A-Z][A-Z0-9_]{1,63}", name):
-                raise ValueError("credential environment names must be safe identifiers")
+                raise ValueError(
+                    "credential environment names must be safe identifiers"
+                )
         return self
 
 
@@ -445,12 +511,16 @@ class ProviderReceipt(StrictContract):
         ]
         | None
     ) = None
-    cost_usd: Annotated[Decimal, Field(ge=0, max_digits=16, decimal_places=8)] | None = None
+    cost_usd: (
+        Annotated[Decimal, Field(ge=0, max_digits=16, decimal_places=8)] | None
+    ) = None
     cost_source: Literal["provider_exact", "locally_computed", "unavailable"] = (
         "unavailable"
     )
     region: Annotated[str, Field(min_length=1, max_length=64)]
-    account_fingerprint: Annotated[str, Field(pattern=r"^sha256:[0-9a-f]{12}$")] | None = None
+    account_fingerprint: (
+        Annotated[str, Field(pattern=r"^sha256:[0-9a-f]{12}$")] | None
+    ) = None
     response_id: Annotated[str, Field(min_length=1, max_length=128)] | None = None
     duration_ms: Annotated[int, Field(ge=0, le=3_600_000)]
     usage: ProviderTokenUsage
@@ -541,7 +611,9 @@ class ProviderFailureReceipt(StrictContract):
     error_code: Annotated[str, Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")]
     duration_ms: Annotated[int, Field(ge=0, le=3_600_000)]
     usage: ProviderTokenUsage = ProviderTokenUsage()
-    cost_usd: Annotated[Decimal, Field(ge=0, max_digits=16, decimal_places=8)] | None = None
+    cost_usd: (
+        Annotated[Decimal, Field(ge=0, max_digits=16, decimal_places=8)] | None
+    ) = None
     cost_source: Literal["provider_exact", "locally_computed", "unavailable"] = (
         "unavailable"
     )
@@ -588,11 +660,63 @@ class ProviderAttemptResult(StrictContract):
 
     @model_validator(mode="after")
     def validate_result(self) -> "ProviderAttemptResult":
-        if self.status == "returned" and (self.response is None or self.failure is not None):
+        if self.status == "returned" and (
+            self.response is None or self.failure is not None
+        ):
             raise ValueError("returned attempts require only a response")
-        if self.status == "failed" and (self.failure is None or self.response is not None):
+        if self.status == "failed" and (
+            self.failure is None or self.response is not None
+        ):
             raise ValueError("failed attempts require only a failure receipt")
         return self
+
+
+def provider_result_matches_start(
+    start: ProviderAttemptStart,
+    result: ProviderAttemptResult,
+) -> bool:
+    """Return whether one normalized result is bound to its exact v2 start."""
+
+    execution = start.execution
+    receipt = result.response.receipt if result.response is not None else result.failure
+    if execution is None or receipt is None:
+        return False
+    if not all(
+        (
+            receipt.request_id == start.request.request_id,
+            receipt.supervision == start.request.supervision,
+            receipt.provider == start.provider,
+            receipt.channel == start.channel,
+            receipt.credential_plane == start.credential_plane,
+            receipt.route == start.request.route,
+            receipt.requested_model == start.requested_model,
+            receipt.endpoint_host == execution.endpoint_host,
+            receipt.endpoint_kind == execution.endpoint_kind,
+            receipt.credential_kind == execution.credential_kind,
+            receipt.billing_class == execution.billing_class,
+            receipt.client_identity == execution.client_identity,
+            receipt.authority == WorkerAuthority(),
+        )
+    ):
+        return False
+    if result.response is not None:
+        response = result.response
+        if not all(
+            (
+                response.provider == start.provider,
+                response.channel == start.channel,
+                response.model == receipt.resolved_model,
+                response.authority == WorkerAuthority(),
+                receipt.region == execution.residency,
+            )
+        ):
+            return False
+        if (
+            receipt.model_source == "requested_fallback"
+            and receipt.resolved_model != start.requested_model
+        ):
+            return False
+    return True
 
 
 @runtime_checkable

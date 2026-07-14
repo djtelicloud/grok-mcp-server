@@ -62,10 +62,10 @@ def _request(
             ttl_expires_at=current + timedelta(seconds=ttl_seconds),
         ),
         route=RouteClass.PLANNING,
-        messages=[
+        messages=(
             ProviderMessage(role="system", content="Return a bounded observation."),
             ProviderMessage(role="user", content="Compare the two approaches."),
-        ],
+        ),
         model=model,
         timeout_seconds=timeout_seconds,
         max_output_tokens=max_output_tokens,

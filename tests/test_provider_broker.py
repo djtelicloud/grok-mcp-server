@@ -24,6 +24,7 @@ from src.providers import (
     GrokWorkerBroker,
     GrokWorkerBrokerResult,
     GrokWorkerDelegation,
+    ProviderAttemptStart,
     ProviderAttemptResult,
     ProviderChannel,
     ProviderDescriptor,
@@ -163,6 +164,7 @@ class FakeAdapter:
         events: list[str] | None = None,
         tracker: dict[str, int] | None = None,
         descriptor: ProviderDescriptor | None = None,
+        response_text: str | None = None,
     ) -> None:
         self._descriptor = descriptor or _descriptor(channel)
         self.outcome = outcome
@@ -170,6 +172,7 @@ class FakeAdapter:
         self.delay = delay
         self.events = events if events is not None else []
         self.tracker = tracker
+        self.response_text = response_text
         self.calls = 0
         self.requests: list[Any] = []
 
@@ -237,7 +240,11 @@ class FakeAdapter:
                     provider=self.descriptor.provider,
                     channel=self.descriptor.channel,
                     model=receipt.resolved_model,
-                    text=f"evidence from {self.descriptor.channel.value}",
+                    text=(
+                        self.response_text
+                        if self.response_text is not None
+                        else f"evidence from {self.descriptor.channel.value}"
+                    ),
                     finish_reason="stop",
                     receipt=receipt,
                 ),
@@ -789,6 +796,130 @@ async def test_real_provider_ledger_replays_without_duplicate_effect(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_first_return_uses_same_redacted_durable_result_as_replay(
+    tmp_path,
+    monkeypatch,
+):
+    secret = "sk-ant-worker-secret-that-must-never-be-returned"
+    monkeypatch.setenv("ANTHROPIC_API_KEY", secret)
+    adapter = FakeAdapter(
+        ProviderChannel.OPENAI_MCP_SAMPLING,
+        response_text=f"Worker echoed {secret}",
+    )
+    store = GrokSessionStore(tmp_path / "broker-redacted-return.db")
+    broker = GrokWorkerBroker(
+        registry={ProviderChannel.OPENAI_MCP_SAMPLING: adapter},
+        store=store,
+        clock=lambda: NOW,
+    )
+    plan = _plan(fallback=False)
+
+    first = await broker.execute(plan)
+    replay = await broker.execute(plan)
+    first_attempt = first.delegations[0].attempts[0]
+    replay_attempt = replay.delegations[0].attempts[0]
+
+    assert adapter.calls == 1
+    assert first_attempt.result == replay_attempt.result
+    assert first_attempt.start == replay_attempt.start
+    assert secret not in first_attempt.result.response.text
+    assert secret not in replay_attempt.result.response.text
+    assert first_attempt.persistence == "durable_terminal"
+    assert replay_attempt.persistence == "replayed_terminal"
+    await store.close()
+
+
+@pytest.mark.asyncio
+async def test_adapter_cannot_mutate_frozen_prompt_after_durable_begin(tmp_path):
+    class MutatingAdapter(FakeAdapter):
+        def __init__(self):
+            super().__init__(ProviderChannel.OPENAI_MCP_SAMPLING)
+            self.mutation_errors: list[BaseException] = []
+            self.physical_messages = None
+
+        async def attempt(self, request):
+            try:
+                request.messages.append(
+                    ProviderMessage(role="user", content="forged late prompt")
+                )
+            except BaseException as exc:
+                self.mutation_errors.append(exc)
+            try:
+                request.messages[0].content = "forged nested mutation"
+            except BaseException as exc:
+                self.mutation_errors.append(exc)
+            self.physical_messages = request.messages
+            return await super().attempt(request)
+
+    adapter = MutatingAdapter()
+    store = GrokSessionStore(tmp_path / "broker-frozen-prompt.db")
+    broker = GrokWorkerBroker(
+        registry={ProviderChannel.OPENAI_MCP_SAMPLING: adapter},
+        store=store,
+        clock=lambda: NOW,
+    )
+    plan = _plan(fallback=False)
+    first = await broker.execute(plan)
+    replay = await broker.execute(plan)
+
+    assert adapter.calls == 1
+    assert len(adapter.mutation_errors) == 2
+    assert adapter.physical_messages == plan.delegations[0].messages
+    assert first.delegations[0].attempts[0].start == (
+        replay.delegations[0].attempts[0].start
+    )
+    rows = await store.list_provider_attempts()
+    reconstructed = broker._reconstruct_stored_start(rows[0])
+    assert reconstructed.request.messages == adapter.physical_messages
+    await store.close()
+
+
+@pytest.mark.asyncio
+async def test_effect_edge_rejects_forced_prompt_mutation_without_changing_ledger(
+    tmp_path,
+):
+    class HostileAdapter(FakeAdapter):
+        def __init__(self):
+            super().__init__(ProviderChannel.OPENAI_MCP_SAMPLING)
+            self.physical_messages = None
+
+        async def attempt(self, request):
+            object.__setattr__(
+                request.messages[0],
+                "content",
+                "forged physical prompt after durable begin",
+            )
+            self.physical_messages = request.messages
+            return await super().attempt(request)
+
+    adapter = HostileAdapter()
+    store = GrokSessionStore(tmp_path / "broker-hostile-prompt.db")
+    broker = GrokWorkerBroker(
+        registry={ProviderChannel.OPENAI_MCP_SAMPLING: adapter},
+        store=store,
+        clock=lambda: NOW,
+    )
+    plan = _plan(fallback=False)
+
+    first = await broker.execute(plan)
+    replay = await broker.execute(plan)
+    first_attempt = first.delegations[0].attempts[0]
+    replay_attempt = replay.delegations[0].attempts[0]
+
+    assert adapter.calls == 1
+    assert adapter.physical_messages != plan.delegations[0].messages
+    assert first.status == "failed"
+    assert first_attempt.result.failure.error_code == "adapter_request_mutation"
+    assert first_attempt.start.request.messages == plan.delegations[0].messages
+    assert first_attempt.result == replay_attempt.result
+    assert replay_attempt.start == first_attempt.start
+    rows = await store.list_provider_attempts()
+    reconstructed = broker._reconstruct_stored_start(rows[0])
+    assert reconstructed.request.messages == plan.delegations[0].messages
+    await store.close()
+
+
+@pytest.mark.asyncio
 async def test_durable_replay_ignores_current_descriptor_and_lane_availability():
     base_descriptor = _descriptor(ProviderChannel.OPENAI_API)
     first_adapter = FakeAdapter(
@@ -1022,6 +1153,73 @@ async def test_conflicting_stored_identity_blocks_new_effect():
     assert refused.delegations[0].reason == "stored_attempt_conflict"
     assert subscription.calls == 0
     assert api.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_forged_content_addressed_attempt_and_request_ids_cannot_replay():
+    adapter = FakeAdapter(ProviderChannel.OPENAI_API)
+    store = FakeStore()
+    plan = _plan()
+    broker = GrokWorkerBroker(
+        registry={ProviderChannel.OPENAI_API: adapter},
+        store=store,
+        clock=lambda: NOW,
+    )
+    first = await broker.execute(plan)
+    original_start = next(iter(store.starts.values()))
+    original_result = next(iter(store.results.values()))
+    forged_request = original_start.request.model_copy(
+        update={"request_id": "req:" + ("f" * 64)}
+    )
+    forged_start = original_start.model_copy(
+        update={
+            "attempt_id": "att:" + ("f" * 64),
+            "request": forged_request,
+        }
+    )
+    receipt = original_result.response.receipt.model_copy(
+        update={"request_id": forged_request.request_id}
+    )
+    forged_response = original_result.response.model_copy(update={"receipt": receipt})
+    forged_result = original_result.model_copy(update={"response": forged_response})
+    store.starts = {forged_start.attempt_id: forged_start}
+    store.results = {forged_start.attempt_id: forged_result}
+
+    refused = await broker.execute(plan)
+    assert first.status == "returned"
+    assert refused.status == "indeterminate"
+    assert refused.delegations[0].reason == "stored_attempt_conflict"
+    assert adapter.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_legacy_v1_start_is_parseable_but_cannot_replay_as_broker_evidence():
+    adapter = FakeAdapter(ProviderChannel.OPENAI_API)
+    store = FakeStore()
+    plan = _plan()
+    broker = GrokWorkerBroker(
+        registry={ProviderChannel.OPENAI_API: adapter},
+        store=store,
+        clock=lambda: NOW,
+    )
+    first = await broker.execute(plan)
+    current = next(iter(store.starts.values()))
+    legacy = ProviderAttemptStart.model_validate(
+        {
+            **current.model_dump(mode="python"),
+            "version": "provider-attempt-start/v1",
+            "execution": None,
+        }
+    )
+    store.starts = {legacy.attempt_id: legacy}
+
+    refused = await broker.execute(plan)
+
+    assert first.status == "returned"
+    assert legacy.version == "provider-attempt-start/v1"
+    assert refused.status == "indeterminate"
+    assert refused.delegations[0].reason == "stored_attempt_conflict"
+    assert adapter.calls == 1
 
 
 @pytest.mark.asyncio
@@ -1485,6 +1683,7 @@ def test_harvest_status_rejects_secret_shaped_or_unbounded_details():
 
 @pytest.mark.asyncio
 async def test_exported_result_contracts_reject_inverse_and_identity_spoofs():
+    plan = _plan(count=2, fallback=False)
     returned = await GrokWorkerBroker(
         registry={
             ProviderChannel.OPENAI_MCP_SAMPLING: FakeAdapter(
@@ -1493,7 +1692,7 @@ async def test_exported_result_contracts_reject_inverse_and_identity_spoofs():
         },
         store=FakeStore(),
         clock=lambda: NOW,
-    ).execute(_plan(count=2, fallback=False))
+    ).execute(plan)
     attempt = returned.delegations[0].attempts[0]
 
     raw_attempt = attempt.model_dump(mode="python")
@@ -1545,6 +1744,64 @@ async def test_exported_result_contracts_reject_inverse_and_identity_spoofs():
     with pytest.raises(ValidationError, match="attempt ordinals"):
         BrokerDelegationResult.model_validate(duplicate_ordinal)
 
+    cross_plane = attempt.model_dump(mode="python")
+    cross_plane["result"] = fallback.delegations[0].attempts[1].result
+    with pytest.raises(ValidationError, match="exact attempt start"):
+        BrokerAttemptEvidence.model_validate(cross_plane)
+
+    wrong_region = attempt.model_dump(mode="python")
+    wrong_region["result"]["response"]["receipt"]["region"] = "forged-region"
+    with pytest.raises(ValidationError, match="exact attempt start"):
+        BrokerAttemptEvidence.model_validate(wrong_region)
+
+    anthropic = await GrokWorkerBroker(
+        registry={
+            ProviderChannel.ANTHROPIC_API: FakeAdapter(ProviderChannel.ANTHROPIC_API)
+        },
+        store=FakeStore(),
+        clock=lambda: NOW,
+    ).execute(_plan(ProviderId.ANTHROPIC))
+    cross_provider = attempt.model_dump(mode="python")
+    cross_provider["result"] = anthropic.delegations[0].attempts[0].result
+    with pytest.raises(ValidationError, match="exact attempt start"):
+        BrokerAttemptEvidence.model_validate(cross_provider)
+
+    plan_spoofs = []
+    raw = returned.model_dump(mode="python")
+    raw["delegations"][0]["delegation_key"] = "forged-unique-key"
+    plan_spoofs.append(raw)
+
+    raw = returned.model_dump(mode="python")
+    forged_attempt = raw["delegations"][0]["attempts"][0]
+    forged_attempt["start"]["provider"] = ProviderId.ANTHROPIC
+    forged_attempt["start"]["channel"] = ProviderChannel.ANTHROPIC_MCP_SAMPLING
+    forged_attempt["result"]["response"]["provider"] = ProviderId.ANTHROPIC
+    forged_attempt["result"]["response"]["channel"] = (
+        ProviderChannel.ANTHROPIC_MCP_SAMPLING
+    )
+    forged_attempt["result"]["response"]["receipt"]["provider"] = ProviderId.ANTHROPIC
+    forged_attempt["result"]["response"]["receipt"]["channel"] = (
+        ProviderChannel.ANTHROPIC_MCP_SAMPLING
+    )
+    raw["delegations"][0]["provider"] = ProviderId.ANTHROPIC
+    plan_spoofs.append(raw)
+
+    raw = returned.model_dump(mode="python")
+    forged_attempt = raw["delegations"][0]["attempts"][0]
+    forged_attempt["start"]["request"]["route"] = RouteClass.CODING
+    forged_attempt["result"]["response"]["receipt"]["route"] = RouteClass.CODING
+    raw["delegations"][0]["route"] = RouteClass.CODING
+    plan_spoofs.append(raw)
+
+    raw = returned.model_dump(mode="python")
+    raw["delegations"][0]["attempts"][0]["start"]["attempt_ordinal"] = 2
+    plan_spoofs.append(raw)
+
+    for forged in plan_spoofs:
+        candidate = GrokWorkerBrokerResult.model_validate(forged)
+        with pytest.raises(ValueError, match="plan"):
+            candidate.validate_against_plan(plan)
+
     global_spoofs = []
     raw = returned.model_dump(mode="python")
     raw["plan_id"] = "gdp:" + ("0" * 64)
@@ -1573,3 +1830,14 @@ async def test_exported_result_contracts_reject_inverse_and_identity_spoofs():
     for forged in global_spoofs:
         with pytest.raises(ValidationError):
             GrokWorkerBrokerResult.model_validate(forged)
+
+    expired_plan = _plan(ttl=NOW - timedelta(seconds=1))
+    zero_attempt = await GrokWorkerBroker(
+        registry={},
+        store=FakeStore(),
+        clock=lambda: NOW,
+    ).execute(expired_plan)
+    non_grok = zero_attempt.model_dump(mode="python")
+    non_grok["supervisor_model"] = "claude-fable-5"
+    with pytest.raises(ValidationError, match="string_pattern_mismatch"):
+        GrokWorkerBrokerResult.model_validate(non_grok)

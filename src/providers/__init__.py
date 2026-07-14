@@ -31,6 +31,7 @@ from .contracts import (
     ProviderAttemptStart,
     ProviderChannel,
     ProviderDescriptor,
+    ProviderExecutionBinding,
     ProviderFailureReceipt,
     ProviderId,
     ProviderMessage,
@@ -42,6 +43,7 @@ from .contracts import (
     RouteClass,
     WorkerAuthority,
     model_visible_messages,
+    provider_result_matches_start,
 )
 from .errors import (
     ProviderConfigurationError,
@@ -104,6 +106,7 @@ __all__ = [
     "ProviderChannel",
     "ProviderConfigurationError",
     "ProviderDescriptor",
+    "ProviderExecutionBinding",
     "ProviderError",
     "ProviderFailureReceipt",
     "ProviderId",
@@ -129,6 +132,7 @@ __all__ = [
     "DISABLED_SUBSCRIPTION_SURFACES",
     "load_google_adc_identity",
     "model_visible_messages",
+    "provider_result_matches_start",
     "WorkerAuthority",
     "WorkerFallbackPolicy",
 ]

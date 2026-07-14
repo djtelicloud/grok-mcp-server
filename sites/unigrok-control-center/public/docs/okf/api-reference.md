@@ -1093,6 +1093,21 @@ class BrokerAttemptEvidence
 
 One physical attempt, with worker output exposed only after durability.
 
+### Method: `GrokWorkerBrokerResult.validate_against_plan` {#providers-broker-grokworkerbrokerresult-validate_against_plan}
+
+```python
+def GrokWorkerBrokerResult.validate_against_plan(self, plan: GrokDelegationPlan | Mapping[str, Any]) -> 'GrokWorkerBrokerResult'
+```
+
+**Keywords:** grok, worker, broker, result, validate, against, plan
+
+Bind exported evidence to one exact originating Grok plan.
+
+The result intentionally does not duplicate model-visible prompts or
+fallback policy. Consumers holding the originating plan must cross the
+same explicit boundary used by :meth:`GrokWorkerBroker.execute` before
+trusting delegation labels or attempt identities.
+
 ### Class: `GrokWorkerBroker` {#providers-broker-grokworkerbroker}
 
 ```python
@@ -1167,6 +1182,16 @@ The supervisor deadline is model-visible and shared by every transport.
 Keeping this construction in the contract module lets the adapter, the
 attempt ledger, and the Grok broker layer hash the same logical request.
 
+### Class: `ProviderExecutionBinding` {#providers-contracts-providerexecutionbinding}
+
+```python
+class ProviderExecutionBinding
+```
+
+**Keywords:** provider, execution, binding
+
+Stable physical-lane material frozen into a v2 attempt start.
+
 ### Class: `ProviderAttemptStart` {#providers-contracts-providerattemptstart}
 
 ```python
@@ -1176,6 +1201,10 @@ class ProviderAttemptStart
 **Keywords:** provider, attempt, start
 
 Grok-authorized identity for one physical subordinate channel call.
+
+Version 1 remains parseable for ledger inspection and migration tooling.
+Broker evidence and replay intentionally fail closed unless the start is
+version 2 with its complete execution binding.
 
 ### Class: `ProviderFailureReceipt` {#providers-contracts-providerfailurereceipt}
 
@@ -1196,6 +1225,16 @@ class ProviderAttemptResult
 **Keywords:** provider, attempt, result
 
 One subordinate worker return or failure for Grok synthesis.
+
+### Function: `provider_result_matches_start` {#providers-contracts-provider_result_matches_start}
+
+```python
+def provider_result_matches_start(start: ProviderAttemptStart, result: ProviderAttemptResult) -> bool
+```
+
+**Keywords:** provider, result, matches, start
+
+Return whether one normalized result is bound to its exact v2 start.
 
 ### Function: `is_safe_model_id` {#providers-contracts-is_safe_model_id}
 
