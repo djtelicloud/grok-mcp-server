@@ -69,15 +69,29 @@ Optional kill-switch later: workflow `if` gated on `vars.UNIGROK_REVIEW_ENABLED 
 
 **Remaining bridge:** repository secret `UNIGROK_CLIENT_TOKEN` (narrow gateway client; never `XAI_API_KEY`) **or** P1 OIDC mint. Without one of these, Actions cannot authenticate to the twin.
 
-### 3. Client credential for Actions (temporary bridge)
+### 3. Client credential for Actions (service token mint)
 
-Until OIDC → Control mint ships (P1):
+The production twin is **OAuth introspection only** (no `UNIGROK_API_KEYS` on
+Cloud Run). A long-lived static `UNIGROK_CLIENT_TOKEN` is the **wrong** install.
 
-- Prefer a **narrow** gateway client token accepted by the remote MCP OAuth/introspection design — **not** `XAI_API_KEY`.
-- Store as repository secret `UNIGROK_CLIENT_TOKEN` only if the twin still accepts that bootstrap path.
-- Production preference (docs): OAuth introspection; static client is break-glass / short rotation.
+**P0 (shipped):** GitHub Actions mints a ~120s Control-compatible service token
+at job start:
 
-If the twin is pure OAuth and rejects static tokens, P0 uses **Control broker** from an authenticated insider session first, and Actions waits for P1 OIDC.
+| Secret / var | Purpose |
+| --- | --- |
+| Secret `UNIGROK_MCP_TOKEN_SECRET` | Same value as Control `MCP_TOKEN_SECRET` (SM: `unigrok-control-center-mcp-token-secret`) — **signing key**, not a gateway client password |
+| Var `UNIGROK_OAUTH_ISSUER` | default `https://control.grokmcp.org` |
+| Var `UNIGROK_MCP_RESOURCE_URL` | default `https://mcp.grokmcp.org/mcp` |
+
+Mint script: `scripts/mint_mcp_service_token.py` (`service:github-review-broker`,
+scopes `unigrok:connect` + `unigrok:review`). Called from
+`scripts/github-grok-review.py` when the mint secret is set.
+
+**Still not allowed:** `XAI_API_KEY` in GitHub; static `UNIGROK_API_KEYS` on the
+Cloud Run twin.
+
+**P1:** GitHub OIDC → Control mint endpoint so Actions never holds
+`MCP_TOKEN_SECRET`.
 
 ### 4. Cost controls (required before volume)
 
@@ -110,7 +124,8 @@ Hard token budgets on the twin (`UNIGROK_CALLER_BUDGETS`) should be set in Cloud
 2. ~~Un-hardcode Control `grokReview` snapshot from real broker/probe state.~~ → PR `grok/hosted-review-ui-truth` derives state from MCP OAuth config + UniGrok review check runs (no invented scores).
 3. Per-subject budgets + spend log in Control.
 4. Optional: workflow default in-repo once vars proven (still var-driven).
-5. Set or rotate `UNIGROK_CLIENT_TOKEN` (break-glass) until OIDC lands; smoke `@grok review` Mac-off.
+5. Ensure secret `UNIGROK_MCP_TOKEN_SECRET` is installed (Control MCP signing secret); smoke `@grok review` Mac-off.
+6. P1 OIDC mint so Actions no longer holds the signing secret.
 
 ## Explicit NO-GOs
 
