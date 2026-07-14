@@ -1913,6 +1913,8 @@ class TestCompletionContentContract:
         "Pulling PR #64 now — I'll report concrete findings shortly.",
         "I'll inspect the completion guard, then return concrete findings. "
         "I found the relevant helper in src/utils.py; next I'll read its tests.",
+        "I'll inspect the completion-contract guard and its tests now and return "
+        "concrete findings plus a verdict.",
         "I'll inspect the completion-contract guard and related tests directly, "
         "then return concrete findings and the smallest deterministic fix.I found "
         "the guard in `utils.py`; next I'll read the full promise/nonanswer logic "
@@ -1980,7 +1982,11 @@ class TestCompletionContentContract:
             "Let me explain: TTL belongs in every prediction input.",
             "Let me explain. TTL belongs in every prediction input.",
             "Let me explain—TTL belongs in every prediction input.",
+            "Let me explain – TTL belongs in every prediction input.",
+            "Let me explain - TTL belongs in every prediction input.",
             "I'll summarize — TTL belongs in every prediction input.",
+            "I'll review the completion-contract result: the guard fails because "
+            "it accepts an expired lease.",
             "I'll explain\nTTL belongs in every prediction input.",
             "I'll fix this:\n```python\nprint('fixed')\n```",
             "I'll review this now. Verdict: the TTL guard fails because it "
