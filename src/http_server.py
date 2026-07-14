@@ -22,7 +22,7 @@ from pydantic import BaseModel
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
 from starlette.requests import Request
-from starlette.responses import JSONResponse, Response, StreamingResponse
+from starlette.responses import JSONResponse, RedirectResponse, Response, StreamingResponse
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
@@ -2284,6 +2284,8 @@ def create_app(*, bound_host: Optional[str] = None) -> Starlette:
                 app=create_docs_app(),
                 name="docs",
             ),
+            # Trailing-slash canonical URL: /ui alone 404s under StaticFiles.
+            Route("/ui", endpoint=lambda _request: RedirectResponse(url="/ui/", status_code=307), methods=["GET"]),
             Mount(
                 "/ui",
                 app=create_ui_app(),

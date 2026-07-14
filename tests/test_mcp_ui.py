@@ -47,10 +47,12 @@ def test_mcp_ui_static_files_are_served(monkeypatch):
     assert index.status_code == 200
     assert "<title>UniGrok MCP v0.6.0 Control Center</title>" in index.text
     assert '<span class="version-badge">v0.6.0</span>' in index.text
-    assert 'script type="module" src="./app.js?v=grok-v0.6.0-r4"' in index.text
-    assert '<link rel="stylesheet" href="./styles.css?v=grok-v0.6.0-r4" />' in index.text
-    assert '<link rel="stylesheet" href="./tokens.css?v=grok-v0.6.0-r4" />' in index.text
+    assert 'script type="module" src="./app.js?v=grok-v0.6.0-r5"' in index.text
+    assert '<link rel="stylesheet" href="./styles.css?v=grok-v0.6.0-r5" />' in index.text
+    assert '<link rel="stylesheet" href="./tokens.css?v=grok-v0.6.0-r5" />' in index.text
     assert "Control Center" in index.text
+    assert 'id="surfaceModeBadge"' in index.text
+    assert 'id="metricVerifiedSplit"' in index.text
     assert "Bearer token" not in index.text
     assert "Agent Playground" in index.text
     assert 'id="verifySetupBtn"' in index.text
@@ -389,7 +391,7 @@ def test_mcp_ui_markdown_renderer_is_shared_and_escape_first():
     assert "\\u000E-\\u001F" in renderer.text
     # app.js imports the shared renderer at the current cache-bust version and
     # no longer defines its own.
-    assert 'from "./markdown.js?v=grok-v0.6.0-r4"' in script.text
+    assert 'from "./markdown.js?v=grok-v0.6.0-r5"' in script.text
     assert "import { parseMarkdown" in script.text
     assert "function parseMarkdown" not in script.text
     assert "renderMarkdownInto" in script.text
@@ -632,3 +634,12 @@ def test_mcp_ui_reflow_is_container_driven():
     assert "@media (max-width: 768px)" not in styles
     # Fixed sidebar columns became user-resizable with clamps.
     assert "resize: horizontal" in styles
+
+
+def test_ui_root_redirects_to_trailing_slash(monkeypatch):
+    monkeypatch.delenv("UNIGROK_RUNTIME", raising=False)
+    monkeypatch.delenv("UNIGROK_API_KEYS", raising=False)
+    with TestClient(create_app(), base_url="http://localhost:8080") as client:
+        response = client.get("/ui", follow_redirects=False)
+    assert response.status_code in (307, 308)
+    assert response.headers.get("location", "").endswith("/ui/")

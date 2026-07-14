@@ -102,6 +102,10 @@ Configure UniGrok MCP for this machine:
 - Never put XAI_API_KEY in IDE MCP settings; credentials stay in UniGrok's server .env
 - After connecting, call tools/list and grok_mcp_discover_self
 - Prefer the UniGrok agent tool when I say @grok or want a second opinion
+- When I ask for a multi-step Implementation Plan, get a UniGrok second opinion
+  (agent mode thinking or reasoning) and improve the plan before showing it —
+  only if I want that habit; do not silently spend metered API credits
+- Do not invent a second MCP port, Forge, or land workflow for ordinary use
 ```
 
 Detailed multi-IDE notes: [docs/ide-setup.md](docs/ide-setup.md) (public path

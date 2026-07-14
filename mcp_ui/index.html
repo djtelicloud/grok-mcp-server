@@ -7,9 +7,9 @@
     <meta name="unigrok-ui-regions" content="navigation,workbench,rpc-inspector,rpc-logs,result-facts" />
     <!-- Version handshake: app.js compares this against its own build constant
          and self-heals a stale-cached page with one revalidating reload. -->
-    <meta name="unigrok-ui-version" content="grok-v0.6.0-r4" />
-  <link rel="stylesheet" href="./tokens.css?v=grok-v0.6.0-r4" />
-  <link rel="stylesheet" href="./styles.css?v=grok-v0.6.0-r4" />
+    <meta name="unigrok-ui-version" content="grok-v0.6.0-r5" />
+  <link rel="stylesheet" href="./tokens.css?v=grok-v0.6.0-r5" />
+  <link rel="stylesheet" href="./styles.css?v=grok-v0.6.0-r5" />
   </head>
   <body>
     <main class="app-shell">
@@ -39,6 +39,7 @@
         <div class="brand-block">
           <p class="eyebrow">UNIGROK GATEWAY</p>
           <h1>Control Center <span class="version-badge">v0.6.0</span></h1>
+          <p id="surfaceModeBadge" class="surface-mode-badge" title="Stable Core is the public product path">Surface: Core (checking…)</p>
         </div>
         <div class="layout-actions" aria-label="Workspace layout controls">
           <button id="toggleNavBtn" type="button" class="chrome-btn" aria-controls="sidebarNav" aria-expanded="true" aria-pressed="true" title="Show or hide sections (⌘/Ctrl+B)"><span aria-hidden="true">◧</span><span class="chrome-label">Sections</span></button>
@@ -446,9 +447,14 @@
                 <span class="metric-sub">Mean elapsed execution time</span>
               </div>
               <div class="metric-card">
-                <h3>Success Rate</h3>
+                <h3>Verified success</h3>
                 <div id="metricSuccess" class="metric-value">—</div>
-                <span class="metric-sub">Successful completed requests</span>
+                <span id="metricSuccessSub" class="metric-sub">Of receipt-verified outcomes only</span>
+              </div>
+              <div class="metric-card">
+                <h3>Verified / unverified</h3>
+                <div id="metricVerifiedSplit" class="metric-value">—</div>
+                <span class="metric-sub">Most stops stay unverified until a receipt</span>
               </div>
               <div class="metric-card">
                 <h3>API / CLI</h3>
@@ -469,7 +475,7 @@
                 <div class="section-title">Plane Breakdown</div>
                 <div class="usage-table-wrap">
                   <table class="usage-table">
-                    <thead><tr><th>Plane</th><th>Requests</th><th>Success</th><th>Latency</th><th>Tokens</th><th>Cost</th></tr></thead>
+                    <thead><tr><th>Plane</th><th>Requests</th><th>Verified success</th><th>Latency</th><th>Tokens</th><th>Cost</th></tr></thead>
                     <tbody id="planeBreakdownBody"><tr><td colspan="6" class="empty-cell">Loading…</td></tr></tbody>
                   </table>
                 </div>
@@ -600,6 +606,6 @@ docker compose up --build -d</code></pre>
 
       </section>
     </main>
-  <script type="module" src="./app.js?v=grok-v0.6.0-r4"></script>
+  <script type="module" src="./app.js?v=grok-v0.6.0-r5"></script>
   </body>
 </html>

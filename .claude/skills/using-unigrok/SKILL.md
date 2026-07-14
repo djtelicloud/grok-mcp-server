@@ -90,6 +90,7 @@ configured auth. Because many repositories can reuse
 
 When the user is about to see a multi-step Implementation Plan, prefer calling
 UniGrok `agent` (`thinking` or `reasoning`) for a second opinion, then improve
-the plan before presenting it. Do not silently spend metered API credits without
-consent. Do not invent a second MCP port or Forge workflow for public installs.
-Public path remains `http://localhost:4765/mcp` only.
+the plan before presenting it **only when the user wants a Grok second opinion**
+(including `@grok`). Do not silently spend metered API credits without consent.
+Do not invent a second MCP port or Forge workflow for public installs. Public
+path remains `http://localhost:4765/mcp` only.

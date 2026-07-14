@@ -1,9 +1,9 @@
-import { parseMarkdown, sanitizeHref } from "./markdown.js?v=grok-v0.6.0-r4";
+import { parseMarkdown, sanitizeHref } from "./markdown.js?v=grok-v0.6.0-r5";
 
 // Must match the <meta name="unigrok-ui-version"> baked into index.html and
 // src/version.py UI_ASSET_VERSION; a mismatch means the browser paired a
 // cached page with a different script build (the stale-skew failure class).
-const UI_ASSET_VERSION = "grok-v0.6.0-r4";
+const UI_ASSET_VERSION = "grok-v0.6.0-r5";
 
 const LAYOUT_KEY = "unigrok.mcp.console.layout.v2";
 
@@ -744,6 +744,20 @@ function renderRoutingReceipts(receipts) {
   }
 }
 
+function formatVerifiedSuccess(metrics) {
+  const verified = Number(metrics?.verified_outcomes || 0);
+  if (!verified) return "—";
+  if (metrics.success_rate === null || metrics.success_rate === undefined) return "—";
+  return `${(metrics.success_rate * 100).toFixed(1)}% of ${verified}`;
+}
+
+function formatVerifiedSplit(metrics) {
+  const verified = Number(metrics?.verified_outcomes || 0);
+  const unverified = Number(metrics?.unverified_requests || 0);
+  if (!verified && !unverified && !Number(metrics?.requests || 0)) return "—";
+  return `${verified} / ${unverified}`;
+}
+
 function renderPlaneTable(planes) {
   const body = $("planeBreakdownBody");
   body.replaceChildren();
@@ -760,7 +774,7 @@ function renderPlaneTable(planes) {
   }
   for (const [plane, metrics] of entries) {
     const row = document.createElement("tr");
-    const success = metrics.success_rate === null ? "—" : `${(metrics.success_rate * 100).toFixed(1)}%`;
+    const success = formatVerifiedSuccess(metrics);
     const latency = metrics.avg_latency_sec === null ? "—" : `${metrics.avg_latency_sec.toFixed(2)}s`;
     const cost = plane === "API" ? `$${Number(metrics.api_cost_usd || 0).toFixed(5)}` : "Subscription";
     const values = [plane, metrics.requests, success, latency, formatTokens(metrics.tracked_tokens), cost];
@@ -781,18 +795,28 @@ function renderMetricsSnapshot() {
   const planes = period.planes || {};
   const apiRequests = planeRequests(planes, ["API"]);
   const cliRequests = planeRequests(planes, ["CLI", "CLI-Fallback"]);
+  const verified = Number(summary.verified_outcomes || 0);
+  const unverified = Number(summary.unverified_requests || 0);
 
   $("metricApiCost").innerText = `$${Number(summary.api_cost_usd || 0).toFixed(5)}`;
   $("metricRequests").innerText = Number(summary.requests || 0).toLocaleString();
   $("metricLatency").innerText = formatMetric(summary.avg_latency_sec, (v) => `${v.toFixed(2)}s`);
-  $("metricSuccess").innerText = formatMetric(summary.success_rate, (v) => `${(v * 100).toFixed(1)}%`);
+  $("metricSuccess").innerText = formatVerifiedSuccess(summary);
+  if ($("metricSuccessSub")) {
+    $("metricSuccessSub").innerText = verified
+      ? `Of ${verified} receipt-verified outcome${verified === 1 ? "" : "s"} only`
+      : "No receipt-verified outcomes yet (most stops stay unverified)";
+  }
+  if ($("metricVerifiedSplit")) {
+    $("metricVerifiedSplit").innerText = formatVerifiedSplit(summary);
+  }
   $("metricPlane").innerText = `${apiRequests} / ${cliRequests}`;
   $("metricTokens").innerText = formatTokens(summary.tracked_tokens);
 
   const quality = payload.usage.data_quality;
   const periodLabel = state.metricsPeriod === "today" ? "today" : "across the local ledger";
   $("metricsCoverage").innerText = summary.requests
-    ? `${summary.requests} request${summary.requests === 1 ? "" : "s"} ${periodLabel}. ${summary.routing_receipt_requests || 0} row${summary.routing_receipt_requests === 1 ? "" : "s"} include explainable routing receipts; older rows remain valid for cost, latency, and plane counts.`
+    ? `${summary.requests} request${summary.requests === 1 ? "" : "s"} ${periodLabel} (${verified} verified, ${unverified} unverified). ${summary.routing_receipt_requests || 0} row${summary.routing_receipt_requests === 1 ? "" : "s"} include explainable routing receipts. Success % is never over all requests — only over verified outcomes.`
     : `No model executions ${periodLabel}. Health checks, discovery, and status calls intentionally do not create billable telemetry.`;
 
   const breakerCount = Object.values(payload.circuit_breakers || {}).filter((item) => item?.open).length;
@@ -927,6 +951,31 @@ function renderSetupStatus(data, ready = true, detailText = null) {
   target.replaceChildren(title, document.createElement("br"), detail);
 }
 
+function renderSurfaceModeBadge(data) {
+  const badge = $("surfaceModeBadge");
+  if (!badge) return;
+  const mode = String(data?.service?.mode || "").toLowerCase();
+  const port = window.location.port || "";
+  const isForgePort = port === "4766";
+  if (mode === "contributor" || isForgePort) {
+    badge.textContent = "Surface: Contributor Forge";
+    badge.title = "Forge attaches the UniGrok checkout. Public product path remains Core :4765.";
+    badge.dataset.surface = "forge";
+  } else {
+    badge.textContent = "Surface: Stable Core";
+    badge.title = "Public product path. Swarm apply and land workflows are insider-only.";
+    badge.dataset.surface = "core";
+  }
+  const swarmLink = $("nav-link-swarm");
+  if (swarmLink) {
+    if (badge.dataset.surface === "core") {
+      swarmLink.title = "Swarm Optimizer (best on Contributor Forge :4766; opens local page)";
+    } else {
+      swarmLink.title = "Swarm Optimizer — Pareto Playground";
+    }
+  }
+}
+
 async function fetchRuntimeStatus() {
   try {
     const res = await fetch("/runtimez");
@@ -934,6 +983,7 @@ async function fetchRuntimeStatus() {
     const data = await res.json();
     $("runtimeChip").innerText = `runtime: ${data.runtime || "unknown"}`;
     $("transportChip").innerText = `transport: ${data.transport || "unknown"}`;
+    renderSurfaceModeBadge(data);
     renderCredentialPlanes(data.credential_planes || null);
     // /runtimez is 200 even when not ready, so honor the readiness probe.
     renderSetupStatus(data, gatewayReadiness.ready, gatewayReadiness.detail);
@@ -942,6 +992,7 @@ async function fetchRuntimeStatus() {
     $("runtimeChip").innerText = "runtime: unknown";
     $("transportChip").innerText = "transport: unknown";
     $("planeChip").innerText = "plane: unknown";
+    renderSurfaceModeBadge(null);
     renderSetupStatus(null, false);
     return null;
   }

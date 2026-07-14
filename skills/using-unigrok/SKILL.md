@@ -7,8 +7,9 @@ description: How to query xAI Grok through the UniGrok MCP gateway. Activate whe
 
 UniGrok exposes one headline MCP tool: `agent`. It self-routes across Grok
 models and two billing planes, and returns structured metadata with every
-answer. **Primary chat path for every project is IDE → UniGrok MCP**, not a
-browser chat client.
+answer. **Primary chat path for every project is IDE → UniGrok MCP**. The local
+browser UI is an optional trusted-loopback test/control surface whose agent
+playground can invoke providers and spend metered credits.
 
 ## The `agent` tool
 
@@ -83,7 +84,8 @@ not invented subscription cost or remaining provider quota.
 
 The shared gateway runs at `http://localhost:4765/mcp` (Streamable HTTP).
 Health: `GET /healthz`. Optional local Core UI: `http://localhost:4765/ui/`
-(machine-owner loopback status). `X-Client-ID` is a caller-controlled
+(trusted machine-owner test/control surface with a provider-calling agent
+playground). `X-Client-ID` is a caller-controlled
 attribution and session label beneath a server-derived principal; it is not
 authentication. The default unauthenticated loopback service derives the shared
 `http:anon` principal for one local budget/security trust domain, so there is
