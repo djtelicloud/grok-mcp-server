@@ -138,6 +138,7 @@ public Quick Start.
 | GitHub write+ for all cloud Console entry | **LIVE** |
 | Unified single Insider UI (swarm+control+core) | **Deferred** |
 | Silent skill compiler into user repos | **Forbidden** |
+| GitHub Wiki as second docs tree / auto-synced `.wiki.git` from OKF | **Forbidden** — public knowledge is README + OKF only |
 
 ## 8. Related docs
 

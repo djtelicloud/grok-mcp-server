@@ -96,6 +96,14 @@ mutate. Pasteable terminal prompts for agents beat multi-step browser forms.
 - Prefer existing helpers and architecture over new parallel abstractions.
 - Update `README.md` (public) and this file / design docs when behavior changes
   audience-facing setup.
+- **Documentation surfaces (do not fork truth):**
+  - **Public humans:** `README.md`
+  - **Agents / machine-readable knowledge:** `docs/okf/` (generated pieces via
+    `scripts/generate_okf.py`, mirrored to the public site and gateway)
+  - **Insiders:** this file + `docs/design/*`
+  - **GitHub Wiki is not a product surface.** Do not hand-edit it as source of
+    truth, do not auto-publish full OKF into `.wiki.git`, and do not send
+    public users there. Prefer disabling the Wiki tab or leaving it empty.
 - Run `uv run pytest` before opening a PR.
 
 Human contributors and coding agents use the same evidence contract: intent,

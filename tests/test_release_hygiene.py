@@ -144,6 +144,24 @@ def test_public_setup_surfaces_use_the_grok_phoneword_endpoint():
         assert "http://localhost:8080" not in text, path
 
 
+def test_public_docs_surfaces_exclude_github_wiki_as_product():
+    """Public knowledge is README + OKF; GitHub Wiki is not a second tree."""
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    contributing = (ROOT / "CONTRIBUTING.md").read_text(encoding="utf-8")
+    freeze = (ROOT / "docs" / "design" / "public-vs-insider-surfaces.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert "## 8. Where docs live" in readme
+    assert "https://grokmcp.org/docs/okf/" in readme
+    assert "There is **no** separate GitHub Wiki product surface" in readme
+    assert "GitHub Wiki is not a product surface" in contributing
+    assert "Do not hand-edit it as source of" in contributing
+    assert "auto-publish full OKF into `.wiki.git`" in contributing
+    assert "GitHub Wiki as second docs tree" in freeze
+    assert "Forbidden** — public knowledge is README + OKF only" in freeze
+
+
 def test_agent_guidance_preserves_workspace_and_credential_boundaries():
     using_unigrok = (ROOT / "skills" / "using-unigrok" / "SKILL.md").read_text(encoding="utf-8")
     claude = (ROOT / ".claude" / "skills" / "using-unigrok" / "SKILL.md").read_text(

@@ -142,11 +142,23 @@ repo role; a **Sites rollback fallback** remains only for the legacy identity
 binding path. That control plane does not replace local UniGrok MCP on
 `localhost:4765`, and it never holds your xAI key.
 
-## 8. Next steps
+## 8. Where docs live
+
+| You are… | Use |
+|---|---|
+| Installing / connecting an IDE | This README |
+| An agent needing schemas and operations | [OKF knowledge bundle](https://grokmcp.org/docs/okf/) (also via `discover_self` and local `/docs/okf/`) |
+| Changing UniGrok itself | [CONTRIBUTING.md](CONTRIBUTING.md) |
+
+There is **no** separate GitHub Wiki product surface. Prefer these three paths
+over any Wiki tab so public install and agent knowledge stay one source of truth.
+
+## 9. Next steps
 
 | I want… | Go here |
 |---|---|
 | More IDE examples | [docs/ide-setup.md](docs/ide-setup.md) |
+| Agent knowledge (OKF) | [https://grokmcp.org/docs/okf/](https://grokmcp.org/docs/okf/) |
 | Architecture | [architecture.md](architecture.md) |
 | Security reporting | [SECURITY.md](SECURITY.md) |
 | **Contribute to UniGrok itself** | [CONTRIBUTING.md](CONTRIBUTING.md) |
