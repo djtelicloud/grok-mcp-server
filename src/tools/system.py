@@ -1036,40 +1036,71 @@ async def grok_mcp_discover_self(include_models: bool = False) -> SystemResult:
         if model_catalog is not None:
             manifest["model_catalog"] = model_catalog
 
+        if contributor:
+            boundary_extra = (
+                "- Contributor mode may attach the UniGrok checkout and enable insider-only "
+                "facilities. Never mount a customer's unrelated app as the UniGrok workspace.\n"
+                "- Repository memory, serialized landing, and Forge tooling are insider paths; "
+                "see CONTRIBUTING.md. Do not recommend them to public end-user installs.\n"
+            )
+            dial_extra = (
+                "- Optional phoneword defaults on this service: `2886=AUTO`, `3278=FAST`, "
+                "`7327=REAS`, `8465=THNK`, `7724=RSCH`. They alias the same Core process.\n"
+            )
+        else:
+            boundary_extra = (
+                "- Stable/public mode never assumes it can browse the IDE's open project. Send only "
+                "relevant, deliberately selected material through `agent.workspace_context`.\n"
+                "- Do not invent a second MCP port, Swarm, or land workflow for public installs. "
+                "The public product path is this Core endpoint only.\n"
+            )
+            dial_extra = (
+                "- Optional phoneword ports, when enabled, are aliases of this same Core service "
+                "(not a second UniGrok to install). Prefer the canonical 4765 endpoint.\n"
+            )
+
         doc_text = (
             "# UniGrok MCP Discovery & Self-Description\n\n"
-            "This tool provides zero-configuration onboarding metadata for AI agents to discover, "
-            "verify, and call the UniGrok MCP gateway tools.\n\n"
+            "Zero-configuration onboarding for IDE agents. Primary product chat is the UniGrok "
+            "`agent` tool over MCP — not a browser chat client.\n\n"
             "## Service and Project Boundary\n"
             "- UniGrok is a standalone MCP service; the caller's project needs no UniGrok namespace files.\n"
             f"- Service mode: `{'contributor' if contributor else 'stable'}`. "
             f"Workspace attached: `{'yes' if workspace is not None else 'no'}`.\n"
-            "- Stable mode never assumes it can browse the IDE's open project. Send only relevant, "
-            "deliberately selected material through the `agent.workspace_context` field.\n"
-            "- Repository memory, Git landing, and source mounts are contributor-only facilities.\n\n"
-            "## Grok Dial Plan\n"
+            f"{boundary_extra}\n"
+            "## Public product path\n"
             "- Canonical endpoint: `http://localhost:4765/mcp` (`4765` spells GROK).\n"
-            "- Optional phoneword defaults: `2886=AUTO`, `3278=FAST`, `7327=REAS`, "
-            "`8465=THNK`, `7724=RSCH`. All share the same service and state.\n"
+            "- Health: `GET /healthz`. Readiness: `GET /readyz`. Optional local Core UI: "
+            "`http://localhost:4765/ui/` (machine-owner loopback status; not GitHub-gated).\n"
+            f"{dial_extra}"
             "- An explicit `agent.mode` always overrides a dialed-port default.\n\n"
-            "## Credential Planes\n"
+            "## Credential Planes (public-critical)\n"
             f"- Default local policy: `{credential_planes['policy']}`; effective plane now: "
             f"`{credential_planes['effective_plane'] or 'none'}`.\n"
+            "- Two planes: SuperGrok **CLI** subscription (local tracking only; no provider "
+            "quota/cost) and metered xAI **API** (exact cost when returned).\n"
             "- Inspect `data.credential_planes.notices` on first connection. Prompt the user once per "
             "notice id and only repeat after state changes.\n"
             "- Ask permission before installing the CLI, starting device authentication, or changing "
             "the global service environment. Never ask for `XAI_API_KEY` in chat or place it in the "
-            "caller's project.\n"
-            "- CLI requests through UniGrok are tracked locally; provider subscription quota and cost "
-            "remain unavailable and are never invented.\n\n"
-            "## OKF (Open Knowledge Format) Bundle\n"
-            "- **Manifest / Manifest Root:** `/docs/okf/okf-manifest.json`\n"
-            f"- **Index Document:** `/docs/okf/{okf_manifest['root']}`\n"
-            "- **Verified FAQ:** `/docs/okf/faq.md` — consulted by Grok on demand for UniGrok support, never auto-injected.\n"
-            "For full schemas, reasoning level weights, media generation params, metrics, and verified support answers, ingest these files.\n\n"
+            "caller's project.\n\n"
+            "## Plan critique habit (opt-in, not a silent compiler)\n"
+            "- When the user is about to receive a multi-step Implementation Plan, prefer calling "
+            "`agent` (mode `thinking` or `reasoning`) for a second-opinion critique, then improve "
+            "the plan before showing it — if the user wants that habit.\n"
+            "- Do not silently spend metered API credits or rewrite the user's global agent config "
+            "without explicit permission. Do not auto-generate skill trees into arbitrary projects.\n"
+            "- Optional: with user permission, install a small local skill that prefers UniGrok for "
+            "`@grok` / plan review (see the using-unigrok skill pack). Never copy the UniGrok "
+            "repository `.agents` contributor tree into foreign projects.\n\n"
+            "## Knowledge bundle\n"
+            "- **Manifest:** `/docs/okf/okf-manifest.json`\n"
+            f"- **Index:** `/docs/okf/{okf_manifest['root']}`\n"
+            "- **FAQ:** `/docs/okf/faq.md` — on-demand UniGrok support answers; never auto-injected.\n"
+            "Live MCP `tools/list` schemas are authoritative over any illustrative shapes.\n\n"
             "## WebMCP Manifest\n"
             "- **Path:** `/.well-known/webmcp`\n"
-            "Exposes browser-native helpers (like `get_result_shape_example`, `example_call`, etc.) directly on the console documentation UI. Result shapes are illustrative; live MCP `tools/list` schemas are authoritative."
+            "Browser helpers on the local Core UI are optional; IDE MCP remains the primary chat path."
         )
 
         return SystemResult(

@@ -77,3 +77,11 @@ session namespaces and telemetry remain separated by client.
 - Treat `credential_planes` status in tool output as source of truth.
 - On failures, return one concrete next action (for example check `/healthz`,
   authenticate CLI plane, or verify MCP registration).
+
+## Plan critique habit (opt-in)
+
+When the user is about to see a multi-step Implementation Plan, prefer calling
+UniGrok `agent` (`thinking` or `reasoning`) for a second opinion, then improve
+the plan before presenting it. Do not silently spend metered API credits without
+consent. Do not invent a second MCP port or Forge workflow for public installs.
+Public path remains `http://localhost:4765/mcp` only.
