@@ -333,8 +333,7 @@ def _format_exc(exc: BaseException) -> str:
     cause = exc.__cause__ or exc.__context__
     if cause is not None and cause is not exc:
         parts.append(f"  caused by: {_format_exc(cause)}")
-    return "
-".join(parts)
+    return "\n".join(parts)
 
 
 if __name__ == "__main__":
