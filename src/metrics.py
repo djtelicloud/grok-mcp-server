@@ -15,6 +15,8 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 
+from .xai_credentials import _resolve_optional_xai_management_key
+
 
 _PROVIDER_CACHE: Dict[str, Any] = {"key": None, "at": 0.0, "value": None}
 _PROVIDER_CACHE_TTL_SEC = 300.0
@@ -261,7 +263,6 @@ def aggregate_telemetry_callers(
 async def fetch_provider_api_usage() -> Dict[str, Any]:
     """Optionally fetch today's team-wide API spend from xAI Management API."""
     enabled = os.environ.get("UNIGROK_PROVIDER_USAGE", "auto").strip().lower()
-    management_key = os.environ.get("XAI_MANAGEMENT_API_KEY", "").strip()
     team_id = os.environ.get("UNIGROK_XAI_TEAM_ID", "").strip()
     base = {
         "scope": "xai_api_team",
@@ -271,6 +272,17 @@ async def fetch_provider_api_usage() -> Dict[str, Any]:
     }
     if enabled in ("0", "false", "off", "disabled"):
         return {**base, "state": "disabled", "detail": "Provider comparison disabled."}
+    try:
+        management_key = _resolve_optional_xai_management_key()
+    except ValueError:
+        return {
+            **base,
+            "state": "error",
+            "detail": (
+                "Management credential aliases conflict; provider comparison "
+                "is blocked until configuration is unambiguous."
+            ),
+        }
     if not management_key or not team_id:
         return {
             **base,
