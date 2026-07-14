@@ -6,6 +6,19 @@ future policy broker.
 """
 
 from .anthropic import AnthropicAdapter
+from .broker import (
+    BrokerCancellationPersistenceError,
+    BrokerAttemptEvidence,
+    BrokerDelegationResult,
+    BrokerHarvestStatus,
+    GrokDelegationPlan,
+    GrokWorkerBroker,
+    GrokWorkerBrokerResult,
+    GrokWorkerDelegation,
+    ProviderAttemptHarvestTrigger,
+    ProviderAttemptStore,
+    WorkerFallbackPolicy,
+)
 from .contracts import (
     BillingClass,
     CredentialPlane,
@@ -62,6 +75,10 @@ __all__ = [
     "ADCIdentity",
     "AnthropicAdapter",
     "BillingClass",
+    "BrokerAttemptEvidence",
+    "BrokerCancellationPersistenceError",
+    "BrokerDelegationResult",
+    "BrokerHarvestStatus",
     "CLIProcessResult",
     "CLIProcessRunner",
     "ClaudeCLIAdapter",
@@ -72,12 +89,18 @@ __all__ = [
     "CredentialState",
     "EndpointKind",
     "GeminiAdapter",
+    "GrokDelegationPlan",
     "GrokSupervisorBinding",
+    "GrokWorkerBroker",
+    "GrokWorkerBrokerResult",
+    "GrokWorkerDelegation",
     "OpenAIAdapter",
     "MCPClientSamplingAdapter",
     "ProviderAdapter",
+    "ProviderAttemptHarvestTrigger",
     "ProviderAttemptResult",
     "ProviderAttemptStart",
+    "ProviderAttemptStore",
     "ProviderChannel",
     "ProviderConfigurationError",
     "ProviderDescriptor",
@@ -107,4 +130,5 @@ __all__ = [
     "load_google_adc_identity",
     "model_visible_messages",
     "WorkerAuthority",
+    "WorkerFallbackPolicy",
 ]

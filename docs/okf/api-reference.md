@@ -1029,6 +1029,85 @@ def opaque_fingerprint(value: str) -> str
 
 Identify a non-secret account/project without exposing its raw value.
 
+## providers/broker.py {#providers-broker}
+
+### Class: `BrokerCancellationPersistenceError` {#providers-broker-brokercancellationpersistenceerror}
+
+```python
+class BrokerCancellationPersistenceError
+```
+
+**Keywords:** broker, cancellation, persistence, error
+
+A cancelled physical attempt could not be durably terminalized.
+
+### Class: `WorkerFallbackPolicy` {#providers-broker-workerfallbackpolicy}
+
+```python
+class WorkerFallbackPolicy
+```
+
+**Keywords:** worker, fallback, policy
+
+Bound one delegation to subscription-only or one metered fallback.
+
+### Class: `GrokWorkerDelegation` {#providers-broker-grokworkerdelegation}
+
+```python
+class GrokWorkerDelegation
+```
+
+**Keywords:** grok, worker, delegation
+
+One semantic worker request chosen by the Grok supervisor.
+
+Physical channels are intentionally absent.  The broker applies the fixed
+same-provider channel ladder from its injected registry.
+
+### Class: `GrokDelegationPlan` {#providers-broker-grokdelegationplan}
+
+```python
+class GrokDelegationPlan
+```
+
+**Keywords:** grok, delegation, plan
+
+Content-addressed internal plan bound to one exact Grok turn.
+
+``supervisor='grok'`` and a Grok-shaped model ID are validation constraints,
+not authentication.  The future runtime integration must accept plans only
+from its trusted Grok session state, never directly from an MCP caller.
+
+### Class: `BrokerAttemptEvidence` {#providers-broker-brokerattemptevidence}
+
+```python
+class BrokerAttemptEvidence
+```
+
+**Keywords:** broker, attempt, evidence
+
+One physical attempt, with worker output exposed only after durability.
+
+### Class: `GrokWorkerBroker` {#providers-broker-grokworkerbroker}
+
+```python
+class GrokWorkerBroker
+```
+
+**Keywords:** grok, worker, broker
+
+Execute strict subordinate attempts while preserving Grok authority.
+
+### Method: `GrokWorkerBroker.execute` {#providers-broker-grokworkerbroker-execute}
+
+```python
+async def GrokWorkerBroker.execute(self, plan: GrokDelegationPlan | Mapping[str, Any]) -> GrokWorkerBrokerResult
+```
+
+**Keywords:** grok, worker, broker, execute
+
+Run one plan and return transport evidence for Grok synthesis only.
+
 ## providers/config.py {#providers-config}
 
 ### Function: `load_model_pins` {#providers-config-load_model_pins}
