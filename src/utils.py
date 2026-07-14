@@ -1241,6 +1241,11 @@ def _bounded_redacted(text: str, limit: int) -> str:
 
 
 _PROVIDER_CONTENT_WITHHELD = "[CONTENT_WITHHELD_BY_SECRET_GUARD]"
+_SESSION_STORE_SCHEMA_HEAD = 17
+_PROVIDER_HARVEST_MAX_LEASE_SECONDS = 300.0
+_PROVIDER_HARVEST_MAX_BACKOFF_SECONDS = 86_400.0
+_PROVIDER_HARVEST_CORRUPT_SCAN_OVERHEAD = 25
+_PROVIDER_HARVEST_CORRUPT_ERROR = "integrity:provider_attempt_decode_failed"
 
 
 def _redact_provider_episode_text(text: Any) -> tuple[str, str]:
@@ -1270,6 +1275,21 @@ def _canonical_json_text(value: Any) -> str:
 
 def _content_sha256(text: str) -> str:
     return "sha256:" + hashlib.sha256(text.encode("utf-8", errors="strict")).hexdigest()
+
+
+def _provider_episode_identity(
+    attempt_id: str,
+    start_digest: str,
+    completion_digest: str,
+    document_digest: str,
+) -> str:
+    basis = _canonical_json_text({
+        "attempt_id": attempt_id,
+        "start_digest": start_digest,
+        "completion_digest": completion_digest,
+        "document_digest": document_digest,
+    })
+    return hashlib.sha256(basis.encode("utf-8", errors="strict")).hexdigest()
 
 
 _PROVIDER_ATTEMPT_COLUMNS = frozenset({
@@ -1325,9 +1345,20 @@ _PROVIDER_ATTEMPT_COLUMNS = frozenset({
     "harvest_lease_id",
     "harvest_lease_expires_at",
     "harvest_error",
+    "harvest_document_json",
+    "harvest_document_digest",
+    "harvest_episode_id",
     "remote_file_id",
     "harvested_at",
 })
+_PROVIDER_ATTEMPT_FROZEN_COLUMNS = frozenset({
+    "harvest_document_json",
+    "harvest_document_digest",
+    "harvest_episode_id",
+})
+_PROVIDER_ATTEMPT_V15_COLUMNS = (
+    _PROVIDER_ATTEMPT_COLUMNS - _PROVIDER_ATTEMPT_FROZEN_COLUMNS
+)
 
 
 def _normalize_verified_outcome(value: Optional[int]) -> Optional[int]:
@@ -2367,13 +2398,19 @@ _with_read_retry_async = _with_write_retry_async
 
 # SQLite Session store to manage API thread IDs and CLI session mapping safely
 class GrokSessionStore:
-    def __init__(self, db_path: Optional[Path | str] = None):
+    def __init__(
+        self,
+        db_path: Optional[Path | str] = None,
+        *,
+        clock: Optional[Callable[[], datetime]] = None,
+    ):
         if db_path is not None:
             db_path = ":memory:" if str(db_path) == ":memory:" else Path(db_path)
         self._custom_db_path = db_path
         self._conn = None
         self._lock = asyncio.Lock()
         self._initialized = False
+        self._clock = clock or (lambda: datetime.now(UTC))
         # Read pool: independent read-only connections against the same WAL
         # db so reads never serialize through the write lock. _read_lock
         # guards only the checkout/lazy open, never the query itself.
@@ -2386,6 +2423,14 @@ class GrokSessionStore:
         self._knowledge_fts = False
         # task_memory_fts availability — same contract as _knowledge_fts.
         self._task_memory_fts = False
+
+    def _trusted_now(self) -> datetime:
+        """Return the store-owned UTC clock used for outbox authority."""
+
+        now = self._clock()
+        if not isinstance(now, datetime) or now.tzinfo is None:
+            raise ValueError("session-store clock must return a timezone-aware datetime")
+        return now.astimezone(UTC)
 
     @property
     def db_path(self) -> Path | str:
@@ -2465,6 +2510,14 @@ class GrokSessionStore:
                 self.db_path.parent.mkdir(parents=True, exist_ok=True)
             self._conn = await aiosqlite.connect(self.db_path)
             self._conn.row_factory = aiosqlite.Row
+            async with self._conn.execute("PRAGMA user_version;") as cursor:
+                row = await cursor.fetchone()
+                version = int(row[0])
+            if version < 0 or version > _SESSION_STORE_SCHEMA_HEAD:
+                raise RuntimeError(
+                    f"unsupported session-store schema version {version}; "
+                    f"expected 0..{_SESSION_STORE_SCHEMA_HEAD}"
+                )
             await self._conn.execute("PRAGMA journal_mode=WAL;")
             await self._conn.execute("PRAGMA synchronous=NORMAL;")
             await self._conn.execute("PRAGMA busy_timeout=30000;")
@@ -2509,10 +2562,6 @@ class GrokSessionStore:
                 raise
 
             # User version migrations
-            async with self._conn.execute("PRAGMA user_version;") as cursor:
-                row = await cursor.fetchone()
-                version = row[0]
-
             if version < 1:
                 await self._conn.execute("BEGIN IMMEDIATE;")
                 try:
@@ -3016,7 +3065,7 @@ class GrokSessionStore:
                         "PRAGMA table_info(provider_attempts);"
                     ) as cursor:
                         actual_columns = {row["name"] for row in await cursor.fetchall()}
-                    if actual_columns != _PROVIDER_ATTEMPT_COLUMNS:
+                    if actual_columns != _PROVIDER_ATTEMPT_V15_COLUMNS:
                         raise RuntimeError(
                             "provider_attempts schema is incompatible; refusing to stamp v15"
                         )
@@ -3173,6 +3222,68 @@ class GrokSessionStore:
                 except Exception:
                     await self._conn.rollback()
                     raise
+
+            if version < 17:
+                # Freeze the exact redacted cloud artifact at terminal
+                # transition. Retries never rebuild it under a changing secret
+                # environment or reuse one identity for different bytes.
+                await self._conn.execute("BEGIN IMMEDIATE;")
+                try:
+                    async with self._conn.execute(
+                        "PRAGMA table_info(provider_attempts);"
+                    ) as cursor:
+                        before_columns = {
+                            row["name"] for row in await cursor.fetchall()
+                        }
+                    present_frozen = before_columns & _PROVIDER_ATTEMPT_FROZEN_COLUMNS
+                    if present_frozen:
+                        raise RuntimeError(
+                            "provider_attempts frozen columns predate v17; refusing "
+                            "to certify unknown schema"
+                        )
+                    await self._conn.execute(
+                        "ALTER TABLE provider_attempts "
+                        "ADD COLUMN harvest_document_json TEXT;"
+                    )
+                    await self._conn.execute(
+                        "ALTER TABLE provider_attempts "
+                        "ADD COLUMN harvest_document_digest TEXT;"
+                    )
+                    await self._conn.execute(
+                        "ALTER TABLE provider_attempts "
+                        "ADD COLUMN harvest_episode_id TEXT;"
+                    )
+                    async with self._conn.execute(
+                        "SELECT attempt_id FROM provider_attempts "
+                        "WHERE transport_status IN ('returned', 'failed', 'indeterminate') "
+                        "ORDER BY id ASC"
+                    ) as cursor:
+                        terminal_rows = await cursor.fetchall()
+                    for terminal_row in terminal_rows:
+                        await self._freeze_provider_attempt_document_unlocked(
+                            str(terminal_row["attempt_id"])
+                        )
+                    async with self._conn.execute(
+                        "PRAGMA table_info(provider_attempts);"
+                    ) as cursor:
+                        actual_columns = {
+                            row["name"] for row in await cursor.fetchall()
+                        }
+                    if actual_columns != _PROVIDER_ATTEMPT_COLUMNS:
+                        raise RuntimeError(
+                            "provider_attempts frozen schema is incompatible; "
+                            "refusing to stamp v17"
+                        )
+                    await self._conn.execute("PRAGMA user_version = 17;")
+                    await self._conn.commit()
+                except Exception:
+                    await self._conn.rollback()
+                    raise
+
+            # Certification is unconditional, including an already-stamped
+            # v17 database. Version metadata alone never proves that the
+            # provider evidence table still has its exact trusted shape.
+            await self._certify_provider_attempts_v17_schema_unlocked()
 
             # knowledge_fts is (re)checked on EVERY init, not just inside the
             # v7 gate: FTS5 is a compile-time SQLite option, so a db created
@@ -4099,9 +4210,280 @@ class GrokSessionStore:
 
     # ── Grok-owned subordinate provider attempts (v15) ────────────────────
 
-    @staticmethod
-    def _decode_provider_attempt_row(row: Any) -> Dict[str, Any]:
+    async def _certify_provider_attempts_v17_schema_unlocked(self) -> None:
+        """Fail closed unless provider_attempts has the exact v17 contract."""
+
+        async with self._conn.execute(
+            "PRAGMA table_info(provider_attempts);"
+        ) as cursor:
+            column_rows = await cursor.fetchall()
+        columns = {str(row["name"]): row for row in column_rows}
+        if set(columns) != _PROVIDER_ATTEMPT_COLUMNS:
+            raise RuntimeError("provider_attempts v17 columns are incompatible")
+        for name in _PROVIDER_ATTEMPT_FROZEN_COLUMNS:
+            row = columns[name]
+            if (
+                str(row["type"] or "").casefold() != "text"
+                or int(row["notnull"]) != 0
+                or row["dflt_value"] is not None
+            ):
+                raise RuntimeError(
+                    "provider_attempts v17 frozen columns are incompatible"
+                )
+
+        async with self._conn.execute(
+            "SELECT sql FROM sqlite_master "
+            "WHERE type = 'table' AND name = 'provider_attempts'"
+        ) as cursor:
+            ddl_row = await cursor.fetchone()
+        normalized_ddl = re.sub(
+            r"\s+", " ", str(ddl_row["sql"] if ddl_row else "").casefold()
+        )
+        required_checks = (
+            "attempt_id text not null unique",
+            "check(supervisor = 'grok')",
+            "check(supervisor_plane in ('cli', 'api'))",
+            "check(transport_status in ('started', 'returned', 'failed', 'indeterminate'))",
+            "check(harvest_status in ('held', 'pending', 'leased', 'retry_wait', 'synced'))",
+            "unique(delegation_id, attempt_ordinal)",
+        )
+        if any(marker not in normalized_ddl for marker in required_checks):
+            raise RuntimeError("provider_attempts v17 constraints are incompatible")
+
+        async with self._conn.execute(
+            "PRAGMA index_list(provider_attempts);"
+        ) as cursor:
+            index_rows = await cursor.fetchall()
+        indexes = {str(row["name"]): row for row in index_rows}
+        required_indexes = {
+            "idx_provider_attempts_delegation": (
+                False,
+                ["delegation_id", "attempt_ordinal"],
+            ),
+            "idx_provider_attempts_request": (True, ["request_id"]),
+            "idx_provider_attempts_session": (
+                False,
+                ["supervisor_session_id", "id"],
+            ),
+            "idx_provider_attempts_harvest": (
+                False,
+                ["harvest_status", "harvest_next_at", "id"],
+            ),
+        }
+        for name, (unique, expected_columns) in required_indexes.items():
+            index_row = indexes.get(name)
+            if (
+                index_row is None
+                or bool(int(index_row["unique"])) != unique
+                or str(index_row["origin"]) != "c"
+                or int(index_row["partial"]) != 0
+            ):
+                raise RuntimeError("provider_attempts v17 indexes are incompatible")
+            async with self._conn.execute(f"PRAGMA index_xinfo({name});") as cursor:
+                index_shape = [
+                    (
+                        str(row["name"]),
+                        int(row["desc"]),
+                        str(row["coll"] or "").casefold(),
+                    )
+                    for row in await cursor.fetchall()
+                    if int(row["key"]) == 1
+                ]
+            expected_shape = [
+                (column, 0, "binary") for column in expected_columns
+            ]
+            if index_shape != expected_shape:
+                raise RuntimeError("provider_attempts v17 indexes are incompatible")
+
+    async def _freeze_provider_attempt_document_unlocked(
+        self, attempt_id: str
+    ) -> None:
+        """Persist one terminal episode's exact final redacted cloud bytes."""
+
+        async with self._conn.execute(
+            "SELECT * FROM provider_attempts WHERE attempt_id = ?",
+            (attempt_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+        if row is None:
+            raise KeyError(f"unknown provider attempt: {attempt_id}")
         item = dict(row)
+        if item.get("transport_status") not in {"returned", "failed", "indeterminate"}:
+            raise ValueError("only terminal provider attempts can freeze cloud evidence")
+        existing = tuple(item.get(name) for name in _PROVIDER_ATTEMPT_FROZEN_COLUMNS)
+        if all(value is not None for value in existing):
+            self._decode_provider_attempt_row(row)
+            return
+        if any(value is not None for value in existing):
+            raise ValueError("provider attempt has a partial frozen cloud artifact")
+
+        decoded = self._decode_provider_attempt_row(row, require_frozen=False)
+        from .provider_harvest import freeze_worker_episode_document
+
+        frozen = freeze_worker_episode_document(decoded)
+        document_text = frozen.document.decode("utf-8", errors="strict")
+        cursor = await self._conn.execute(
+            """
+            UPDATE provider_attempts SET
+                harvest_document_json = ?, harvest_document_digest = ?,
+                harvest_episode_id = ?
+            WHERE attempt_id = ?
+              AND harvest_document_json IS NULL
+              AND harvest_document_digest IS NULL
+              AND harvest_episode_id IS NULL
+            """,
+            (
+                document_text,
+                frozen.document_digest,
+                frozen.episode_id,
+                attempt_id,
+            ),
+        )
+        if self._safe_db_int(cursor.rowcount) != 1:
+            raise ValueError("provider attempt frozen artifact changed concurrently")
+
+    @staticmethod
+    def _validate_provider_frozen_projection(
+        item: Dict[str, Any], *, terminal: bool, require_frozen: bool
+    ) -> None:
+        document_text = item.get("harvest_document_json")
+        document_digest = item.get("harvest_document_digest")
+        episode_id = item.get("harvest_episode_id")
+        frozen = (document_text, document_digest, episode_id)
+        if not terminal:
+            if any(value is not None for value in frozen):
+                raise ValueError("started provider attempt has a frozen cloud artifact")
+            return
+        if not require_frozen and all(value is None for value in frozen):
+            return
+        if not all(isinstance(value, str) and value for value in frozen):
+            raise ValueError("terminal provider attempt lacks its frozen cloud artifact")
+        try:
+            parsed = json.loads(str(document_text))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("provider frozen cloud document is malformed") from exc
+        if _canonical_json_text(parsed) != document_text:
+            raise ValueError("provider frozen cloud document is not canonical")
+        if _content_sha256(str(document_text)) != document_digest:
+            raise ValueError("provider frozen cloud document digest mismatch")
+        if re.fullmatch(r"[0-9a-f]{64}", str(episode_id)) is None:
+            raise ValueError("provider frozen episode identity is malformed")
+        expected_identity = _provider_episode_identity(
+            str(item.get("attempt_id") or ""),
+            str(item.get("start_digest") or ""),
+            str(item.get("completion_digest") or ""),
+            str(document_digest),
+        )
+        if episode_id != expected_identity:
+            raise ValueError("provider frozen episode identity mismatch")
+
+    @staticmethod
+    def _validate_provider_harvest_projection(
+        item: Dict[str, Any], *, terminal: bool
+    ) -> None:
+        """Fail closed on impossible mutable outbox state.
+
+        The episode evidence is digest-bound separately.  These columns are
+        intentionally mutable, so their safety comes from a small state
+        machine: terminal rows may be pending, leased, waiting to retry, or
+        synced; a started row must remain held.
+        """
+
+        status = str(item.get("harvest_status") or "")
+        try:
+            attempts = int(item.get("harvest_attempts") or 0)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("provider harvest attempt count is malformed") from exc
+        if attempts < 0:
+            raise ValueError("provider harvest attempt count is negative")
+
+        lease_id = item.get("harvest_lease_id")
+        lease_expires = item.get("harvest_lease_expires_at")
+        next_at = item.get("harvest_next_at")
+        error = item.get("harvest_error")
+        remote_file_id = item.get("remote_file_id")
+        harvested_at = item.get("harvested_at")
+
+        def _aware(value: Any, label: str) -> datetime:
+            try:
+                parsed = datetime.fromisoformat(str(value))
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"provider harvest {label} is malformed") from exc
+            if parsed.tzinfo is None:
+                raise ValueError(f"provider harvest {label} lacks timezone")
+            return parsed
+
+        if not terminal:
+            if status != "held" or attempts != 0 or any(
+                value is not None
+                for value in (
+                    lease_id,
+                    lease_expires,
+                    next_at,
+                    error,
+                    remote_file_id,
+                    harvested_at,
+                )
+            ):
+                raise ValueError("started provider attempt has invalid harvest state")
+            return
+
+        if status == "pending":
+            _aware(next_at, "next time")
+            if any(
+                value is not None
+                for value in (lease_id, lease_expires, error, remote_file_id, harvested_at)
+            ):
+                raise ValueError("pending provider harvest has conflicting state")
+            return
+        if status == "leased":
+            if (
+                attempts < 1
+                or not isinstance(lease_id, str)
+                or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", lease_id) is None
+            ):
+                raise ValueError("provider harvest lease identity is invalid")
+            _aware(lease_expires, "lease expiry")
+            if any(
+                value is not None
+                for value in (next_at, error, remote_file_id, harvested_at)
+            ):
+                raise ValueError("leased provider harvest has conflicting state")
+            return
+        if status == "retry_wait":
+            if attempts < 1 or not isinstance(error, str) or not error:
+                raise ValueError("retrying provider harvest is missing bounded error state")
+            _aware(next_at, "retry time")
+            if any(
+                value is not None
+                for value in (lease_id, lease_expires, remote_file_id, harvested_at)
+            ):
+                raise ValueError("retrying provider harvest has conflicting state")
+            return
+        if status == "synced":
+            if (
+                attempts < 1
+                or not isinstance(remote_file_id, str)
+                or not remote_file_id
+                or len(remote_file_id) > 256
+            ):
+                raise ValueError("synced provider harvest is missing remote identity")
+            _aware(harvested_at, "completion time")
+            if any(
+                value is not None
+                for value in (lease_id, lease_expires, next_at, error)
+            ):
+                raise ValueError("synced provider harvest has conflicting state")
+            return
+        raise ValueError("terminal provider attempt has an unknown harvest state")
+
+    @staticmethod
+    def _decode_provider_attempt_row(
+        row: Any, *, require_frozen: bool = True
+    ) -> Dict[str, Any]:
+        item = dict(row)
+        if set(item) != _PROVIDER_ATTEMPT_COLUMNS:
+            raise RuntimeError("provider_attempts row schema is incompatible")
         start_raw = item.get("start_json")
         if not isinstance(start_raw, str) or not start_raw:
             raise ValueError("provider attempt is missing its canonical start record")
@@ -4197,6 +4579,12 @@ class GrokSessionStore:
                 or item.get("harvest_status") != "held"
             ):
                 raise ValueError("started provider attempt has terminal projection state")
+            GrokSessionStore._validate_provider_harvest_projection(
+                item, terminal=False
+            )
+            GrokSessionStore._validate_provider_frozen_projection(
+                item, terminal=False, require_frozen=require_frozen
+            )
             item["receipt"] = None
             return item
 
@@ -4272,6 +4660,12 @@ class GrokSessionStore:
             }
             if completion_record != expected_completion:
                 raise ValueError("indeterminate completion projection mismatch")
+            GrokSessionStore._validate_provider_harvest_projection(
+                item, terminal=True
+            )
+            GrokSessionStore._validate_provider_frozen_projection(
+                item, terminal=True, require_frozen=require_frozen
+            )
             item["receipt"] = None
             return item
         if status not in {"returned", "failed"}:
@@ -4371,6 +4765,10 @@ class GrokSessionStore:
             "unknown",
         }:
             raise ValueError("returned provider attempt has an invalid finish reason")
+        GrokSessionStore._validate_provider_harvest_projection(item, terminal=True)
+        GrokSessionStore._validate_provider_frozen_projection(
+            item, terminal=True, require_frozen=require_frozen
+        )
         return item
 
     @_with_write_retry_async
@@ -4587,7 +4985,7 @@ class GrokSessionStore:
 
                 usage = receipt.usage
                 cost_usd = str(receipt.cost_usd) if receipt.cost_usd is not None else None
-                await self._conn.execute(
+                cursor = await self._conn.execute(
                     """
                     UPDATE provider_attempts SET
                         completion_json = ?, completion_digest = ?,
@@ -4629,6 +5027,9 @@ class GrokSessionStore:
                         attempt_key,
                     ),
                 )
+                if self._safe_db_int(cursor.rowcount) != 1:
+                    raise ValueError("provider attempt terminal transition was lost")
+                await self._freeze_provider_attempt_document_unlocked(attempt_key)
                 await self._conn.commit()
             except Exception:
                 await self._conn.rollback()
@@ -4689,7 +5090,12 @@ class GrokSessionStore:
                             attempt_key,
                         ),
                     )
-                    count += self._safe_db_int(cursor.rowcount)
+                    changed = self._safe_db_int(cursor.rowcount)
+                    if changed:
+                        await self._freeze_provider_attempt_document_unlocked(
+                            attempt_key
+                        )
+                    count += changed
                 await self._conn.commit()
             except Exception:
                 await self._conn.rollback()
@@ -4722,6 +5128,369 @@ class GrokSessionStore:
             async with conn.execute(query, params) as cursor:
                 rows = await cursor.fetchall()
         return [self._decode_provider_attempt_row(row) for row in rows]
+
+    @_with_write_retry_async
+    async def lease_provider_attempts_for_harvest(
+        self,
+        lease_id: str,
+        lease_seconds: float = 60.0,
+        limit: int = 25,
+    ) -> List[Dict[str, Any]]:
+        """Atomically lease due terminal episodes, including expired leases.
+
+        A crashed uploader therefore never strands a row.  The retry count is
+        intentionally unbounded: this outbox has no discard/dead-letter state.
+        """
+
+        lease_key = str(lease_id or "").strip()
+        if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", lease_key) is None:
+            raise ValueError("provider harvest lease_id must be opaque and safe")
+        try:
+            bounded_lease_seconds = float(lease_seconds)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("provider harvest lease duration is malformed") from exc
+        if not 1.0 <= bounded_lease_seconds <= _PROVIDER_HARVEST_MAX_LEASE_SECONDS:
+            raise ValueError("provider harvest lease exceeds the bounded maximum")
+        bounded = max(1, min(int(limit or 25), 25))
+        scan_limit = min(
+            100, bounded + _PROVIDER_HARVEST_CORRUPT_SCAN_OVERHEAD
+        )
+
+        await self._ensure_initialized()
+        leased: List[Dict[str, Any]] = []
+        changed = False
+        async with self._lock:
+            await self._conn.execute("BEGIN IMMEDIATE;")
+            try:
+                # Read trusted time only after every local wait and after the
+                # write transaction is fenced. A queued caller cannot carry a
+                # stale timestamp through lock contention.
+                now_utc = self._trusted_now()
+                expires_utc = now_utc + timedelta(seconds=bounded_lease_seconds)
+                now_text = now_utc.isoformat()
+                expires_text = expires_utc.isoformat()
+                async with self._conn.execute(
+                    """
+                    SELECT * FROM provider_attempts
+                    WHERE transport_status IN ('returned', 'failed', 'indeterminate')
+                      AND (
+                        (harvest_status = 'pending' AND harvest_next_at <= ?)
+                        OR (harvest_status = 'retry_wait' AND harvest_next_at <= ?)
+                        OR (harvest_status = 'leased' AND harvest_lease_expires_at <= ?)
+                      )
+                    ORDER BY id ASC LIMIT ?
+                    """,
+                    (now_text, now_text, now_text, scan_limit),
+                ) as cursor:
+                    candidate_rows = await cursor.fetchall()
+                leased_ids: List[int] = []
+                corrupt_next_text = (
+                    now_utc
+                    + timedelta(seconds=_PROVIDER_HARVEST_MAX_BACKOFF_SECONDS)
+                ).isoformat()
+                for row in candidate_rows:
+                    if len(leased_ids) >= bounded:
+                        break
+                    row_id = int(row["id"])
+                    try:
+                        self._decode_provider_attempt_row(row)
+                    except ValueError:
+                        # This is row-local evidence corruption, not a schema or
+                        # database failure. Defer it with a bounded fixed error
+                        # and keep scanning so one poisoned oldest row cannot
+                        # starve healthy work or trigger a cloud effect.
+                        cursor = await self._conn.execute(
+                            """
+                            UPDATE provider_attempts SET
+                                harvest_status = 'retry_wait',
+                                harvest_attempts = harvest_attempts + 1,
+                                harvest_next_at = ?, harvest_lease_id = NULL,
+                                harvest_lease_expires_at = NULL,
+                                harvest_error = ?, remote_file_id = NULL,
+                                harvested_at = NULL
+                            WHERE id = ?
+                              AND transport_status IN
+                                  ('returned', 'failed', 'indeterminate')
+                              AND (
+                                (harvest_status = 'pending' AND harvest_next_at <= ?)
+                                OR (harvest_status = 'retry_wait' AND harvest_next_at <= ?)
+                                OR (harvest_status = 'leased'
+                                    AND harvest_lease_expires_at <= ?)
+                              )
+                            """,
+                            (
+                                corrupt_next_text,
+                                _PROVIDER_HARVEST_CORRUPT_ERROR,
+                                row_id,
+                                now_text,
+                                now_text,
+                                now_text,
+                            ),
+                        )
+                        if self._safe_db_int(cursor.rowcount) != 1:
+                            raise RuntimeError(
+                                "provider harvest corrupt-row quarantine lost"
+                            )
+                        changed = True
+                        continue
+                    cursor = await self._conn.execute(
+                        """
+                        UPDATE provider_attempts SET
+                            harvest_status = 'leased',
+                            harvest_attempts = harvest_attempts + 1,
+                            harvest_next_at = NULL,
+                            harvest_lease_id = ?,
+                            harvest_lease_expires_at = ?,
+                            harvest_error = NULL
+                        WHERE id = ?
+                          AND transport_status IN ('returned', 'failed', 'indeterminate')
+                          AND (
+                            (harvest_status = 'pending' AND harvest_next_at <= ?)
+                            OR (harvest_status = 'retry_wait' AND harvest_next_at <= ?)
+                            OR (harvest_status = 'leased' AND harvest_lease_expires_at <= ?)
+                          )
+                        """,
+                        (
+                            lease_key,
+                            expires_text,
+                            row_id,
+                            now_text,
+                            now_text,
+                            now_text,
+                        ),
+                    )
+                    if self._safe_db_int(cursor.rowcount) != 1:
+                        raise RuntimeError("provider harvest lease lost during transaction")
+                    leased_ids.append(row_id)
+                    changed = True
+                if leased_ids:
+                    placeholders = ", ".join("?" for _ in leased_ids)
+                    async with self._conn.execute(
+                        f"SELECT * FROM provider_attempts WHERE id IN ({placeholders}) "  # nosec B608
+                        "ORDER BY id ASC",
+                        leased_ids,
+                    ) as cursor:
+                        leased_rows = await cursor.fetchall()
+                    leased = [
+                        self._decode_provider_attempt_row(row) for row in leased_rows
+                    ]
+                await self._conn.commit()
+            except Exception:
+                await self._conn.rollback()
+                raise
+            if changed:
+                await self._on_write_completed()
+        return leased
+
+    @_with_read_retry_async
+    async def provider_attempt_harvest_lease_is_fresh(
+        self,
+        attempt_id: str,
+        lease_id: str,
+        minimum_remaining_seconds: float = 0.0,
+    ) -> bool:
+        """Check trusted-time ownership immediately before a cloud effect."""
+
+        attempt_key = str(attempt_id or "").strip()
+        lease_key = str(lease_id or "").strip()
+        if not attempt_key or not lease_key:
+            raise ValueError("provider harvest attempt and lease identities are required")
+        try:
+            minimum = float(minimum_remaining_seconds)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("provider harvest minimum lease remainder is malformed") from exc
+        if minimum < 0 or minimum > _PROVIDER_HARVEST_MAX_LEASE_SECONDS:
+            raise ValueError("provider harvest minimum lease remainder is out of bounds")
+        await self._ensure_initialized()
+        async with self._read_conn() as conn:
+            async with conn.execute(
+                "SELECT * FROM provider_attempts WHERE attempt_id = ?",
+                (attempt_key,),
+            ) as cursor:
+                row = await cursor.fetchone()
+        if row is None:
+            raise KeyError(f"unknown provider attempt: {attempt_key}")
+        stored = self._decode_provider_attempt_row(row)
+        if (
+            stored["harvest_status"] != "leased"
+            or stored["harvest_lease_id"] != lease_key
+        ):
+            return False
+        lease_expires = datetime.fromisoformat(
+            str(stored["harvest_lease_expires_at"])
+        ).astimezone(UTC)
+        # Evaluate trusted time after the storage read so connection setup or
+        # query delay cannot inflate the apparent remaining authority.
+        required_until = self._trusted_now() + timedelta(seconds=minimum)
+        return lease_expires > required_until
+
+    @_with_write_retry_async
+    async def mark_provider_attempt_harvest_synced(
+        self,
+        attempt_id: str,
+        lease_id: str,
+        remote_file_id: str,
+    ) -> bool:
+        """Commit one upload only when the caller still owns its lease."""
+
+        attempt_key = str(attempt_id or "").strip()
+        lease_key = str(lease_id or "").strip()
+        remote_key = str(remote_file_id or "").strip()
+        if not attempt_key or not lease_key:
+            raise ValueError("provider harvest attempt and lease identities are required")
+        if not remote_key or len(remote_key) > 256:
+            raise ValueError("provider harvest remote file identity is invalid")
+        safe_remote, remote_redaction = _redact_provider_episode_text(remote_key)
+        if remote_redaction != "clean" or safe_remote != remote_key:
+            raise ValueError("provider harvest remote file identity is not secret-safe")
+        await self._ensure_initialized()
+        async with self._lock:
+            await self._conn.execute("BEGIN IMMEDIATE;")
+            try:
+                async with self._conn.execute(
+                    "SELECT * FROM provider_attempts WHERE attempt_id = ?",
+                    (attempt_key,),
+                ) as cursor:
+                    row = await cursor.fetchone()
+                if row is None:
+                    raise KeyError(f"unknown provider attempt: {attempt_key}")
+                stored = self._decode_provider_attempt_row(row)
+                if stored["harvest_status"] == "synced":
+                    if stored["remote_file_id"] == remote_key:
+                        await self._conn.rollback()
+                        return False
+                    raise ValueError("provider harvest remote identity conflicts")
+                if (
+                    stored["harvest_status"] != "leased"
+                    or stored["harvest_lease_id"] != lease_key
+                ):
+                    await self._conn.rollback()
+                    return False
+                # This read belongs inside the fenced transaction. Computing
+                # it before awaiting the lock would let a queued stale worker
+                # commit with a backdated authority check.
+                harvested_utc = self._trusted_now()
+                harvested_text = harvested_utc.isoformat()
+                lease_expires_utc = datetime.fromisoformat(
+                    str(stored["harvest_lease_expires_at"])
+                ).astimezone(UTC)
+                if harvested_utc >= lease_expires_utc:
+                    await self._conn.rollback()
+                    return False
+                if harvested_utc < datetime.fromisoformat(
+                    str(stored["completed_at"])
+                ).astimezone(UTC):
+                    raise ValueError("provider harvest completion predates the episode")
+                cursor = await self._conn.execute(
+                    """
+                    UPDATE provider_attempts SET
+                        harvest_status = 'synced', harvest_next_at = NULL,
+                        harvest_lease_id = NULL, harvest_lease_expires_at = NULL,
+                        harvest_error = NULL, remote_file_id = ?, harvested_at = ?
+                    WHERE attempt_id = ? AND harvest_status = 'leased'
+                      AND harvest_lease_id = ?
+                      AND harvest_lease_expires_at > ?
+                    """,
+                    (
+                        remote_key,
+                        harvested_text,
+                        attempt_key,
+                        lease_key,
+                        harvested_text,
+                    ),
+                )
+                if self._safe_db_int(cursor.rowcount) != 1:
+                    raise ValueError("provider harvest lease was lost")
+                await self._conn.commit()
+            except Exception:
+                await self._conn.rollback()
+                raise
+            await self._on_write_completed()
+        return True
+
+    @_with_write_retry_async
+    async def mark_provider_attempt_harvest_retry(
+        self,
+        attempt_id: str,
+        lease_id: str,
+        error: str,
+        backoff_seconds: float,
+    ) -> bool:
+        """Release a failed lease into bounded backoff without discarding it."""
+
+        attempt_key = str(attempt_id or "").strip()
+        lease_key = str(lease_id or "").strip()
+        if not attempt_key or not lease_key:
+            raise ValueError("provider harvest attempt and lease identities are required")
+        try:
+            bounded_backoff = float(backoff_seconds)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("provider harvest retry delay is malformed") from exc
+        if not 1.0 <= bounded_backoff <= _PROVIDER_HARVEST_MAX_BACKOFF_SECONDS:
+            raise ValueError("provider harvest retry exceeds the bounded backoff")
+        safe_error, _ = _redact_provider_episode_text(error)
+        safe_error = _bounded_redacted(safe_error or "provider_harvest_failed", 500)
+        if not safe_error:
+            safe_error = "provider_harvest_failed"
+        await self._ensure_initialized()
+        async with self._lock:
+            await self._conn.execute("BEGIN IMMEDIATE;")
+            try:
+                async with self._conn.execute(
+                    "SELECT * FROM provider_attempts WHERE attempt_id = ?",
+                    (attempt_key,),
+                ) as cursor:
+                    row = await cursor.fetchone()
+                if row is None:
+                    raise KeyError(f"unknown provider attempt: {attempt_key}")
+                stored = self._decode_provider_attempt_row(row)
+                if stored["harvest_status"] == "retry_wait":
+                    await self._conn.rollback()
+                    return False
+                if (
+                    stored["harvest_status"] != "leased"
+                    or stored["harvest_lease_id"] != lease_key
+                ):
+                    await self._conn.rollback()
+                    return False
+                # Derive failure/backoff time only after the write lock is
+                # held; lock wait cannot preserve an expired lease.
+                failed_utc = self._trusted_now()
+                next_utc = failed_utc + timedelta(seconds=bounded_backoff)
+                failed_text = failed_utc.isoformat()
+                next_text = next_utc.isoformat()
+                lease_expires_utc = datetime.fromisoformat(
+                    str(stored["harvest_lease_expires_at"])
+                ).astimezone(UTC)
+                if failed_utc >= lease_expires_utc:
+                    await self._conn.rollback()
+                    return False
+                cursor = await self._conn.execute(
+                    """
+                    UPDATE provider_attempts SET
+                        harvest_status = 'retry_wait', harvest_next_at = ?,
+                        harvest_lease_id = NULL, harvest_lease_expires_at = NULL,
+                        harvest_error = ?, remote_file_id = NULL, harvested_at = NULL
+                    WHERE attempt_id = ? AND harvest_status = 'leased'
+                      AND harvest_lease_id = ?
+                      AND harvest_lease_expires_at > ?
+                    """,
+                    (
+                        next_text,
+                        safe_error,
+                        attempt_key,
+                        lease_key,
+                        failed_text,
+                    ),
+                )
+                if self._safe_db_int(cursor.rowcount) != 1:
+                    raise ValueError("provider harvest lease was lost")
+                await self._conn.commit()
+            except Exception:
+                await self._conn.rollback()
+                raise
+            await self._on_write_completed()
+        return True
 
     # ── Commit-anchored workspace evidence (v11) ───────────────────────────
 
