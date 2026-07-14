@@ -85,9 +85,9 @@ Public docs and **stable** `discover_self` prose must **not** instruct agents to
 **LIVE:** GitHub OAuth control plane with live collaborator checks; no provider
 secret forms; no laptop proxy of local MCP.
 
-**TARGET:** Raise privileged Console entry to GitHub permission ∈
-`{write, maintain, admin}` where product requires write-only insiders; fail
-closed; short cache; never long-lived “is_insider” without recheck.
+**LIVE:** Privileged Console entry requires GitHub permission ∈
+`{write, maintain, admin}` and fails closed. Authorization is rechecked on each
+protected request rather than trusting a long-lived “is_insider” claim.
 
 Cloud must **never** accept, store, or proxy `XAI_API_KEY`, CLI OAuth material,
 or gateway secrets.
@@ -139,7 +139,7 @@ public Quick Start.
 | Public README is vibe-only; insider ops in CONTRIBUTING | Wave-1 docs goal |
 | Stable discover prose does not teach Forge connect | Wave-1 onboarding goal |
 | Console is observe+paste only | **TARGET** (legacy chat still LIVE) |
-| GitHub write+ for all cloud Console entry | **TARGET** (verify LIVE gate separately) |
+| GitHub write+ for all cloud Console entry | **LIVE** |
 | Unified single Insider UI (swarm+control+core) | **Deferred** |
 | Silent skill compiler into user repos | **Forbidden** |
 

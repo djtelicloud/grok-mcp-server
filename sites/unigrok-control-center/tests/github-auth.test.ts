@@ -36,17 +36,19 @@ test("session cookies round trip and reject tampering, duplicates, and expiry", 
   assert.equal(await readGitHubSession(config, pair, now + 3_600_001), null);
 });
 
-test("live authorization accepts triage and above but rejects read and identity mismatch", async () => {
+test("live authorization requires write or stronger and rejects weaker roles or identity mismatch", async () => {
   const config = loadGitHubAuthConfig(environment);
   const identity = { id: 42, login: "contributor" };
   const response = (permission: string, id = 42) => async () => Response.json({
     permission,
     user: { id, login: "contributor" },
   });
-  assert.equal((await authorizeGitHubCollaborator(config, identity, "t".repeat(40), response("triage")))?.role, "contributor");
+  assert.equal((await authorizeGitHubCollaborator(config, identity, "t".repeat(40), response("write")))?.role, "contributor");
+  assert.equal((await authorizeGitHubCollaborator(config, identity, "t".repeat(40), response("maintain")))?.role, "contributor");
   assert.equal((await authorizeGitHubCollaborator(config, identity, "t".repeat(40), response("admin")))?.role, "admin");
+  assert.equal(await authorizeGitHubCollaborator(config, identity, "t".repeat(40), response("triage")), null);
   assert.equal(await authorizeGitHubCollaborator(config, identity, "t".repeat(40), response("read")), null);
-  assert.equal(await authorizeGitHubCollaborator(config, identity, "t".repeat(40), response("triage", 99)), null);
+  assert.equal(await authorizeGitHubCollaborator(config, identity, "t".repeat(40), response("write", 99)), null);
 });
 
 test("a later permission check observes revocation", async () => {

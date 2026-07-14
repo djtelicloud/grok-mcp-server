@@ -28,7 +28,7 @@ export default function GitHubControlAccessDenied({
         </div>
         <div className="access-notice">
           <strong>Authorization is checked on every request.</strong>
-          <p>Only GitHub roles with triage, write, maintain, or admin access to {PUBLIC_PROJECT.repository.name} qualify. Removing that role revokes control access without waiting for the browser session to expire.</p>
+          <p>Only GitHub roles with write, maintain, or admin access to {PUBLIC_PROJECT.repository.name} qualify. Removing that role revokes control access without waiting for the browser session to expire.</p>
         </div>
         <div className="public-actions">
           <a className="public-primary" href="/auth/github/login?return_to=%2Fcontrol">Sign in with GitHub</a>

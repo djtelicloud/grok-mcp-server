@@ -9,7 +9,7 @@ export default function Forbidden() {
         <p className="public-kicker"><span /> Contributor boundary</p>
         <h1 id="access-title">Contributor access was not confirmed.</h1>
         <p className="access-lede">
-          GitHub did not confirm a current triage, write, maintain, or admin role for this repository.
+          GitHub did not confirm a current write, maintain, or admin role for this repository.
           Public read access is not sufficient.
         </p>
         <div className="access-notice">

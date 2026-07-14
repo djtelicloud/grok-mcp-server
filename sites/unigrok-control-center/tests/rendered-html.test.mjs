@@ -313,6 +313,7 @@ test("serves public project, discovery, and llms documents anonymously", async (
   assert.equal(project.mcp.remote_status, "private-oauth-api-plane");
   assert.equal(project.mcp.private_remote, "https://mcp.grokmcp.org/mcp");
   assert.equal(project.control.authorization, "fresh-server-side-github-repository-role-check");
+  assert.equal(project.control.minimum_repository_role, "write");
   assert.equal(project.documentation.okf_manifest, "https://grokmcp.org/docs/okf/okf-manifest.json");
 
   const discoveryResponse = await request(worker, "/.well-known/unigrok.json");
@@ -329,6 +330,7 @@ test("serves public project, discovery, and llms documents anonymously", async (
   const llms = await llmsResponse.text();
   assert.match(llms, /# UniGrok/);
   assert.match(llms, /fresh server-side repository role check/);
+  assert.match(llms, /minimum accepted role is write/);
   assert.match(llms, /OKF knowledge bundle/);
   assert.match(llms, /short-lived scoped tokens/);
   assert.doesNotMatch(llms, /xai-[A-Za-z0-9_-]+/i);

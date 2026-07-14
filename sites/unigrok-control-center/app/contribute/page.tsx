@@ -21,7 +21,7 @@ export default function ContributePage() {
         <div className="public-capability-grid">
           <article><b>01</b><h3>Learn and run</h3><p>Read the architecture, start the local gateway, and verify your IDE connection without giving this site an xAI key.</p></article>
           <article><b>02</b><h3>Propose work</h3><p>Open an issue or pull request. Codex reviews evidence, tests the exact commit, and owns integration into main.</p></article>
-          <article><b>03</b><h3>Receive access</h3><p>A maintainer grants a GitHub repository role. Control access starts at triage and is rechecked on every protected request.</p></article>
+          <article><b>03</b><h3>Receive access</h3><p>A maintainer grants a GitHub repository role. Control access starts at write and is rechecked on every protected request.</p></article>
         </div>
       </section>
     </main>

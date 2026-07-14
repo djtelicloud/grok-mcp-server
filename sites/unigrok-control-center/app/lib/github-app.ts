@@ -215,14 +215,13 @@ async function readResponseBody(response: Response): Promise<string> {
 function normalizePermission(
   permissionValue: unknown,
   roleNameValue: unknown,
-): "admin" | "maintain" | "triage" | "write" | null {
+): "admin" | "maintain" | "write" | null {
   const candidates = [roleNameValue, permissionValue];
   for (const value of candidates) {
     if (
       value === "admin" ||
       value === "maintain" ||
-      value === "write" ||
-      value === "triage"
+      value === "write"
     ) {
       return value;
     }
