@@ -976,12 +976,17 @@ schedule it. The future Grok-owned broker is responsible for invocation.
 ### Method: `ProviderAttemptHarvester.run_once` {#provider_harvest-providerattemptharvester-run_once}
 
 ```python
-async def ProviderAttemptHarvester.run_once(self, store: Any) -> ProviderHarvestRun
+async def ProviderAttemptHarvester.run_once(self, store: Any, *, deadline_monotonic: float | None=None) -> ProviderHarvestRun
 ```
 
 **Keywords:** provider, attempt, harvester, run, once
 
-Run at most one bounded batch; unavailable credentials lease nothing.
+Run one bounded batch inside an optional caller-owned deadline.
+
+The caller deadline is absolute so cancellation cannot accidentally
+grant a background SDK thread a fresh per-row lease. Every row token
+is bounded by both that deadline and the local outbox lease, and is
+revoked in ``finally`` even when this coroutine is cancelled.
 
 ## providers/base.py {#providers-base}
 

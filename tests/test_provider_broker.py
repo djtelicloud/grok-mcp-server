@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime, timedelta
+import hashlib
+import json
+import threading
 from types import SimpleNamespace
 from typing import Any
 import time
@@ -11,12 +14,15 @@ from pydantic import ValidationError
 
 from src.providers import (
     BrokerHarvestStatus,
+    BrokerAttemptEvidence,
     BrokerCancellationPersistenceError,
+    BrokerDelegationResult,
     CredentialPlane,
     CredentialState,
     GrokDelegationPlan,
     GrokSupervisorBinding,
     GrokWorkerBroker,
+    GrokWorkerBrokerResult,
     GrokWorkerDelegation,
     ProviderAttemptResult,
     ProviderChannel,
@@ -31,6 +37,8 @@ from src.providers import (
     RouteClass,
     WorkerFallbackPolicy,
 )
+from src.provider_harvest import ProviderAttemptHarvester
+from src.providers.contracts import model_visible_messages
 from src.utils import GrokSessionStore
 
 
@@ -320,19 +328,65 @@ class FakeStore:
                 continue
             if delegation_id not in (None, start.delegation_id):
                 continue
+            visible = [
+                message.model_dump(mode="json")
+                for message in model_visible_messages(start.request)
+            ]
+            prompt_text = json.dumps(
+                visible,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+            )
+            prompt_digest = (
+                "sha256:" + hashlib.sha256(prompt_text.encode("utf-8")).hexdigest()
+            )
+            start_record = start.model_dump(mode="json")
+            start_record["request"].pop("messages")
+            start_record.update(
+                {
+                    "model_visible_prompt_digest": prompt_digest,
+                    "prompt_redaction": "clean",
+                    "started_at": NOW.isoformat(),
+                }
+            )
+            start_json = json.dumps(
+                start_record,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+            )
+            base_row = {
+                "attempt_id": attempt_id,
+                "delegation_id": start.delegation_id,
+                "attempt_ordinal": start.attempt_ordinal,
+                "start_json": start_json,
+                "start_digest": (
+                    "sha256:" + hashlib.sha256(start_json.encode("utf-8")).hexdigest()
+                ),
+                "supervisor_plane": start.supervisor_plane,
+                "supervisor_model": start.supervisor_model,
+                "supervisor_session_id": start.request.supervision.session_id,
+                "objective_id": start.request.supervision.objective_id,
+                "route_decision_id": start.request.supervision.route_decision_id,
+                "ttl_expires_at": start.request.supervision.ttl_expires_at.isoformat(),
+                "request_id": start.request.request_id,
+                "provider": start.provider.value,
+                "channel": start.channel.value,
+                "credential_plane": start.credential_plane.value,
+                "route": start.request.route.value,
+                "requested_model": start.requested_model,
+                "prompt_text": prompt_text,
+                "prompt_digest": prompt_digest,
+            }
             result = self.results.get(attempt_id)
             if result is None:
-                rows.append(
-                    {
-                        "attempt_id": attempt_id,
-                        "transport_status": "started",
-                    }
-                )
+                rows.append({**base_row, "transport_status": "started"})
                 continue
             receipt = result.response.receipt if result.response else result.failure
             rows.append(
                 {
-                    "attempt_id": attempt_id,
+                    **base_row,
                     "transport_status": result.status,
                     "receipt": receipt.model_dump(mode="json"),
                     "resolved_model": (
@@ -378,9 +432,11 @@ class FakeHarvester:
         self.outcome = outcome
         self.delay = delay
         self.calls = 0
+        self.deadlines: list[float] = []
 
-    async def run_once(self, store):
+    async def run_once(self, store, *, deadline_monotonic: float):
         self.calls += 1
+        self.deadlines.append(deadline_monotonic)
         if self.delay:
             await asyncio.sleep(self.delay)
         if self.outcome == "raise":
@@ -733,7 +789,7 @@ async def test_real_provider_ledger_replays_without_duplicate_effect(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_identity_ignores_display_state_drift_but_endpoint_drift_fails_closed():
+async def test_durable_replay_ignores_current_descriptor_and_lane_availability():
     base_descriptor = _descriptor(ProviderChannel.OPENAI_API)
     first_adapter = FakeAdapter(
         ProviderChannel.OPENAI_API,
@@ -774,14 +830,198 @@ async def test_identity_ignores_display_state_drift_but_endpoint_drift_fails_clo
         ProviderChannel.OPENAI_API,
         descriptor=changed_endpoint,
     )
-    refused = await GrokWorkerBroker(
+    endpoint_replay = await GrokWorkerBroker(
         registry={ProviderChannel.OPENAI_API: changed_adapter},
         store=store,
         clock=lambda: NOW,
     ).execute(plan)
-    assert refused.status == "indeterminate"
-    assert refused.delegations[0].attempts[0].persistence == "begin_failed"
+    assert endpoint_replay.status == "returned"
     assert changed_adapter.calls == 0
+
+    removed_lane_replay = await GrokWorkerBroker(
+        registry={},
+        store=store,
+        clock=lambda: NOW,
+    ).execute(plan)
+    assert removed_lane_replay.status == "returned"
+    assert removed_lane_replay.delegations[0].attempts[0].result == (
+        first.delegations[0].attempts[0].result
+    )
+
+
+@pytest.mark.asyncio
+async def test_exact_delegation_replays_api_when_subscription_later_appears(tmp_path):
+    store = GrokSessionStore(tmp_path / "availability-drift-replay.db")
+    api = FakeAdapter(ProviderChannel.OPENAI_API)
+    plan = _plan()
+    first = await GrokWorkerBroker(
+        registry={ProviderChannel.OPENAI_API: api},
+        store=store,
+        clock=lambda: NOW,
+    ).execute(plan)
+
+    subscription = FakeAdapter(ProviderChannel.OPENAI_MCP_SAMPLING)
+    replay = await GrokWorkerBroker(
+        registry={
+            ProviderChannel.OPENAI_MCP_SAMPLING: subscription,
+            ProviderChannel.OPENAI_API: api,
+        },
+        store=store,
+        clock=lambda: NOW,
+    ).execute(plan)
+
+    assert first.status == replay.status == "returned"
+    assert api.calls == 1
+    assert subscription.calls == 0
+    assert [item.start.attempt_ordinal for item in replay.delegations[0].attempts] == [
+        2
+    ]
+    rows = await store.list_provider_attempts(
+        delegation_id=replay.delegations[0].delegation_id
+    )
+    assert len(rows) == 1
+    await store.close()
+
+
+@pytest.mark.asyncio
+async def test_exact_delegation_replays_api_when_missing_subscription_appears():
+    missing = FakeAdapter(
+        ProviderChannel.OPENAI_MCP_SAMPLING,
+        descriptor=_descriptor(
+            ProviderChannel.OPENAI_MCP_SAMPLING,
+            state=CredentialState.MISSING,
+        ),
+    )
+    api = FakeAdapter(ProviderChannel.OPENAI_API)
+    store = FakeStore()
+    plan = _plan()
+    first = await GrokWorkerBroker(
+        registry={
+            ProviderChannel.OPENAI_MCP_SAMPLING: missing,
+            ProviderChannel.OPENAI_API: api,
+        },
+        store=store,
+        clock=lambda: NOW,
+    ).execute(plan)
+
+    available = FakeAdapter(ProviderChannel.OPENAI_MCP_SAMPLING)
+    replay = await GrokWorkerBroker(
+        registry={ProviderChannel.OPENAI_MCP_SAMPLING: available},
+        store=store,
+        clock=lambda: NOW,
+    ).execute(plan)
+    assert first.status == replay.status == "returned"
+    assert missing.calls == available.calls == 0
+    assert api.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_exact_failed_fallback_sequence_replays_without_new_effect():
+    subscription = FakeAdapter(
+        ProviderChannel.OPENAI_MCP_SAMPLING,
+        outcome="failed",
+    )
+    api = FakeAdapter(ProviderChannel.OPENAI_API, outcome="failed")
+    store = FakeStore()
+    plan = _plan()
+    first = await GrokWorkerBroker(
+        registry={
+            ProviderChannel.OPENAI_MCP_SAMPLING: subscription,
+            ProviderChannel.OPENAI_API: api,
+        },
+        store=store,
+        clock=lambda: NOW,
+    ).execute(plan)
+    replay = await GrokWorkerBroker(
+        registry={},
+        store=store,
+        clock=lambda: NOW,
+    ).execute(plan)
+
+    assert first.status == replay.status == "failed"
+    assert subscription.calls == api.calls == 1
+    assert [item.persistence for item in replay.delegations[0].attempts] == [
+        "replayed_terminal",
+        "replayed_terminal",
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stored_status", ["started", "indeterminate"])
+async def test_existing_nonterminal_delegation_blocks_every_new_lane(stored_status):
+    api = FakeAdapter(ProviderChannel.OPENAI_API)
+    store = FakeStore()
+    plan = _plan()
+    broker = GrokWorkerBroker(
+        registry={ProviderChannel.OPENAI_API: api},
+        store=store,
+        clock=lambda: NOW,
+    )
+    start = broker._start(
+        plan=plan,
+        index=0,
+        channel=ProviderChannel.OPENAI_API,
+        descriptor=api.descriptor,
+        ordinal=2,
+    )
+    await store.begin_provider_attempt(start)
+
+    original_list = store.list_provider_attempts
+
+    async def projected_list(*args, **kwargs):
+        rows = await original_list(*args, **kwargs)
+        rows[0]["transport_status"] = stored_status
+        return rows
+
+    store.list_provider_attempts = projected_list
+    subscription = FakeAdapter(ProviderChannel.OPENAI_MCP_SAMPLING)
+    result = await GrokWorkerBroker(
+        registry={
+            ProviderChannel.OPENAI_MCP_SAMPLING: subscription,
+            ProviderChannel.OPENAI_API: api,
+        },
+        store=store,
+        clock=lambda: NOW,
+    ).execute(plan)
+    assert result.status == "indeterminate"
+    assert subscription.calls == api.calls == 0
+    assert result.delegations[0].attempts[0].persistence == "replay_indeterminate"
+
+
+@pytest.mark.asyncio
+async def test_conflicting_stored_identity_blocks_new_effect():
+    api = FakeAdapter(ProviderChannel.OPENAI_API)
+    store = FakeStore()
+    plan = _plan()
+    broker = GrokWorkerBroker(
+        registry={ProviderChannel.OPENAI_API: api},
+        store=store,
+        clock=lambda: NOW,
+    )
+    first = await broker.execute(plan)
+    assert first.status == "returned"
+
+    original_list = store.list_provider_attempts
+
+    async def conflicting_list(*args, **kwargs):
+        rows = await original_list(*args, **kwargs)
+        rows[0]["request_id"] = "req:" + ("f" * 64)
+        return rows
+
+    store.list_provider_attempts = conflicting_list
+    subscription = FakeAdapter(ProviderChannel.OPENAI_MCP_SAMPLING)
+    refused = await GrokWorkerBroker(
+        registry={
+            ProviderChannel.OPENAI_MCP_SAMPLING: subscription,
+            ProviderChannel.OPENAI_API: api,
+        },
+        store=store,
+        clock=lambda: NOW,
+    ).execute(plan)
+    assert refused.status == "indeterminate"
+    assert refused.delegations[0].reason == "stored_attempt_conflict"
+    assert subscription.calls == 0
+    assert api.calls == 1
 
 
 @pytest.mark.asyncio
@@ -932,6 +1172,42 @@ async def test_cancelled_blocked_terminal_write_failure_stays_explicit():
 
 
 @pytest.mark.asyncio
+async def test_fatal_delegation_cancels_and_awaits_every_started_sibling():
+    tracker = {"active": 0, "peak": 0}
+    adapter = FakeAdapter(
+        ProviderChannel.OPENAI_MCP_SAMPLING,
+        delay=10.0,
+        tracker=tracker,
+    )
+    store = FakeStore()
+
+    class OneFatalBroker(GrokWorkerBroker):
+        async def _guarded_delegation(self, plan, index, semaphore):
+            if index == 0:
+                while adapter.calls == 0:
+                    await asyncio.sleep(0)
+                raise BrokerCancellationPersistenceError("injected fatal persistence")
+            return await super()._guarded_delegation(plan, index, semaphore)
+
+    with pytest.raises(
+        BrokerCancellationPersistenceError,
+        match="injected fatal persistence",
+    ):
+        await OneFatalBroker(
+            registry={ProviderChannel.OPENAI_MCP_SAMPLING: adapter},
+            store=store,
+            clock=lambda: NOW,
+        ).execute(_plan(count=2, fallback=False, max_concurrency=2))
+
+    assert tracker["active"] == 0
+    assert len(store.starts) == 1
+    assert len(store.results) == 1
+    terminal = next(iter(store.results.values()))
+    assert terminal.status == "failed"
+    assert terminal.failure.error_code == "broker_cancelled"
+
+
+@pytest.mark.asyncio
 async def test_injected_adapter_obeys_request_timeout_before_supervisor_ttl():
     adapter = FakeAdapter(
         ProviderChannel.OPENAI_MCP_SAMPLING,
@@ -992,8 +1268,89 @@ async def test_queued_harvest_trigger_cannot_extend_the_shared_ttl():
         delegation.attempts[0].harvest.status for delegation in result.delegations
     }
     assert elapsed < 0.35
+    assert len(harvester.deadlines) == 2
+    assert max(harvester.deadlines) - min(harvester.deadlines) < 0.03
     assert "complete" in harvest_states
     assert harvest_states & {"ttl_expired", "timed_out"}
+
+
+@pytest.mark.asyncio
+async def test_real_harvester_revokes_background_thread_at_grok_ttl(tmp_path):
+    class BlockingUploader:
+        def __init__(self) -> None:
+            self.started = threading.Event()
+            self.release = threading.Event()
+            self.finished = threading.Event()
+            self.effects: list[str] = []
+            self.authority = None
+
+        def prepare_client(self):
+            return object(), None
+
+        def upload(self, client, row, authority):
+            self.authority = authority
+            try:
+                authority.require_active()
+                self.effects.append("first_cloud_effect")
+                self.started.set()
+                if not self.release.wait(timeout=5):
+                    raise RuntimeError("test uploader was never released")
+                authority.require_active()
+                self.effects.append("forbidden_late_effect")
+                return "remote-file"
+            finally:
+                self.finished.set()
+
+    class CapturingHarvester(ProviderAttemptHarvester):
+        deadline = None
+
+        async def run_once(self, store, *, deadline_monotonic=None):
+            self.deadline = deadline_monotonic
+            return await super().run_once(
+                store,
+                deadline_monotonic=deadline_monotonic,
+            )
+
+    uploader = BlockingUploader()
+    harvester = CapturingHarvester(
+        uploader=uploader,
+        batch_size=1,
+        lease_seconds=5,
+        call_timeout_seconds=2,
+        lease_id_factory=lambda: "broker-ttl-owner",
+    )
+    store = GrokSessionStore(tmp_path / "broker-harvest-ttl.db")
+    ttl = datetime.now(UTC) + timedelta(seconds=0.5)
+    result = await GrokWorkerBroker(
+        registry={
+            ProviderChannel.OPENAI_MCP_SAMPLING: FakeAdapter(
+                ProviderChannel.OPENAI_MCP_SAMPLING
+            )
+        },
+        store=store,
+        harvester=harvester,
+        harvest_timeout_seconds=1.0,
+    ).execute(_plan(fallback=False, ttl=ttl))
+
+    evidence = result.delegations[0].attempts[0]
+    assert uploader.started.is_set()
+    assert evidence.harvest.status == "ttl_expired"
+    assert harvester.deadline is not None
+    assert uploader.authority.expires_monotonic <= harvester.deadline
+    with pytest.raises(PermissionError, match="authority expired"):
+        uploader.authority.require_active()
+
+    uploader.release.set()
+    for _ in range(200):
+        if uploader.finished.is_set():
+            break
+        await asyncio.sleep(0.01)
+    assert uploader.finished.is_set()
+    assert uploader.effects == ["first_cloud_effect"]
+    rows = await store.list_provider_attempts()
+    assert rows[0]["harvest_status"] == "leased"
+    assert rows[0]["remote_file_id"] is None
+    await store.close()
 
 
 @pytest.mark.asyncio
@@ -1124,3 +1481,95 @@ async def test_broker_core_uses_no_sockets_or_credential_environment(monkeypatch
 def test_harvest_status_rejects_secret_shaped_or_unbounded_details():
     with pytest.raises(ValidationError):
         BrokerHarvestStatus(status="failed", reason="contains a secret value")
+
+
+@pytest.mark.asyncio
+async def test_exported_result_contracts_reject_inverse_and_identity_spoofs():
+    returned = await GrokWorkerBroker(
+        registry={
+            ProviderChannel.OPENAI_MCP_SAMPLING: FakeAdapter(
+                ProviderChannel.OPENAI_MCP_SAMPLING
+            )
+        },
+        store=FakeStore(),
+        clock=lambda: NOW,
+    ).execute(_plan(count=2, fallback=False))
+    attempt = returned.delegations[0].attempts[0]
+
+    raw_attempt = attempt.model_dump(mode="python")
+    raw_attempt["persistence"] = "replay_indeterminate"
+    raw_attempt["result"] = None
+    raw_attempt["harvest"] = BrokerHarvestStatus(status="complete")
+    with pytest.raises(ValidationError, match="non-durable"):
+        BrokerAttemptEvidence.model_validate(raw_attempt)
+
+    raw_delegation = returned.delegations[0].model_dump(mode="python")
+    raw_delegation["status"] = "failed"
+    raw_delegation["reason"] = "forged_failure"
+    raw_delegation["attempts"][0]["persistence"] = "replay_indeterminate"
+    raw_delegation["attempts"][0]["result"] = None
+    raw_delegation["attempts"][0]["harvest"] = BrokerHarvestStatus(
+        status="not_applicable",
+        reason="forged_failure",
+    )
+    with pytest.raises(ValidationError, match="indeterminate delegations"):
+        BrokerDelegationResult.model_validate(raw_delegation)
+
+    for field, forged in (
+        ("delegation_id", "dlg:" + ("f" * 64)),
+        ("provider", ProviderId.ANTHROPIC),
+        ("request.route", RouteClass.CODING),
+    ):
+        raw_delegation = returned.delegations[0].model_dump(mode="python")
+        if field == "request.route":
+            raw_delegation["attempts"][0]["start"]["request"]["route"] = forged
+        else:
+            raw_delegation["attempts"][0]["start"][field] = forged
+        with pytest.raises(ValidationError):
+            BrokerDelegationResult.model_validate(raw_delegation)
+
+    subscription = FakeAdapter(
+        ProviderChannel.OPENAI_MCP_SAMPLING,
+        outcome="failed",
+    )
+    fallback = await GrokWorkerBroker(
+        registry={
+            ProviderChannel.OPENAI_MCP_SAMPLING: subscription,
+            ProviderChannel.OPENAI_API: FakeAdapter(ProviderChannel.OPENAI_API),
+        },
+        store=FakeStore(),
+        clock=lambda: NOW,
+    ).execute(_plan())
+    duplicate_ordinal = fallback.delegations[0].model_dump(mode="python")
+    duplicate_ordinal["attempts"][1]["start"]["attempt_ordinal"] = 1
+    with pytest.raises(ValidationError, match="attempt ordinals"):
+        BrokerDelegationResult.model_validate(duplicate_ordinal)
+
+    global_spoofs = []
+    raw = returned.model_dump(mode="python")
+    raw["plan_id"] = "gdp:" + ("0" * 64)
+    global_spoofs.append(raw)
+    raw = returned.model_dump(mode="python")
+    raw["status"] = "failed"
+    global_spoofs.append(raw)
+    raw = returned.model_dump(mode="python")
+    raw["delegations"][1]["delegation_key"] = raw["delegations"][0]["delegation_key"]
+    global_spoofs.append(raw)
+    raw = returned.model_dump(mode="python")
+    duplicate_id = raw["delegations"][0]["delegation_id"]
+    raw["delegations"][1]["delegation_id"] = duplicate_id
+    raw["delegations"][1]["attempts"][0]["start"]["delegation_id"] = duplicate_id
+    global_spoofs.append(raw)
+    raw = returned.model_dump(mode="python")
+    raw["supervisor_model"] = "grok-forged"
+    global_spoofs.append(raw)
+    raw = returned.model_dump(mode="python")
+    raw["supervisor_plane"] = "API"
+    global_spoofs.append(raw)
+    raw = returned.model_dump(mode="python")
+    raw["supervision"]["objective_id"] = "forged-objective"
+    global_spoofs.append(raw)
+
+    for forged in global_spoofs:
+        with pytest.raises(ValidationError):
+            GrokWorkerBrokerResult.model_validate(forged)

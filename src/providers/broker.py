@@ -44,6 +44,7 @@ from .contracts import (
     RouteClass,
     StrictContract,
     WorkerAuthority,
+    model_visible_messages,
 )
 
 
@@ -214,9 +215,7 @@ class BrokerAttemptEvidence(StrictContract):
         durable = self.persistence in {"durable_terminal", "replayed_terminal"}
         if durable != (self.result is not None):
             raise ValueError("only durable terminal attempts may expose a result")
-        if self.persistence in {"begin_failed", "terminal_indeterminate"} and (
-            self.harvest.status != "not_applicable"
-        ):
+        if not durable and self.harvest.status != "not_applicable":
             raise ValueError("non-durable attempts cannot claim a harvest run")
         return self
 
@@ -239,6 +238,17 @@ class BrokerDelegationResult(StrictContract):
 
     @model_validator(mode="after")
     def validate_result(self) -> "BrokerDelegationResult":
+        ordinals = [attempt.start.attempt_ordinal for attempt in self.attempts]
+        if ordinals not in ([], [1], [2], [1, 2]):
+            raise ValueError("attempt ordinals must be unique and in execution order")
+        for attempt in self.attempts:
+            if attempt.start.delegation_id != self.delegation_id:
+                raise ValueError("attempt is bound to a different delegation")
+            if attempt.start.provider != self.provider:
+                raise ValueError("attempt provider does not match its delegation")
+            if attempt.start.request.route != self.route:
+                raise ValueError("attempt route does not match its delegation")
+
         returned = [
             attempt
             for attempt in self.attempts
@@ -248,16 +258,24 @@ class BrokerDelegationResult(StrictContract):
             raise ValueError(
                 "returned delegation status must identify one durable return"
             )
-        if (
-            self.status == "indeterminate"
-            and self.attempts
-            and not any(
-                attempt.persistence.endswith("indeterminate")
-                or attempt.persistence == "begin_failed"
-                for attempt in self.attempts
+        non_durable = [
+            attempt
+            for attempt in self.attempts
+            if attempt.persistence not in {"durable_terminal", "replayed_terminal"}
+        ]
+        if self.status != "indeterminate" and non_durable:
+            raise ValueError(
+                "only indeterminate delegations may expose non-durable work"
             )
-        ):
+        if self.status == "indeterminate" and self.attempts and not non_durable:
             raise ValueError("indeterminate status requires persistence evidence")
+        if self.status == "failed" and not any(
+            attempt.result is not None and attempt.result.status == "failed"
+            for attempt in self.attempts
+        ):
+            raise ValueError("failed delegation status requires a durable failure")
+        if self.status == "unavailable" and self.attempts:
+            raise ValueError("unavailable delegation cannot contain attempts")
         return self
 
 
@@ -277,6 +295,33 @@ class GrokWorkerBrokerResult(StrictContract):
     synthesized: Literal[False] = False
     authority: WorkerAuthority = WorkerAuthority()
 
+    @model_validator(mode="after")
+    def validate_result(self) -> "GrokWorkerBrokerResult":
+        if self.plan_id != f"gdp:{self.plan_digest.removeprefix('sha256:')}":
+            raise ValueError("plan_id does not match plan_digest")
+        delegation_ids = [item.delegation_id for item in self.delegations]
+        delegation_keys = [item.delegation_key for item in self.delegations]
+        if len(set(delegation_ids)) != len(delegation_ids):
+            raise ValueError("broker result delegation IDs must be unique")
+        if len(set(delegation_keys)) != len(delegation_keys):
+            raise ValueError("broker result delegation keys must be unique")
+        for delegation in self.delegations:
+            for attempt in delegation.attempts:
+                start = attempt.start
+                if start.request.supervision != self.supervision:
+                    raise ValueError("attempt supervision does not match broker result")
+                if start.supervisor_plane != self.supervisor_plane:
+                    raise ValueError(
+                        "attempt supervisor plane does not match broker result"
+                    )
+                if start.supervisor_model != self.supervisor_model:
+                    raise ValueError(
+                        "attempt supervisor model does not match broker result"
+                    )
+        if self.status != _global_status(self.delegations):
+            raise ValueError("broker status does not match delegation statuses")
+        return self
+
 
 class ProviderAttemptStore(Protocol):
     async def begin_provider_attempt(self, start: Any) -> bool: ...
@@ -292,7 +337,7 @@ class ProviderAttemptStore(Protocol):
 
 
 class ProviderAttemptHarvestTrigger(Protocol):
-    async def run_once(self, store: Any) -> Any: ...
+    async def run_once(self, store: Any, *, deadline_monotonic: float) -> Any: ...
 
 
 def _canonical_plan(plan: GrokDelegationPlan) -> str:
@@ -680,7 +725,6 @@ class GrokWorkerBroker:
     async def _stored_result(
         self,
         start: ProviderAttemptStart,
-        descriptor: ProviderDescriptor,
     ) -> tuple[ProviderAttemptResult | None, str | None]:
         rows = await self._store.list_provider_attempts(
             supervisor_session_id=start.request.supervision.session_id,
@@ -693,6 +737,151 @@ class GrokWorkerBroker:
         )
         if row is None:
             return None, "replay_row_missing"
+        try:
+            stored_start = self._reconstruct_stored_start(row)
+        except Exception:
+            return None, "replay_start_decode_failed"
+        if stored_start != start:
+            return None, "replay_start_mismatch"
+        return self._decode_stored_result(row, start)
+
+    @staticmethod
+    def _reconstruct_stored_start(
+        row: Mapping[str, Any],
+    ) -> ProviderAttemptStart:
+        """Rebuild the typed start from the ledger's canonical frozen prompt."""
+
+        start_raw = row.get("start_json")
+        prompt_raw = row.get("prompt_text")
+        if not isinstance(start_raw, str) or not isinstance(prompt_raw, str):
+            raise ValueError("stored attempt lacks canonical start evidence")
+        if _content_digest(start_raw) != row.get("start_digest"):
+            raise ValueError("stored attempt start digest mismatch")
+        if _content_digest(prompt_raw) != row.get("prompt_digest"):
+            raise ValueError("stored attempt prompt digest mismatch")
+        try:
+            start_record = json.loads(start_raw)
+            prompt_record = json.loads(prompt_raw)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("stored attempt evidence is malformed") from exc
+        if (
+            json.dumps(
+                start_record,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+                allow_nan=False,
+            )
+            != start_raw
+            or json.dumps(
+                prompt_record,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+                allow_nan=False,
+            )
+            != prompt_raw
+        ):
+            raise ValueError("stored attempt evidence is not canonical")
+        if not isinstance(prompt_record, list) or len(prompt_record) < 2:
+            raise ValueError("stored attempt prompt lacks its TTL envelope")
+
+        visible = tuple(ProviderMessage.model_validate(item) for item in prompt_record)
+        request_record = start_record.get("request")
+        if not isinstance(request_record, dict):
+            raise ValueError("stored attempt request is malformed")
+        if start_record.get("model_visible_prompt_digest") != row.get("prompt_digest"):
+            raise ValueError("stored attempt prompt is not bound to its start")
+        request_record["messages"] = [
+            message.model_dump(mode="json") for message in visible[1:]
+        ]
+        for metadata_key in (
+            "model_visible_prompt_digest",
+            "prompt_redaction",
+            "started_at",
+        ):
+            start_record.pop(metadata_key, None)
+        start = ProviderAttemptStart.model_validate_json(
+            json.dumps(
+                start_record,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+                allow_nan=False,
+            )
+        )
+        if model_visible_messages(start.request) != visible:
+            raise ValueError("stored attempt TTL or model-visible prompt changed")
+        supervision = start.request.supervision
+        projections = {
+            "attempt_id": start.attempt_id,
+            "delegation_id": start.delegation_id,
+            "attempt_ordinal": start.attempt_ordinal,
+            "supervisor_plane": start.supervisor_plane,
+            "supervisor_model": start.supervisor_model,
+            "provider": start.provider.value,
+            "channel": start.channel.value,
+            "credential_plane": start.credential_plane.value,
+            "requested_model": start.requested_model,
+            "request_id": start.request.request_id,
+            "route": start.request.route.value,
+            "supervisor_session_id": supervision.session_id,
+            "objective_id": supervision.objective_id,
+            "route_decision_id": supervision.route_decision_id,
+        }
+        if any(
+            str(row.get(field)) != str(expected)
+            for field, expected in projections.items()
+        ):
+            raise ValueError("stored attempt start projection changed")
+        try:
+            row_ttl = datetime.fromisoformat(str(row.get("ttl_expires_at")))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("stored attempt TTL projection is malformed") from exc
+        if row_ttl != supervision.ttl_expires_at:
+            raise ValueError("stored attempt TTL projection changed")
+        return start
+
+    @staticmethod
+    def _stored_start_matches_plan(
+        start: ProviderAttemptStart,
+        plan: GrokDelegationPlan,
+        index: int,
+    ) -> bool:
+        delegation = plan.delegations[index]
+        expected_channels = (
+            _SUBSCRIPTION_LADDERS[delegation.provider]
+            if start.attempt_ordinal == 1
+            else _API_LADDERS[delegation.provider]
+        )
+        return all(
+            (
+                start.delegation_id == _delegation_id(plan, index),
+                start.provider == delegation.provider,
+                start.channel in expected_channels,
+                start.credential_plane
+                == (
+                    CredentialPlane.SUBSCRIPTION
+                    if start.attempt_ordinal == 1
+                    else CredentialPlane.METERED_API
+                ),
+                start.supervisor_plane == plan.supervisor_plane,
+                start.supervisor_model == plan.supervisor_model,
+                start.request.supervision == plan.supervision,
+                start.request.route == delegation.route,
+                tuple(start.request.messages) == delegation.messages,
+                start.request.model == start.requested_model,
+                start.request.max_output_tokens <= delegation.max_output_tokens,
+                start.request.timeout_seconds <= delegation.timeout_seconds,
+                start.request.temperature == delegation.temperature,
+            )
+        )
+
+    def _decode_stored_result(
+        self,
+        row: Mapping[str, Any],
+        start: ProviderAttemptStart,
+    ) -> tuple[ProviderAttemptResult | None, str | None]:
         status = str(row.get("transport_status") or "")
         if status in {"started", "indeterminate"}:
             return None, "replay_not_returnable"
@@ -719,9 +908,181 @@ class GrokWorkerBroker:
                 return None, "replay_status_invalid"
         except Exception:
             return None, "replay_decode_failed"
-        if not self._result_matches_start(result, start, descriptor):
+        receipt = (
+            result.response.receipt if result.response is not None else result.failure
+        )
+        if receipt is None or not all(
+            (
+                receipt.request_id == start.request.request_id,
+                receipt.supervision == start.request.supervision,
+                receipt.provider == start.provider,
+                receipt.channel == start.channel,
+                receipt.credential_plane == start.credential_plane,
+                receipt.route == start.request.route,
+                receipt.requested_model == start.requested_model,
+                receipt.authority == WorkerAuthority(),
+            )
+        ):
             return None, "replay_contract_mismatch"
         return result, None
+
+    def _stored_conflict_result(
+        self,
+        plan: GrokDelegationPlan,
+        index: int,
+        reason: str,
+        attempts: tuple[BrokerAttemptEvidence, ...] = (),
+    ) -> BrokerDelegationResult:
+        delegation = plan.delegations[index]
+        return BrokerDelegationResult(
+            delegation_id=_delegation_id(plan, index),
+            delegation_key=delegation.delegation_key,
+            provider=delegation.provider,
+            route=delegation.route,
+            status="indeterminate",
+            reason=reason,
+            attempts=attempts,
+        )
+
+    async def _replay_delegation(
+        self,
+        plan: GrokDelegationPlan,
+        index: int,
+    ) -> BrokerDelegationResult | None:
+        """Replay any existing exact delegation before consulting availability.
+
+        Availability and mutable credential state are deliberately excluded
+        from attempt identity. Once any physical effect has been recorded for
+        an exact delegation, a later execution may only replay that sequence
+        or fail indeterminate; it may never choose a newly available lane.
+        """
+
+        delegation = plan.delegations[index]
+        delegation_id = _delegation_id(plan, index)
+        try:
+            rows = await self._store.list_provider_attempts(
+                supervisor_session_id=plan.supervision.session_id,
+                delegation_id=delegation_id,
+                limit=100,
+            )
+        except Exception:
+            return self._stored_conflict_result(
+                plan,
+                index,
+                "stored_attempt_read_failed",
+            )
+        if not rows:
+            return None
+        if len(rows) > MAX_PHYSICAL_ATTEMPTS_PER_DELEGATION:
+            return self._stored_conflict_result(
+                plan,
+                index,
+                "stored_attempt_conflict",
+            )
+
+        try:
+            ordered = sorted(rows, key=lambda row: int(row.get("attempt_ordinal")))
+            ordinals = [int(row.get("attempt_ordinal")) for row in ordered]
+            if ordinals not in ([1], [2], [1, 2]):
+                raise ValueError("stored attempt ordinal conflict")
+
+            evidence: list[BrokerAttemptEvidence] = []
+            has_indeterminate = False
+            for row in ordered:
+                start = self._reconstruct_stored_start(row)
+                if not self._stored_start_matches_plan(start, plan, index):
+                    raise ValueError("stored start does not match the exact plan")
+                stored_result, error = self._decode_stored_result(
+                    row,
+                    start,
+                )
+                if stored_result is None:
+                    if str(row.get("transport_status") or "") not in {
+                        "started",
+                        "indeterminate",
+                    }:
+                        raise ValueError(error or "stored terminal result is invalid")
+                    has_indeterminate = True
+                    evidence.append(
+                        BrokerAttemptEvidence(
+                            start=start,
+                            persistence="replay_indeterminate",
+                            harvest=BrokerHarvestStatus(
+                                status="not_applicable",
+                                reason=(
+                                    "stored_attempt_started"
+                                    if row.get("transport_status") == "started"
+                                    else "stored_attempt_indeterminate"
+                                ),
+                            ),
+                        )
+                    )
+                else:
+                    evidence.append(
+                        BrokerAttemptEvidence(
+                            start=start,
+                            persistence="replayed_terminal",
+                            result=stored_result,
+                            harvest=BrokerHarvestStatus(
+                                status="not_applicable",
+                                reason="delegation_replayed",
+                            ),
+                        )
+                    )
+
+            if len(evidence) == 2:
+                first_result = evidence[0].result
+                if first_result is None or first_result.status != "failed":
+                    raise ValueError("fallback sequence lacks a durable first failure")
+            if has_indeterminate:
+                return self._stored_conflict_result(
+                    plan,
+                    index,
+                    "stored_attempt_indeterminate",
+                    tuple(evidence),
+                )
+
+            final = evidence[-1]
+            if final.result is None:
+                raise ValueError("stored terminal sequence has no result")
+            if final.result.status == "returned":
+                return BrokerDelegationResult(
+                    delegation_id=delegation_id,
+                    delegation_key=delegation.delegation_key,
+                    provider=delegation.provider,
+                    route=delegation.route,
+                    status="returned",
+                    reason=(
+                        "subscription_returned"
+                        if final.start.attempt_ordinal == 1
+                        else "same_provider_api_returned"
+                    ),
+                    attempts=tuple(evidence),
+                )
+            failure = final.result.failure
+            return BrokerDelegationResult(
+                delegation_id=delegation_id,
+                delegation_key=delegation.delegation_key,
+                provider=delegation.provider,
+                route=delegation.route,
+                status="failed",
+                reason=(
+                    "same_provider_api_failed"
+                    if final.start.attempt_ordinal == 2
+                    else (
+                        "subscription_failed_no_fallback"
+                        if failure is not None and failure.error_kind == "internal"
+                        else "same_provider_api_unavailable"
+                    )
+                ),
+                attempts=tuple(evidence),
+            )
+        except Exception:
+            return self._stored_conflict_result(
+                plan,
+                index,
+                "stored_attempt_conflict",
+            )
 
     async def _harvest(
         self,
@@ -736,6 +1097,7 @@ class GrokWorkerBroker:
         if remaining <= 0:
             return BrokerHarvestStatus(status="ttl_expired", reason="ttl_expired")
         timeout = min(remaining, self._harvest_timeout_seconds)
+        deadline_monotonic = time.monotonic() + timeout
         try:
             # Lock acquisition and the trigger share one deadline.  A queued
             # trigger cannot wait outside the supervisor lease and then start
@@ -747,7 +1109,10 @@ class GrokWorkerBroker:
                             status="ttl_expired",
                             reason="ttl_expired",
                         )
-                    raw = await self._harvester.run_once(self._store)
+                    raw = await self._harvester.run_once(
+                        self._store,
+                        deadline_monotonic=deadline_monotonic,
+                    )
             status = str(getattr(raw, "status", ""))
             if status not in {"complete", "partial", "idle", "unavailable"}:
                 raise ValueError("invalid harvest status")
@@ -813,7 +1178,7 @@ class GrokWorkerBroker:
                     timeout=self._terminal_write_timeout_seconds,
                 )
                 if not stored:
-                    replay, _ = await self._stored_result(start, descriptor)
+                    replay, _ = await self._stored_result(start)
                     if replay != result:
                         raise ValueError("cancelled terminal replay does not match")
             except BaseException as exc:
@@ -857,7 +1222,7 @@ class GrokWorkerBroker:
             )
         if not is_new:
             try:
-                stored_result, error = await self._stored_result(start, descriptor)
+                stored_result, error = await self._stored_result(start)
             except Exception:
                 stored_result, error = None, "replay_read_failed"
             if stored_result is None:
@@ -873,7 +1238,10 @@ class GrokWorkerBroker:
                 start=start,
                 persistence="replayed_terminal",
                 result=stored_result,
-                harvest=await self._harvest(plan),
+                harvest=BrokerHarvestStatus(
+                    status="not_applicable",
+                    reason="delegation_replayed",
+                ),
             )
 
         try:
@@ -911,7 +1279,7 @@ class GrokWorkerBroker:
                 descriptor=descriptor,
             )
             if not stored:
-                replay, _ = await self._stored_result(start, descriptor)
+                replay, _ = await self._stored_result(start)
                 if replay != result:
                     raise ValueError("terminal replay does not match result")
         except BrokerCancellationPersistenceError:
@@ -941,6 +1309,9 @@ class GrokWorkerBroker:
         delegation = plan.delegations[index]
         delegation_id = _delegation_id(plan, index)
         async with semaphore:
+            replay = await self._replay_delegation(plan, index)
+            if replay is not None:
+                return replay
             if self._remaining(plan) <= 0:
                 return BrokerDelegationResult(
                     delegation_id=delegation_id,
@@ -1122,14 +1493,30 @@ class GrokWorkerBroker:
         )
         self._now()
         semaphore = asyncio.Semaphore(validated.max_concurrency)
-        results = tuple(
-            await asyncio.gather(
-                *(
-                    self._guarded_delegation(validated, index, semaphore)
-                    for index in range(len(validated.delegations))
-                )
+        tasks = [
+            asyncio.create_task(self._guarded_delegation(validated, index, semaphore))
+            for index in range(len(validated.delegations))
+        ]
+        try:
+            results = tuple(await asyncio.gather(*tasks))
+        except BaseException as original:
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            settled = await asyncio.gather(*tasks, return_exceptions=True)
+            persistence_failure = next(
+                (
+                    item
+                    for item in settled
+                    if isinstance(item, BrokerCancellationPersistenceError)
+                ),
+                None,
             )
-        )
+            if persistence_failure is not None and not isinstance(
+                original, BrokerCancellationPersistenceError
+            ):
+                raise persistence_failure from original
+            raise
         return GrokWorkerBrokerResult(
             plan_id=validated.plan_id,
             plan_digest=validated.plan_digest,
