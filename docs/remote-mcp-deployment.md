@@ -5,6 +5,11 @@ It is not an anonymous inference endpoint and it never receives the local Grok
 CLI OAuth volume. The Python gateway runs with `UNIGROK_RUNTIME=cloudrun`, which
 disables the CLI plane and all local agent-tool execution.
 
+**Live probes (re-verify):** `GET /healthz` and `GET /readyz` on the same host
+are public process gates. Authenticated MCP and status routes return `401`
+without a bearer. Hosted PR review wiring is
+[design/hosted-review-p0.md](design/hosted-review-p0.md).
+
 ## Runtime contract
 
 Deploy the repository `Dockerfile` to a dedicated Cloud Run service and set:

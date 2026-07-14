@@ -38,32 +38,38 @@ development, an HTTPS tunnel may forward to `http://127.0.0.1:4765`.
 The widget has no external network access and declares empty CSP domain lists.
 Do not grant the ChatGPT App GitHub write credentials.
 
-## GitHub runner setup
+## Production path (hosted API plane — default goal)
 
-The workflow requires a self-hosted runner on the same trusted machine as the
-stable UniGrok service. Apply the custom label `unigrok-review` when registering
-the runner. The runner needs outbound HTTPS to GitHub and loopback access to
-`127.0.0.1:4765`; it does not need inbound public access.
+**Production review must not depend on a developer Mac, local Docker, or
+tunnel.** The private twin at `https://mcp.grokmcp.org/mcp` is the API-plane
+resource (`UNIGROK_RUNTIME=cloudrun`). Health/ready probes are public;
+MCP calls require auth (see [remote-mcp-deployment.md](remote-mcp-deployment.md)
+and [hosted-review-p0.md](design/hosted-review-p0.md)).
 
-Repository configuration (owned by Codex/project-admin automation; the user
-does not need to operate Git or babysit the runner):
+Repository configuration (Codex/project-admin):
 
-1. Add the self-hosted runner with labels `self-hosted` and `unigrok-review`.
-2. If the local gateway requires a client token, add repository secret
-   `UNIGROK_CLIENT_TOKEN`. Never use `XAI_API_KEY` as this token.
-3. Ensure workflow permissions allow pull-request reads and timeline comments;
-   the checked-in workflow uses `contents: read` and `pull-requests: write`
-   without contents, actions, deployments, or administration write access.
-4. Manually dispatch the workflow with a PR number, or have an owner, member,
-   or collaborator comment `@grok review` on a PR. Opening or updating a PR
-   does not trigger this workflow.
+1. Set repository variables:
+   - `UNIGROK_REVIEW_RUNNER_JSON` = `"ubuntu-latest"` (JSON string)
+   - `UNIGROK_REVIEW_MCP_URL` = `https://mcp.grokmcp.org/mcp`
+   - `UNIGROK_REVIEW_PLANE` = `api`
+2. Prefer short-lived OAuth / Control-minted tokens with scope `unigrok:review`.
+   A repository secret `UNIGROK_CLIENT_TOKEN` is a **temporary bridge only** —
+   never store `XAI_API_KEY` in GitHub. Never use `XAI_API_KEY` as this token.
+3. Workflow permissions stay `contents: read` and `pull-requests: write`.
+4. Trigger: owner/member/collaborator comments `@grok review`, or
+   `workflow_dispatch` with a PR number. Opening or updating a PR does not trigger this workflow
+   (cost control).
 
-The checked-in defaults intentionally preserve this local path:
+Checked-in workflow defaults still fall back to the **lab** self-hosted path
+when variables are unset (local loopback + CLI). Operators must set the vars
+above to activate hosted production review.
 
-- `UNIGROK_REVIEW_RUNNER_JSON` unset means
-  `["self-hosted","unigrok-review"]`;
-- `UNIGROK_REVIEW_MCP_URL` unset means `http://127.0.0.1:4765/mcp`;
-- `UNIGROK_REVIEW_PLANE` unset means `cli`.
+## Lab path (local self-hosted runner)
+
+Optional development only. Requires a self-hosted runner labeled
+`self-hosted` and `unigrok-review` on the same machine as local Core
+`http://127.0.0.1:4765/mcp`, with plane `cli` if desired. Do not document this
+as the always-on product path.
 
 ## Security contract
 
@@ -82,18 +88,12 @@ The checked-in defaults intentionally preserve this local path:
 - The tool and workflow cannot merge, push, tag, release, or change protection.
 - The review comment explicitly hands authority back to Codex.
 
-## Production options
+## Path summary
 
-- **Local subscription plane:** the self-hosted runner calls the local MCP and
-  uses `plane=cli` with same-plane failure behavior. Reviews require the Mac and
-  UniGrok service to be online.
-- **Always-on API plane:** deploy a separately authenticated API-only UniGrok
-  service behind stable HTTPS. Set repository variable
-  `UNIGROK_REVIEW_RUNNER_JSON` to the JSON string `"ubuntu-latest"`, set
-  `UNIGROK_REVIEW_MCP_URL` to that service's `/mcp` URL, set
-  `UNIGROK_REVIEW_PLANE=api`, and store the service's narrowly scoped client
-  credential as `UNIGROK_CLIENT_TOKEN`. Do not copy the local CLI OAuth volume
-  to cloud infrastructure.
+- **Hosted API plane (production):** `ubuntu-latest` → `https://mcp.grokmcp.org/mcp`
+  with `plane=api`. Mac may be off. Metered XAI only; no CLI volume in cloud.
+- **Local CLI plane (lab):** self-hosted runner → loopback Core with `plane=cli`.
+  Requires the machine online. Do not use for team-critical review.
 
 There is no switch that permits outside contributors to schedule automatic
 reviews. The hosted API path is invoked explicitly by an authorized contributor,
