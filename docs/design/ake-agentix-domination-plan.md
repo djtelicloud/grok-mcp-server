@@ -9,10 +9,29 @@
   [intelligence-capsule-v1.md](../okf/intelligence-capsule-v1.md),
   [swarm-v2-implementation-plan.md](../swarm-v2-implementation-plan.md)
 
-This document is **target-state only**. It defines what UniGrok should become
-when every xAI business feature is utilized at full strength. Operational
-truth remains the current implementation until each PR below lands and is
-verified.
+This document is primarily **target-state**. It defines what UniGrok should
+become when every xAI business feature is utilized at full strength.
+Operational truth remains the current implementation until each remaining PR
+below lands and is verified.
+
+### Landed foundation (do not re-implement)
+
+[PR #85](https://github.com/djtelicloud/grok-mcp-server/pull/85) landed the
+**Grok-owned xAI worker harvest outbox** on `main` (schema v17,
+`src/provider_harvest.py`, default collection `unigrok-worker-episodes-v2`).
+
+That module is the first production Collections outbox brick:
+
+- one-way upload of redacted subordinate-worker episodes
+- Management API key required; no routing / retrieval / final-answer authority
+- deliberately **inert** until a future Grok-owned broker calls
+  `ProviderAttemptHarvester.run_once`
+- cannot alias task-memory or knowledge collection names
+
+AKE implementation PRs must **extend** this pattern (shared lease/CAS/outbox
+discipline, secret redaction, name isolation), not invent a second harvest
+path. Worker episodes are a dedicated corpus; they are never fused into
+verified task-memory routing evidence.
 
 ## 1. Thesis
 
@@ -105,6 +124,7 @@ hybrid search.
 | `ake-policies-v1` | Active gates, budgets, promotion policy | markdown | `policy_id`, `version` | Guardrails context |
 | `ake-corpus-user-v1` | User PDFs / Excel / code drops | hybrid by MIME | `project`, `ingest_id` | User RAG |
 | `ake-capsules-v1` | Capsule abstracts + digests | structured short | `capsule_id`, `kind`, `sha256` | Insider Factory bridge |
+| `unigrok-worker-episodes-v2` | Redacted subordinate-worker episodes | frozen canonical JSON docs | `episode_id`, `document_digest` | Grok-owned harvest only (**landed**, no routing authority) |
 
 ### 3.1 Hard contracts
 
@@ -269,14 +289,16 @@ bytes.
 
 | PR | Branch sketch | Scope | Depends |
 |---|---|---|---|
-| **PR0 Design** | `grok/ake-domination-design` | This document + cross-links + env comments | — |
+| **Landed** | `codex/xai-worker-harvest-outbox` → **PR #85** | Worker episode harvest outbox (`provider_harvest`, v17) | — |
+| **PR0 Design** | `grok/ake-domination-design` | This document + cross-links + env comments | Landed #85 |
 | **PR1 Corpus registry** | `grok/ake-corpus-registry` | Typed registry, field defs, chunk presets, find-or-create, readiness | PR0 |
-| **PR2 Unified outbox** | `grok/ake-outbox` | Durable outbox for facts / taskmem / docs; status polling | PR1 |
+| **PR2 Unified outbox** | `grok/ake-outbox` | Generalize lease/CAS outbox patterns for facts / taskmem / docs; **reuse** harvest discipline from #85 | PR1 + #85 |
 | **PR3 Live collections_search** | `grok/ake-live-tool` | Attach tool on API agent; mode scopes; fail-open | PR1 |
-| **PR4 Forge fusion** | `grok/ake-forge` | Multi-corpus prefetch + fusion into dynamic context | PR2, PR3 |
+| **PR4 Forge fusion** | `grok/ake-forge` | Multi-corpus prefetch + fusion into dynamic context (never worker episodes into routing) | PR2, PR3 |
 | **PR5 Management governor** | `grok/ake-mgmt-governor` | Team catalog, soft/hard caps, optional child-key provisioner | PR0 |
 | **PR6 Ops surface** | `grok/ake-ops-surface` | `/metrics` AKE panel, CLI, Control Center health | PR2, PR5 |
 | **PR7 Active promotion** | `grok/ake-active` | Evidence-gated promotion to `UNIGROK_AKE=active` for opt-in installs | PR4 + evals |
+| **PR8 Harvest broker** | `grok/ake-harvest-broker` | Explicit Grok-owned drain of `ProviderAttemptHarvester` (still no routing authority) | #85 + policy |
 
 Each implementation PR: agent-prefixed worktree, full tests, draft PR, Codex
 exact-head review, `./scripts/land`.
