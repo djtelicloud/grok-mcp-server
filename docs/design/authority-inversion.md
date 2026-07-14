@@ -90,6 +90,26 @@ observations and continuation conditions rather than false successful answers.
 The accurate starting assessment is: **protocol pieces exist, labels are not
 clean, and the authority-inverted hot path is not integrated.**
 
+### 1.2 Agentix Knowledge Engine (AKE) Context Forge
+
+Authority inversion defines **who decides**. The companion
+[AKE domination plan](ake-agentix-domination-plan.md) defines **what verified
+evidence Grok receives and can fetch**:
+
+- Local SQLite remains the private hot store.
+- xAI Collections become a multi-corpus semantic fabric (facts, verified task
+  memory, docs, code cards, failures, policies, user corpus, capsule indexes).
+- Native `collections_search` attaches as a Tier-1 cloud tool so Grok can
+  retrieve mid-reasoning under mode-scoped corpus allowlists.
+- The Management API becomes the economic and ACL governor (team catalog,
+  scoped child keys, soft/hard spend caps, audit), never an inference credential.
+
+Context Forge assembles local FTS, optional AKE hybrid prefetch, Needle
+projections, and code-floor cards into advisory priors. Raw remote chunks stay
+candidates with provenance until claim-scoped verification. AKE rollout is
+`off → mirror → shadow → active` and must not elevate unverified text to
+routing or training authority.
+
 ## 2. Three planes of responsibility
 
 The same runtime design serves different audiences without allowing

@@ -411,6 +411,14 @@ flowchart LR
 
 Full design detail lives in [architecture.md](architecture.md).
 
+**Agentix Knowledge Engine (AKE) — planned:** the target design that unifies
+xAI Collections, Management API governors, multi-corpus hybrid retrieval, and
+live `collections_search` into one intelligence fabric for the Agentix harness
+lives in
+[docs/design/ake-agentix-domination-plan.md](docs/design/ake-agentix-domination-plan.md).
+It is design-only until implementation PRs land; local SQLite remains the
+private source of truth.
+
 UniGrok strips every server-owned API, management, gateway, and subordinate-
 provider credential from each CLI subprocess while preserving the Grok OAuth
 path. This prevents silent API billing or credential exposure and makes the
