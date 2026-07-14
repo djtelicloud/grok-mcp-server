@@ -1,10 +1,41 @@
 {
-  "version": "D0001",
-  "name": "AKE Static Dataset V1",
+  "version": "D0002",
+  "name": "AKE Static Dataset V1 (OpenAI/Anthropic Expansion)",
   "source_bundle": "docs/okf/okf-manifest.json",
-  "legacy_reference": "PR #74 (120-row D0001)",
+  "parent_manifest_digest": "780bdcc994fa2a78ac75ea38d99252c9682301ee4243ac0d57312d9b55dc11da",
+  "generation_waves": [
+    "D0001_initial",
+    "openai-anthropic-expansion-v1"
+  ],
+  "statistics": {
+    "total_raw_candidate_atoms": 211,
+    "total_canonical_atoms": 1,
+    "target_conflicts_isolated": 210,
+    "pack_distribution": {
+      "observation_typing": 0,
+      "tool_selection": 0,
+      "funnel_routing": 0,
+      "intent_surface": 1,
+      "authorization_ttl_decision": 0,
+      "plan_state_transition": 0,
+      "recovery_selection": 0,
+      "verification_request": 0,
+      "resource_selection": 0,
+      "memory_selection": 0
+    },
+    "provider_counts": {
+      "donors": {
+        "grok-4.5 (proxy)": 1
+      },
+      "critics": {
+        "grok-4.5": 1
+      }
+    }
+  },
   "files": [
     "stats.json",
-    "generation_recipe.md"
+    "generation_recipe.md",
+    "adjudication_queue.jsonl",
+    "packs/*/canonical_dataset.jsonl"
   ]
 }
