@@ -20,11 +20,16 @@ TELEMETRY_MIN_SAMPLES = 20
 CALIBRATION_MIN_SAMPLES = 5
 
 ROUTE_CANDIDATES: Dict[str, Tuple[str, ...]] = {
-    "planning": ("grok-4.5", "grok-4.3", "grok-4.20-0309-reasoning"),
-    "coding": ("grok-build-0.1", "grok-4.20-0309-non-reasoning", "grok-4.3"),
-    "vision": ("grok-4.5", "grok-4.3"),
-    "research": ("grok-4.20-multi-agent-0309", "grok-4.20-multi-agent"),
+    "planning": ("grok-4.5", "grok-4.3", "grok-4.20-0309-reasoning", "gemini-3.0-pro-deep-think", "gemini-3.1-pro-preview-customtools"),
+    "coding": ("grok-build-0.1", "grok-4.20-0309-non-reasoning", "grok-4.3", "gemini-3.1-pro-preview-customtools", "gemini-3.5-flash"),
+    "vision": ("grok-4.5", "grok-4.3", "gemini-3.1-pro-preview-customtools", "gemini-3.5-flash"),
+    "research": ("grok-4.20-multi-agent-0309", "grok-4.20-multi-agent", "gemini-3.0-pro-deep-think"),
 }
+
+def is_google_model(model_name: Optional[str]) -> bool:
+    """Detect if a model slug targets the Google GenAI/Antigravity planes."""
+    return bool(model_name and model_name.lower().startswith("gemini"))
+
 
 _CODE_TERMS = {
     "bug", "code", "commit", "compile", "debug", "function", "implement",

@@ -32,6 +32,7 @@ from .routing import (
     classify_route,
     extract_routing_features,
     make_routing_receipt,
+    is_google_model,
 )
 from .credentials import (
     CLI_AUTH_SETUP_COMMAND,
@@ -5188,17 +5189,17 @@ def _completion_recovery_prompt(original_prompt: str) -> str:
 
 
 async def _recover_nonanswer_once(
-    invoke: Callable[[str], Awaitable[tuple[str, int, float, bool]]],
+    invoke: Callable[[str], Awaitable[tuple[str, int, float, bool, Optional[Dict[str, Any]]]]],
     original_prompt: str,
-    initial: tuple[str, int, float, bool],
-) -> tuple[tuple[str, int, float, bool], bool]:
+    initial: tuple[str, int, float, bool, Optional[Dict[str, Any]]],
+) -> tuple[tuple[str, int, float, bool, Optional[Dict[str, Any]]], bool]:
     """Retry one non-answer on the same caller-supplied execution plane."""
 
-    text, tokens, cost, is_cli = initial
+    text, tokens, cost, is_cli, receipt = initial
     if not _is_nonanswer_completion(text, prompt=original_prompt):
         return initial, False
 
-    retry_text, retry_tokens, retry_cost, retry_is_cli = await invoke(
+    retry_text, retry_tokens, retry_cost, retry_is_cli, retry_receipt = await invoke(
         _completion_recovery_prompt(original_prompt)
     )
     return (
@@ -5206,6 +5207,7 @@ async def _recover_nonanswer_once(
         tokens + retry_tokens,
         cost + retry_cost,
         retry_is_cli,
+        retry_receipt or receipt,
     ), True
 
 
@@ -7830,6 +7832,161 @@ async def _consume_cli_stream(proc, on_event) -> tuple[str, Optional[str], bytes
             stderr_task.cancel()
 
 
+def _has_tool_calls(messages: Optional[List[Dict[str, Any]]]) -> bool:
+    """Detect if tools/ReAct loops are required by the request."""
+    if not messages:
+        return False
+    # Check if any message is a tool call or tool response
+    for msg in messages:
+        if msg.get("role") == "tool" or "tool_calls" in msg:
+            return True
+    return False
+
+def _adapt_messages_for_antigravity(messages: List[Dict[str, Any]]) -> str:
+    """Flatten tool-less messages into a single string for Antigravity proxy."""
+    prompt = ""
+    for msg in messages:
+        content = msg.get("content", "")
+        if isinstance(content, list):
+            for part in content:
+                if isinstance(part, dict) and "text" in part:
+                    prompt += part["text"] + "\n"
+        elif isinstance(content, str):
+            prompt += content + "\n"
+    return prompt.strip()
+
+async def _call_google_plane(model: str, messages: Optional[List[Dict[str, Any]]] = None, prompt: str = "", **kwargs) -> tuple[str, int, float, bool, Dict[str, Any]]:
+    """
+    Provider adapter for Google Gemini models with Dual-Lane failover.
+    Returns (content, tokens, cost, is_cli, routing_receipt).
+    """
+    import os
+    import logging
+    try:
+        from google import genai
+        from google.api_core import exceptions as google_exceptions
+    except ImportError:
+        raise RuntimeError("Google GenAI SDK is not installed. Please install 'google-genai' and 'google-api-core'.")
+
+    # Attempt to import Antigravity SDK for the "free" deep-think entitlement lane
+    try:
+        from google.antigravity import Agent, LocalAgentConfig, ThinkingLevel
+        ANTIGRAVITY_AVAILABLE = True
+    except ImportError:
+        ANTIGRAVITY_AVAILABLE = False
+
+    api_key = os.environ.get("GEMINI_API_KEY")
+    ide_token = os.environ.get("GOOGLE_AGENT_API_KEY") # Injected by IDE
+    
+    # Strict pins and policies
+    requested_plane = kwargs.get("plane", "auto") # auto | ide | api
+    fallback_policy = kwargs.get("fallback_policy", "cross_plane")
+    allow_paid_fallback = kwargs.get("allow_paid_fallback", False) # Budget gate
+    
+    generation = ""
+    finish_reason = "stop"
+    routing_receipt = {}
+    
+    # Merge prompt into messages if missing
+    msgs = messages or []
+    if prompt and not msgs:
+        msgs = [{"role": "user", "content": prompt}]
+    
+    # Tool Parity Check: If IDE cannot honor tools, we must not silently strip them.
+    requires_tools = _has_tool_calls(msgs)
+    ide_compatible = not requires_tools
+    
+    try_ide_first = requested_plane in ("auto", "ide") and ANTIGRAVITY_AVAILABLE and ide_token and ide_compatible
+
+    if try_ide_first:
+        try:
+            logging.info("Attempting Antigravity IDE proxy (Deep-Think Entitlement Lane)...")
+            config = LocalAgentConfig(
+                system_instructions="You are a reasoning proxy.",
+                model="gemini-3.1-pro-preview-customtools",
+                thinking_level=ThinkingLevel.HIGH
+            )
+            flat_prompt = _adapt_messages_for_antigravity(msgs)
+            
+            async with Agent(config) as agent:
+                response = await agent.chat(flat_prompt)
+                async for chunk in response:
+                    generation += chunk
+                    
+            routing_receipt = {
+                "resolved_plane": "IDE",
+                "billing_class": "entitlement",
+                "fallback_occurred": False
+            }
+            # Return IDE plane result. Tokens/cost are 0 for free IDE lane.
+            return (generation, 0, 0.0, False, routing_receipt)
+            
+        except (google_exceptions.ServiceUnavailable, ConnectionError) as e:
+            # Infrastructure failure (Proxy down)
+            if requested_plane == "ide" or fallback_policy == "same_plane":
+                routing_receipt["why_detail"] = "same_plane_failure"
+                return (f"IDE execution failed without cross-plane fallback: {e}", 0, 0.0, False, routing_receipt)
+            logging.warning(f"IDE lane infra failed ({e}). Falling back...")
+            
+        except google_exceptions.ResourceExhausted as e:
+            # Quota failure (Rate limited)
+            if not allow_paid_fallback:
+                routing_receipt["why_detail"] = "ide_quota_exhausted"
+                return (f"IDE quota exhausted. Paid fallback forbidden: {e}", 0, 0.0, False, routing_receipt)
+            logging.warning("IDE quota exhausted. Paid fallback explicitly allowed.")
+
+    # ---------------------------------------------------------
+    # Fallback Paid Lane (Google GenAI API)
+    # ---------------------------------------------------------
+    if requested_plane == "ide":
+        raise ValueError("Strict IDE plane requested, but IDE is unavailable or incompatible.")
+        
+    if not api_key:
+        raise ValueError("API Lane requires GEMINI_API_KEY to be set.")
+        
+    logging.info("Routing through Google GenAI API (Paid Lane)...")
+    
+    is_deep_think = "deep-think" in model.lower()
+    use_vertex = kwargs.get("use_vertex", False)
+    
+    if is_deep_think:
+        client = genai.Client(api_key=api_key, vertexai=False)
+    elif use_vertex:
+        # Requires GOOGLE_CLOUD_PROJECT + location='global'
+        project = os.environ.get("GOOGLE_CLOUD_PROJECT")
+        client = genai.Client(vertexai=True, project=project, location="global")
+    else:
+        client = genai.Client(api_key=api_key, vertexai=False)
+    
+    # Translate to genai SDK calls...
+    from google.genai import types
+    contents = []
+    for msg in msgs:
+        role = "user" if msg.get("role") != "assistant" else "model"
+        content_text = msg.get("content", "")
+        if isinstance(content_text, list):
+            parts = []
+            for p in content_text:
+                if isinstance(p, dict) and "text" in p:
+                    parts.append(types.Part.from_text(p["text"]))
+            contents.append(types.Content(role=role, parts=parts))
+        else:
+            contents.append(types.Content(role=role, parts=[types.Part.from_text(str(content_text))]))
+
+    response = client.models.generate_content(
+        model=model,
+        contents=contents,
+    )
+    
+    routing_receipt = {
+        "resolved_plane": "API",
+        "billing_class": "metered",
+        "fallback_occurred": try_ide_first,
+        "fallback_from": "IDE" if try_ide_first else None
+    }
+    
+    return (response.text or "", 0, 0.0, False, routing_receipt)
+
 async def _call_plane(
     plane: ModelPlane,
     prompt: str,
@@ -7848,8 +8005,8 @@ async def _call_plane(
     cli_verbatim: bool = False,
     cli_allowed_tools: Optional[str] = None,
     cli_isolated: bool = False,
-) -> tuple[str, int, float, bool]:
-    # Returns (content, tokens, cost, is_cli). When on_event is provided the
+) -> tuple[str, int, float, bool, Optional[Dict[str, Any]]]:
+    # Returns (content, tokens, cost, is_cli, routing_receipt). When on_event is provided the
     # API branch streams for real via chat.stream(), forwarding each chunk as
     # a {"type": "content_delta", "text": ...} event before returning the
     # complete response as usual.
@@ -7862,6 +8019,17 @@ async def _call_plane(
         model_name = "grok-composer-2.5-fast"
     else:
         model_name = await resolve_model("planning")
+
+    if is_google_model(model_name):
+        return await _call_google_plane(
+            model=model_name,
+            messages=input_messages,
+            prompt=prompt,
+            plane=plane,
+            fallback_policy=profile.get("fallback_policy", "cross_plane") if profile else "cross_plane",
+            allow_paid_fallback=profile.get("allow_paid_fallback", False) if profile else False,
+            use_vertex=profile.get("use_vertex", False) if profile else False,
+        )
 
     is_cli = plane == "cli-fallback" or is_cli_model(model_name)
 
@@ -8068,7 +8236,7 @@ async def _call_plane(
                 await store.save_session(session, cli_session_id=final_id, model=model_name)
         # Subscription plane: the CLI exposes no token usage and has no
         # per-token price, so tokens/cost stay 0 by design.
-        return text, 0, 0.0, True
+        return text, 0, 0.0, True, None
     else:
         history = (await load_history(session)) if session and not input_messages else []
         # Real streaming: chat.stream() is a SYNC iterator, so deltas are
@@ -8152,7 +8320,7 @@ async def _call_plane(
             completion_tokens = getattr(response.usage, "completion_tokens", 0)
         if hasattr(response, "cost_usd") and response.cost_usd is not None:
             cost = response.cost_usd
-        return response.content, prompt_tokens + completion_tokens, cost, False
+        return response.content, prompt_tokens + completion_tokens, cost, False, None
 
 
 async def _build_task_memory_context(active_store: Any, prompt: str, context_id: Optional[str]) -> str:
@@ -8661,7 +8829,7 @@ async def orchestrate(
     try:
         async def _invoke_fast_plane(
             call_prompt: str,
-        ) -> tuple[str, int, float, bool]:
+        ) -> tuple[str, int, float, bool, Optional[Dict[str, Any]]]:
             call_messages = input_messages
             if input_messages is not None and call_prompt != prompt:
                 call_messages = [
@@ -8688,7 +8856,8 @@ async def orchestrate(
             prompt,
             await _invoke_fast_plane(prompt),
         )
-        gen_res, g_tok, g_cost, is_cli = fast_result
+        gen_res, g_tok, g_cost, is_cli, google_routing_receipt = fast_result
+
         layer.generation = gen_res
         layer.tokens = g_tok
         layer.cost_usd = g_cost
@@ -8705,9 +8874,19 @@ async def orchestrate(
         layer.context_id = context_id
         layer.routing_why = "failover" if degraded_route else routing_why
         layer.degraded = degraded_route
+
+        if google_routing_receipt:
+            layer.routing_receipt.update(google_routing_receipt)
+            layer.routing_why = google_routing_receipt.get("why_detail", routing_why)
+            layer.fallback_occurred = google_routing_receipt.get("fallback_occurred", layer.fallback_occurred)
+            if "billing_class" in google_routing_receipt:
+                layer.billing_class = google_routing_receipt["billing_class"]
+            if "resolved_plane" in google_routing_receipt:
+                layer.plane = google_routing_receipt["resolved_plane"]
+
         if degraded_route:
             layer.routing_receipt = {
-                **routing_receipt,
+                **layer.routing_receipt,
                 "why": "failover",
                 "why_detail": "agentic_to_fast",
                 "fallback": {"from_route": "agentic", "to_route": "fast"},
@@ -8824,7 +9003,7 @@ async def orchestrate(
             fallback_profile = load_grok_profile("grok-composer-2.5-fast")
             async def _invoke_cli_fallback(
                 call_prompt: str,
-            ) -> tuple[str, int, float, bool]:
+            ) -> tuple[str, int, float, bool, Optional[Dict[str, Any]]]:
                 return await _call_plane(
                     "cli-fallback", call_prompt, session, store, dynamic_sys_prompt,
                     requested_model="grok-composer-2.5-fast",
@@ -8843,7 +9022,8 @@ async def orchestrate(
                     await _invoke_cli_fallback(prompt),
                 )
             )
-            gen_res, g_tok, g_cost, _ = fallback_result
+            gen_res, g_tok, g_cost, is_cli, google_routing_receipt = fallback_result
+
             layer.generation = gen_res
             layer.tokens = g_tok
             layer.cost_usd = g_cost

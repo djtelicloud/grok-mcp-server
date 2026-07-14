@@ -1419,7 +1419,7 @@ class TestAgentLoopFailurePaths:
 
         with patch("src.utils.AgentLoop") as mock_loop_cls, \
              patch("src.utils._call_plane", new_callable=AsyncMock) as mock_call:
-            mock_call.return_value = ("fast path result", 50, 0.002, False)
+            mock_call.return_value = ("fast path result", 50, 0.002, False, None)
 
             layer = await orchestrate(
                 prompt="fix the typo",
@@ -1445,7 +1445,7 @@ class TestAgentLoopFailurePaths:
         with patch("src.utils.AgentLoop") as mock_loop_cls, \
              patch("src.utils.resolve_model", new_callable=AsyncMock) as mock_resolve, \
              patch("src.utils._call_plane", new_callable=AsyncMock) as mock_call:
-            mock_call.return_value = ("cli direct result", 0, 0.0, True)
+            mock_call.return_value = ("cli direct result", 0, 0.0, True, None)
 
             layer = await orchestrate(
                 prompt="fix the typo",
@@ -1477,7 +1477,7 @@ class TestAgentLoopFailurePaths:
         with patch("src.utils.AgentLoop") as mock_loop_cls, \
              patch("src.utils.run_thinking_loop", new_callable=AsyncMock) as mock_thinking, \
              patch("src.utils._call_plane", new_callable=AsyncMock) as mock_call:
-            mock_call.return_value = ("cli reasoning result", 0, 0.0, True)
+            mock_call.return_value = ("cli reasoning result", 0, 0.0, True, None)
 
             layer = await orchestrate(
                 prompt="architect the right fix",
@@ -1848,7 +1848,7 @@ class TestDefaultAgenticRouting:
         monkeypatch.setenv("UNIGROK_FORCE_FAST", "1")
         with patch("src.utils.AgentLoop") as mock_loop_cls, \
              patch("src.utils._call_plane", new_callable=AsyncMock) as mock_call:
-            mock_call.return_value = ("fast answer", 10, 0.001, False)
+            mock_call.return_value = ("fast answer", 10, 0.001, False, None)
             layer = await orchestrate(prompt="hello", mode="auto", dynamic_sys_prompt="sys")
 
         mock_loop_cls.assert_not_called()
@@ -1872,7 +1872,7 @@ class TestDefaultAgenticRouting:
         with patch(
             "src.utils._select_routing_model", new=AsyncMock(return_value=selection)
         ), patch("src.utils._call_plane", new_callable=AsyncMock) as mock_call:
-            mock_call.return_value = ("complete answer", 0, 0.0, True)
+            mock_call.return_value = ("complete answer", 0, 0.0, True, None)
             layer = await orchestrate(
                 prompt="finish the implementation",
                 mode="auto",
@@ -1895,7 +1895,7 @@ class TestDefaultAgenticRouting:
 
         with patch("src.utils.AgentLoop", return_value=mock_loop), \
              patch("src.utils._call_plane", new_callable=AsyncMock) as mock_call:
-            mock_call.return_value = ("recovered answer", 10, 0.001, False)
+            mock_call.return_value = ("recovered answer", 10, 0.001, False, None)
             layer = await orchestrate(prompt="hello", mode="auto", dynamic_sys_prompt="sys")
 
         assert layer.generation == "recovered answer"
@@ -2132,7 +2132,7 @@ class TestHonestOutcomes:
         mock_store = self._mock_store()
 
         with patch("src.utils._call_plane", new_callable=AsyncMock) as mock_call:
-            mock_call.return_value = (promise, 10, 0.001, False)
+            mock_call.return_value = (promise, 10, 0.001, False, None)
             layer = await orchestrate(
                 prompt="Audit the repository",
                 mode="auto",
@@ -2168,8 +2168,8 @@ class TestHonestOutcomes:
 
         with patch("src.utils._call_plane", new_callable=AsyncMock) as mock_call:
             mock_call.side_effect = (
-                (promise, 10, 0.001, True),
-                ("Findings: the PR needs a current-main rebase.", 12, 0.002, True),
+                (promise, 10, 0.001, True, None),
+                ("Findings: the PR needs a current-main rebase.", 12, 0.002, True, None),
             )
             layer = await orchestrate(
                 prompt="Audit the repository",
@@ -2202,7 +2202,7 @@ class TestHonestOutcomes:
 
         mock_store = self._mock_store()
         with patch("src.utils._call_plane", new_callable=AsyncMock) as mock_call:
-            mock_call.return_value = ("The audit found no blockers.", 10, 0.001, False)
+            mock_call.return_value = ("The audit found no blockers.", 10, 0.001, False, None)
             layer = await orchestrate(
                 prompt="Audit the repository",
                 mode="auto",
@@ -2281,7 +2281,7 @@ class TestHonestOutcomes:
             call_count += 1
             if call_count == 1:
                 raise RuntimeError("api down")
-            return "cli recovered", 0, 0.0, True
+            return "cli recovered", 0, 0.0, True, None
 
         with patch("src.utils._call_plane", new=_flaky_plane):
             layer = await orchestrate(
@@ -2779,7 +2779,7 @@ class TestOrchestrateThinkingRoute:
         monkeypatch.delenv("UNIGROK_FORCE_FAST", raising=False)
         with patch("src.utils.run_thinking_loop", new=AsyncMock(side_effect=RuntimeError("boom"))), \
              patch("src.utils._call_plane", new_callable=AsyncMock) as mock_call:
-            mock_call.return_value = ("fast answer", 10, 0.001, False)
+            mock_call.return_value = ("fast answer", 10, 0.001, False, None)
             layer = await orchestrate(
                 prompt="hardest task",
                 thinking_mode=True,
@@ -3723,7 +3723,7 @@ class TestUtilsQuickWins:
         monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
         monkeypatch.setattr("src.utils.communicate_with_timeout", fake_communicate)
 
-        content, _, _, is_cli = await _call_plane("cli-fallback", "hi", None, None, "sys")
+        content, _, _, is_cli, _ = await _call_plane("cli-fallback", "hi", None, None, "sys")
 
         assert is_cli is True
         assert content == "cli output"
@@ -3752,7 +3752,7 @@ class TestUtilsQuickWins:
         monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
         monkeypatch.setattr("src.utils.communicate_with_timeout", fake_communicate)
 
-        content, _, _, is_cli = await _call_plane(
+        content, _, _, is_cli, _ = await _call_plane(
             "cli-fallback", "finish it", None, None, "sys"
         )
 
@@ -3799,7 +3799,7 @@ class TestCliPlaneV2:
         monkeypatch.setattr("src.utils.communicate_with_timeout", fake_communicate)
 
         schema = {"type": "object", "properties": {"answer": {"type": "string"}}}
-        content, _, _, is_cli = await _call_plane(
+        content, _, _, is_cli, _ = await _call_plane(
             "cli-fallback",
             "hi",
             None,
@@ -3875,7 +3875,7 @@ class TestCliPlaneV2:
             events.append(event)
 
         store = self._fake_store(session_row={"cli_session_id": "sid-existing"})
-        content, _, _, is_cli = await _call_plane(
+        content, _, _, is_cli, _ = await _call_plane(
             "cli-fallback",
             "hi",
             "sess",
@@ -4051,7 +4051,7 @@ class TestCliPlaneV2:
         monkeypatch.setattr("src.utils.communicate_with_timeout", fake_communicate)
 
         store = self._fake_store(session_row={})
-        content, tokens, cost, is_cli = await _call_plane(
+        content, tokens, cost, is_cli, _ = await _call_plane(
             "cli-fallback", "hi", "sess", store, "sys")
 
         assert content == "hello from cli"
@@ -4094,7 +4094,7 @@ class TestCliPlaneV2:
         monkeypatch.setattr("src.utils.communicate_with_timeout", fake_communicate)
 
         store = self._fake_store(session_row={"cli_session_id": "abc-123"})
-        content, _, _, _ = await _call_plane("cli-fallback", "hi", "sess", store, "sys")
+        content, _, _, _, _ = await _call_plane("cli-fallback", "hi", "sess", store, "sys")
 
         assert content == "resumed"
         cmd = captured["cmd"]
@@ -4143,7 +4143,7 @@ class TestCliPlaneV2:
             {"role": "user", "content": "Remember marker MISSING-SESSION-MARKER"},
             {"role": "assistant", "content": "Marker stored"},
         ]
-        content, _, _, is_cli = await _call_plane(
+        content, _, _, is_cli, _ = await _call_plane(
             "cli-fallback", "What marker did I give you?", "sess", store, "sys"
         )
 
@@ -4200,7 +4200,7 @@ class TestCliPlaneV2:
         monkeypatch.setattr("src.utils.communicate_with_timeout", fake_communicate)
 
         store = self._fake_store(session_row={"cli_session_id": "abc-123"})
-        content, _, _, is_cli = await _call_plane(
+        content, _, _, is_cli, _ = await _call_plane(
             "cli-fallback", "What marker did I give you?", "sess", store, "sys"
         )
 
@@ -4262,7 +4262,7 @@ class TestCliPlaneV2:
             {"role": "user", "content": "Remember marker STALE-SESSION-MARKER"},
             {"role": "assistant", "content": "Marker stored"},
         ]
-        content, _, _, is_cli = await _call_plane(
+        content, _, _, is_cli, _ = await _call_plane(
             "cli-fallback", "What marker did I give you?", "sess", store, "sys"
         )
 
@@ -4319,7 +4319,7 @@ class TestCliPlaneV2:
             {"role": "assistant", "content": "STORED"},
         ]
 
-        content, _, _, is_cli = await _call_plane(
+        content, _, _, is_cli, _ = await _call_plane(
             "cli-fallback",
             "What marker did I give you?",
             "sess",
@@ -4361,7 +4361,7 @@ class TestCliPlaneV2:
         monkeypatch.setattr("src.utils.communicate_with_timeout", fake_communicate)
 
         store = self._fake_store(session_row={"cli_session_id": "native-cli-session"})
-        content, _, _, is_cli = await _call_plane(
+        content, _, _, is_cli, _ = await _call_plane(
             "cli-fallback",
             "What marker did I give you?",
             "sess",
@@ -4421,7 +4421,7 @@ class TestCliPlaneV2:
             {"role": "assistant", "content": "Stored server-side"},
         ]
 
-        content, _, _, is_cli = await _call_plane(
+        content, _, _, is_cli, _ = await _call_plane(
             "cli-fallback",
             "What marker did I give you?",
             "sess",
@@ -4496,7 +4496,7 @@ class TestCliPlaneV2:
             events.append(event)
 
         store = self._fake_store(session_row={})
-        content, _, _, is_cli = await _call_plane(
+        content, _, _, is_cli, _ = await _call_plane(
             "cli-fallback", "hi", "sess", store, "sys", on_event=on_event)
 
         assert is_cli is True
@@ -5358,7 +5358,7 @@ class TestAgentProgressEvents:
         mock_client.chat.create.return_value = mock_chat
 
         with patch("xai_sdk.Client", return_value=mock_client):
-            content, _, _, is_cli = await _call_plane(
+            content, _, _, is_cli, _ = await _call_plane(
                 "reasoning", "hi", None, None, "sys",
                 requested_model="grok-4.3", on_event=on_event,
             )

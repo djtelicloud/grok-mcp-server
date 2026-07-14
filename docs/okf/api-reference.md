@@ -938,6 +938,16 @@ tests.
 
 ## routing.py {#routing}
 
+### Function: `is_google_model` {#routing-is_google_model}
+
+```python
+def is_google_model(model_name: Optional[str]) -> bool
+```
+
+**Keywords:** is, google, model
+
+Detect if a model slug targets the Google GenAI/Antigravity planes.
+
 ### Function: `extract_routing_features` {#routing-extract_routing_features}
 
 ```python
