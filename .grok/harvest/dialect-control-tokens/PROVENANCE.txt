@@ -1,8 +1,0 @@
-source_repo=djtelicloud/GenFuncAgentixAI
-matrix_commit=8d4f7b3a4fc
-compiler_commit=8d4f7b3a4fc (same path)
-seed_commit=5328eb7769d
-omni_wire_commit=c6921b45dd1
-optimizer_commit=8d4f7b3a4fc (swarm_dialect_optimizer.py)
-lexical_crucible_commit=20344a7451c
-status=reference_harvest_not_runtime
