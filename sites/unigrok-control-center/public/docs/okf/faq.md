@@ -220,10 +220,11 @@ its usage-accounting boundary.
 The same exact model id may appear on both sides. That duplication is
 intentional: the model slug is not the credential plane. The public `agent`
 tool accepts `plane=auto|cli|api` and
-`fallback_policy=same_plane|cross_plane`. Strict `cli` and `api` requests do
-not cross the credential or billing boundary; `auto` preserves compatible
-routing. Headless clients can read the same structured truth from
-`data.model_catalog` in the opt-in discovery response.
+`fallback_policy=same_plane|cross_plane`. `plane` selects the first attempt;
+`same_plane` forbids crossing the credential or billing boundary, while
+`cross_plane` permits one bounded recovery on the other xAI plane. Headless
+clients can read the same structured truth from `data.model_catalog` in the
+opt-in discovery response.
 
 Grok Build is the coding-agent product name. `grok-build-0.1` is the exact
 metered API model slug. It belongs in the shared-id list only if the live CLI

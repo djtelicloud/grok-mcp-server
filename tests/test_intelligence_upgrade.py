@@ -397,7 +397,22 @@ async def test_grok_cli_discovery_failure_returns_fallback(monkeypatch):
 @pytest.mark.asyncio
 async def test_grok_cli_discovery_rejects_api_key_backed_cli(monkeypatch):
     monkeypatch.setenv("UNIGROK_RUNTIME", "local")
-    monkeypatch.setenv("XAI_API_KEY", "must-not-reach-cli")
+    server_secrets = {
+        "XAI_API_KEY": "xai-inference",
+        "XAI_MANAGEMENT_API_KEY": "xai-management",
+        "GROK_API_KEY": "grok-api",
+        "OPENAI_API_KEY": "openai-api",
+        "ANTHROPIC_API_KEY": "anthropic-api",
+        "CLAUDE_API_KEY": "claude-api",
+        "GEMINI_API_KEY": "gemini-api",
+        "GOOGLE_API_KEY": "google-api",
+        "GOOGLE_APPLICATION_CREDENTIALS": "/private/vertex-adc.json",
+        "UNIGROK_API_KEYS": "gateway-client-secret",
+    }
+    for name, value in server_secrets.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setenv("GROK_AUTH_PATH", "/oauth/auth.json")
+    monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "benign-project-id")
     captured = {}
 
     class FakeProc:
@@ -419,7 +434,9 @@ async def test_grok_cli_discovery_rejects_api_key_backed_cli(monkeypatch):
     discovered = await utils.discover_grok_cli_models()
 
     assert discovered["available"] is False
-    assert "XAI_API_KEY" not in captured["env"]
+    assert server_secrets.keys().isdisjoint(captured["env"])
+    assert captured["env"]["GROK_AUTH_PATH"] == "/oauth/auth.json"
+    assert captured["env"]["GOOGLE_CLOUD_PROJECT"] == "benign-project-id"
     assert any("not independent" in warning for warning in discovered["warnings"])
 
 

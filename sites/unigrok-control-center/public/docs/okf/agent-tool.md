@@ -29,11 +29,12 @@ Primary entry point for ordinary IDE calls to `:4765/mcp`.
   - `workspace_label` (string, optional): Human-readable label for that text.
   - `mode` (string, optional): `"auto"` (default), `"fast"`, `"reasoning"`, `"thinking"`, or `"research"`.
   - `model` (string, optional): Enforce a specific Grok model ID.
-  - `plane` (string, optional): `"auto"` (backward-compatible), `"cli"`
-    (strict SuperGrok subscription), or `"api"` (strict metered API).
+  - `plane` (string, optional): starting credential plane — `"auto"`
+    (server policy), `"cli"` (SuperGrok subscription), or `"api"` (metered
+    developer API).
   - `fallback_policy` (string, optional): `"same_plane"` forbids crossing the
-    billing boundary; `"cross_plane"` preserves automatic recovery for legacy
-    auto callers.
+    billing boundary; `"cross_plane"` permits bounded recovery on the other
+    xAI credential plane.
 - **Response Shape (`AgentResult`)**:
   ```json
   {

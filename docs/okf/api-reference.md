@@ -433,11 +433,11 @@ Args:
         enables multi-agent fan-out, and requests inline citations.
     model: Optional Grok model id. Leave unset (or pass the virtual
         `unigrok-agent`) to let routing choose.
-    plane: Credential plane contract. `auto` preserves compatible routing;
-        `cli` strictly uses the SuperGrok subscription; `api` strictly uses
-        the metered developer API.
+    plane: Starting credential plane. `auto` follows server policy; `cli`
+        starts on the SuperGrok subscription; `api` starts on the metered
+        developer API.
     fallback_policy: `same_plane` forbids crossing the billing boundary;
-        `cross_plane` preserves automatic recovery for legacy auto callers.
+        `cross_plane` permits bounded recovery on the other xAI plane.
 
 Returns:
     AgentResult containing execution metadata and responses.
@@ -2044,11 +2044,11 @@ Args:
         inline citations requested — sources come back under `citations`.
     model: Optional Grok model id. Leave unset to let routing choose.
     require_reasoning_level: Minimum required Grok reasoning level (low, medium, high).
-    plane: Credential plane contract. `auto` preserves compatible routing;
-        `cli` strictly uses the SuperGrok subscription; `api` strictly uses
-        the metered developer API.
+    plane: Starting credential plane. `auto` follows server policy; `cli`
+        starts on the SuperGrok subscription; `api` starts on the metered
+        developer API.
     fallback_policy: `same_plane` forbids crossing the billing boundary;
-        `cross_plane` preserves automatic API-to-CLI recovery in auto mode.
+        `cross_plane` permits bounded recovery on the other xAI plane.
 
 Returns:
     AgentResult containing execution metadata and responses.
@@ -3003,12 +3003,13 @@ def grok_cli_oauth_env(base: Optional[Dict[str, str]]=None) -> Dict[str, str]
 
 **Keywords:** grok, cli, oauth, env
 
-Return an environment that cannot silently bill the API plane.
+Return an OAuth-only environment for a Grok CLI child.
 
-The UniGrok process needs ``XAI_API_KEY`` for its SDK route, but the Grok
-CLI inherits process variables by default.  Removing API credentials from
-every CLI child is what makes the two planes genuinely independent: the
-CLI must use its persisted grok.com OAuth session or fail closed.
+The UniGrok process owns API, management, gateway, and subordinate-provider
+credentials. Removing that exact set from every CLI child keeps the xAI
+credential planes independent and prevents Grok-launched tools from seeing
+unrelated provider secrets. The persisted grok.com OAuth path remains
+available, so the CLI must use that subscription identity or fail closed.
 
 ### Function: `grok_cli_plane_status` {#utils-grok_cli_plane_status}
 
@@ -4134,7 +4135,7 @@ Returns [] unless enabled and capable; never raises.
 ### Function: `run_thinking_loop` {#utils-run_thinking_loop}
 
 ```python
-async def run_thinking_loop(prompt: str, session: Optional[str]=None, store: Any=None, dynamic_sys_prompt: str='', model: str=DEFAULT_PLANNING_MODEL, context_id: Optional[str]=None, max_reflections: Optional[int]=None, global_budget_usd: Optional[float]=None, profile: Optional[Dict[str, Any]]=None, input_messages: Optional[List[Dict[str, Any]]]=None, on_event: Optional[Callable]=None, caller: Optional[str]=None, routing_receipt: Optional[Dict[str, Any]]=None) -> MetaLayer
+async def run_thinking_loop(prompt: str, session: Optional[str]=None, store: Any=None, dynamic_sys_prompt: str='', model: str=DEFAULT_PLANNING_MODEL, context_id: Optional[str]=None, max_reflections: Optional[int]=None, global_budget_usd: Optional[float]=None, profile: Optional[Dict[str, Any]]=None, input_messages: Optional[List[Dict[str, Any]]]=None, on_event: Optional[Callable]=None, caller: Optional[str]=None, routing_receipt: Optional[Dict[str, Any]]=None, attempt_recorder: Optional[Callable[..., Any]]=None, defer_telemetry: bool=False) -> MetaLayer
 ```
 
 **Keywords:** run, thinking, loop

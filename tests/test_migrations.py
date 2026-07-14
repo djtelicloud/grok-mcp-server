@@ -18,7 +18,7 @@ from src.utils import GrokSessionStore
 # The current schema head. Bump this alongside any new migration — the
 # sequential-chain test below will fail loudly if the source and this pin
 # ever disagree.
-SCHEMA_HEAD = 15
+SCHEMA_HEAD = 16
 
 # Every table a fully migrated store must carry (sqlite internals and the
 # optional knowledge_fts shadow tables excluded — FTS5 availability is a
@@ -35,6 +35,7 @@ EXPECTED_TABLES = {
     "swarm_tasks",
     "swarm_candidates",
     "provider_attempts",
+    "telemetry_attempts",
 }
 
 
@@ -392,6 +393,66 @@ class TestV10TaskMemorySync:
             assert {
                 "remote_file_id", "synced_at", "sync_attempts", "sync_error",
             } <= await _fetch_columns(store, "task_memory")
+        finally:
+            await store.close()
+
+
+class TestV16TelemetryAttempts:
+    @staticmethod
+    async def _freeze_at_v15(path):
+        store = GrokSessionStore(db_path=path)
+        await store._ensure_initialized()
+        await store.close()
+        conn = sqlite3.connect(path)
+        try:
+            conn.execute("DROP TABLE telemetry_attempts;")
+            conn.execute("PRAGMA user_version = 15;")
+            conn.commit()
+        finally:
+            conn.close()
+
+    @pytest.mark.asyncio
+    async def test_v15_db_upgrades_to_digest_bound_attempt_rows(self, tmp_path):
+        db_path = tmp_path / "legacy_v15.db"
+        await self._freeze_at_v15(db_path)
+
+        store = GrokSessionStore(db_path=db_path)
+        try:
+            await store._ensure_initialized()
+            assert await _fetch_version(store) == 16
+            assert await _fetch_columns(store, "telemetry_attempts") == {
+                "id",
+                "telemetry_id",
+                "attempt_ordinal",
+                "attempt_json",
+                "attempt_digest",
+            }
+            async with store._conn.execute(
+                "PRAGMA index_info(idx_telemetry_attempts_parent);"
+            ) as cursor:
+                assert [row[2] for row in await cursor.fetchall()] == [
+                    "telemetry_id",
+                    "attempt_ordinal",
+                ]
+        finally:
+            await store.close()
+
+    @pytest.mark.asyncio
+    async def test_v15_unknown_preexisting_table_is_not_certified(self, tmp_path):
+        db_path = tmp_path / "foreign_v15.db"
+        await self._freeze_at_v15(db_path)
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute("CREATE TABLE telemetry_attempts (id INTEGER);")
+            conn.commit()
+        finally:
+            conn.close()
+
+        store = GrokSessionStore(db_path=db_path)
+        try:
+            with pytest.raises(RuntimeError, match="predates v16"):
+                await store._ensure_initialized()
+            assert await _fetch_version(store) == 15
         finally:
             await store.close()
 
