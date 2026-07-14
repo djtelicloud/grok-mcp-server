@@ -7,7 +7,8 @@ description: How to query xAI Grok through the UniGrok MCP gateway. Activate whe
 
 UniGrok exposes one headline MCP tool: `agent`. It self-routes across Grok
 models and two billing planes, and returns structured metadata with every
-answer.
+answer. **Primary chat path for every project is IDE → UniGrok MCP**, not a
+browser chat client.
 
 ## The `agent` tool
 
@@ -39,6 +40,19 @@ search grounding was used.
 - Tasks needing self-critique → `thinking`.
 - Current-events or source-cited answers → `research` (uses web + X search).
 
+## Plan critique habit (opt-in)
+
+When the user is about to see a multi-step **Implementation Plan**, prefer:
+
+1. Call UniGrok `agent` (`thinking` or `reasoning`) with the draft plan.
+2. Incorporate feedback silently.
+3. Only then present the improved plan to the user.
+
+Do this when the user wants a Grok second opinion (including `@grok`). Do **not**
+silently spend metered API credits without consent. Do **not** auto-generate
+skill trees into foreign projects without permission. Never copy the UniGrok
+repository’s contributor `.agents` tree into the user’s other apps.
+
 ## Cost awareness
 
 Check `cost_usd` in each response. Session reuse preserves continuity and can
@@ -62,14 +76,17 @@ not invented subscription cost or remaining provider quota.
   contributor/stdio session.
 - Translate provider and transport errors into one concrete next action for
   the user; do not require them to understand planes, MCP transport, or JSON-RPC.
+- Public product path is `http://localhost:4765/mcp` only. Do not invent a
+  second port, Forge, Swarm, or land workflow for ordinary end-user installs.
 
 ## Endpoint
 
 The shared gateway runs at `http://localhost:4765/mcp` (Streamable HTTP).
-Health: `GET /healthz`. Browser Control Center: `http://localhost:4765/ui/`.
-`X-Client-ID` is a caller-controlled attribution and session label beneath a
-server-derived principal; it is not authentication. The default unauthenticated
-loopback service derives the shared `http:anon` principal for one local
-budget/security trust domain, so there is no cross-user isolation without
-configured auth. Project-qualify every session key: a generic key can collide
-across repositories when the same client label is reused.
+Health: `GET /healthz`. Optional local Core UI: `http://localhost:4765/ui/`
+(machine-owner loopback status). `X-Client-ID` is a caller-controlled
+attribution and session label beneath a server-derived principal; it is not
+authentication. The default unauthenticated loopback service derives the shared
+`http:anon` principal for one local budget/security trust domain, so there is
+no cross-user isolation without configured auth. Project-qualify every session
+key: a generic key can collide across repositories when the same client label
+is reused.
