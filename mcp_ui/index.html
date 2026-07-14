@@ -7,9 +7,9 @@
     <meta name="unigrok-ui-regions" content="navigation,workbench,rpc-inspector,rpc-logs,result-facts" />
     <!-- Version handshake: app.js compares this against its own build constant
          and self-heals a stale-cached page with one revalidating reload. -->
-    <meta name="unigrok-ui-version" content="grok-v0.6.0-r5" />
-  <link rel="stylesheet" href="./tokens.css?v=grok-v0.6.0-r5" />
-  <link rel="stylesheet" href="./styles.css?v=grok-v0.6.0-r5" />
+    <meta name="unigrok-ui-version" content="grok-v0.6.0-r6" />
+  <link rel="stylesheet" href="./tokens.css?v=grok-v0.6.0-r6" />
+  <link rel="stylesheet" href="./styles.css?v=grok-v0.6.0-r6" />
   </head>
   <body>
     <main class="app-shell">
@@ -78,7 +78,7 @@
           <button id="tab-btn-metrics" type="button" class="nav-btn" data-tab="tab-metrics" role="tab" aria-selected="false" aria-controls="tab-metrics" tabindex="-1" title="Usage &amp; Costs">
             <span class="btn-icon" aria-hidden="true">📊</span><span class="btn-label">Usage &amp; Costs</span>
           </button>
-          <div class="nav-title nav-title-group">Contributor</div>
+          <div id="nav-group-contributor" class="nav-title nav-title-group">Contributor</div>
           <!-- A real page link, deliberately NOT a .nav-btn: the tab router
                and its arrow-key traversal bind .nav-btn only, so this never
                hijacks tab switching or navigates during keyboard cycling. -->
@@ -606,6 +606,6 @@ docker compose up --build -d</code></pre>
 
       </section>
     </main>
-  <script type="module" src="./app.js?v=grok-v0.6.0-r5"></script>
+  <script type="module" src="./app.js?v=grok-v0.6.0-r6"></script>
   </body>
 </html>
