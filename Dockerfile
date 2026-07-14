@@ -29,8 +29,8 @@ ENV UV_COMPILE_BYTECODE=1 \
 COPY pyproject.toml uv.lock ./
 
 # Install dependencies with sync (project itself is copied and run from source)
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --extra forge --no-install-project
+# No BuildKit cache mounts: Google Cloud Build default builder rejects --mount.
+RUN uv sync --frozen --no-dev --extra forge --no-install-project
 
 # Install the grok CLI (Linux build) so the local CLI plane works inside
 # the container. Version-pinned for reproducible builds. The installer drops
