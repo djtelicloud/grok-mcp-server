@@ -5069,7 +5069,7 @@ _IMMEDIATE_DELIVERY_RE = re.compile(
     rf"(?:i(?:['’]ll|\s+will)|let\s+me)\s+{_PROMISE_ADVERB}"
     r"(?:explain|clarify|answer|summarize|report|review|check|analy[sz]e|audit|inspect)"
     r"\b[^:\n.]{0,80}"
-    r"(?::|[—–-]|\.\s+|\n+)\s*(?P<value>\S[\s\S]*)"
+    r"(?::|[—–]|\s+-\s+|\.\s+|\n+)\s*(?P<value>\S[\s\S]*)"
 )
 
 
