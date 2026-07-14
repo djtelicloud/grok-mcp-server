@@ -363,39 +363,92 @@ def validate_lane_vitals(log_path: Path, *, arm: str = "", seed: int = 0) -> dic
     }
 
 
-def validate_arm_records(packet_root: Path) -> dict[str, Any]:
-    """Replay the frozen arm candidate records — never invent an arm."""
-    packet_root = Path(packet_root)
+def _alias_key(name: str) -> str:
+    """Case/punctuation-insensitive form used only to *reject* near-duplicates."""
+    return re.sub(r"[^a-z0-9]+", "", name.lower())
+
+
+def _load_arm_records(
+    packet_root: Path,
+    violations: list[str],
+    artifact_digests: dict[str, str],
+) -> list[dict[str, Any]]:
+    """Load frozen arm candidate records with exact-identity discipline.
+
+    Each record binds an arm to its exact results identity (``results_name``,
+    defaulting to the arm name) and its dataset digest (``dataset_hash``,
+    required). Duplicate or aliased arm names — two records whose names
+    differ only in case or punctuation — are rejected so no downstream
+    consumer can ever join arms by a fuzzy or partial key.
+    """
     candidates_path = packet_root / "data" / "arm_candidates.json"
-    violations: list[str] = []
     arms: list[dict[str, Any]] = []
-    artifact_digests: dict[str, str] = {}
 
     if not candidates_path.is_file():
         violations.append("data/arm_candidates.json missing")
-    else:
-        artifact_digests[str(candidates_path)] = sha256_file(candidates_path)
-        try:
-            raw = json.loads(candidates_path.read_text())
-        except json.JSONDecodeError as exc:
-            violations.append(f"arm_candidates.json unparseable: {exc}")
-            raw = []
-        if not isinstance(raw, list):
-            violations.append("arm_candidates.json is not a JSON array")
-            raw = []
-        for entry in raw:
-            if not isinstance(entry, dict) or "arm" not in entry:
-                violations.append("arm candidate entry missing 'arm'")
-                continue
-            arms.append(
-                {
-                    "arm": str(entry["arm"]),
-                    "dataset_hash": str(entry.get("dataset_hash", "")),
-                    "n": int(entry.get("n", 0)),
-                    "recipe": str(entry.get("recipe", "")),
-                    "seed": int(entry.get("seed", 0)),
-                }
+        return arms
+    artifact_digests[str(candidates_path)] = sha256_file(candidates_path)
+    try:
+        raw = json.loads(candidates_path.read_text())
+    except json.JSONDecodeError as exc:
+        violations.append(f"arm_candidates.json unparseable: {exc}")
+        return arms
+    if not isinstance(raw, list):
+        violations.append("arm_candidates.json is not a JSON array")
+        return arms
+
+    seen_names: set[str] = set()
+    seen_aliases: dict[str, str] = {}
+    seen_results: dict[str, str] = {}
+    for entry in raw:
+        if not isinstance(entry, dict) or "arm" not in entry:
+            violations.append("arm candidate entry missing 'arm'")
+            continue
+        name = str(entry["arm"])
+        if name in seen_names:
+            violations.append(f"duplicate arm name in arm_candidates.json: {name}")
+            continue
+        alias = _alias_key(name)
+        if alias in seen_aliases:
+            violations.append(
+                f"aliased arm names in arm_candidates.json: {name!r} collides "
+                f"with {seen_aliases[alias]!r}"
             )
+            continue
+        dataset_hash = str(entry.get("dataset_hash", ""))
+        if not dataset_hash:
+            violations.append(f"arm {name}: dataset_hash missing — every arm record "
+                              "must bind its exact dataset digest")
+        results_name = str(entry.get("results_name", name))
+        if results_name in seen_results:
+            violations.append(
+                f"arm {name}: results identity {results_name!r} already claimed "
+                f"by arm {seen_results[results_name]!r}"
+            )
+            continue
+        seen_names.add(name)
+        seen_aliases[alias] = name
+        seen_results[results_name] = name
+        arms.append(
+            {
+                "arm": name,
+                "results_name": results_name,
+                "dataset_hash": dataset_hash,
+                "log": str(entry.get("log", "")),
+                "n": int(entry.get("n", 0)),
+                "recipe": str(entry.get("recipe", "")),
+                "seed": int(entry.get("seed", 0)),
+            }
+        )
+    return arms
+
+
+def validate_arm_records(packet_root: Path) -> dict[str, Any]:
+    """Replay the frozen arm candidate records — never invent an arm."""
+    packet_root = Path(packet_root)
+    violations: list[str] = []
+    artifact_digests: dict[str, str] = {}
+    arms = _load_arm_records(packet_root, violations, artifact_digests)
 
     return {
         "schema": ARM_RECORDS_SCHEMA,
@@ -414,28 +467,64 @@ _LEGACY_KEY_MAP = {
     "forgetting": "retention",
 }
 
+# The trivial deterministic baseline every learned arm must beat, in addition
+# to the A_control comparison. Dropping it silently would let a learned arm
+# be promoted for merely beating an untrained control.
+DEFAULT_BASELINE_NAME = "tfidf_baseline"
 
-def _arm_letter(name: str) -> str:
-    match = re.search(r"(?:^|_)([A-Z])(?:_|$)", name)
-    return match.group(1) if match else ""
+
+def _typed_metrics_row(name: str, entry: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "results_name": name,
+        "dataset_hash": str(entry.get("dataset_hash", "")),
+        "in_template": float(entry.get("in_template", -1)),
+        "dev_ood": float(entry.get("sealed", -1)),
+        "secondary_ood": float(entry.get("dev_ood", -1)),
+        "retention": str(entry.get("forgetting", "")),
+        "worst_class": entry.get("worst_class", []),
+        "class_recalls": dict(sorted((entry.get("sealed_recalls") or {}).items())),
+    }
 
 
-def _find_arm_log(logs_dir: Path, letter: str) -> Path | None:
-    if not logs_dir.is_dir() or not letter:
+def _find_arm_log(logs_dir: Path, record: dict[str, Any]) -> Path | None:
+    """Resolve an arm's training log by exact identity — never by a letter.
+
+    Precedence: the record's explicit ``log`` filename, then a filename that
+    contains the exact ``results_name``. Anything fuzzier (single-letter
+    matching) has been removed: it silently joined unrelated artifacts.
+    """
+    explicit = str(record.get("log", ""))
+    if explicit:
+        candidate = logs_dir / Path(explicit).name
+        return candidate if candidate.is_file() else None
+    results_name = str(record.get("results_name", ""))
+    if not logs_dir.is_dir() or not results_name:
         return None
-    pattern = re.compile(rf"(?i)ft-arm[-_]?{re.escape(letter)}(?![A-Za-z])")
     for candidate in sorted(logs_dir.iterdir()):
-        if candidate.is_file() and pattern.search(candidate.name):
+        if candidate.is_file() and results_name in candidate.name:
             return candidate
     return None
 
 
-def validate_arm_metrics(packet_root: Path, *, control_name: str = "A_control") -> dict[str, Any]:
-    """Typed per-arm metrics from frozen results + mechanical lane vitals.
+def validate_arm_metrics(
+    packet_root: Path,
+    *,
+    control_name: str = "A_control",
+    baseline_name: str = DEFAULT_BASELINE_NAME,
+) -> dict[str, Any]:
+    """Typed per-arm metrics bound to frozen arm records, plus lane vitals.
 
     Applies the audited legacy key map (results ``sealed`` -> ``dev_ood``,
     results ``dev_ood`` -> ``secondary_ood``, ``forgetting`` -> ``retention``)
     in code, so no agent has to remember or restate it.
+
+    Binding discipline: every emitted arm row is a frozen arm-candidate
+    record joined to its results row by the record's exact ``results_name``
+    and cross-checked against its ``dataset_hash``. Results rows that no
+    record claims (other than the control and the trivial baseline) are
+    violations, as are duplicate results identities and dataset-digest
+    mismatches. The trivial ``tfidf_baseline`` row is required: it is a
+    deterministic gate every learned arm must beat alongside the control.
     """
     packet_root = Path(packet_root)
     results_path = packet_root / "data" / "arm_results.json"
@@ -443,7 +532,10 @@ def validate_arm_metrics(packet_root: Path, *, control_name: str = "A_control") 
     violations: list[str] = []
     arms: list[dict[str, Any]] = []
     control: dict[str, Any] | None = None
+    baseline: dict[str, Any] | None = None
     artifact_digests: dict[str, str] = {}
+
+    records = _load_arm_records(packet_root, violations, artifact_digests)
 
     if not results_path.is_file():
         violations.append("data/arm_results.json missing")
@@ -459,29 +551,54 @@ def validate_arm_metrics(packet_root: Path, *, control_name: str = "A_control") 
             violations.append("arm_results.json is not a JSON array")
             raw = []
 
+    results_by_name: dict[str, dict[str, Any]] = {}
     for entry in raw:
         if not isinstance(entry, dict) or "arm" not in entry:
             violations.append("arm result entry missing 'arm'")
             continue
         name = str(entry["arm"])
-        typed: dict[str, Any] = {
-            "results_name": name,
-            "arm_letter": _arm_letter(name),
-            "in_template": float(entry.get("in_template", -1)),
-            "dev_ood": float(entry.get("sealed", -1)),
-            "secondary_ood": float(entry.get("dev_ood", -1)),
-            "retention": str(entry.get("forgetting", "")),
-            "worst_class": entry.get("worst_class", []),
-            "class_recalls": dict(sorted((entry.get("sealed_recalls") or {}).items())),
-        }
-        if name == control_name:
-            control = typed
+        if name in results_by_name:
+            violations.append(f"duplicate results identity in arm_results.json: {name}")
             continue
-        letter = typed["arm_letter"]
-        log_path = _find_arm_log(logs_dir, letter)
+        results_by_name[name] = entry
+
+    if control_name in results_by_name:
+        control = _typed_metrics_row(control_name, results_by_name.pop(control_name))
+    else:
+        violations.append(f"control arm {control_name} missing from arm_results.json")
+
+    if baseline_name in results_by_name:
+        baseline = _typed_metrics_row(baseline_name, results_by_name.pop(baseline_name))
+    else:
+        violations.append(
+            f"trivial baseline {baseline_name} missing from arm_results.json — "
+            "learned arms must be compared against the deterministic baseline"
+        )
+
+    for record in sorted(records, key=lambda r: r["arm"]):
+        results_name = record["results_name"]
+        entry = results_by_name.pop(results_name, None)
+        if entry is None:
+            violations.append(
+                f"arm {record['arm']}: no results row with exact identity "
+                f"{results_name!r} — arms are never joined by partial names"
+            )
+            continue
+        typed = _typed_metrics_row(results_name, entry)
+        typed["arm"] = record["arm"]
+        result_hash = typed["dataset_hash"]
+        if result_hash and record["dataset_hash"] and result_hash != record["dataset_hash"]:
+            violations.append(
+                f"arm {record['arm']}: dataset_hash mismatch — record "
+                f"{record['dataset_hash']} vs results {result_hash}"
+            )
+            continue
+        typed["dataset_hash"] = record["dataset_hash"] or result_hash
+
+        log_path = _find_arm_log(logs_dir, record)
         if log_path is None:
             vitals = {
-                "vitals_veto": f"vitals: no training log found for arm {name}",
+                "vitals_veto": f"vitals: no training log found for arm {record['arm']}",
                 "total_steps": 0,
                 "completed": False,
                 "nan_found": False,
@@ -491,7 +608,7 @@ def validate_arm_metrics(packet_root: Path, *, control_name: str = "A_control") 
                 "ok": False,
             }
         else:
-            lane = validate_lane_vitals(log_path, arm=name)
+            lane = validate_lane_vitals(log_path, arm=record["arm"])
             artifact_digests[str(log_path)] = lane["log_sha256"]
             vitals = {
                 "vitals_veto": lane["vitals_veto"],
@@ -506,8 +623,10 @@ def validate_arm_metrics(packet_root: Path, *, control_name: str = "A_control") 
         typed["vitals"] = vitals
         arms.append(typed)
 
-    if control is None:
-        violations.append(f"control arm {control_name} missing from arm_results.json")
+    for orphan in sorted(results_by_name):
+        violations.append(
+            f"results row {orphan!r} is not bound to any frozen arm record"
+        )
 
     return {
         "schema": ARM_METRICS_SCHEMA,
@@ -515,6 +634,7 @@ def validate_arm_metrics(packet_root: Path, *, control_name: str = "A_control") 
         "ok": not violations,
         "violations": violations,
         "control": control,
+        "baseline": baseline,
         "arms": sorted(arms, key=lambda a: a["results_name"]),
         "artifact_digests": artifact_digests,
     }

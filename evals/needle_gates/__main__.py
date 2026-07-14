@@ -19,6 +19,11 @@ from evals.needle_gates.harvest_request import (
     DEFAULT_WEAK_RECALL_THRESHOLD,
     build_next_harvest_request,
 )
+from evals.needle_gates.identifiers import (
+    IdentifierError,
+    validate_identifier,
+    validate_packet_path,
+)
 from evals.needle_gates.receipts import (
     ReceiptError,
     read_receipt,
@@ -41,30 +46,46 @@ def _emit(receipt: dict, out: str | None) -> None:
     print(json.dumps(receipt, sort_keys=True, indent=2))
 
 
+def _packet_arg(value: str) -> str:
+    """argparse type: reject unsafe packet paths before anything runs."""
+    try:
+        return validate_packet_path(value)
+    except IdentifierError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
+
+
+def _identifier_arg(value: str) -> str:
+    """argparse type: reject unsafe campaign/dataset identifiers."""
+    try:
+        return validate_identifier("identifier", value)
+    except IdentifierError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="evals.needle_gates")
     sub = parser.add_subparsers(dest="command", required=True)
 
     for name in ("preflight", "corpus-veto", "arm-records", "arm-metrics"):
         cmd = sub.add_parser(name)
-        cmd.add_argument("--packet", required=True)
-        cmd.add_argument("--out")
+        cmd.add_argument("--packet", required=True, type=_packet_arg)
+        cmd.add_argument("--out", type=_packet_arg)
 
     vitals = sub.add_parser("lane-vitals")
-    vitals.add_argument("--log", required=True)
+    vitals.add_argument("--log", required=True, type=_packet_arg)
     vitals.add_argument("--arm", default="")
     vitals.add_argument("--seed", type=int, default=0)
-    vitals.add_argument("--out")
+    vitals.add_argument("--out", type=_packet_arg)
 
     harvest = sub.add_parser("harvest-request")
-    harvest.add_argument("--packet", required=True)
-    harvest.add_argument("--campaign", required=True)
-    harvest.add_argument("--source-dataset", required=True)
-    harvest.add_argument("--target-dataset", required=True)
+    harvest.add_argument("--packet", required=True, type=_packet_arg)
+    harvest.add_argument("--campaign", required=True, type=_identifier_arg)
+    harvest.add_argument("--source-dataset", required=True, type=_identifier_arg)
+    harvest.add_argument("--target-dataset", required=True, type=_identifier_arg)
     harvest.add_argument(
         "--recall-threshold", type=float, default=DEFAULT_WEAK_RECALL_THRESHOLD
     )
-    harvest.add_argument("--out")
+    harvest.add_argument("--out", type=_packet_arg)
 
     verify = sub.add_parser("verify")
     verify.add_argument("--receipt", required=True)

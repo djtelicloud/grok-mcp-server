@@ -1,0 +1,2 @@
+{"query": "mock train: draft a unit test for the parser", "tools": "[{\"name\": \"t1\"}]", "answers": "[{\"route\": \"coding\"}]"}
+{"query": "mock train: summarize three papers on retrieval", "tools": "[{\"name\": \"t1\"}]", "answers": "[{\"route\": \"research\"}]"}

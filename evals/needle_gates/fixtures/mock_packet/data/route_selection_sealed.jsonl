@@ -1,0 +1,2 @@
+{"query": "mock dev-ood: plan a three-step migration", "tools": "[{\"name\": \"t1\"}]", "answers": "[{\"route\": \"planning\"}]"}
+{"query": "mock dev-ood: describe the chart contents", "tools": "[{\"name\": \"t1\"}]", "answers": "[{\"route\": \"vision\"}]"}

@@ -1,0 +1,19 @@
+{
+ "planning": [
+  "root-mock-planning-0001",
+  "root-mock-planning-0002"
+ ],
+ "vision": [
+  "root-mock-vision-0001"
+ ],
+ "coding": [
+  "root-mock-coding-0001"
+ ],
+ "research": [
+  "root-mock-research-0001"
+ ],
+ "retention_probe": [
+  "root-mock-coding-0001",
+  "root-mock-research-0001"
+ ]
+}

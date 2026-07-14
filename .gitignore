@@ -137,6 +137,9 @@ venv.bak/
 # UniGrok runtime state
 chats/
 logs/
+# Committed test fixture: mock training-log packet for needle gate validators
+!evals/needle_gates/fixtures/mock_packet/logs/
+!evals/needle_gates/fixtures/mock_packet/logs/*.log
 .unigrok-state/
 artifacts/
 .agents/data_shards/

@@ -1,0 +1,72 @@
+[
+ {
+  "arm": "A_control",
+  "sealed": 0.4,
+  "dev_ood": 0.55,
+  "in_template": 0.9,
+  "forgetting": "3/3",
+  "sealed_recalls": {
+   "coding": 0.5,
+   "planning": 0.25,
+   "research": 0.5,
+   "vision": 0.25
+  },
+  "worst_class": [
+   "planning",
+   0.25
+  ]
+ },
+ {
+  "arm": "tfidf_baseline",
+  "sealed": 0.5,
+  "dev_ood": 0.5,
+  "in_template": 0.6,
+  "forgetting": "3/3",
+  "sealed_recalls": {
+   "coding": 0.5,
+   "planning": 0.5,
+   "research": 0.5,
+   "vision": 0.5
+  },
+  "worst_class": [
+   "coding",
+   0.5
+  ]
+ },
+ {
+  "arm": "B_hardneg",
+  "dataset_hash": "bbbbbbbbbbbbbbbbbbbbbbbb",
+  "sealed": 0.45,
+  "dev_ood": 0.6,
+  "in_template": 0.92,
+  "forgetting": "3/3",
+  "sealed_recalls": {
+   "coding": 0.75,
+   "planning": 0.25,
+   "research": 0.5,
+   "vision": 0.25
+  },
+  "worst_class": [
+   "planning",
+   0.25
+  ]
+ },
+ {
+  "arm": "E_worstcell",
+  "dataset_hash": "eeeeeeeeeeeeeeeeeeeeeeee",
+  "sealed": 0.525,
+  "dev_ood": 0.6,
+  "in_template": 0.93,
+  "forgetting": "3/3",
+  "sealed_recalls": {
+   "coding": 0.75,
+   "planning": 0.5,
+   "research": 0.5,
+   "vision": 0.35
+  },
+  "worst_class": [
+   "vision",
+   0.35
+  ]
+ }
+]

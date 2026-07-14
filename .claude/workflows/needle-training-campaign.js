@@ -64,11 +64,35 @@ export const meta = {
 const A = typeof args === 'string' ? JSON.parse(args) : (args || {})
 const MODE = A.mode || 'mock'
 const STOP_AFTER = A.stop_after || 'full' // preflight|veto|lanes|gate|full
-const RUN_STAMP = A.run_stamp || 'unstamped-run' // caller supplies; no Date.now in workflows
 const MAX_ITER = A.max_iterations || 1
-const CAMPAIGN_ID = A.campaign_id || 'needle-campaign'
-const SOURCE_DATASET = A.source_dataset_id || 'D0001'
-const TARGET_DATASET = A.target_dataset_id || 'D0002'
+
+// ── Strict validation of every value embedded in validator commands ─────────
+// These values are interpolated into the exact CLI commands agents run. A
+// hostile value must never smuggle shell syntax, whitespace, option injection
+// or path traversal into a command string — validate BEFORE any command is
+// built or any agent is called. Mirrors evals/needle_gates/identifiers.py.
+const SAFE_IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/
+const SAFE_PATH = /^\/?[A-Za-z0-9._][A-Za-z0-9._/-]*$/
+function safeIdentifier(name, value) {
+  if (typeof value !== 'string' || !SAFE_IDENTIFIER.test(value)) {
+    throw new Error(`${name} ${JSON.stringify(value)} rejected: must be a single [A-Za-z0-9._-] token (no shell syntax, no whitespace, no leading '-')`)
+  }
+  return value
+}
+function safePacketPath(value) {
+  if (typeof value !== 'string' || !SAFE_PATH.test(value)) {
+    throw new Error(`packet path ${JSON.stringify(value)} rejected: no shell syntax, no whitespace, no leading '-'`)
+  }
+  if (value.split('/').some(part => part === '..')) {
+    throw new Error(`packet path ${JSON.stringify(value)} rejected: '..' traversal is not allowed`)
+  }
+  return value
+}
+
+const RUN_STAMP = safeIdentifier('run_stamp', A.run_stamp || 'unstamped-run') // caller supplies; no Date.now in workflows
+const CAMPAIGN_ID = safeIdentifier('campaign_id', A.campaign_id || 'needle-campaign')
+const SOURCE_DATASET = safeIdentifier('source_dataset_id', A.source_dataset_id || 'D0001')
+const TARGET_DATASET = safeIdentifier('target_dataset_id', A.target_dataset_id || 'D0002')
 
 let manifest = null
 if (MODE === 'live') {
@@ -80,8 +104,8 @@ if (MODE === 'live') {
       'Run mode=mock to exercise the contracts.'
     )
   }
-  if (String(manifest.packet).includes('needle_lab')) {
-    throw new Error('live mode refused: research_dev quarantine data can never be a live training packet.')
+  if (String(manifest.packet).includes('needle_lab') || String(manifest.packet).includes('mock_packet')) {
+    throw new Error('live mode refused: research_dev quarantine data and committed mock fixtures can never be a live training packet.')
   }
   const pins = manifest.receipt_digest_pins
   if (!pins || !pins.preflight || !pins.corpus_veto || !pins.arm_records) {
@@ -96,12 +120,13 @@ if (MODE === 'live') {
   throw new Error(`unknown mode "${MODE}" — use mock or live`)
 }
 
-// Mock packet must be a research_dev needle_lab bundle (default: the one in
-// this checkout; override with args.packet when the bundle lives in another
-// worktree, e.g. before PR #64 lands).
-const PACKET = MODE === 'mock' ? (A.packet || 'evals/needle_lab') : manifest.packet
-if (MODE === 'mock' && !String(PACKET).includes('needle_lab')) {
-  throw new Error('mock mode refused: packet must be a research_dev needle_lab bundle.')
+// Mock packet default: the tiny committed fixture (present on main, validated
+// by tests/test_needle_gates.py). Override with args.packet to point at a
+// research_dev needle_lab bundle in another worktree — never anything else.
+const MOCK_FIXTURE_PACKET = 'evals/needle_gates/fixtures/mock_packet'
+const PACKET = safePacketPath(MODE === 'mock' ? (A.packet || MOCK_FIXTURE_PACKET) : String(manifest.packet))
+if (MODE === 'mock' && PACKET !== MOCK_FIXTURE_PACKET && !PACKET.includes('needle_lab')) {
+  throw new Error('mock mode refused: packet must be the committed mock fixture or a research_dev needle_lab bundle.')
 }
 const SEEDS = MODE === 'mock' ? [42] : (manifest.seeds || [42, 43, 44])
 const RECEIPTS_DIR = `/tmp/needle-gates-${RUN_STAMP}`
@@ -366,24 +391,30 @@ for (let iter = 1; iter <= MAX_ITER; iter++) {
     }
   }
 
-  // Build lane rows from the VERIFIED payload only (mock: replay, trained=false).
-  const metricsByLetter = {}
+  // Build lane rows from the VERIFIED payload only (mock: replay,
+  // trained=false). The validator already bound each frozen arm record to
+  // its exact results identity and dataset digest (rejecting duplicates,
+  // aliases, and unbound rows) — join here strictly by the exact arm name.
+  const metricsByArm = {}
   for (const armMetric of metricsReceipt.payload.arms) {
-    metricsByLetter[armMetric.arm_letter] = armMetric
+    metricsByArm[armMetric.arm] = armMetric
   }
   const lanes = []
   for (const record of armsPayload) {
-    const letterMatch = /(?:^|_)([A-Z])(?:_|$)/.exec(record.arm)
-    const letter = letterMatch ? letterMatch[1] : ''
-    const metric = metricsByLetter[letter]
+    const metric = metricsByArm[record.arm]
     for (const seed of SEEDS) {
       if (!metric) {
-        lanes.push({ arm: record.arm, seed, trained: false, vitals_veto: `no committed result row for ${record.arm}`, in_template: -1, dev_ood: -1, secondary_ood: -1, retention: '', wall_seconds: null })
+        lanes.push({ arm: record.arm, seed, trained: false, vitals_veto: `no bound results row for ${record.arm}`, in_template: -1, dev_ood: -1, secondary_ood: -1, retention: '', wall_seconds: null })
+        continue
+      }
+      if (metric.results_name !== record.results_name || metric.dataset_hash !== record.dataset_hash) {
+        lanes.push({ arm: record.arm, seed, trained: false, vitals_veto: `identity binding mismatch for ${record.arm}: results_name/dataset_hash do not match the frozen record`, in_template: -1, dev_ood: -1, secondary_ood: -1, retention: '', wall_seconds: null })
         continue
       }
       lanes.push({
         arm: record.arm,
         results_name: metric.results_name,
+        dataset_hash: metric.dataset_hash,
         seed,
         trained: false,
         vitals_veto: metric.vitals.vitals_veto,
@@ -403,13 +434,20 @@ for (let iter = 1; iter <= MAX_ITER; iter++) {
 
   // ── Cross-arm gate: mechanical rules computed HERE from verified payloads ──
   phase('Cross-arm gate')
-  // The control comparison uses the verified control row from the arm-metrics
-  // receipt (control dev_ood = legacy "sealed" — the adaptive OOD dev metric).
+  // Two comparisons, both required: the untrained control AND the trivial
+  // TF-IDF baseline (control dev_ood = legacy "sealed" — the adaptive OOD
+  // dev metric). A learned arm that cannot beat a trivial deterministic
+  // baseline is never promotion-grade, whatever it does to the control.
   const control = metricsReceipt.payload.control
   if (!control) {
     return { verdict: 'REFUSED_NO_CONTROL', mode: MODE, receipt_sha256: metricsReceipt.digest, ledger: LEDGER }
   }
+  const baseline = metricsReceipt.payload.baseline
+  if (!baseline) {
+    return { verdict: 'REFUSED_NO_BASELINE', mode: MODE, receipt_sha256: metricsReceipt.digest, ledger: LEDGER }
+  }
   const controlDev = control.dev_ood
+  const baselineDev = baseline.dev_ood
   const judged = armsPayload.map(record => {
     const armLanes = lanes.filter(l => l.arm === record.arm && l.in_template >= 0)
     const seedsRun = new Set(armLanes.map(l => l.seed)).size
@@ -418,27 +456,37 @@ for (let iter = 1; iter <= MAX_ITER; iter++) {
     const devScores = armLanes.map(l => l.dev_ood)
     const minDev = devScores.length ? Math.min(...devScores) : -1
     const beatsControl = minDev > controlDev
+    const beatsBaseline = minDev > baselineDev
     const multiSeedOk = seedsRun >= (MODE === 'mock' ? 1 : 3)
     return {
       arm: record.arm,
+      results_name: record.results_name,
+      dataset_hash: record.dataset_hash,
       seeds_run: seedsRun,
       vitals_ok: vitalsOk,
       retention_ok: retentionOk,
       min_dev_ood: minDev,
       beats_control: beatsControl,
+      beats_baseline: beatsBaseline,
       multi_seed_ok: multiSeedOk,
       // Promotion-candidate rule: every mechanical gate green. In mock,
       // multi-seed is structurally impossible (1 historical seed) so no arm
       // can be promotion-grade — which is exactly the audited conclusion.
-      promotion_candidate: vitalsOk && retentionOk && beatsControl && multiSeedOk && MODE === 'live',
+      promotion_candidate: vitalsOk && retentionOk && beatsControl && beatsBaseline && multiSeedOk && MODE === 'live',
     }
   })
-  iterations.push({ iter, arms: judged, control: { name: control.results_name, dev_ood: controlDev } })
+  iterations.push({
+    iter,
+    arms: judged,
+    control: { name: control.results_name, dev_ood: controlDev },
+    baseline: { name: baseline.results_name, dev_ood: baselineDev },
+  })
 
   if (STOP_AFTER === 'gate' && iter === MAX_ITER) break
-  // Iterate only when live, authorized, and something is still improving.
+  // Iterate only when live, authorized, and something is still improving
+  // against BOTH the control and the trivial baseline.
   if (MODE === 'mock' || iter === MAX_ITER) break
-  if (!judged.some(j => j.beats_control)) break
+  if (!judged.some(j => j.beats_control && j.beats_baseline)) break
 }
 
 if (STOP_AFTER === 'gate') {
@@ -466,6 +514,7 @@ const gateSummary = {
   corpus_veto: { ok: veto.payload.ok, violations: veto.payload.violations, receipt_sha256: veto.digest },
   arms: last.arms,
   control: last.control,
+  baseline: last.baseline,
 }
 
 const draft = await call('report-draft', 'Evidence', `${COMMON}

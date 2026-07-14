@@ -1,0 +1,6 @@
+run start
+step 10 loss 2.31
+step 512 loss 0.42
+total steps: 512
+wall_seconds: 512.5
+training complete, best checkpoint saved

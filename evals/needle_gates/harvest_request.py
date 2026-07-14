@@ -10,13 +10,38 @@ harvesting manifest is required before any harvester may act on it.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
+from evals.needle_gates.receipts import sha256_file
 from evals.needle_gates.validators import validate_arm_metrics
 
 HARVEST_REQUEST_SCHEMA = "needle-next-harvest-request/v1"
 DEFAULT_WEAK_RECALL_THRESHOLD = 0.5
+
+
+def _load_cell_roots(packet_root: Path) -> tuple[dict[str, list[str]], dict[str, str]]:
+    """Committed cell -> originating semantic root IDs map (never sealed text).
+
+    ``data/harvest_roots.json`` binds each confusion cell to the exact root
+    IDs whose evaluations produced it, so a downstream harvester can generate
+    variants of the *failing* root (and controlled variants of retained
+    roots) instead of guessing. Root IDs are opaque identifiers; no sealed
+    evaluation content is exposed.
+    """
+    roots_path = Path(packet_root) / "data" / "harvest_roots.json"
+    if not roots_path.is_file():
+        return {}, {}
+    raw = json.loads(roots_path.read_text())
+    if not isinstance(raw, dict):
+        raise ValueError("harvest_roots.json must map cell -> [root_id, ...]")
+    mapping = {
+        str(cell): sorted(str(r) for r in roots)
+        for cell, roots in raw.items()
+        if isinstance(roots, list)
+    }
+    return mapping, {str(roots_path): sha256_file(roots_path)}
 
 
 def build_next_harvest_request(
@@ -40,6 +65,7 @@ def build_next_harvest_request(
             "(harvesting never modifies the dataset being trained)"
         )
     metrics = arm_metrics_payload or validate_arm_metrics(Path(packet_root))
+    cell_roots, roots_digests = _load_cell_roots(packet_root)
 
     weak_cells: list[dict[str, Any]] = []
     retention_cells: list[dict[str, Any]] = []
@@ -51,6 +77,7 @@ def build_next_harvest_request(
                 "arm": name,
                 "cell": cell,
                 "recall": recall,
+                "root_ids": cell_roots.get(cell, []),
             }
             if recall < weak_recall_threshold:
                 weak_cells.append(entry)
@@ -59,11 +86,19 @@ def build_next_harvest_request(
         retention = str(arm.get("retention", ""))
         if retention:
             retention_cells.append(
-                {"arm": name, "cell": "retention_probe", "status": retention}
+                {
+                    "arm": name,
+                    "cell": "retention_probe",
+                    "status": retention,
+                    "root_ids": cell_roots.get("retention_probe", []),
+                }
             )
 
     weak_cells.sort(key=lambda c: (c["cell"], c["arm"]))
     retention_cells.sort(key=lambda c: (c["cell"], c["arm"]))
+
+    evidence_digests = dict(metrics.get("artifact_digests", {}))
+    evidence_digests.update(roots_digests)
 
     return {
         "schema": HARVEST_REQUEST_SCHEMA,
@@ -73,7 +108,7 @@ def build_next_harvest_request(
         "weak_recall_threshold": weak_recall_threshold,
         "weak_confusion_cells": weak_cells,
         "retention_cells": retention_cells,
-        "evidence_digests": dict(sorted(metrics.get("artifact_digests", {}).items())),
+        "evidence_digests": dict(sorted(evidence_digests.items())),
         "request_only": True,
         "authorizes_generation": False,
         "authorizes_training": False,

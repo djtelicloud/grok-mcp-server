@@ -67,13 +67,16 @@ def build_packet(root: Path, *, tamper: bool = False) -> Path:
     arm_candidates = [
         {
             "arm": "arm_B",
+            "results_name": "B_hardneg",
             "dataset_hash": "b" * 24,
+            "log": "ft-arm-B-seed42.log",
             "n": 128,
             "recipe": "hard_negatives",
             "seed": 42,
         },
         {
             "arm": "arm_E",
+            "results_name": "E_worstcell",
             "dataset_hash": "e" * 24,
             "n": 128,
             "recipe": "worst_cell",
@@ -98,7 +101,22 @@ def build_packet(root: Path, *, tamper: bool = False) -> Path:
             "worst_class": ["planning", 0.25],
         },
         {
+            "arm": "tfidf_baseline",
+            "sealed": 0.50,
+            "dev_ood": 0.50,
+            "in_template": 0.60,
+            "forgetting": "3/3",
+            "sealed_recalls": {
+                "coding": 0.5,
+                "planning": 0.5,
+                "research": 0.5,
+                "vision": 0.5,
+            },
+            "worst_class": ["coding", 0.5],
+        },
+        {
             "arm": "B_hardneg",
+            "dataset_hash": "b" * 24,
             "sealed": 0.45,
             "dev_ood": 0.60,
             "in_template": 0.92,
@@ -113,6 +131,7 @@ def build_packet(root: Path, *, tamper: bool = False) -> Path:
         },
         {
             "arm": "E_worstcell",
+            "dataset_hash": "e" * 24,
             "sealed": 0.525,
             "dev_ood": 0.60,
             "in_template": 0.93,
@@ -128,8 +147,21 @@ def build_packet(root: Path, *, tamper: bool = False) -> Path:
     ]
     (data / "arm_results.json").write_text(json.dumps(arm_results, indent=1))
 
+    harvest_roots = {
+        "planning": ["root-planning-0001", "root-planning-0002"],
+        "vision": ["root-vision-0001"],
+        "coding": ["root-coding-0001"],
+        "research": ["root-research-0001"],
+        "retention_probe": ["root-coding-0001", "root-research-0001"],
+    }
+    (data / "harvest_roots.json").write_text(json.dumps(harvest_roots, indent=1))
+
     manifest = []
-    for name in sorted(files) + ["arm_candidates.json", "arm_results.json"]:
+    for name in sorted(files) + [
+        "arm_candidates.json",
+        "arm_results.json",
+        "harvest_roots.json",
+    ]:
         generator = "gen_datasets.py seed 42"
         if name == "combined.jsonl":
             generator = "concat; KNOWN-CONTAMINATED research control, quarantined"
@@ -159,7 +191,7 @@ def build_packet(root: Path, *, tamper: bool = False) -> Path:
         "training complete, best checkpoint saved\n"
     )
     (logs / "ft-arm-B-seed42.log").write_text(log_text)
-    (logs / "ft-arm-E-seed42.log").write_text(log_text.replace("640", "512"))
+    (logs / "ft-E_worstcell-seed42.log").write_text(log_text.replace("640", "512"))
 
     if tamper:
         (data / "route_selection.jsonl").write_text(_row("tampered", "coding") + "\n")
@@ -384,19 +416,27 @@ def test_arm_metrics_legacy_key_mapping_and_vitals_join(tmp_path):
     assert control["secondary_ood"] == 0.55  # legacy "dev_ood"
     assert control["retention"] == "3/3"  # legacy "forgetting"
 
+    baseline = payload["baseline"]
+    assert baseline["results_name"] == "tfidf_baseline"
+    assert baseline["dev_ood"] == 0.50
+
     by_name = {a["results_name"]: a for a in payload["arms"]}
     assert set(by_name) == {"B_hardneg", "E_worstcell"}
     b_arm = by_name["B_hardneg"]
+    assert b_arm["arm"] == "arm_B"  # bound to the frozen record's exact identity
+    assert b_arm["dataset_hash"] == "b" * 24
     assert b_arm["dev_ood"] == 0.45
     assert b_arm["vitals"]["ok"] is True
     assert b_arm["vitals"]["total_steps"] == 640
-    assert "ft-arm-B-seed42.log" in b_arm["vitals"]["log"]
-    assert by_name["E_worstcell"]["vitals"]["total_steps"] == 512
+    assert "ft-arm-B-seed42.log" in b_arm["vitals"]["log"]  # explicit log field
+    e_arm = by_name["E_worstcell"]
+    assert e_arm["vitals"]["total_steps"] == 512
+    assert "ft-E_worstcell-seed42.log" in e_arm["vitals"]["log"]  # exact-name match
 
 
 def test_arm_metrics_missing_log_vetoes_lane(tmp_path):
     packet = build_packet(tmp_path)
-    (packet / "logs" / "ft-arm-E-seed42.log").unlink()
+    (packet / "logs" / "ft-E_worstcell-seed42.log").unlink()
     payload = validate_arm_metrics(packet)
     by_name = {a["results_name"]: a for a in payload["arms"]}
     assert by_name["E_worstcell"]["vitals"]["ok"] is False
@@ -412,6 +452,88 @@ def test_arm_metrics_missing_control_fails(tmp_path):
     payload = validate_arm_metrics(packet)
     assert payload["ok"] is False
     assert any("control arm" in v for v in payload["violations"])
+
+
+def test_arm_metrics_missing_trivial_baseline_fails(tmp_path):
+    packet = build_packet(tmp_path)
+    results_path = packet / "data" / "arm_results.json"
+    rows = json.loads(results_path.read_text())
+    rows = [r for r in rows if r["arm"] != "tfidf_baseline"]
+    results_path.write_text(json.dumps(rows))
+    payload = validate_arm_metrics(packet)
+    assert payload["ok"] is False
+    assert payload["baseline"] is None
+    assert any("trivial baseline tfidf_baseline missing" in v for v in payload["violations"])
+
+
+def test_arm_metrics_rejects_dataset_hash_mismatch(tmp_path):
+    packet = build_packet(tmp_path)
+    results_path = packet / "data" / "arm_results.json"
+    rows = json.loads(results_path.read_text())
+    for row in rows:
+        if row["arm"] == "B_hardneg":
+            row["dataset_hash"] = "f" * 24
+    results_path.write_text(json.dumps(rows))
+    payload = validate_arm_metrics(packet)
+    assert payload["ok"] is False
+    assert any("dataset_hash mismatch" in v for v in payload["violations"])
+    assert all(a["results_name"] != "B_hardneg" for a in payload["arms"])
+
+
+def test_arm_metrics_rejects_unbound_results_row(tmp_path):
+    packet = build_packet(tmp_path)
+    results_path = packet / "data" / "arm_results.json"
+    rows = json.loads(results_path.read_text())
+    rows.append({"arm": "Z_orphan", "sealed": 0.9, "forgetting": "3/3"})
+    results_path.write_text(json.dumps(rows))
+    payload = validate_arm_metrics(packet)
+    assert payload["ok"] is False
+    assert any("not bound to any frozen arm record" in v for v in payload["violations"])
+
+
+def test_arm_metrics_never_joins_by_partial_name(tmp_path):
+    """A results row that merely shares a letter with a record must not bind."""
+    packet = build_packet(tmp_path)
+    results_path = packet / "data" / "arm_results.json"
+    rows = json.loads(results_path.read_text())
+    for row in rows:
+        if row["arm"] == "B_hardneg":
+            row["arm"] = "B_other_variant"  # same letter, different exact identity
+    results_path.write_text(json.dumps(rows))
+    payload = validate_arm_metrics(packet)
+    assert payload["ok"] is False
+    joined = "\n".join(payload["violations"])
+    assert "no results row with exact identity 'B_hardneg'" in joined
+    assert "'B_other_variant' is not bound" in joined
+
+
+def test_arm_records_rejects_duplicates_aliases_and_missing_hash(tmp_path):
+    packet = build_packet(tmp_path)
+    candidates_path = packet / "data" / "arm_candidates.json"
+    rows = json.loads(candidates_path.read_text())
+    rows.append(dict(rows[0]))  # exact duplicate name
+    rows.append({**rows[1], "arm": "ARM-E", "results_name": "E_alias"})  # alias of arm_E
+    rows.append({"arm": "arm_H", "results_name": "H_x", "n": 1, "recipe": "r", "seed": 1})
+    candidates_path.write_text(json.dumps(rows))
+    payload = validate_arm_records(packet)
+    assert payload["ok"] is False
+    joined = "\n".join(payload["violations"])
+    assert "duplicate arm name" in joined
+    assert "aliased arm names" in joined
+    assert "arm arm_H: dataset_hash missing" in joined
+
+
+def test_arm_records_rejects_duplicate_results_identity(tmp_path):
+    packet = build_packet(tmp_path)
+    candidates_path = packet / "data" / "arm_candidates.json"
+    rows = json.loads(candidates_path.read_text())
+    rows.append(
+        {"arm": "arm_F", "results_name": "B_hardneg", "dataset_hash": "f" * 24}
+    )
+    candidates_path.write_text(json.dumps(rows))
+    payload = validate_arm_records(packet)
+    assert payload["ok"] is False
+    assert any("already claimed" in v for v in payload["violations"])
 
 
 # --------------------------------------------------------- harvest request
@@ -436,10 +558,26 @@ def test_harvest_request_typed_and_request_only(tmp_path):
     assert ("E_worstcell", "vision") in weak
     assert ("B_hardneg", "coding") not in weak
 
+    # Every cell names the exact roots that produced it, so a harvester can
+    # generate variants of the FAILING root rather than guessing.
+    weak_by_cell = {c["cell"]: c for c in request["weak_confusion_cells"]}
+    assert weak_by_cell["planning"]["root_ids"] == [
+        "root-planning-0001",
+        "root-planning-0002",
+    ]
+    assert weak_by_cell["vision"]["root_ids"] == ["root-vision-0001"]
+
     retention = {(c["arm"], c["cell"]) for c in request["retention_cells"]}
     assert ("B_hardneg", "coding") in retention
     assert ("B_hardneg", "retention_probe") in retention
+    retention_by_cell = {c["cell"]: c for c in request["retention_cells"]}
+    assert retention_by_cell["coding"]["root_ids"] == ["root-coding-0001"]
+    assert retention_by_cell["retention_probe"]["root_ids"] == [
+        "root-coding-0001",
+        "root-research-0001",
+    ]
     assert request["evidence_digests"]  # exact digests present
+    assert any("harvest_roots.json" in k for k in request["evidence_digests"])
 
 
 def test_harvest_request_rejects_same_dataset(tmp_path):
@@ -463,6 +601,74 @@ def test_harvest_request_deterministic(tmp_path):
     first = seal_receipt("harvest_request", build_next_harvest_request(packet, **kwargs))
     second = seal_receipt("harvest_request", build_next_harvest_request(packet, **kwargs))
     assert first == second
+
+
+# ------------------------------------------------------------- identifiers
+
+
+def test_identifier_validation_allows_safe_and_rejects_shell_syntax():
+    from evals.needle_gates.identifiers import (
+        IdentifierError,
+        validate_identifier,
+        validate_packet_path,
+    )
+
+    assert validate_identifier("campaign", "needle-r2.v1_x") == "needle-r2.v1_x"
+    for bad in (
+        "a b",
+        "x;rm -rf /",
+        "$(whoami)",
+        "`id`",
+        "a|b",
+        "a>b",
+        "-flag",
+        "",
+        "x" * 70,
+        "über",
+    ):
+        with pytest.raises(IdentifierError):
+            validate_identifier("campaign", bad)
+
+    assert validate_packet_path("evals/needle_gates/fixtures/mock_packet")
+    assert validate_packet_path("/tmp/needle-gates-run1/preflight.json")
+    for bad in ("a b/c", "pkt;rm", "$(pwd)/pkt", "-pkt", "../secrets", "a/../../b"):
+        with pytest.raises(IdentifierError):
+            validate_packet_path(bad)
+
+
+# ------------------------------------------------------- committed fixture
+
+
+def test_committed_mock_packet_fixture_passes_all_gates():
+    """The default mock packet advertised by the workflow exists on this
+    branch and passes every validator, so the workflow never advertises a
+    packet absent from main."""
+    fixture = Path("evals/needle_gates/fixtures/mock_packet")
+    assert fixture.is_dir(), "committed mock packet fixture missing"
+
+    for func in (validate_preflight, validate_corpus, validate_arm_records):
+        payload = func(fixture)
+        assert payload["ok"] is True, payload["violations"]
+
+    metrics = validate_arm_metrics(fixture)
+    assert metrics["ok"] is True, metrics["violations"]
+    assert metrics["baseline"]["results_name"] == "tfidf_baseline"
+    assert metrics["control"]["results_name"] == "A_control"
+    # Fixture numbers make the trivial-baseline gate do real work:
+    # B_hardneg beats the control but NOT the baseline.
+    by_name = {a["results_name"]: a for a in metrics["arms"]}
+    assert by_name["B_hardneg"]["dev_ood"] > metrics["control"]["dev_ood"]
+    assert by_name["B_hardneg"]["dev_ood"] < metrics["baseline"]["dev_ood"]
+    assert by_name["E_worstcell"]["dev_ood"] > metrics["baseline"]["dev_ood"]
+
+    request = build_next_harvest_request(
+        fixture,
+        campaign_id="fixture-check",
+        source_dataset_id="D0001",
+        target_dataset_id="D0002",
+    )
+    assert request["request_only"] is True
+    assert all(c["root_ids"] for c in request["weak_confusion_cells"])
 
 
 # ----------------------------------------------------------- determinism
@@ -542,3 +748,55 @@ def test_cli_harvest_request(tmp_path, capsys):
     receipt = json.loads(capsys.readouterr().out)
     payload = verify_receipt(receipt, "harvest_request")
     assert payload["request_only"] is True
+
+
+def test_cli_rejects_unsafe_embedded_values(tmp_path, capsys):
+    """Shell syntax, whitespace, and traversal in caller-supplied values are
+    rejected at the argument boundary before any validator runs."""
+    from evals.needle_gates.__main__ import main
+
+    packet = build_packet(tmp_path)
+    bad_invocations = [
+        ["preflight", "--packet", "pkt;rm -rf /"],
+        ["preflight", "--packet", "pkt $(whoami)"],
+        ["preflight", "--packet", "../../../etc"],
+        ["arm-metrics", "--packet", str(packet), "--out", "/tmp/x;touch pwned"],
+        [
+            "harvest-request",
+            "--packet",
+            str(packet),
+            "--campaign",
+            "c1; curl evil",
+            "--source-dataset",
+            "D0001",
+            "--target-dataset",
+            "D0002",
+        ],
+        [
+            "harvest-request",
+            "--packet",
+            str(packet),
+            "--campaign",
+            "c1",
+            "--source-dataset",
+            "$(id)",
+            "--target-dataset",
+            "D0002",
+        ],
+        [
+            "harvest-request",
+            "--packet",
+            str(packet),
+            "--campaign",
+            "c1",
+            "--source-dataset",
+            "D0001",
+            "--target-dataset",
+            "D0002|tee /tmp/x",
+        ],
+    ]
+    for argv in bad_invocations:
+        with pytest.raises(SystemExit) as excinfo:
+            main(argv)
+        assert excinfo.value.code == 2, argv
+        capsys.readouterr()

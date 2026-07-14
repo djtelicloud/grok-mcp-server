@@ -1,0 +1,20 @@
+[
+ {
+  "arm": "arm_B",
+  "results_name": "B_hardneg",
+  "dataset_hash": "bbbbbbbbbbbbbbbbbbbbbbbb",
+  "log": "ft-arm-B_hardneg-seed42.log",
+  "n": 128,
+  "recipe": "hard_negatives",
+  "seed": 42
+ },
+ {
+  "arm": "arm_E",
+  "results_name": "E_worstcell",
+  "dataset_hash": "eeeeeeeeeeeeeeeeeeeeeeee",
+  "log": "ft-arm-E_worstcell-seed42.log",
+  "n": 128,
+  "recipe": "worst_cell",
+  "seed": 42
+ }
+]

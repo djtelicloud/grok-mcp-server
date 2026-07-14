@@ -1,0 +1,32 @@
+[
+ {
+  "path": "evals/needle_gates/fixtures/mock_packet/data/arm_candidates.json",
+  "sha256": "1ac63fcf19a20876ad91b17e2ca6eee1b55c62b351ab24c0c34838a0086782dc",
+  "n": 2,
+  "generator": "committed mock fixture (synthetic, deterministic)"
+ },
+ {
+  "path": "evals/needle_gates/fixtures/mock_packet/data/arm_results.json",
+  "sha256": "d43ccb1fbb315a72849281dd9efd177c03dac2a1f9d06fa998d8585dde1c8b62",
+  "n": 2,
+  "generator": "committed mock fixture (synthetic, deterministic)"
+ },
+ {
+  "path": "evals/needle_gates/fixtures/mock_packet/data/harvest_roots.json",
+  "sha256": "a0bbaf403aa60c3b766de344ba1d6775277e85c2084ad0508c4cf52b4a9f5fd5",
+  "n": 2,
+  "generator": "committed mock fixture (synthetic, deterministic)"
+ },
+ {
+  "path": "evals/needle_gates/fixtures/mock_packet/data/route_selection.jsonl",
+  "sha256": "876f9ff10885d86ac4dfa3f97519c09ae7621db96a3191c80de99b01891c6105",
+  "n": 2,
+  "generator": "committed mock fixture (synthetic, deterministic)"
+ },
+ {
+  "path": "evals/needle_gates/fixtures/mock_packet/data/route_selection_sealed.jsonl",
+  "sha256": "36b3ceaeb3c4f22e95d7c72b453bf5265b5c2f1c593520a867c61c1300e2b2eb",
+  "n": 2,
+  "generator": "committed mock fixture (synthetic, deterministic)"
+ }
+]
