@@ -79,6 +79,13 @@ _ALL_WORKER_CHANNELS = frozenset(
     for channels in ladders.values()
     for channel in channels
 )
+_MCP_SAMPLING_CHANNELS = frozenset(
+    {
+        ProviderChannel.OPENAI_MCP_SAMPLING,
+        ProviderChannel.ANTHROPIC_MCP_SAMPLING,
+        ProviderChannel.GOOGLE_MCP_SAMPLING,
+    }
+)
 _SAFE_HARVEST_REASON = r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
 
 
@@ -975,6 +982,85 @@ class GrokWorkerBroker:
         )
 
     @staticmethod
+    def _sampling_effect_requires_indeterminate(
+        *,
+        channel: ProviderChannel,
+        adapter: ProviderAdapter,
+    ) -> bool:
+        """Fail closed when an MCP sampling effect may already exist.
+
+        Only the typed MCP sampling channels carry this one-shot contract.
+        Missing, throwing, or non-boolean inspectors cannot prove that the
+        physical callback remained unclaimed, so the broker must forbid a
+        metered retry or a first dispatch under that durable attempt.
+        """
+
+        if channel not in _MCP_SAMPLING_CHANNELS:
+            return False
+        try:
+            inspector = getattr(adapter, "effect_claimed")
+            if not callable(inspector):
+                return True
+            claimed = inspector()
+        except BaseException:
+            return True
+        return claimed if type(claimed) is bool else True
+
+    def _pre_dispatch_failure(
+        self,
+        *,
+        adapter: ProviderAdapter,
+        start: ProviderAttemptStart,
+        descriptor: ProviderDescriptor,
+        error_kind: Literal["configuration", "transport", "protocol", "internal"],
+        error_code: str,
+        duration_ms: int,
+    ) -> ProviderAttemptResult:
+        """Forbid retry when the exact sampling grant was already consumed.
+
+        Once the start is durable, a positive or unreadable one-shot state
+        must never be repeated through this adapter or an API fallback.
+        """
+
+        if self._sampling_effect_requires_indeterminate(
+            channel=start.channel,
+            adapter=adapter,
+        ):
+            error_kind = "internal"
+            error_code = "sampling_effect_indeterminate"
+        return self._normalized_failure(
+            start=start,
+            descriptor=descriptor,
+            error_kind=error_kind,
+            error_code=error_code,
+            duration_ms=duration_ms,
+        )
+
+    def _post_dispatch_failure(
+        self,
+        *,
+        adapter: ProviderAdapter,
+        start: ProviderAttemptStart,
+        descriptor: ProviderDescriptor,
+        error_kind: Literal["configuration", "transport", "protocol", "internal"],
+        error_code: str,
+        duration_ms: int,
+    ) -> ProviderAttemptResult:
+        if self._sampling_effect_requires_indeterminate(
+            channel=start.channel,
+            adapter=adapter,
+        ):
+            error_kind = "internal"
+            error_code = "sampling_effect_indeterminate"
+        return self._normalized_failure(
+            start=start,
+            descriptor=descriptor,
+            error_kind=error_kind,
+            error_code=error_code,
+            duration_ms=duration_ms,
+        )
+
+    @staticmethod
     def _result_matches_start(
         result: ProviderAttemptResult,
         start: ProviderAttemptStart,
@@ -1001,7 +1087,8 @@ class GrokWorkerBroker:
     ) -> ProviderAttemptResult:
         started = time.monotonic()
         if not _attempt_start_matches_plan(start, plan, index):
-            return self._normalized_failure(
+            return self._pre_dispatch_failure(
+                adapter=adapter,
                 start=start,
                 descriptor=descriptor,
                 error_kind="protocol",
@@ -1011,7 +1098,8 @@ class GrokWorkerBroker:
         try:
             current_descriptor = self._snapshot_descriptor(adapter.descriptor)
         except Exception:
-            return self._normalized_failure(
+            return self._pre_dispatch_failure(
+                adapter=adapter,
                 start=start,
                 descriptor=descriptor,
                 error_kind="protocol",
@@ -1024,7 +1112,8 @@ class GrokWorkerBroker:
             start=start,
             descriptor=current_descriptor,
         ):
-            return self._normalized_failure(
+            return self._pre_dispatch_failure(
+                adapter=adapter,
                 start=start,
                 descriptor=descriptor,
                 error_kind="protocol",
@@ -1033,7 +1122,8 @@ class GrokWorkerBroker:
             )
         remaining = self._remaining(plan)
         if remaining <= 0:
-            return self._normalized_failure(
+            return self._pre_dispatch_failure(
+                adapter=adapter,
                 start=start,
                 descriptor=descriptor,
                 error_kind="transport",
@@ -1051,6 +1141,17 @@ class GrokWorkerBroker:
             <= min(start.request.timeout_seconds, descriptor.max_timeout_seconds)
             else "timeout"
         )
+        if self._sampling_effect_requires_indeterminate(
+            channel=start.channel,
+            adapter=adapter,
+        ):
+            return self._normalized_failure(
+                start=start,
+                descriptor=descriptor,
+                error_kind="internal",
+                error_code="sampling_effect_indeterminate",
+                duration_ms=round((time.monotonic() - started) * 1000),
+            )
         # Keep the durable start isolated from adapter-owned code.  Frozen
         # Pydantic models prevent ordinary mutation; the deep copy plus the
         # post-effect equality check also catches adapters that deliberately
@@ -1066,14 +1167,16 @@ class GrokWorkerBroker:
             )
         except TimeoutError:
             if physical_request != start.request:
-                return self._normalized_failure(
+                return self._post_dispatch_failure(
+                    adapter=adapter,
                     start=start,
                     descriptor=descriptor,
                     error_kind="protocol",
                     error_code="adapter_request_mutation",
                     duration_ms=round((time.monotonic() - started) * 1000),
                 )
-            return self._normalized_failure(
+            return self._post_dispatch_failure(
+                adapter=adapter,
                 start=start,
                 descriptor=descriptor,
                 error_kind="transport",
@@ -1082,14 +1185,16 @@ class GrokWorkerBroker:
             )
         except Exception:
             if physical_request != start.request:
-                return self._normalized_failure(
+                return self._post_dispatch_failure(
+                    adapter=adapter,
                     start=start,
                     descriptor=descriptor,
                     error_kind="protocol",
                     error_code="adapter_request_mutation",
                     duration_ms=round((time.monotonic() - started) * 1000),
                 )
-            return self._normalized_failure(
+            return self._post_dispatch_failure(
+                adapter=adapter,
                 start=start,
                 descriptor=descriptor,
                 error_kind="internal",
@@ -1106,7 +1211,8 @@ class GrokWorkerBroker:
             start=start,
             descriptor=completed_descriptor,
         ):
-            return self._normalized_failure(
+            return self._post_dispatch_failure(
+                adapter=adapter,
                 start=start,
                 descriptor=descriptor,
                 error_kind="protocol",
@@ -1114,7 +1220,8 @@ class GrokWorkerBroker:
                 duration_ms=round((time.monotonic() - started) * 1000),
             )
         if physical_request != start.request:
-            return self._normalized_failure(
+            return self._post_dispatch_failure(
+                adapter=adapter,
                 start=start,
                 descriptor=descriptor,
                 error_kind="protocol",
@@ -1122,7 +1229,8 @@ class GrokWorkerBroker:
                 duration_ms=round((time.monotonic() - started) * 1000),
             )
         if self._remaining(plan) <= 0:
-            return self._normalized_failure(
+            return self._post_dispatch_failure(
+                adapter=adapter,
                 start=start,
                 descriptor=descriptor,
                 error_kind="transport",
@@ -1132,11 +1240,23 @@ class GrokWorkerBroker:
         if not _attempt_start_matches_plan(
             start, plan, index
         ) or not self._result_matches_start(result, start, descriptor):
-            return self._normalized_failure(
+            return self._post_dispatch_failure(
+                adapter=adapter,
                 start=start,
                 descriptor=descriptor,
                 error_kind="protocol",
                 error_code="adapter_contract_mismatch",
+                duration_ms=round((time.monotonic() - started) * 1000),
+            )
+        if result.status == "failed" and self._sampling_effect_requires_indeterminate(
+            channel=start.channel,
+            adapter=adapter,
+        ):
+            return self._normalized_failure(
+                start=start,
+                descriptor=descriptor,
+                error_kind="internal",
+                error_code="sampling_effect_indeterminate",
                 duration_ms=round((time.monotonic() - started) * 1000),
             )
         return result
@@ -1643,7 +1763,8 @@ class GrokWorkerBroker:
                 start=start,
             )
         except asyncio.CancelledError:
-            result = self._normalized_failure(
+            result = self._post_dispatch_failure(
+                adapter=adapter,
                 start=start,
                 descriptor=descriptor,
                 error_kind="transport",
