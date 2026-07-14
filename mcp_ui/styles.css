@@ -77,6 +77,16 @@ body {
   letter-spacing: 1.5px;
 }
 
+.product-law {
+  margin: 0.35rem 0 0;
+  max-width: 34rem;
+  font-size: clamp(0.72rem, 1.1vw, 0.85rem);
+  line-height: 1.35;
+  color: var(--ink-soft, #8b9eb0);
+  font-weight: 500;
+}
+.product-law code { font-size: 0.95em; }
+.retired-panel { display: none !important; }
 .surface-mode-badge {
   margin: 0.2rem 0 0;
   font-size: 0.72rem;

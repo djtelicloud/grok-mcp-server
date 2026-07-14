@@ -7,4 +7,4 @@ __version__ = "0.6.0"
 # runtime handshake in app.js).
 # Bump the -rN suffix whenever any /ui asset changes; a pytest asserts every
 # copy of this string agrees so HTML and JS can never skew apart silently.
-UI_ASSET_VERSION = "grok-v0.6.0-r6"
+UI_ASSET_VERSION = "grok-v0.6.0-r7"

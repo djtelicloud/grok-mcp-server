@@ -1,9 +1,9 @@
-import { parseMarkdown, sanitizeHref } from "./markdown.js?v=grok-v0.6.0-r6";
+import { parseMarkdown, sanitizeHref } from "./markdown.js?v=grok-v0.6.0-r7";
 
 // Must match the <meta name="unigrok-ui-version"> baked into index.html and
 // src/version.py UI_ASSET_VERSION; a mismatch means the browser paired a
 // cached page with a different script build (the stale-skew failure class).
-const UI_ASSET_VERSION = "grok-v0.6.0-r6";
+const UI_ASSET_VERSION = "grok-v0.6.0-r7";
 
 const LAYOUT_KEY = "unigrok.mcp.console.layout.v2";
 
@@ -34,14 +34,10 @@ const defaultLayout = {
 };
 
 const TAB_IDS = new Set([
-  "tab-console",
-  "tab-guard",
+  "tab-onboarding",
   "tab-metrics",
   "tab-models",
-  "tab-okf",
-  "tab-onboarding",
-  "tab-schemas",
-  "tab-webmcp",
+  "tab-console",
 ]);
 
 function readLayout() {
@@ -227,7 +223,7 @@ function setupLayoutController() {
 }
 
 const state = {
-  activeTab: "tab-console",
+  activeTab: "tab-onboarding",
   activeSchema: "AgentResult",
   activeOkfFile: "index.md",
   okfManifest: null,
@@ -963,18 +959,8 @@ function renderSurfaceModeBadge(data) {
     badge.dataset.surface = "forge";
   } else {
     badge.textContent = "Surface: Stable Core";
-    badge.title = "Public product path. Swarm apply and land workflows are insider-only.";
+    badge.title = "Public product path. Daily chat is IDE MCP; this page is health and connect.";
     badge.dataset.surface = "core";
-  }
-  const contributorTitle = $("nav-group-contributor");
-  const swarmLink = $("nav-link-swarm");
-  const isForge = badge.dataset.surface === "forge";
-  if (contributorTitle) contributorTitle.hidden = !isForge;
-  if (swarmLink) swarmLink.hidden = !isForge;
-  if (swarmLink) {
-    if (isForge) {
-      swarmLink.title = "Swarm Optimizer — Pareto Playground";
-    }
   }
 }
 
@@ -1809,7 +1795,7 @@ async function registerWebMcpTools() {
   try {
     await ctx.registerTool({
       name: "unigrok_ui_layout_get",
-      description: "Returns the deterministic IDE layout state and crawlable Control Center regions.",
+      description: "Returns the deterministic IDE layout state and crawlable Console regions.",
       inputSchema: { type: "object", properties: {} },
       execute: async () => ({
         content: [{
@@ -1990,7 +1976,7 @@ function enforceUiVersionHandshake() {
   const message = $("offlineAlertMessage");
   const banner = $("dockerOfflineAlert");
   if (message && banner) {
-    message.textContent = "⚠️ This page is out of date (browser cache). Hard refresh — Cmd/Ctrl+Shift+R — to load the current Control Center.";
+    message.textContent = "⚠️ This page is out of date (browser cache). Hard refresh — Cmd/Ctrl+Shift+R — to load the current Console.";
     banner.classList.remove("hidden");
   }
   return true;
@@ -2003,7 +1989,7 @@ function renderFilePreviewNotice() {
   const fallback = $("restartManualFallback");
   if (!alertBanner || !message || !restartBtn) return;
   isOffline = false;
-  message.textContent = "Preview only — use the live Control Center for runtime actions.";
+  message.textContent = "Preview only — use the live Console for runtime actions.";
   restartBtn.textContent = "Open Live UI";
   restartBtn.dataset.action = "open-live-ui";
   fallback?.classList.add("hidden");
@@ -2207,9 +2193,10 @@ function init() {
   });
   setupLayoutController();
   setupTabRouter();
-  setupSchemaExplorer();
-  setupReasoningGuard();
-  setupOkfClipboard();
+  // Advanced demos retired from Core Console; keep functions for optional dead panels.
+  if ($("tab-schemas") && !$("tab-schemas").hidden) setupSchemaExplorer();
+  if ($("tab-guard") && !$("tab-guard").hidden) setupReasoningGuard();
+  if ($("tab-okf") && !$("tab-okf").hidden) setupOkfClipboard();
   setupConsoleActions();
 
   // Proactive safety checks initialization
@@ -2241,13 +2228,13 @@ function init() {
   $("planeInput")?.addEventListener("change", updatePlaneControls);
   updatePlaneControls();
 
-  // Re-probe the WebMCP bridge on demand instead of only on tab entry.
   $("runWebMcpBridgeBtn")?.addEventListener("click", () => {
     checkWebMcpBridge();
     loadWebMcpManifest();
   });
 
   resetConversation();
+  switchTab("tab-onboarding");
 
   window.parseMcpResponse = parseMcpResponse;
   window.fetchMcpListTools = fetchMcpListTools;
@@ -2256,11 +2243,11 @@ function init() {
     const ready = await runStartupCheck();
     const runtime = await fetchRuntimeStatus();
     renderSetupStatus(runtime, ready, gatewayReadiness.detail);
-    if (!ready) switchTab("tab-onboarding");
+    switchTab("tab-onboarding");
     await loadModelsList();
     await loadPlaneModelCatalog();
     await fetchMcpListTools();
-    await registerWebMcpTools();
+    // WebMCP browser registration is optional/experimental; skip on Core glass.
   }, 100);
 }
 

@@ -45,26 +45,33 @@ def test_mcp_ui_static_files_are_served(monkeypatch):
         styles = client.get("/ui/styles.css")
 
     assert index.status_code == 200
-    assert "<title>UniGrok MCP v0.6.0 Control Center</title>" in index.text
+    assert "<title>UniGrok Gateway Console v0.6.0</title>" in index.text
     assert '<span class="version-badge">v0.6.0</span>' in index.text
-    assert 'script type="module" src="./app.js?v=grok-v0.6.0-r6"' in index.text
-    assert '<link rel="stylesheet" href="./styles.css?v=grok-v0.6.0-r6" />' in index.text
-    assert '<link rel="stylesheet" href="./tokens.css?v=grok-v0.6.0-r6" />' in index.text
-    assert "Control Center" in index.text
+    assert 'script type="module" src="./app.js?v=grok-v0.6.0-r7"' in index.text
+    assert '<link rel="stylesheet" href="./styles.css?v=grok-v0.6.0-r7" />' in index.text
+    assert '<link rel="stylesheet" href="./tokens.css?v=grok-v0.6.0-r7" />' in index.text
+    assert "Console" in index.text
     assert 'id="surfaceModeBadge"' in index.text
+    assert 'id="tab-btn-schemas"' not in index.text
+    assert 'id="tab-btn-okf"' not in index.text
+    assert 'id="tab-btn-webmcp"' not in index.text
+    assert 'id="tab-btn-guard"' not in index.text
+    assert 'id="nav-link-swarm"' not in index.text
+    assert "product-law" in index.text
+    assert 'id="tab-btn-onboarding"' in index.text
     assert 'id="metricVerifiedSplit"' in index.text
-    assert 'id="nav-group-contributor"' in index.text
-    assert 'contributorTitle.hidden = !isForge' in script.text
-    assert 'swarmLink.hidden = !isForge' in script.text
-    assert '#nav-link-swarm[hidden]' in styles.text
+    assert 'id="nav-group-contributor"' not in index.text
+    assert 'nav-link-swarm' not in index.text
+    assert 'Swarm Optimizer' not in index.text
+    assert 'product-law' in index.text
     assert "Bearer token" not in index.text
-    assert "Agent Playground" in index.text
+    assert "Legacy connectivity smoke" in index.text
     assert 'id="verifySetupBtn"' in index.text
     assert 'id="runSampleBtn"' in index.text
-    assert "No prompt is required for the setup check" in index.text
+    assert "IDE MCP is primary" in index.text or "Legacy connectivity smoke" in index.text
     assert "Legacy Mode" not in index.text
     assert "verifyPlaygroundSetup" in script.text
-    assert "Add a task, choose a preset" in script.text
+    assert "switchTab(\"tab-onboarding\")" in script.text or "switchTab('tab-onboarding')" in script.text
     assert script.status_code == 200
     assert "tools/call" in script.text
     assert "X-Client-ID" in script.text
@@ -76,7 +83,7 @@ def test_mcp_ui_static_files_are_served(monkeypatch):
     assert "Deprecated compatibility alias" in script.text
     assert "authoritative: false" in script.text
     assert "Live MCP tools/list schemas are authoritative" in script.text
-    assert "Result Shape Guide" in index.text
+    assert "Health" in index.text
     assert "startup ingestion is not automatic" in index.text
     assert "before hitting the API" not in script.text
     assert "safely route this call" not in script.text
@@ -175,14 +182,13 @@ def test_mcp_ui_swarm_playground_is_served_and_honest(monkeypatch):
     assert script.status_code == 200
     assert "unigrok-swarm-status-v1" in script.text
     assert "unigrok-swarm-status-v2" in script.text
-    # Discoverable from the Control Center sidebar — as a page LINK, not a
-    # .nav-btn, so the tab router and its keyboard traversal never bind it.
+    # Swarm remains statically served for deep links, but Core Console nav
+    # no longer promotes it (health-glass IA; IDE MCP is primary chat).
     with TestClient(create_app(), base_url="http://localhost:8080") as client:
         index = client.get("/ui/")
-    assert 'id="nav-link-swarm"' in index.text
-    assert 'href="./swarm.html"' in index.text
-    assert 'class="nav-link"' in index.text
-    assert "Swarm Optimizer" in index.text
+    assert 'id="nav-link-swarm"' not in index.text
+    assert 'href="./swarm.html"' not in index.text
+    assert "Swarm Optimizer" not in index.text
     assert "get_swarm_status" in script.text
     assert 'id="fileBtn"' in page.text
     assert "onclick=" not in page.text  # blocked by the server's script-src CSP
@@ -254,8 +260,9 @@ def test_mcp_ui_layout_engine_is_local_and_ide_first():
     assert '.console-grid[data-inspector="drawer"]' in styles.text
     assert 'data-inspector-drawer="closed"' in index.text
     assert 'class="form-actions playground-action-dock"' in index.text
-    assert "Setup &amp; Status" in index.text
-    assert 'id="advancedNav"' in index.text
+    assert "Health" in index.text
+    assert 'id="advancedNav"' not in index.text
+    assert "product-law" in index.text
     assert 'inspectorPresence: "hide"' in script.text
     assert "PANEL_MODES" not in script.text
     assert "cyclePanel" not in script.text
@@ -325,7 +332,7 @@ def test_mcp_ui_browser_warning():
         index = client.get("/ui/")
     assert index.status_code == 200
     assert 'id="browserWarningCard"' in index.text
-    assert "Browser compatibility" in index.text
+    assert "Browser note" in index.text
 
 
 def test_mcp_ui_token_drift_wizard():
@@ -395,7 +402,7 @@ def test_mcp_ui_markdown_renderer_is_shared_and_escape_first():
     assert "\\u000E-\\u001F" in renderer.text
     # app.js imports the shared renderer at the current cache-bust version and
     # no longer defines its own.
-    assert 'from "./markdown.js?v=grok-v0.6.0-r6"' in script.text
+    assert 'from "./markdown.js?v=grok-v0.6.0-r7"' in script.text
     assert "import { parseMarkdown" in script.text
     assert "function parseMarkdown" not in script.text
     assert "renderMarkdownInto" in script.text

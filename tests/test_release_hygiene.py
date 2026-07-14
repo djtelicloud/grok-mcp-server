@@ -15,7 +15,11 @@ def test_release_version_is_aligned_across_package_runtime_and_ui():
     plugin = json.loads((ROOT / ".plugin" / "plugin.json").read_text(encoding="utf-8"))
 
     assert metadata["project"]["version"] == __version__ == "0.6.0"
-    assert f"v{__version__} Control Center" in index
+    assert (
+        f"v{__version__} Control Center" in index
+        or f"Gateway Console v{__version__}" in index
+        or f'Console <span class="version-badge">v{__version__}</span>' in index
+    )
     assert f"## [{__version__}]" in changelog
     assert plugin["version"] == __version__
 
