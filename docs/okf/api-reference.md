@@ -1044,6 +1044,38 @@ def build_provider_registry(*, environ: Mapping[str, str] | None=None, clients: 
 
 Build adapters without performing discovery or provider calls.
 
+## providers/subscription.py {#providers-subscription}
+
+### Class: `ClaudeCLIAdapter` {#providers-subscription-claudecliadapter}
+
+```python
+class ClaudeCLIAdapter
+```
+
+**Keywords:** claude, cli, adapter
+
+One-shot Claude Code OAuth worker with tools and persistence disabled.
+
+### Class: `MCPClientSamplingAdapter` {#providers-subscription-mcpclientsamplingadapter}
+
+```python
+class MCPClientSamplingAdapter
+```
+
+**Keywords:** mcp, client, sampling, adapter
+
+One client-advertised MCP sampling lane bound to one trusted provider.
+
+### Function: `build_subscription_registry` {#providers-subscription-build_subscription_registry}
+
+```python
+def build_subscription_registry(*, claude_executable: str='claude', environ: Mapping[str, str] | None=None, claude_runner: CLIProcessRunner | None=None, sampling_clients: Mapping[ProviderChannel, SamplingClientBinding] | None=None, clock: Clock | None=None) -> dict[ProviderChannel, ProviderAdapter]
+```
+
+**Keywords:** build, subscription, registry
+
+Construct request-scoped subscription adapters without any effect.
+
 ## providers/vertex.py {#providers-vertex}
 
 ### Function: `load_google_adc_identity` {#providers-vertex-load_google_adc_identity}

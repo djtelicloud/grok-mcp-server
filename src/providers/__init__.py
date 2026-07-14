@@ -7,8 +7,11 @@ future policy broker.
 
 from .anthropic import AnthropicAdapter
 from .contracts import (
+    BillingClass,
     CredentialPlane,
+    CredentialKind,
     CredentialState,
+    EndpointKind,
     GrokSupervisorBinding,
     ProviderAdapter,
     ProviderAttemptResult,
@@ -36,16 +39,42 @@ from .errors import (
 from .gemini import GeminiAdapter
 from .openai import OpenAIAdapter
 from .registry import build_provider_registry
+from .subscription import (
+    DISABLED_SUBSCRIPTION_SURFACES,
+    CLIProcessResult,
+    CLIProcessRunner,
+    ClaudeCLIAdapter,
+    ClientSamplingRequest,
+    ClientSamplingResult,
+    MCPClientSamplingAdapter,
+    SamplingCallback,
+    SamplingCapability,
+    SamplingClientBinding,
+    SamplingMessage,
+    SamplingModelHint,
+    SamplingModelPreferences,
+    SamplingTextContent,
+    build_subscription_registry,
+)
 from .vertex import ADCIdentity, VertexADCAdapter, load_google_adc_identity
 
 __all__ = [
     "ADCIdentity",
     "AnthropicAdapter",
+    "BillingClass",
+    "CLIProcessResult",
+    "CLIProcessRunner",
+    "ClaudeCLIAdapter",
+    "ClientSamplingRequest",
+    "ClientSamplingResult",
+    "CredentialKind",
     "CredentialPlane",
     "CredentialState",
+    "EndpointKind",
     "GeminiAdapter",
     "GrokSupervisorBinding",
     "OpenAIAdapter",
+    "MCPClientSamplingAdapter",
     "ProviderAdapter",
     "ProviderAttemptResult",
     "ProviderAttemptStart",
@@ -64,8 +93,17 @@ __all__ = [
     "ProviderTokenUsage",
     "ProviderTransportError",
     "RouteClass",
+    "SamplingCallback",
+    "SamplingCapability",
+    "SamplingClientBinding",
+    "SamplingMessage",
+    "SamplingModelHint",
+    "SamplingModelPreferences",
+    "SamplingTextContent",
     "VertexADCAdapter",
     "build_provider_registry",
+    "build_subscription_registry",
+    "DISABLED_SUBSCRIPTION_SURFACES",
     "load_google_adc_identity",
     "model_visible_messages",
     "WorkerAuthority",

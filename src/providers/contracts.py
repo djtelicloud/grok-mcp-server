@@ -44,6 +44,10 @@ class ProviderChannel(str, Enum):
     ANTHROPIC_API = "anthropic_api"
     GEMINI_API_KEY = "gemini_api_key"
     VERTEX_ADC = "vertex_adc"
+    CLAUDE_CLI = "claude_cli"
+    OPENAI_MCP_SAMPLING = "openai_mcp_sampling"
+    ANTHROPIC_MCP_SAMPLING = "anthropic_mcp_sampling"
+    GOOGLE_MCP_SAMPLING = "google_mcp_sampling"
 
 
 class CredentialPlane(str, Enum):
@@ -62,6 +66,117 @@ class CredentialState(str, Enum):
     CONFIGURED = "configured"
     MISSING = "missing"
     DEFERRED = "deferred"
+
+
+EndpointKind = Literal[
+    "first_party_api",
+    "vertex_ai",
+    "local_cli",
+    "mcp_client_sampling",
+]
+CredentialKind = Literal[
+    "api_key",
+    "google_adc",
+    "host_oauth",
+    "mcp_client_subscription",
+]
+BillingClass = Literal["metered", "subscription"]
+
+
+_CHANNEL_PROVIDER: dict[ProviderChannel, ProviderId] = {
+    ProviderChannel.XAI_API: ProviderId.XAI,
+    ProviderChannel.GROK_CLI: ProviderId.XAI,
+    ProviderChannel.OPENAI_API: ProviderId.OPENAI,
+    ProviderChannel.ANTHROPIC_API: ProviderId.ANTHROPIC,
+    ProviderChannel.GEMINI_API_KEY: ProviderId.GOOGLE,
+    ProviderChannel.VERTEX_ADC: ProviderId.GOOGLE,
+    ProviderChannel.CLAUDE_CLI: ProviderId.ANTHROPIC,
+    ProviderChannel.OPENAI_MCP_SAMPLING: ProviderId.OPENAI,
+    ProviderChannel.ANTHROPIC_MCP_SAMPLING: ProviderId.ANTHROPIC,
+    ProviderChannel.GOOGLE_MCP_SAMPLING: ProviderId.GOOGLE,
+}
+
+_CHANNEL_PLANE: dict[ProviderChannel, CredentialPlane] = {
+    ProviderChannel.XAI_API: CredentialPlane.METERED_API,
+    ProviderChannel.GROK_CLI: CredentialPlane.SUBSCRIPTION,
+    ProviderChannel.OPENAI_API: CredentialPlane.METERED_API,
+    ProviderChannel.ANTHROPIC_API: CredentialPlane.METERED_API,
+    ProviderChannel.GEMINI_API_KEY: CredentialPlane.METERED_API,
+    ProviderChannel.VERTEX_ADC: CredentialPlane.METERED_API,
+    ProviderChannel.CLAUDE_CLI: CredentialPlane.SUBSCRIPTION,
+    ProviderChannel.OPENAI_MCP_SAMPLING: CredentialPlane.SUBSCRIPTION,
+    ProviderChannel.ANTHROPIC_MCP_SAMPLING: CredentialPlane.SUBSCRIPTION,
+    ProviderChannel.GOOGLE_MCP_SAMPLING: CredentialPlane.SUBSCRIPTION,
+}
+
+_CHANNEL_ENDPOINT_KIND: dict[ProviderChannel, EndpointKind] = {
+    ProviderChannel.XAI_API: "first_party_api",
+    ProviderChannel.GROK_CLI: "local_cli",
+    ProviderChannel.OPENAI_API: "first_party_api",
+    ProviderChannel.ANTHROPIC_API: "first_party_api",
+    ProviderChannel.GEMINI_API_KEY: "first_party_api",
+    ProviderChannel.VERTEX_ADC: "vertex_ai",
+    ProviderChannel.CLAUDE_CLI: "local_cli",
+    ProviderChannel.OPENAI_MCP_SAMPLING: "mcp_client_sampling",
+    ProviderChannel.ANTHROPIC_MCP_SAMPLING: "mcp_client_sampling",
+    ProviderChannel.GOOGLE_MCP_SAMPLING: "mcp_client_sampling",
+}
+
+_CHANNEL_CREDENTIAL_KIND: dict[ProviderChannel, CredentialKind] = {
+    ProviderChannel.XAI_API: "api_key",
+    ProviderChannel.GROK_CLI: "host_oauth",
+    ProviderChannel.OPENAI_API: "api_key",
+    ProviderChannel.ANTHROPIC_API: "api_key",
+    ProviderChannel.GEMINI_API_KEY: "api_key",
+    ProviderChannel.VERTEX_ADC: "google_adc",
+    ProviderChannel.CLAUDE_CLI: "host_oauth",
+    ProviderChannel.OPENAI_MCP_SAMPLING: "mcp_client_subscription",
+    ProviderChannel.ANTHROPIC_MCP_SAMPLING: "mcp_client_subscription",
+    ProviderChannel.GOOGLE_MCP_SAMPLING: "mcp_client_subscription",
+}
+
+_CHANNEL_BILLING: dict[ProviderChannel, BillingClass] = {
+    channel: (
+        "subscription"
+        if _CHANNEL_PLANE[channel] == CredentialPlane.SUBSCRIPTION
+        else "metered"
+    )
+    for channel in ProviderChannel
+}
+
+
+def _validate_channel_binding(
+    *,
+    provider: ProviderId,
+    channel: ProviderChannel,
+    credential_plane: CredentialPlane,
+    endpoint_kind: EndpointKind | None = None,
+    credential_kind: CredentialKind | None = None,
+    billing_class: BillingClass | None = None,
+) -> None:
+    if _CHANNEL_PROVIDER[channel] != provider:
+        raise ValueError("provider and physical channel do not match")
+    if _CHANNEL_PLANE[channel] != credential_plane:
+        raise ValueError("channel and credential plane do not match")
+    if endpoint_kind is not None and _CHANNEL_ENDPOINT_KIND[channel] != endpoint_kind:
+        raise ValueError("channel and endpoint kind do not match")
+    if (
+        credential_kind is not None
+        and _CHANNEL_CREDENTIAL_KIND[channel] != credential_kind
+    ):
+        raise ValueError("channel and credential kind do not match")
+    if billing_class is not None and _CHANNEL_BILLING[channel] != billing_class:
+        raise ValueError("channel and billing class do not match")
+
+
+def _validate_endpoint_locator(endpoint_kind: EndpointKind, value: str) -> None:
+    if endpoint_kind in {"first_party_api", "vertex_ai"}:
+        if not _SAFE_HOST_RE.fullmatch(value):
+            raise ValueError("API endpoint_host must be a fixed DNS hostname")
+    elif endpoint_kind == "local_cli" and value != "local-process":
+        raise ValueError("local CLI endpoint_host must be local-process")
+    elif endpoint_kind == "mcp_client_sampling" and value != "mcp-client":
+        raise ValueError("MCP sampling endpoint_host must be mcp-client")
 
 
 class StrictContract(BaseModel):
@@ -179,26 +294,11 @@ class ProviderAttemptStart(StrictContract):
             raise ValueError("xAI planes are supervisor attempts, not subordinate workers")
         if self.request.model is not None and self.request.model != self.requested_model:
             raise ValueError("explicit request model must match requested_model")
-        allowed_channels = {
-            ProviderId.OPENAI: {ProviderChannel.OPENAI_API},
-            ProviderId.ANTHROPIC: {ProviderChannel.ANTHROPIC_API},
-            ProviderId.GOOGLE: {
-                ProviderChannel.GEMINI_API_KEY,
-                ProviderChannel.VERTEX_ADC,
-            },
-        }
-        if self.channel not in allowed_channels[self.provider]:
-            raise ValueError("provider and physical channel do not match")
-        expected_plane = {
-            ProviderChannel.GROK_CLI: CredentialPlane.SUBSCRIPTION,
-            ProviderChannel.XAI_API: CredentialPlane.METERED_API,
-            ProviderChannel.OPENAI_API: CredentialPlane.METERED_API,
-            ProviderChannel.ANTHROPIC_API: CredentialPlane.METERED_API,
-            ProviderChannel.GEMINI_API_KEY: CredentialPlane.METERED_API,
-            ProviderChannel.VERTEX_ADC: CredentialPlane.METERED_API,
-        }[self.channel]
-        if self.credential_plane != expected_plane:
-            raise ValueError("channel and credential plane do not match")
+        _validate_channel_binding(
+            provider=self.provider,
+            channel=self.channel,
+            credential_plane=self.credential_plane,
+        )
         return self
 
 
@@ -225,8 +325,20 @@ class ProviderDescriptor(StrictContract):
     credential_plane: CredentialPlane
     display_name: Annotated[str, Field(min_length=1, max_length=64)]
     endpoint_host: Annotated[str, Field(min_length=3, max_length=253)]
-    endpoint_kind: Literal["first_party_api", "vertex_ai"]
-    credential_kind: Literal["api_key", "google_adc"]
+    endpoint_kind: EndpointKind
+    credential_kind: CredentialKind
+    billing_class: BillingClass = "metered"
+    client_identity: (
+        Annotated[
+            str,
+            Field(
+                min_length=1,
+                max_length=128,
+                pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+            ),
+        ]
+        | None
+    ) = None
     credential_env_names: tuple[str, ...]
     credential_state: CredentialState
     models: ProviderModelPins
@@ -244,14 +356,29 @@ class ProviderDescriptor(StrictContract):
 
     @model_validator(mode="after")
     def validate_descriptor(self) -> "ProviderDescriptor":
-        if not _SAFE_HOST_RE.fullmatch(self.endpoint_host):
-            raise ValueError("endpoint_host must be a fixed DNS hostname")
+        _validate_channel_binding(
+            provider=self.provider,
+            channel=self.channel,
+            credential_plane=self.credential_plane,
+            endpoint_kind=self.endpoint_kind,
+            credential_kind=self.credential_kind,
+            billing_class=self.billing_class,
+        )
+        _validate_endpoint_locator(self.endpoint_kind, self.endpoint_host)
+        if (self.endpoint_kind == "mcp_client_sampling") != (
+            self.client_identity is not None
+        ):
+            raise ValueError("only MCP sampling descriptors require client_identity")
         if not self.supported_routes or len(set(self.supported_routes)) != len(
             self.supported_routes
         ):
             raise ValueError("supported routes must be nonempty and unique")
         if len(set(self.credential_env_names)) != len(self.credential_env_names):
             raise ValueError("credential environment names must be unique")
+        if self.billing_class == "subscription" and self.credential_env_names:
+            raise ValueError(
+                "subscription descriptors cannot advertise API credentials"
+            )
         for name in self.credential_env_names:
             if not re.fullmatch(r"[A-Z][A-Z0-9_]{1,63}", name):
                 raise ValueError("credential environment names must be safe identifiers")
@@ -304,9 +431,20 @@ class ProviderReceipt(StrictContract):
     resolved_model: Annotated[str, Field(min_length=1, max_length=192)]
     model_source: Literal["provider_reported", "requested_fallback"]
     endpoint_host: Annotated[str, Field(min_length=3, max_length=253)]
-    endpoint_kind: Literal["first_party_api", "vertex_ai"]
-    credential_kind: Literal["api_key", "google_adc"]
-    billing_class: Literal["metered"] = "metered"
+    endpoint_kind: EndpointKind
+    credential_kind: CredentialKind
+    billing_class: BillingClass = "metered"
+    client_identity: (
+        Annotated[
+            str,
+            Field(
+                min_length=1,
+                max_length=128,
+                pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+            ),
+        ]
+        | None
+    ) = None
     cost_usd: Annotated[Decimal, Field(ge=0, max_digits=16, decimal_places=8)] | None = None
     cost_source: Literal["provider_exact", "locally_computed", "unavailable"] = (
         "unavailable"
@@ -326,12 +464,30 @@ class ProviderReceipt(StrictContract):
             raise ValueError("receipt requested_model must be safe")
         if not _SAFE_MODEL_RE.fullmatch(self.resolved_model):
             raise ValueError("receipt resolved_model must be safe")
-        if not _SAFE_HOST_RE.fullmatch(self.endpoint_host):
-            raise ValueError("receipt endpoint_host must be a fixed hostname")
+        _validate_channel_binding(
+            provider=self.provider,
+            channel=self.channel,
+            credential_plane=self.credential_plane,
+            endpoint_kind=self.endpoint_kind,
+            credential_kind=self.credential_kind,
+            billing_class=self.billing_class,
+        )
+        _validate_endpoint_locator(self.endpoint_kind, self.endpoint_host)
+        if (self.endpoint_kind == "mcp_client_sampling") != (
+            self.client_identity is not None
+        ):
+            raise ValueError("only MCP sampling receipts require client_identity")
         if self.response_id and not _SAFE_IDENTIFIER_RE.fullmatch(self.response_id):
             raise ValueError("receipt response_id must be a safe identifier")
         if (self.cost_usd is None) != (self.cost_source == "unavailable"):
             raise ValueError("receipt cost and cost source must agree")
+        if (
+            self.billing_class == "subscription"
+            and self.cost_source == "locally_computed"
+        ):
+            raise ValueError(
+                "subscription cost must be provider-reported or unavailable"
+            )
         return self
 
 
@@ -367,6 +523,20 @@ class ProviderFailureReceipt(StrictContract):
     route: RouteClass
     requested_model: Annotated[str, Field(min_length=1, max_length=192)]
     endpoint_host: Annotated[str, Field(min_length=3, max_length=253)]
+    endpoint_kind: EndpointKind = "first_party_api"
+    credential_kind: CredentialKind = "api_key"
+    billing_class: BillingClass = "metered"
+    client_identity: (
+        Annotated[
+            str,
+            Field(
+                min_length=1,
+                max_length=128,
+                pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+            ),
+        ]
+        | None
+    ) = None
     error_kind: Literal["configuration", "transport", "protocol", "internal"]
     error_code: Annotated[str, Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")]
     duration_ms: Annotated[int, Field(ge=0, le=3_600_000)]
@@ -383,10 +553,28 @@ class ProviderFailureReceipt(StrictContract):
             raise ValueError("failure request_id must be safe")
         if not _SAFE_MODEL_RE.fullmatch(self.requested_model):
             raise ValueError("failure requested_model must be safe")
-        if not _SAFE_HOST_RE.fullmatch(self.endpoint_host):
-            raise ValueError("failure endpoint_host must be fixed")
+        _validate_channel_binding(
+            provider=self.provider,
+            channel=self.channel,
+            credential_plane=self.credential_plane,
+            endpoint_kind=self.endpoint_kind,
+            credential_kind=self.credential_kind,
+            billing_class=self.billing_class,
+        )
+        _validate_endpoint_locator(self.endpoint_kind, self.endpoint_host)
+        if (self.endpoint_kind == "mcp_client_sampling") != (
+            self.client_identity is not None
+        ):
+            raise ValueError("only MCP sampling failures require client_identity")
         if (self.cost_usd is None) != (self.cost_source == "unavailable"):
             raise ValueError("failure cost and cost source must agree")
+        if (
+            self.billing_class == "subscription"
+            and self.cost_source == "locally_computed"
+        ):
+            raise ValueError(
+                "subscription cost must be provider-reported or unavailable"
+            )
         return self
 
 
