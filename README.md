@@ -111,9 +111,11 @@ For an explicit no-API-billing agent call, set `plane="cli"` and
 `fallback_policy="same_plane"`. For a metered API-only call, pair
 `plane="api"` with the same policy. `plane` selects the first attempt;
 `fallback_policy="cross_plane"` permits bounded recovery on the other xAI
-credential plane and reports the resolved plane and billing class. The default
-`plane="auto"` remains backward compatible; the Control Center defaults to the
-safer subscription-only contract.
+credential plane and reports the resolved plane and billing class. Recovery is
+symmetric: a CLI OAuth attempt may recover through `XAI_API_KEY`, and an
+API-first attempt may recover through CLI OAuth. The default `plane="auto"`
+remains backward compatible; the Control Center defaults to the safer
+subscription-only contract.
 
 This is a standalone, workspace-neutral service. The image runs its baked
 application from `/app`, keeps mutable data in a Docker volume at `/state`, and
@@ -411,13 +413,35 @@ flowchart LR
 
 Full design detail lives in [architecture.md](architecture.md).
 
+### Current multi-provider foundation
+
+The code landed through PR #90 includes typed subordinate-worker contracts and
+inert broker/transport foundations for OpenAI, Anthropic, and Google. Those
+foundations describe subscription- or IDE-backed execution first and, when
+Grok explicitly authorizes it and the failure is eligible, one bounded
+same-provider API fallback. They are **not wired into the public MCP agent,
+current router, or stable service yet**, so UniGrok does not currently advertise
+those workers as callable runtime providers.
+
+Grok remains the only supervisor, synthesizer, finalizer, and harvest authority.
+Worker output is evidence for Grok, never a final answer. If both Grok
+inference planes are unavailable, today's runtime fails closed rather than
+returning OpenAI, Anthropic, or Google output as final. A future long-running
+orchestrator may enter a durable wait without changing that authority rule.
+
+The optional xAI business/management credential
+(`XAI_MANAGEMENT_API_KEY`) is separate non-inference management authority. It
+does not replace either Grok CLI OAuth or `XAI_API_KEY`, does not enable model
+inference, and does not by itself define which administrative operations are
+allowed; those remain operation-specific authorization decisions.
+
 **Agentix Knowledge Engine (AKE) — planned:** the target design that unifies
 xAI Collections, Management API governors, multi-corpus hybrid retrieval, and
 live `collections_search` into one intelligence fabric for the Agentix harness
 lives in
 [docs/design/ake-agentix-domination-plan.md](docs/design/ake-agentix-domination-plan.md).
-It is design-only until implementation PRs land; local SQLite remains the
-private source of truth.
+The full AKE remains planned beyond PR #85's inert worker-episode harvest seed;
+local SQLite remains the private source of truth.
 
 UniGrok strips every server-owned API, management, gateway, and subordinate-
 provider credential from each CLI subprocess while preserving the Grok OAuth

@@ -6,14 +6,14 @@ This document is the production-grade architectural specification of **UniGrok**
 
 ## 1. System Overview & Core Goals
 
-UniGrok is a Python implementation built on the `FastMCP` framework. It runs once on a developer's machine as a shared local gateway: every MCP client (Claude Code, Claude Desktop, VS Code, Codex, Antigravity) connects to the same endpoint, the xAI credential stays server-side, and requests self-route across two Grok planes — the metered xAI API and the Grok CLI subscription. It bridges cloud APIs with local execution fallbacks and workspace context sensing.
+UniGrok is a Python implementation built on the `FastMCP` framework. It runs once on a developer's machine as a shared local gateway: every MCP client (Claude Code, Claude Desktop, VS Code, Codex, Antigravity) connects to the same endpoint, the xAI credentials stay server-side, and requests self-route across two Grok inference planes — the metered xAI API and the Grok CLI subscription. It bridges cloud APIs with local execution fallbacks and workspace context sensing.
 
 The target public/control/GitHub trust zones and the staged move from local
 landing to a protected `origin/main` with signed remote receipts are specified
 in [ADR 0001](docs/adr/0001-cloud-control-plane-governance.md). That target does
-not change today's operational truth: until the broker is implemented and
-verified, `scripts/land` and the shared local `main` contract in `AGENTS.md`
-remain authoritative.
+not change today's operational truth: until the GitHub mutation broker is
+implemented and verified, `scripts/land` and the shared local `main` contract
+in `AGENTS.md` remain authoritative.
 
 The accepted target for inverting runtime authority—Grok first, typed Needle
 reflexes second, and versioned code continuity floors third—is specified in
@@ -29,6 +29,29 @@ evidence through `agent.workspace_context`; MCP registration alone never grants
 filesystem access. A separate contributor Compose service mounts the UniGrok
 repository, enables local file/git/test tools and commit-anchored evidence, and
 is the only runtime that `scripts/land` may reconcile automatically.
+
+### Current multi-provider boundary (landed, not runtime-wired)
+
+Through PR #90, the repository contains typed subordinate-worker contracts and
+inert broker/transport foundations for OpenAI, Anthropic, and Google. They
+encode subscription- or IDE-backed execution first and permit one bounded,
+same-provider API fallback only when Grok authorizes it and the failure is
+eligible. These worker lanes are not registered in the public MCP agent,
+current router, or stable service, so they are not a claim of runtime
+availability.
+
+Grok remains the sole supervisor, synthesizer, finalizer, and harvest authority.
+A subordinate result is evidence for Grok, never a final answer. If both Grok
+inference planes are unavailable, today's runtime fails closed. A future
+long-running orchestrator may enter a durable wait, but neither path may
+promote an OpenAI, Anthropic, or Google result to final output.
+
+The three xAI credential roles are separate. Grok CLI OAuth and `XAI_API_KEY`
+authorize their respective inference planes. The optional xAI
+business/management credential (`XAI_MANAGEMENT_API_KEY`) is non-inference
+management authority: configuring it neither enables inference nor chooses
+which administrative operations are allowed. Each management operation still
+requires its own explicit authorization boundary.
 
 The concrete security assumptions and residual risks are maintained in
 [docs/threat-model.md](docs/threat-model.md).
@@ -95,7 +118,12 @@ No dial owns separate state or broadens authorization.
 ```
 
 ### Guiding Principles:
-* **Local dual-plane execution**: The server utilizes a Cloud API Plane (via `xai-sdk`) and a Local CLI Plane (via the native `grok` command-line tool) to ensure resilience against network failures or credential issues.
+* **Local dual-plane execution**: The server utilizes a Cloud API Plane (via
+  `xai-sdk`) and a Local CLI Plane (via the native `grok` command-line tool).
+  Recovery is symmetric for eligible failures: `fallback_policy=cross_plane`
+  permits one bounded CLI OAuth → `XAI_API_KEY` or `XAI_API_KEY` → CLI
+  OAuth attempt, while `same_plane` forbids crossing that credential and
+  billing boundary.
   The planes are credential-isolated: the API SDK receives `XAI_API_KEY`, while
   every CLI child has server-owned API, management, gateway, subordinate-
   provider, and credential-file variables removed and must use a verified
@@ -165,11 +193,13 @@ flowchart TD
     AgenticPath --> AgentLoop[ReAct Loop: Parallel Tool Dispatch]
     AgentLoop --> SQLiteSave
 
-    AgenticDecide -- No --> CallPlane[Execute selected model on fast plane]
+    AgenticDecide -- No --> CallPlane[Execute on selected starting xAI plane]
     CallPlane --> ExecSuccess{Execution Successful?}
     ExecSuccess -- Yes --> SQLiteSave
-    ExecSuccess -- No --> Fallback[Activate Local CLI Fallback]
-    Fallback --> ExecFallback{CLI Fallback Successful?}
+    ExecSuccess -- No --> FallbackPolicy{fallback_policy?}
+    FallbackPolicy -- same_plane --> Fatal
+    FallbackPolicy -- cross_plane --> Fallback[Attempt other xAI plane once: CLI OAuth ↔ XAI_API_KEY]
+    Fallback --> ExecFallback{Cross-plane attempt successful?}
     ExecFallback -- Yes --> SQLiteSave
     ExecFallback -- No --> Fatal[Output Hard Recovery Error Message]
     Fatal --> SQLiteSave
@@ -189,7 +219,9 @@ and coding work use the authenticated Grok CLI subscription. The public agent
 also exposes `plane=cli|api` as the starting-plane selector plus an independent
 `fallback_policy`: `same_plane` never crosses the subscription/API billing
 boundary, while `cross_plane` permits one bounded recovery on the other xAI
-plane. Model pins are validated against the selected starting catalog.
+plane. That recovery is symmetric: CLI OAuth may recover through
+`XAI_API_KEY`, and an API-first call may recover through CLI OAuth. Model pins
+are validated against the selected starting catalog.
 Thinking, vision, and multi-agent research remain API-native. Discovery,
 status, `/runtimez`, and every public agent result carry the same versioned
 `credential_planes` contract. Agents prompt once per notice id and must obtain
