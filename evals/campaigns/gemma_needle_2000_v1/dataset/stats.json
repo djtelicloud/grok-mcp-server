@@ -1,0 +1,19 @@
+{
+  "total_rows": 120,
+  "quarantined_rows": 16,
+  "packs": {
+    "tool_selection": 20,
+    "gemma_plan_state": 20,
+    "recovery_selection": 20,
+    "resource_selection": 20,
+    "memory_selection": 20,
+    "observation_typing": 20
+  },
+  "label_distribution": {
+    "critic_approved": 118,
+    "judge_labeled": 2
+  },
+  "ttl_distribution": {
+    "1_hour": 120
+  }
+}

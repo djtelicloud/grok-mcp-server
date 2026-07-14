@@ -1,0 +1,22 @@
+{
+  "version": "D0001",
+  "generated_at": "2026-07-14T03:08:22.012157+00:00",
+  "row_counts": 120,
+  "provenance": {
+    "donor_models": [
+      "gemma-4-26b-a4b-it-maas",
+      "gemini-3.1-pro-preview"
+    ],
+    "critic_model": "grok-4.5",
+    "judge_model": "gemini-3.1-pro-preview"
+  },
+  "files": {
+    "pack_tool_selection.jsonl": "e80e0e3cbb7eade8e79642242e680878f6aeb9fced66f465a84b8830692c8ac0",
+    "pack_gemma_plan_state.jsonl": "28e191a36f426785406c30576eb80aaa4d6e011163963e1fbe0fe099ca20bafd",
+    "pack_recovery_selection.jsonl": "52d1d14b76f72fd7de3bc564beff772f6761ef7d6c5cd5f4773e90f66678de6b",
+    "pack_resource_selection.jsonl": "54c921b8df2033844685ee140109e6a34bbc4808f0c09429aaa9ecbb48d76bcb",
+    "pack_memory_selection.jsonl": "85b91f0f9f523680e1e907df6d41a1f74c6f4b4ce352a8005bd618b1d41176a2",
+    "pack_observation_typing.jsonl": "f680bd66338ea5afc9ca492ec9452364eda73be7cbacdef40b38f50e03b5f0d1",
+    "quarantine.jsonl": "c2ad6af20ec06f95a8e9380c50a46a02f6b17f42861064065a5e110395b61e2a"
+  }
+}
