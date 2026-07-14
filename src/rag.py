@@ -43,7 +43,7 @@ from .utils import (
     _collections_capable,
     _env_timeout,
     _task_hash,
-    get_xai_client,
+    get_xai_management_client,
     run_blocking,
 )
 
@@ -203,7 +203,7 @@ class TaskMemoryMirror:
     """Best-effort cloud mirror for task_memory rows.
 
     Modeled on the knowledge collections adapter (find-or-create by name,
-    single XAI_API_KEY client, run_blocking offload, warn-once) but with
+    role-separated xAI management client, run_blocking offload, warn-once) but with
     instance state instead of module globals, soft-disable with exponential
     backoff instead of unbounded retries, and a token bucket bounding
     remote searches under bursty borderline traffic. Never raises."""
@@ -340,7 +340,7 @@ class TaskMemoryMirror:
             return False
 
         def _probe():
-            client = get_xai_client()
+            client = get_xai_management_client()
             if not _collections_capable(client):
                 raise RuntimeError("installed xai_sdk lacks the collections service surface")
             if not self._resolve_collection_id(client):
@@ -363,7 +363,7 @@ class TaskMemoryMirror:
             return None
 
         def _upload():
-            client = get_xai_client()
+            client = get_xai_management_client()
             if not _collections_capable(client):
                 raise RuntimeError("installed xai_sdk lacks the collections service surface")
             collection_id = self._resolve_collection_id(client)
@@ -401,7 +401,7 @@ class TaskMemoryMirror:
             return []
 
         def _search():
-            client = get_xai_client()
+            client = get_xai_management_client()
             if not _collections_capable(client):
                 raise RuntimeError("installed xai_sdk lacks the collections service surface")
             collection_id = self._resolve_collection_id(client)

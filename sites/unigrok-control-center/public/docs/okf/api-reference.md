@@ -1234,7 +1234,7 @@ class TaskMemoryMirror
 Best-effort cloud mirror for task_memory rows.
 
 Modeled on the knowledge collections adapter (find-or-create by name,
-single XAI_API_KEY client, run_blocking offload, warn-once) but with
+role-separated xAI management client, run_blocking offload, warn-once) but with
 instance state instead of module globals, soft-disable with exponential
 backoff instead of unbounded retries, and a token bucket bounding
 remote searches under bursty borderline traffic. Never raises.
@@ -3402,6 +3402,76 @@ async def build_model_catalog(include_cli: bool=True) -> Dict[str, Any]
 **Keywords:** build, model, catalog
 
 Build a structured catalog for API models, local CLI models, and profiles.
+
+### Function: `get_xai_inference_client` {#utils-get_xai_inference_client}
+
+```python
+def get_xai_inference_client()
+```
+
+**Keywords:** get, xai, inference, client
+
+Return the cached inference-only xAI SDK client.
+
+This constructor must never receive ``XAI_MANAGEMENT_API_KEY``.  Keeping
+the privilege boundary at construction time prevents an inference call
+path from gaining Collections/admin authority through the shared cache.
+
+### Function: `get_xai_client` {#utils-get_xai_client}
+
+```python
+def get_xai_client()
+```
+
+**Keywords:** get, xai, client
+
+Compatibility alias for the inference-only xAI client factory.
+
+### Function: `get_xai_management_client` {#utils-get_xai_management_client}
+
+```python
+def get_xai_management_client()
+```
+
+**Keywords:** get, xai, management, client
+
+Return the cached xAI Collections/admin client.
+
+The installed SDK requires the inference key alongside the management key
+when constructing its Collections service.  This factory is therefore the
+only place where both credentials may enter one SDK client, and callers are
+restricted to the RAG, knowledge, task-memory, and provider-harvest admin
+surfaces.
+
+### Function: `close_xai_inference_client` {#utils-close_xai_inference_client}
+
+```python
+def close_xai_inference_client()
+```
+
+**Keywords:** close, xai, inference, client
+
+Close only the inference client cache.
+
+### Function: `close_xai_management_client` {#utils-close_xai_management_client}
+
+```python
+def close_xai_management_client()
+```
+
+**Keywords:** close, xai, management, client
+
+Close only the Collections/admin client cache.
+
+### Function: `close_xai_client` {#utils-close_xai_client}
+
+```python
+def close_xai_client()
+```
+
+**Keywords:** close, xai, client
+
+Compatibility shutdown hook that closes both role-separated caches.
 
 ### Class: `CircuitBreakerOpenError` {#utils-circuitbreakeropenerror}
 

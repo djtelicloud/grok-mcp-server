@@ -21,12 +21,14 @@ def setup_test_env(tmp_path_factory):
 @pytest.fixture(autouse=True)
 def reset_global_client():
     src.utils._client = None
+    src.utils._management_client = None
     src.utils._MODEL_MAX_TOKENS_CACHE.clear()
     src.utils._BREAKER_STATE.clear()
     src.utils._ROUTING_ADVISOR.invalidate()
     src.utils._CALLER_SPEND_CACHE.clear()
     yield
     src.utils._client = None
+    src.utils._management_client = None
     src.utils._MODEL_MAX_TOKENS_CACHE.clear()
     src.utils._BREAKER_STATE.clear()
     src.utils._ROUTING_ADVISOR.invalidate()
@@ -38,4 +40,3 @@ async def cleanup_global_store(setup_test_env):
     yield
     from src.utils import store
     await store.close()
-

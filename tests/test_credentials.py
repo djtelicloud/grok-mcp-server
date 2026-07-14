@@ -147,9 +147,8 @@ def test_inference_key_alone_never_satisfies_management_readiness(monkeypatch):
     created = {}
 
     class FakeClient:
-        def __init__(self, api_key=None, management_api_key=None):
-            created["api_key"] = api_key
-            created["management_api_key"] = management_api_key
+        def __init__(self, **kwargs):
+            created.update(kwargs)
 
     monkeypatch.setenv("XAI_API_KEY", "xai-inference-only")
     monkeypatch.delenv("XAI_MANAGEMENT_API_KEY", raising=False)
@@ -160,10 +159,7 @@ def test_inference_key_alone_never_satisfies_management_readiness(monkeypatch):
     assert utils.xai_api_key_configured() is True
     assert rag.has_management_key() is False
     utils.get_xai_client()
-    assert created == {
-        "api_key": "xai-inference-only",
-        "management_api_key": None,
-    }
+    assert created == {"api_key": "xai-inference-only"}
 
 
 @pytest.mark.asyncio

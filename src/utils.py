@@ -1867,13 +1867,26 @@ async def build_model_catalog(include_cli: bool = True) -> Dict[str, Any]:
         },
     }
 
-# Global Client Connection Pool
+# Global xAI client connection pools.  The inference client is intentionally
+# incapable of carrying management authority; Collections/admin call sites use
+# the separately named management factory below.
 _client = None
-# get_xai_client is called from executor threads — guard the check-then-set so
-# concurrent first calls cannot leak duplicate Client instances.
+_management_client = None
+# Both factories are called from executor threads — guard each check-then-set
+# so concurrent first calls cannot leak duplicate Client instances or cross
+# their credential-authority caches.
 _client_lock = threading.Lock()
+_management_client_lock = threading.Lock()
 
-def get_xai_client():
+
+def get_xai_inference_client():
+    """Return the cached inference-only xAI SDK client.
+
+    This constructor must never receive ``XAI_MANAGEMENT_API_KEY``.  Keeping
+    the privilege boundary at construction time prevents an inference call
+    path from gaining Collections/admin authority through the shared cache.
+    """
+
     global _client
     if _client is None:
         with _client_lock:
@@ -1881,13 +1894,8 @@ def get_xai_client():
                 if not XAI_API_KEY:
                     raise ValueError("XAI_API_KEY is not configured in the environment.")
                 from xai_sdk import Client
-                # Collections (knowledge + task-memory mirrors) require a
-                # SEPARATE management API key on the xAI side — the inference
-                # key alone yields "Please provide a management API key."
-                # Optional: unset keeps inference-only behavior, and the
-                # mirrors fail open with that exact reason in `rag status`.
-                management_key = os.getenv("XAI_MANAGEMENT_API_KEY", "").strip() or None
-                _client = Client(api_key=XAI_API_KEY, management_api_key=management_key)
+
+                _client = Client(api_key=XAI_API_KEY)
     if _eval_record_enabled():
         # Opt-in eval recording tap (UNIGROK_EVAL_RECORD=1): a thin per-call
         # proxy that appends completed responses to a cassette event log.
@@ -1895,7 +1903,48 @@ def get_xai_client():
         return _EvalRecordingClient(_client)
     return _client
 
-def close_xai_client():
+
+def get_xai_client():
+    """Compatibility alias for the inference-only xAI client factory."""
+
+    return get_xai_inference_client()
+
+
+def get_xai_management_client():
+    """Return the cached xAI Collections/admin client.
+
+    The installed SDK requires the inference key alongside the management key
+    when constructing its Collections service.  This factory is therefore the
+    only place where both credentials may enter one SDK client, and callers are
+    restricted to the RAG, knowledge, task-memory, and provider-harvest admin
+    surfaces.
+    """
+
+    global _management_client
+    if _management_client is None:
+        with _management_client_lock:
+            if _management_client is None:
+                if not XAI_API_KEY:
+                    raise ValueError(
+                        "XAI_API_KEY is not configured for the xAI management client."
+                    )
+                management_key = os.getenv("XAI_MANAGEMENT_API_KEY", "").strip()
+                if not management_key:
+                    raise ValueError(
+                        "XAI_MANAGEMENT_API_KEY is not configured in the environment."
+                    )
+                from xai_sdk import Client
+
+                _management_client = Client(
+                    api_key=XAI_API_KEY,
+                    management_api_key=management_key,
+                )
+    return _management_client
+
+
+def close_xai_inference_client():
+    """Close only the inference client cache."""
+
     global _client
     with _client_lock:
         if _client is not None:
@@ -1906,9 +1955,29 @@ def close_xai_client():
             _client = None
 
 
+def close_xai_management_client():
+    """Close only the Collections/admin client cache."""
+
+    global _management_client
+    with _management_client_lock:
+        if _management_client is not None:
+            try:
+                _management_client.close()
+            except Exception:
+                pass
+            _management_client = None
+
+
+def close_xai_client():
+    """Compatibility shutdown hook that closes both role-separated caches."""
+
+    close_xai_inference_client()
+    close_xai_management_client()
+
+
 # ─── Eval Recording Tap (UNIGROK_EVAL_RECORD) ────────────────────────────────
 # OFF by default; zero behavior change while off. With UNIGROK_EVAL_RECORD
-# truthy, get_xai_client() hands back a thin proxy whose chats append one
+# truthy, get_xai_inference_client() hands back a thin proxy whose chats append one
 # JSON line per completed sample()/parse() — (model, prompt-hash, response
 # content/usage/cost) — to UNIGROK_EVAL_RECORD_FILE (default
 # evals/cassettes/recorded.jsonl). Real traffic becomes cassette raw material
@@ -9584,7 +9653,7 @@ async def sync_fact_to_collection(
         return False
 
     def _upload():
-        client = get_xai_client()
+        client = get_xai_management_client()
         if not _collections_capable(client):
             raise RuntimeError("installed xai_sdk lacks the collections service surface")
         collection_id = _resolve_knowledge_collection_id(client)
@@ -9614,7 +9683,7 @@ async def search_knowledge_collection(query: str, limit: int = 5) -> List[Dict[s
         return []
 
     def _search():
-        client = get_xai_client()
+        client = get_xai_management_client()
         if not _collections_capable(client):
             raise RuntimeError("installed xai_sdk lacks the collections service surface")
         collection_id = _resolve_knowledge_collection_id(client)

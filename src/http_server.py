@@ -68,6 +68,14 @@ from .utils import (
 
 UNIGROK_AGENT_MODEL = "unigrok-agent"
 XAI_BASE_URL = "https://api.x.ai/v1"
+_UPSTREAM_PROVIDER_SECRET_ENV_NAMES = (
+    "XAI_API_KEY",
+    "XAI_MANAGEMENT_API_KEY",
+    "OPENAI_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "CLAUDE_API_KEY",
+    "GEMINI_API_KEY",
+)
 FALLBACK_XAI_MODELS = FALLBACK_XAI_LANGUAGE_MODELS
 
 logger = logging.getLogger("GrokMCP")
@@ -349,11 +357,13 @@ def _tokens_match(candidate: str, expected: str) -> bool:
 def _token_is_allowed(token: Optional[str]) -> bool:
     if not token:
         return False
-    xai_key = os.environ.get("XAI_API_KEY", "")
-    # The upstream xAI key is never a valid client credential: leaking it into
-    # a client config must not grant gateway access.
-    if xai_key and _tokens_match(token, xai_key):
-        return False
+    # Server-owned upstream provider credentials are never valid gateway
+    # client credentials.  Reject accidental aliases even when an operator
+    # also copied the same value into UNIGROK_API_KEYS.
+    for env_name in _UPSTREAM_PROVIDER_SECRET_ENV_NAMES:
+        upstream_secret = os.environ.get(env_name, "").strip()
+        if upstream_secret and _tokens_match(token, upstream_secret):
+            return False
     return any(_tokens_match(token, key) for key in _api_keys())
 
 

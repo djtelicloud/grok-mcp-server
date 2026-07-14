@@ -867,7 +867,7 @@ class TestCollectionsAdapter:
         self, monkeypatch, reset_collections_state
     ):
         monkeypatch.delenv("UNIGROK_COLLECTIONS", raising=False)
-        with patch("src.utils.get_xai_client") as mock_client:
+        with patch("src.utils.get_xai_management_client") as mock_client:
             assert await sync_fact_to_collection(1, "fact") is False
             assert await search_knowledge_collection("query") == []
         mock_client.assert_not_called()
@@ -878,7 +878,7 @@ class TestCollectionsAdapter:
     ):
         monkeypatch.setenv("UNIGROK_COLLECTIONS", "1")
         incapable = MagicMock(spec=["chat"])  # no collections service at all
-        with patch("src.utils.get_xai_client", return_value=incapable):
+        with patch("src.utils.get_xai_management_client", return_value=incapable):
             assert await sync_fact_to_collection(1, "fact") is False
             assert utils_module._COLLECTIONS_WARNED is True
             assert await search_knowledge_collection("query") == []
@@ -890,7 +890,7 @@ class TestCollectionsAdapter:
         monkeypatch.setenv("UNIGROK_COLLECTIONS", "1")
         monkeypatch.setenv("UNIGROK_COLLECTION_NAME", "kb-test")
         client, service = _fake_collections_client()
-        with patch("src.utils.get_xai_client", return_value=client):
+        with patch("src.utils.get_xai_management_client", return_value=client):
             assert await sync_fact_to_collection(7, "durable fact text") is True
             assert await sync_fact_to_collection(8, "another fact") is True
 
@@ -908,7 +908,7 @@ class TestCollectionsAdapter:
         monkeypatch.setenv("UNIGROK_COLLECTION_NAME", "kb-existing")
         existing = SimpleNamespace(collection_id="col-77", collection_name="kb-existing")
         client, service = _fake_collections_client(collections=[existing])
-        with patch("src.utils.get_xai_client", return_value=client):
+        with patch("src.utils.get_xai_management_client", return_value=client):
             assert await sync_fact_to_collection(1, "fact") is True
         service.create.assert_not_called()
         assert service.upload_document.call_args.args[0] == "col-77"
@@ -921,7 +921,7 @@ class TestCollectionsAdapter:
             SimpleNamespace(chunk_content="   ", score=0.5, file_id="f-x"),
         ]
         client, service = _fake_collections_client(search_matches=matches)
-        with patch("src.utils.get_xai_client", return_value=client):
+        with patch("src.utils.get_xai_management_client", return_value=client):
             results = await search_knowledge_collection("remote knowledge", limit=3)
         assert results == [{
             "fact": "remote knowledge chunk",
@@ -938,7 +938,7 @@ class TestCollectionsAdapter:
         monkeypatch.setenv("UNIGROK_COLLECTIONS", "1")
         client, service = _fake_collections_client()
         service.list.side_effect = RuntimeError("collections API down")
-        with patch("src.utils.get_xai_client", return_value=client):
+        with patch("src.utils.get_xai_management_client", return_value=client):
             assert await sync_fact_to_collection(1, "fact") is False
             assert await search_knowledge_collection("q") == []
         assert utils_module._COLLECTIONS_WARNED is True

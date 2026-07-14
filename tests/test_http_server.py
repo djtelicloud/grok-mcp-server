@@ -630,13 +630,67 @@ def test_readyz_body_stays_boolean_on_failure(monkeypatch):
     assert "/secret/container/path" not in res.text
 
 
-def test_xai_key_is_not_client_auth(monkeypatch):
+@pytest.mark.parametrize(
+    "secret_env",
+    [
+        "XAI_API_KEY",
+        "XAI_MANAGEMENT_API_KEY",
+        "OPENAI_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "CLAUDE_API_KEY",
+        "GEMINI_API_KEY",
+    ],
+)
+def test_upstream_provider_secret_is_not_client_auth(monkeypatch, secret_env):
     monkeypatch.setenv("UNIGROK_RUNTIME", "cloudrun")
-    monkeypatch.setenv("XAI_API_KEY", "xai-secret")
-    monkeypatch.setenv("UNIGROK_API_KEYS", "client-secret,xai-secret")
+    monkeypatch.setenv(secret_env, "upstream-secret")
+    monkeypatch.setenv("UNIGROK_API_KEYS", "client-secret,upstream-secret")
 
     with TestClient(create_app()) as client:
-        res = client.get("/v1/models", headers={"Authorization": "Bearer xai-secret"})
+        res = client.get(
+            "/v1/models", headers={"Authorization": "Bearer upstream-secret"}
+        )
+
+    assert res.status_code == 401
+
+
+def test_distinct_gateway_key_remains_valid_with_upstream_secrets(monkeypatch):
+    monkeypatch.setenv("UNIGROK_RUNTIME", "cloudrun")
+    for index, env_name in enumerate(
+        (
+            "XAI_API_KEY",
+            "XAI_MANAGEMENT_API_KEY",
+            "OPENAI_API_KEY",
+            "ANTHROPIC_API_KEY",
+            "CLAUDE_API_KEY",
+            "GEMINI_API_KEY",
+        )
+    ):
+        monkeypatch.setenv(env_name, f"upstream-secret-{index}")
+    monkeypatch.setenv("UNIGROK_API_KEYS", "gateway-client-secret")
+    monkeypatch.setattr(
+        "src.http_server.get_xai_model_ids",
+        AsyncMock(return_value=["unigrok-agent"]),
+    )
+
+    with TestClient(create_app()) as client:
+        res = client.get(
+            "/v1/models",
+            headers={"Authorization": "Bearer gateway-client-secret"},
+        )
+
+    assert res.status_code == 200
+
+
+def test_upstream_secret_alias_rejection_normalizes_provider_whitespace(monkeypatch):
+    monkeypatch.setenv("UNIGROK_RUNTIME", "cloudrun")
+    monkeypatch.setenv("OPENAI_API_KEY", "  upstream-secret  ")
+    monkeypatch.setenv("UNIGROK_API_KEYS", "gateway-client-secret,upstream-secret")
+
+    with TestClient(create_app()) as client:
+        res = client.get(
+            "/v1/models", headers={"Authorization": "Bearer upstream-secret"}
+        )
 
     assert res.status_code == 401
 

@@ -40,7 +40,7 @@ def _reset_rag_state():
 
 def _fake_collections_client(collections=None, search_matches=None):
     """Same seam as tests/test_knowledge.py: a MagicMock collections service
-    injected at the get_xai_client boundary (patched at src.rag here)."""
+    injected at the get_xai_management_client boundary (patched at src.rag here)."""
     service = MagicMock()
     service.list.return_value = SimpleNamespace(collections=list(collections or []))
     service.create.return_value = SimpleNamespace(collection_id="col-new")
@@ -364,7 +364,7 @@ class TestTaskMemoryMirror:
     async def test_off_mode_never_touches_client(self, monkeypatch):
         monkeypatch.delenv("UNIGROK_TASK_RAG", raising=False)
         mirror = get_task_memory_mirror()
-        with patch("src.rag.get_xai_client") as mock_client:
+        with patch("src.rag.get_xai_management_client") as mock_client:
             assert await mirror.upload_memory(_memory_row()) is None
             assert await mirror.search("query", 5) == []
             assert await mirror.ready() is False
@@ -376,7 +376,7 @@ class TestTaskMemoryMirror:
         monkeypatch.setenv("UNIGROK_TASK_RAG_COLLECTION", "tm-test")
         client, service = _fake_collections_client()
         mirror = get_task_memory_mirror()
-        with patch("src.rag.get_xai_client", return_value=client):
+        with patch("src.rag.get_xai_management_client", return_value=client):
             fid1 = await mirror.upload_memory(_memory_row(1))
             fid2 = await mirror.upload_memory(_memory_row(2))
 
@@ -403,7 +403,7 @@ class TestTaskMemoryMirror:
         client, service = _fake_collections_client()
         service.upload_document.return_value = SimpleNamespace(file_id="fid-42")
         mirror = get_task_memory_mirror()
-        with patch("src.rag.get_xai_client", return_value=client):
+        with patch("src.rag.get_xai_management_client", return_value=client):
             assert await mirror.upload_memory(_memory_row()) == "fid-42"
 
     @pytest.mark.asyncio
@@ -413,7 +413,7 @@ class TestTaskMemoryMirror:
         existing = SimpleNamespace(collection_id="col-77", collection_name="tm-existing")
         client, service = _fake_collections_client(collections=[existing])
         mirror = get_task_memory_mirror()
-        with patch("src.rag.get_xai_client", return_value=client):
+        with patch("src.rag.get_xai_management_client", return_value=client):
             await mirror.upload_memory(_memory_row())
         service.create.assert_not_called()
         assert service.upload_document.call_args.args[0] == "col-77"
@@ -427,7 +427,7 @@ class TestTaskMemoryMirror:
         ]
         client, service = _fake_collections_client(search_matches=matches)
         mirror = get_task_memory_mirror()
-        with patch("src.rag.get_xai_client", return_value=client):
+        with patch("src.rag.get_xai_management_client", return_value=client):
             results = await mirror.search("query " * 200, 5)
         assert results == [
             {"content": "remote chunk", "score": pytest.approx(0.9), "file_id": "f-1"}
@@ -444,7 +444,7 @@ class TestTaskMemoryMirror:
         client, service = _fake_collections_client()
         service.list.side_effect = RuntimeError("collections API down")
         mirror = get_task_memory_mirror()
-        with patch("src.rag.get_xai_client", return_value=client):
+        with patch("src.rag.get_xai_management_client", return_value=client):
             for _ in range(5):
                 assert await mirror.upload_memory(_memory_row()) is None
             # First trip: ~30s cooldown, calls now short-circuit.
@@ -474,7 +474,7 @@ class TestTaskMemoryMirror:
         mirror = get_task_memory_mirror()
         mirror._bucket_tokens = 0.0
         mirror._bucket_refreshed = time.monotonic()
-        with patch("src.rag.get_xai_client", return_value=client):
+        with patch("src.rag.get_xai_management_client", return_value=client):
             assert await mirror.search("query", 5) == []
         service.search.assert_not_called()
         assert get_task_rag_stats()["rate_limited"] == 1
@@ -486,7 +486,7 @@ class TestTaskMemoryMirror:
         await _save_memory(tstore, "second unsynced task about caching")
         client, service = _fake_collections_client()
         mirror = get_task_memory_mirror()
-        with patch("src.rag.get_xai_client", return_value=client):
+        with patch("src.rag.get_xai_management_client", return_value=client):
             summary = await mirror.sync_pending(tstore, limit=10)
         assert summary == {"synced": 2, "failed": 0}
         assert await tstore.count_unsynced_task_memories() == 0
@@ -511,7 +511,7 @@ class TestTaskMemoryMirror:
         client, service = _fake_collections_client()
         service.upload_document.side_effect = RuntimeError("quota exceeded")
         mirror = get_task_memory_mirror()
-        with patch("src.rag.get_xai_client", return_value=client):
+        with patch("src.rag.get_xai_management_client", return_value=client):
             summary = await mirror.sync_pending(tstore, limit=10)
         assert summary == {"synced": 0, "failed": 1}
         row = (await tstore.list_unsynced_task_memories())[0]
@@ -527,7 +527,7 @@ class TestTaskMemoryMirror:
         client, service = _fake_collections_client()
         mirror = get_task_memory_mirror()
 
-        with patch("src.rag.get_xai_client", return_value=client):
+        with patch("src.rag.get_xai_management_client", return_value=client):
             summary = await mirror.sync_pending(tstore, limit=10)
 
         assert summary == {"synced": 0, "failed": 0}
@@ -685,7 +685,7 @@ class TestGatherSemanticEvidence:
             SimpleNamespace(chunk_content="orphan", score=0.6, file_id="fid-unknown"),
         ]
         client, service = _fake_collections_client(search_matches=matches)
-        with patch("src.rag.get_xai_client", return_value=client):
+        with patch("src.rag.get_xai_management_client", return_value=client):
             verdict = await gather_semantic_evidence(
                 tstore, "plan the migration", None, PLANNING, CODING
             )
@@ -716,7 +716,7 @@ class TestGatherSemanticEvidence:
             SimpleNamespace(chunk_content=header_chunk, score=0.9, file_id="fid-other"),
         ]
         client, _service = _fake_collections_client(search_matches=matches)
-        with patch("src.rag.get_xai_client", return_value=client):
+        with patch("src.rag.get_xai_management_client", return_value=client):
             verdict = await gather_semantic_evidence(
                 tstore, "tune the query planner", None, PLANNING, CODING
             )
@@ -812,7 +812,7 @@ class TestSpawnSyncTask:
             escalated=False, generation="fixed", reflection=None, reasoning=None,
             plane="API", profile="default", latency=0.1, cost_usd=0.0, context_id=None,
         )
-        with patch("src.rag.get_xai_client", return_value=client):
+        with patch("src.rag.get_xai_management_client", return_value=client):
             await utils_module._save_task_memory_safe(
                 tstore, "end to end drain check", layer, CODING, 1
             )
@@ -869,7 +869,7 @@ class TestRagCli:
         _seed_db(db, [])
         client, _service = _fake_collections_client()
         out = io.StringIO()
-        with patch("src.rag.get_xai_client", return_value=client):
+        with patch("src.rag.get_xai_management_client", return_value=client):
             code = rag.rag_cli(
                 ["status"], stream=out, store=GrokSessionStore(db_path=db)
             )
@@ -894,7 +894,7 @@ class TestRagCli:
         db = tmp_path / "cli-dry.db"
         _seed_db(db, ["alpha task", "beta task"])
         out = io.StringIO()
-        with patch("src.rag.get_xai_client") as mock_client:
+        with patch("src.rag.get_xai_management_client") as mock_client:
             code = rag.rag_cli(
                 ["backfill", "--dry-run"], stream=out,
                 store=GrokSessionStore(db_path=db),
@@ -914,7 +914,7 @@ class TestRagCli:
         _seed_db(db, ["alpha task", "beta task", "gamma task"])
         client, service = _fake_collections_client()
         out = io.StringIO()
-        with patch("src.rag.get_xai_client", return_value=client):
+        with patch("src.rag.get_xai_management_client", return_value=client):
             code = rag.rag_cli(
                 ["backfill"], stream=out, store=GrokSessionStore(db_path=db)
             )
@@ -931,7 +931,7 @@ class TestRagCli:
         _seed_db(db, ["alpha task", "beta task", "gamma task"])
         client, service = _fake_collections_client()
         out = io.StringIO()
-        with patch("src.rag.get_xai_client", return_value=client):
+        with patch("src.rag.get_xai_management_client", return_value=client):
             code = rag.rag_cli(
                 ["backfill", "--limit", "1"], stream=out,
                 store=GrokSessionStore(db_path=db),
@@ -961,7 +961,7 @@ class TestRagCli:
         db = tmp_path / "cli-force.db"
         _seed_db(db, ["alpha task"])
         client, service = _fake_collections_client()
-        with patch("src.rag.get_xai_client", return_value=client):
+        with patch("src.rag.get_xai_management_client", return_value=client):
             assert rag.rag_cli(
                 ["backfill"], stream=io.StringIO(),
                 store=GrokSessionStore(db_path=db),
@@ -1006,7 +1006,7 @@ class TestEndToEndIntegration:
         )
 
         client, service = _fake_collections_client()
-        with patch("src.rag.get_xai_client", return_value=client):
+        with patch("src.rag.get_xai_management_client", return_value=client):
             summary = await get_task_memory_mirror().sync_pending(tstore, limit=10)
             assert summary == {"synced": 3, "failed": 0}
 
@@ -1057,34 +1057,39 @@ class TestManagementKeyWiring:
     def _fresh_client(self, monkeypatch, mgmt_env):
         import src.utils as utils_module
 
-        created = {}
+        created = []
 
         class FakeClient:
-            def __init__(self, api_key=None, management_api_key=None):
-                created["api_key"] = api_key
-                created["management_api_key"] = management_api_key
+            def __init__(self, **kwargs):
+                created.append(kwargs)
 
         monkeypatch.setattr("xai_sdk.Client", FakeClient)
-        monkeypatch.setattr(utils_module, "_client", None)
+        monkeypatch.setattr(utils_module, "_management_client", None)
         if mgmt_env is None:
             monkeypatch.delenv("XAI_MANAGEMENT_API_KEY", raising=False)
         else:
             monkeypatch.setenv("XAI_MANAGEMENT_API_KEY", mgmt_env)
-        utils_module.get_xai_client()
+        utils_module.get_xai_management_client()
         return created
 
     def test_management_key_passed_when_set(self, monkeypatch):
+        from src import utils as utils_module
+
         created = self._fresh_client(monkeypatch, "xai-mgmt-test-key")
-        assert created["management_api_key"] == "xai-mgmt-test-key"
-        assert created["api_key"]  # inference key still wired
+        assert created == [
+            {
+                "api_key": utils_module.XAI_API_KEY,
+                "management_api_key": "xai-mgmt-test-key",
+            }
+        ]
 
-    def test_absent_management_key_passes_none(self, monkeypatch):
-        created = self._fresh_client(monkeypatch, None)
-        assert created["management_api_key"] is None
+    def test_absent_management_key_refuses_construction(self, monkeypatch):
+        with pytest.raises(ValueError, match="XAI_MANAGEMENT_API_KEY"):
+            self._fresh_client(monkeypatch, None)
 
-    def test_blank_management_key_passes_none(self, monkeypatch):
-        created = self._fresh_client(monkeypatch, "   ")
-        assert created["management_api_key"] is None
+    def test_blank_management_key_refuses_construction(self, monkeypatch):
+        with pytest.raises(ValueError, match="XAI_MANAGEMENT_API_KEY"):
+            self._fresh_client(monkeypatch, "   ")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1108,7 +1113,7 @@ class TestKeylessOperation:
         monkeypatch.setenv("UNIGROK_TASK_RAG", "mirror")
         monkeypatch.delenv("XAI_MANAGEMENT_API_KEY", raising=False)
         mirror = get_task_memory_mirror()
-        with patch("src.rag.get_xai_client") as mock_client:
+        with patch("src.rag.get_xai_management_client") as mock_client:
             assert await mirror.ready() is False
         mock_client.assert_not_called()
         assert "optional" in mirror._last_error
@@ -1129,7 +1134,7 @@ class TestKeylessOperation:
         await _save_memory(
             tstore, "plan the sprint backlog grooming", model=CODING, success=0
         )
-        with patch("src.rag.get_xai_client") as mock_client:
+        with patch("src.rag.get_xai_management_client") as mock_client:
             verdict = await gather_semantic_evidence(
                 tstore, "plan the sprint", None, PLANNING, CODING
             )
@@ -1158,7 +1163,7 @@ class TestKeylessOperation:
         db = tmp_path / "keyless-status.db"
         _seed_db(db, ["one task"])
         out = io.StringIO()
-        with patch("src.rag.get_xai_client") as mock_client:
+        with patch("src.rag.get_xai_management_client") as mock_client:
             code = rag.rag_cli(
                 ["status"], stream=out, store=GrokSessionStore(db_path=db)
             )
