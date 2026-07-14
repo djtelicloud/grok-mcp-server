@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
+from xai_sdk import Client as SDKClient
 
 from src import utils
 from src.provider_harvest import XAIWorkerEpisodeUploader
@@ -23,12 +24,49 @@ def test_inference_factory_constructs_with_only_inference_authority(monkeypatch)
     monkeypatch.setattr("xai_sdk.Client", FakeClient)
     monkeypatch.setattr(utils, "XAI_API_KEY", "inference-test-key")
     monkeypatch.setenv("XAI_MANAGEMENT_API_KEY", "management-test-key")
+    monkeypatch.setenv("XAI_MANAGEMENT_KEY", "sdk-management-test-key")
     monkeypatch.setattr(utils, "_client", None)
 
     inference = utils.get_xai_inference_client()
 
     assert utils.get_xai_client() is inference
-    assert calls == [{"api_key": "inference-test-key"}]
+    assert calls == [
+        {
+            "api_key": "inference-test-key",
+            "management_api_key": utils._XAI_INFERENCE_MANAGEMENT_ISOLATION_KEY,
+        }
+    ]
+    assert getattr(inference, "collections", None) is None
+
+
+def test_real_sdk_inference_constructor_never_uses_management_environment(
+    monkeypatch,
+):
+    channels = []
+
+    def capture_channel(self, api_key, api_host, *args, **kwargs):
+        channels.append((api_key, api_host))
+        return MagicMock()
+
+    monkeypatch.setattr(SDKClient, "_make_grpc_channel", capture_channel)
+    monkeypatch.setattr(utils, "XAI_API_KEY", "inference-test-key")
+    monkeypatch.setenv("XAI_MANAGEMENT_API_KEY", "canonical-management-test-key")
+    monkeypatch.setenv("XAI_MANAGEMENT_KEY", "sdk-management-test-key")
+    monkeypatch.setattr(utils, "_client", None)
+
+    inference = utils.get_xai_inference_client()
+
+    assert channels == [
+        ("inference-test-key", "api.x.ai"),
+        (
+            utils._XAI_INFERENCE_MANAGEMENT_ISOLATION_KEY,
+            "management-api.x.ai",
+        ),
+    ]
+    assert all(key != "sdk-management-test-key" for key, _ in channels)
+    assert all(key != "canonical-management-test-key" for key, _ in channels)
+    assert getattr(inference, "collections", None) is None
+    utils.close_xai_inference_client()
 
 
 def test_management_factory_constructs_with_both_sdk_credentials(monkeypatch):
@@ -41,6 +79,7 @@ def test_management_factory_constructs_with_both_sdk_credentials(monkeypatch):
     monkeypatch.setattr("xai_sdk.Client", FakeClient)
     monkeypatch.setattr(utils, "XAI_API_KEY", "inference-test-key")
     monkeypatch.setenv("XAI_MANAGEMENT_API_KEY", "management-test-key")
+    monkeypatch.delenv("XAI_MANAGEMENT_KEY", raising=False)
     monkeypatch.setattr(utils, "_management_client", None)
 
     management = utils.get_xai_management_client()
@@ -77,11 +116,61 @@ def test_management_factory_requires_both_credentials(
         monkeypatch.setenv("XAI_MANAGEMENT_API_KEY", management_key)
     else:
         monkeypatch.delenv("XAI_MANAGEMENT_API_KEY", raising=False)
+    monkeypatch.delenv("XAI_MANAGEMENT_KEY", raising=False)
     monkeypatch.setattr(utils, "_management_client", None)
 
     with pytest.raises(ValueError, match=message):
         utils.get_xai_management_client()
     assert constructed is False
+
+
+@pytest.mark.parametrize(
+    ("canonical", "sdk_alias", "expected"),
+    [
+        ("canonical-test-key", "", "canonical-test-key"),
+        ("", "sdk-alias-test-key", "sdk-alias-test-key"),
+        ("shared-test-key", "shared-test-key", "shared-test-key"),
+    ],
+)
+def test_management_factory_resolves_aliases_deterministically(
+    monkeypatch, canonical, sdk_alias, expected
+):
+    calls = []
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            calls.append(kwargs)
+
+    monkeypatch.setattr("xai_sdk.Client", FakeClient)
+    monkeypatch.setattr(utils, "XAI_API_KEY", "inference-test-key")
+    monkeypatch.setenv("XAI_MANAGEMENT_API_KEY", canonical)
+    monkeypatch.setenv("XAI_MANAGEMENT_KEY", sdk_alias)
+    monkeypatch.setattr(utils, "_management_client", None)
+
+    utils.get_xai_management_client()
+
+    assert calls == [
+        {
+            "api_key": "inference-test-key",
+            "management_api_key": expected,
+        }
+    ]
+
+
+def test_management_factory_rejects_conflicting_aliases_before_construction(
+    monkeypatch,
+):
+    constructor = MagicMock()
+    monkeypatch.setattr("xai_sdk.Client", constructor)
+    monkeypatch.setattr(utils, "XAI_API_KEY", "inference-test-key")
+    monkeypatch.setenv("XAI_MANAGEMENT_API_KEY", "canonical-test-key")
+    monkeypatch.setenv("XAI_MANAGEMENT_KEY", "different-sdk-alias-test-key")
+    monkeypatch.setattr(utils, "_management_client", None)
+
+    with pytest.raises(ValueError, match="both configured"):
+        utils.get_xai_management_client()
+
+    constructor.assert_not_called()
 
 
 def test_eval_recording_wraps_inference_but_never_management(monkeypatch):
@@ -95,6 +184,7 @@ def test_eval_recording_wraps_inference_but_never_management(monkeypatch):
     monkeypatch.setattr("xai_sdk.Client", FakeClient)
     monkeypatch.setattr(utils, "XAI_API_KEY", "inference-test-key")
     monkeypatch.setenv("XAI_MANAGEMENT_API_KEY", "management-test-key")
+    monkeypatch.delenv("XAI_MANAGEMENT_KEY", raising=False)
     monkeypatch.setenv("UNIGROK_EVAL_RECORD", "1")
     monkeypatch.setattr(utils, "_client", None)
     monkeypatch.setattr(utils, "_management_client", None)
@@ -103,7 +193,7 @@ def test_eval_recording_wraps_inference_but_never_management(monkeypatch):
     management = utils.get_xai_management_client()
 
     assert isinstance(inference, utils._EvalRecordingClient)
-    assert inference._client is clients[0]
+    assert inference._client._delegate is clients[0]
     assert management is clients[1]
     assert not isinstance(management, utils._EvalRecordingClient)
 
@@ -153,6 +243,7 @@ def test_management_factory_is_thread_safe_and_separate_from_inference(monkeypat
     monkeypatch.setattr("xai_sdk.Client", SlowClient)
     monkeypatch.setattr(utils, "XAI_API_KEY", "inference-test-key")
     monkeypatch.setenv("XAI_MANAGEMENT_API_KEY", "management-test-key")
+    monkeypatch.delenv("XAI_MANAGEMENT_KEY", raising=False)
     monkeypatch.setattr(utils, "_client", None)
     monkeypatch.setattr(utils, "_management_client", None)
 
@@ -168,7 +259,10 @@ def test_management_factory_is_thread_safe_and_separate_from_inference(monkeypat
         "api_key": "inference-test-key",
         "management_api_key": "management-test-key",
     }
-    assert inference.kwargs == {"api_key": "inference-test-key"}
+    assert inference.kwargs == {
+        "api_key": "inference-test-key",
+        "management_api_key": utils._XAI_INFERENCE_MANAGEMENT_ISOLATION_KEY,
+    }
     assert inference is not management_clients[0]
 
 

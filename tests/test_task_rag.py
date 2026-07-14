@@ -1065,6 +1065,7 @@ class TestManagementKeyWiring:
 
         monkeypatch.setattr("xai_sdk.Client", FakeClient)
         monkeypatch.setattr(utils_module, "_management_client", None)
+        monkeypatch.delenv("XAI_MANAGEMENT_KEY", raising=False)
         if mgmt_env is None:
             monkeypatch.delenv("XAI_MANAGEMENT_API_KEY", raising=False)
         else:

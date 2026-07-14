@@ -656,6 +656,7 @@ def test_upstream_provider_secret_registry_completely_classifies_server_envs():
     assert set(UPSTREAM_PROVIDER_SECRET_ENV_NAMES) == {
         "XAI_API_KEY",
         "XAI_MANAGEMENT_API_KEY",
+        "XAI_MANAGEMENT_KEY",
         "GROK_API_KEY",
         "OPENAI_API_KEY",
         "ANTHROPIC_API_KEY",

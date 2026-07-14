@@ -1218,10 +1218,11 @@ def has_management_key() -> bool
 xAI Collections is a MANAGEMENT API: the inference key alone cannot
 create/upload/search collections, and xAI exposes no public embedding
 models to inference keys (/v1/embedding-models returns []). Most users
-therefore run WITHOUT this key — the semantic routing evidence works
-fully locally (task_memory_fts bm25 + recency + per-model success); the
-cloud mirror is an optional boost gated on this check so keyless setups
-never spawn doomed sync work or remote searches.
+therefore run WITHOUT either supported management-key alias — the
+semantic routing evidence works fully locally (task_memory_fts bm25 +
+recency + per-model success); the cloud mirror is an optional boost gated
+on this check so keyless setups never spawn doomed sync work or remote
+searches.
 
 ### Class: `TaskMemoryMirror` {#rag-taskmemorymirror}
 
@@ -3403,6 +3404,16 @@ async def build_model_catalog(include_cli: bool=True) -> Dict[str, Any]
 
 Build a structured catalog for API models, local CLI models, and profiles.
 
+### Function: `xai_management_key_configured` {#utils-xai_management_key_configured}
+
+```python
+def xai_management_key_configured() -> bool
+```
+
+**Keywords:** xai, management, key, configured
+
+Return whether one unambiguous xAI management credential is configured.
+
 ### Function: `get_xai_inference_client` {#utils-get_xai_inference_client}
 
 ```python
@@ -3413,9 +3424,11 @@ def get_xai_inference_client()
 
 Return the cached inference-only xAI SDK client.
 
-This constructor must never receive ``XAI_MANAGEMENT_API_KEY``.  Keeping
-the privilege boundary at construction time prevents an inference call
-path from gaining Collections/admin authority through the shared cache.
+The installed SDK reads ``XAI_MANAGEMENT_KEY`` whenever its management
+argument is falsey.  Pass a fixed, non-provider isolation canary instead of
+mutating process environment, then deny Collections on the returned
+surface.  Real management credentials can therefore never enter this
+client's channel or inference call paths.
 
 ### Function: `get_xai_client` {#utils-get_xai_client}
 

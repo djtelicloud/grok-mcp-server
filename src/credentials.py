@@ -14,6 +14,7 @@ from typing import Any, Dict, Optional
 UPSTREAM_PROVIDER_SECRET_ENV_NAMES = (
     "XAI_API_KEY",
     "XAI_MANAGEMENT_API_KEY",
+    "XAI_MANAGEMENT_KEY",
     "GROK_API_KEY",
     "OPENAI_API_KEY",
     "ANTHROPIC_API_KEY",

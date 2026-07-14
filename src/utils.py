@@ -1877,14 +1877,64 @@ _management_client = None
 # their credential-authority caches.
 _client_lock = threading.Lock()
 _management_client_lock = threading.Lock()
+_XAI_INFERENCE_MANAGEMENT_ISOLATION_KEY = (
+    "unigrok-inference-only-no-management-authority"
+)
+
+
+class _InferenceOnlyXAIClient:
+    """Delegate xAI inference surfaces while denying Collections access."""
+
+    __slots__ = ("_delegate",)
+
+    def __init__(self, delegate: Any) -> None:
+        self._delegate = delegate
+
+    def __getattr__(self, name: str) -> Any:
+        if name == "collections":
+            raise AttributeError("Collections require the xAI management client")
+        return getattr(self._delegate, name)
+
+    def close(self) -> None:
+        self._delegate.close()
+
+
+def _resolve_xai_management_key() -> str:
+    """Resolve canonical/SDK management-key aliases without exposing a value."""
+
+    canonical = os.getenv("XAI_MANAGEMENT_API_KEY", "").strip()
+    sdk_alias = os.getenv("XAI_MANAGEMENT_KEY", "").strip()
+    if canonical and sdk_alias and canonical != sdk_alias:
+        raise ValueError(
+            "XAI_MANAGEMENT_API_KEY and XAI_MANAGEMENT_KEY are both configured "
+            "with different values."
+        )
+    resolved = canonical or sdk_alias
+    if not resolved:
+        raise ValueError(
+            "XAI_MANAGEMENT_API_KEY or XAI_MANAGEMENT_KEY must be configured."
+        )
+    return resolved
+
+
+def xai_management_key_configured() -> bool:
+    """Return whether one unambiguous xAI management credential is configured."""
+
+    try:
+        _resolve_xai_management_key()
+    except ValueError:
+        return False
+    return True
 
 
 def get_xai_inference_client():
     """Return the cached inference-only xAI SDK client.
 
-    This constructor must never receive ``XAI_MANAGEMENT_API_KEY``.  Keeping
-    the privilege boundary at construction time prevents an inference call
-    path from gaining Collections/admin authority through the shared cache.
+    The installed SDK reads ``XAI_MANAGEMENT_KEY`` whenever its management
+    argument is falsey.  Pass a fixed, non-provider isolation canary instead of
+    mutating process environment, then deny Collections on the returned
+    surface.  Real management credentials can therefore never enter this
+    client's channel or inference call paths.
     """
 
     global _client
@@ -1895,7 +1945,11 @@ def get_xai_inference_client():
                     raise ValueError("XAI_API_KEY is not configured in the environment.")
                 from xai_sdk import Client
 
-                _client = Client(api_key=XAI_API_KEY)
+                raw_client = Client(
+                    api_key=XAI_API_KEY,
+                    management_api_key=_XAI_INFERENCE_MANAGEMENT_ISOLATION_KEY,
+                )
+                _client = _InferenceOnlyXAIClient(raw_client)
     if _eval_record_enabled():
         # Opt-in eval recording tap (UNIGROK_EVAL_RECORD=1): a thin per-call
         # proxy that appends completed responses to a cassette event log.
@@ -1928,11 +1982,7 @@ def get_xai_management_client():
                     raise ValueError(
                         "XAI_API_KEY is not configured for the xAI management client."
                     )
-                management_key = os.getenv("XAI_MANAGEMENT_API_KEY", "").strip()
-                if not management_key:
-                    raise ValueError(
-                        "XAI_MANAGEMENT_API_KEY is not configured in the environment."
-                    )
+                management_key = _resolve_xai_management_key()
                 from xai_sdk import Client
 
                 _management_client = Client(

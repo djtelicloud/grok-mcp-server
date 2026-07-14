@@ -371,7 +371,7 @@ class XAIWorkerEpisodeUploader:
 
     @staticmethod
     def _default_unavailable_reason() -> str | None:
-        if not os.environ.get("XAI_MANAGEMENT_API_KEY", "").strip():
+        if not _utils.xai_management_key_configured():
             return "management_key_missing"
         if not str(_utils.XAI_API_KEY or "").strip():
             return "inference_client_missing"
