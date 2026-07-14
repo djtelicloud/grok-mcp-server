@@ -1919,11 +1919,11 @@ async def public_agent(
             enables multi-agent fan-out, and requests inline citations.
         model: Optional Grok model id. Leave unset (or pass the virtual
             `unigrok-agent`) to let routing choose.
-        plane: Credential plane contract. `auto` preserves compatible routing;
-            `cli` strictly uses the SuperGrok subscription; `api` strictly uses
-            the metered developer API.
+        plane: Starting credential plane. `auto` follows server policy; `cli`
+            starts on the SuperGrok subscription; `api` starts on the metered
+            developer API.
         fallback_policy: `same_plane` forbids crossing the billing boundary;
-            `cross_plane` preserves automatic recovery for legacy auto callers.
+            `cross_plane` permits bounded recovery on the other xAI plane.
 
     Returns:
         AgentResult containing execution metadata and responses.

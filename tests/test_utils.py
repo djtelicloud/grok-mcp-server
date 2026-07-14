@@ -17,10 +17,13 @@ Unit tests for src/utils.py — covers all v2 agentic loop infrastructure:
 
 import asyncio
 import concurrent.futures
+import contextlib
 import json
 import os
 import re
+import signal
 import sqlite3
+import sys
 import threading
 import time
 
@@ -1092,6 +1095,109 @@ class TestAgentLoopFailurePaths:
         # _MAX_SAMPLE_RETRIES = 2 → 3 total attempts (1 + 2 retries)
         assert call_count == 3, f"Expected 3 attempts (1 + 2 retries), got {call_count}"
 
+    @pytest.mark.asyncio
+    async def test_sample_retry_emits_one_row_per_physical_api_call(self):
+        attempts = []
+
+        def record_attempt(**attempt):
+            attempts.append(attempt)
+
+        response = _make_response(
+            content="recovered answer", tool_calls=[], cost_usd=0.002
+        )
+        call_count = 0
+
+        def _sample(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise ConnectionError("transient xAI failure")
+            return response
+
+        loop = AgentLoop(
+            policy=AgentLoopPolicy(max_depth=1),
+            dynamic_sys_prompt="You are helpful.",
+            model="grok-4.3",
+            attempt_recorder=record_attempt,
+        )
+        mock_chat = MagicMock()
+        mock_chat.sample.side_effect = _sample
+        mock_chat.append = MagicMock()
+        mock_client = MagicMock()
+        mock_client.chat.create.return_value = mock_chat
+
+        with patch("xai_sdk.Client", return_value=mock_client), patch(
+            "asyncio.sleep", new_callable=AsyncMock
+        ):
+            layer = await loop.run("test prompt")
+
+        assert layer.generation == "recovered answer"
+        assert call_count == 2
+        assert len(attempts) == call_count
+        assert [attempt["outcome"] for attempt in attempts] == [
+            "error",
+            "completed",
+        ]
+        assert attempts[0].get("cost_usd") is None
+        assert attempts[1]["cost_usd"] == pytest.approx(0.002)
+
+    @pytest.mark.asyncio
+    async def test_missing_api_usage_stays_unavailable_in_agentic_receipt(self):
+        from src.utils import orchestrate
+
+        class MissingUsageLoop:
+            def __init__(self, **kwargs):
+                self.recorder = kwargs["attempt_recorder"]
+
+            async def run(self, *args, **kwargs):
+                self.recorder(
+                    plane="API",
+                    model="grok-build-0.1",
+                    outcome="completed",
+                    purpose="agentic:depth 1",
+                    tokens=None,
+                    cost_usd=None,
+                )
+                return MetaLayer(
+                    generation="answer without usage metadata",
+                    finish_reason="final_answer",
+                    plane="API",
+                    tokens=0,
+                    cost_usd=0.0,
+                )
+
+        selection = (
+            "grok-build-0.1",
+            "auto",
+            {
+                "route_class": "coding",
+                "resolved_model": "grok-build-0.1",
+                "catalog": {"source": "xai_api_live", "fallback": False},
+            },
+            False,
+        )
+        store = MagicMock()
+        store.get_similar_task_memories = AsyncMock(return_value=[])
+        store.save_telemetry = AsyncMock()
+        store.save_task_memory = AsyncMock()
+        with patch(
+            "src.utils._select_routing_model", new=AsyncMock(return_value=selection)
+        ), patch("src.utils.AgentLoop", MissingUsageLoop):
+            layer = await orchestrate(
+                prompt="answer this",
+                store=store,
+                enable_agentic=True,
+                requested_plane="api",
+                fallback_policy="same_plane",
+            )
+
+        attempt = layer.routing_receipt["attempts"][0]
+        assert attempt["cost_usd"] is None
+        assert attempt["billing_source"] == "unavailable"
+        saved = store.save_telemetry.await_args.kwargs
+        assert saved["billing_source"] == "unknown"
+        assert saved["token_kind"] == "unavailable"
+
     # ── Test 2: budget fires mid-loop — partial result is preserved ───────────
     @pytest.mark.asyncio
     async def test_budget_enforcement_fires_and_preserves_partial_content(self):
@@ -1525,6 +1631,9 @@ class TestAgentLoopFailurePaths:
         assert layer.route == "fast"
         assert layer.finish_reason == "error"
         assert layer.model == "grok-composer-2.5-fast"
+        assert layer.fallback_occurred is False
+        assert layer.routing_receipt["why_detail"] == "cli_failure_api_unavailable"
+        assert len(layer.routing_receipt["attempts"]) == 1
 
     # ── Test 8: mode=reasoning always triggers AgentLoop regardless of prompt ─
     @pytest.mark.asyncio
@@ -1866,7 +1975,10 @@ class TestDefaultAgenticRouting:
         selection = (
             "grok-composer-2.5-fast",
             "cost",
-            {"resolved_model": "grok-composer-2.5-fast"},
+            {
+                "resolved_model": "grok-composer-2.5-fast",
+                "catalog": {"source": "grok_cli_live", "fallback": False},
+            },
             False,
         )
         with patch(
@@ -1900,6 +2012,1275 @@ class TestDefaultAgenticRouting:
 
         assert layer.generation == "recovered answer"
         assert layer.finish_reason == "fallback"
+
+
+class TestSymmetricXaiPlaneFailover:
+    """CLI-first Grok work recovers only on the same provider's API plane."""
+
+    @staticmethod
+    def _cli_selection():
+        return (
+            "grok-composer-2.5-fast",
+            "cost",
+            {
+                "route_class": "coding",
+                "resolved_model": "grok-composer-2.5-fast",
+                "catalog": {"source": "grok_cli_live", "fallback": False},
+            },
+            False,
+        )
+
+    @staticmethod
+    def _api_selection():
+        return (
+            "grok-build-0.1",
+            "auto",
+            {
+                "route_class": "coding",
+                "resolved_model": "grok-build-0.1",
+                "catalog": {"source": "xai_api_live", "fallback": False},
+            },
+            False,
+        )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("requested_plane", ("auto", "cli"))
+    async def test_cli_failure_recovers_on_xai_api_with_receipt(
+        self, requested_plane
+    ):
+        from src.utils import orchestrate
+
+        secret = "xai-123456789CLI"
+        with patch("src.utils.xai_api_key_configured", return_value=True), \
+             patch(
+                 "src.utils._select_routing_model",
+                 new=AsyncMock(
+                     side_effect=[self._cli_selection(), self._api_selection()]
+                 ),
+            ) as mock_select, \
+             patch("src.utils._call_plane", new_callable=AsyncMock) as mock_call:
+            mock_call.side_effect = [
+                RuntimeError(f"CLI transport unavailable: Bearer {secret}"),
+                ("API recovered answer", 42, 0.012, False),
+            ]
+            layer = await orchestrate(
+                prompt="complete the task",
+                session="grok-owned-session",
+                mode="auto",
+                enable_agentic=False,
+                dynamic_sys_prompt="Objective TTL: 2030-01-01T00:00:00Z",
+                requested_plane=requested_plane,
+                fallback_policy="cross_plane",
+            )
+
+        assert mock_select.await_count == 2
+        assert mock_select.await_args_list[1].kwargs["requested_plane"] == "api"
+        assert mock_call.await_count == 2
+        assert mock_call.await_args_list[0].args[0] == "cli-fallback"
+        assert mock_call.await_args_list[1].args[0] == "reasoning"
+        assert mock_call.await_args_list[0].args[1:4] == (
+            "complete the task",
+            "grok-owned-session",
+            None,
+        )
+        assert mock_call.await_args_list[1].args[1:4] == (
+            "complete the task",
+            "grok-owned-session",
+            None,
+        )
+        assert "Objective TTL: 2030-01-01T00:00:00Z" in (
+            mock_call.await_args_list[1].args[4]
+        )
+        assert "Re-observe the current state" in mock_call.await_args_list[1].args[4]
+        assert secret not in mock_call.await_args_list[1].args[4]
+        assert mock_call.await_args_list[1].kwargs["requested_model"] == "grok-build-0.1"
+        assert layer.generation == "API recovered answer"
+        assert layer.plane == "API"
+        assert layer.model == "grok-build-0.1"
+        assert layer.finish_reason == "fallback"
+        assert layer.degraded is True
+        assert layer.fallback_occurred is True
+        assert layer.routing_receipt["provider"] == "xai"
+        assert layer.routing_receipt["authority"] == "grok"
+        assert layer.routing_receipt["why_detail"] == "cli_to_api_fallback"
+        assert layer.routing_receipt["resolved_plane"] == "API"
+        assert layer.routing_receipt["billing_class"] == "metered"
+        attempts = layer.routing_receipt["attempts"]
+        assert [attempt["attempt"] for attempt in attempts] == [1, 2]
+        assert [attempt["plane"] for attempt in attempts] == ["CLI", "API"]
+        assert [attempt["model"] for attempt in attempts] == [
+            "grok-composer-2.5-fast",
+            "grok-build-0.1",
+        ]
+        assert [attempt["outcome"] for attempt in attempts] == [
+            "error",
+            "completed",
+        ]
+        assert attempts[0]["error_type"] == "RuntimeError"
+        assert attempts[0]["error_digest"]
+        assert attempts[0]["billing_source"] == "subscription_unmetered"
+        assert attempts[0]["cost_usd"] == 0.0
+        assert attempts[1]["billing_source"] == "xai_response_exact"
+        assert attempts[1]["cost_usd"] == pytest.approx(0.012)
+        assert attempts[1]["tokens"] == 42
+        assert secret not in json.dumps(layer.routing_receipt)
+        assert layer.routing_receipt["failure"]["error"] == attempts[0]["error"]
+
+    @pytest.mark.asyncio
+    async def test_cli_failure_preserves_agentic_semantics_on_api(self):
+        from src.utils import MetaLayer, orchestrate
+
+        api_layer = MetaLayer(
+            generation="agentic API recovery",
+            finish_reason="final_answer",
+            tokens=25,
+            cost_usd=0.01,
+        )
+        mock_loop = MagicMock()
+        mock_loop.run = AsyncMock(return_value=api_layer)
+
+        with patch("src.utils.xai_api_key_configured", return_value=True), \
+             patch(
+                 "src.utils._select_routing_model",
+                 new=AsyncMock(
+                     side_effect=[self._cli_selection(), self._api_selection()]
+                 ),
+             ), \
+             patch(
+                 "src.utils._call_plane",
+                 new=AsyncMock(side_effect=RuntimeError("CLI failed")),
+             ) as mock_call, \
+             patch("src.utils.AgentLoop", return_value=mock_loop) as loop_cls:
+            layer = await orchestrate(
+                prompt="complete the repository task",
+                mode="auto",
+                enable_agentic=True,
+                requested_plane="auto",
+                fallback_policy="cross_plane",
+            )
+
+        assert mock_call.await_count == 1
+        assert loop_cls.call_args.kwargs["model"] == "grok-build-0.1"
+        assert "Re-observe the current state" in loop_cls.call_args.kwargs[
+            "dynamic_sys_prompt"
+        ]
+        mock_loop.run.assert_awaited_once()
+        assert layer.generation == "agentic API recovery"
+        assert layer.route == "agentic"
+        assert layer.plane == "API"
+        assert layer.finish_reason == "fallback"
+        assert layer.routing_receipt["why_detail"] == "cli_to_api_fallback"
+
+    @pytest.mark.asyncio
+    async def test_cli_to_api_agentic_recovery_uses_injected_store_history(self):
+        from src.utils import MetaLayer, orchestrate
+
+        injected_store = MagicMock(name="injected_store")
+        injected_store.get_similar_task_memories = AsyncMock(return_value=[])
+        injected_store.save_telemetry = AsyncMock()
+        injected_store.save_task_memory = AsyncMock()
+        expected_history = [
+            {"role": "user", "content": "prior objective"},
+            {"role": "assistant", "content": "prior verified receipt"},
+        ]
+        history_loader = AsyncMock(return_value=expected_history)
+        api_layer = MetaLayer(
+            generation="agentic API recovery",
+            finish_reason="final_answer",
+            tokens=25,
+            cost_usd=0.01,
+        )
+        mock_loop = MagicMock()
+        mock_loop.run = AsyncMock(return_value=api_layer)
+
+        with patch("src.utils.xai_api_key_configured", return_value=True), patch(
+            "src.utils._select_routing_model",
+            new=AsyncMock(
+                side_effect=[self._cli_selection(), self._api_selection()]
+            ),
+        ), patch(
+            "src.utils._call_plane",
+            new=AsyncMock(side_effect=RuntimeError("CLI failed")),
+        ), patch("src.utils.AgentLoop", return_value=mock_loop), patch(
+            "src.utils.load_history", new=history_loader
+        ):
+            await orchestrate(
+                prompt="continue the objective",
+                session="grok-owned-session",
+                store=injected_store,
+                enable_agentic=True,
+                requested_plane="cli",
+                fallback_policy="cross_plane",
+            )
+
+        history_loader.assert_awaited_once_with(
+            "grok-owned-session", injected_store
+        )
+        assert mock_loop.run.await_args.kwargs["history"] == expected_history
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "requested_plane",
+        (
+            "cli",
+            "auto",
+        ),
+    )
+    async def test_same_plane_contract_refuses_api_fallback(self, requested_plane):
+        from src.utils import orchestrate
+
+        mock_select = AsyncMock(return_value=self._cli_selection())
+        with patch("src.utils.xai_api_key_configured", return_value=True), \
+             patch("src.utils._select_routing_model", new=mock_select), \
+             patch(
+                 "src.utils._call_plane",
+                 new=AsyncMock(side_effect=RuntimeError("CLI failed")),
+             ) as mock_call:
+            layer = await orchestrate(
+                prompt="stay on subscription",
+                mode="auto",
+                enable_agentic=False,
+                requested_plane=requested_plane,
+                fallback_policy="same_plane",
+            )
+
+        assert mock_select.await_count == 1
+        assert mock_call.await_count == 1
+        assert layer.plane == "CLI"
+        assert layer.finish_reason == "error"
+        assert layer.degraded is False
+        assert layer.fallback_occurred is False
+        assert layer.routing_receipt["why_detail"] == "same_plane_failure"
+        assert layer.routing_receipt["fallback_occurred"] is False
+        assert len(layer.routing_receipt["attempts"]) == 1
+
+    @pytest.mark.asyncio
+    async def test_api_same_plane_terminal_persists_exact_attempt_receipt(self):
+        from src.utils import orchestrate
+
+        store = MagicMock()
+        store.get_similar_task_memories = AsyncMock(return_value=[])
+        store.save_telemetry = AsyncMock()
+        store.save_task_memory = AsyncMock()
+        with patch(
+            "src.utils._select_routing_model",
+            new=AsyncMock(return_value=self._api_selection()),
+        ), patch(
+            "src.utils._call_plane",
+            new=AsyncMock(side_effect=RuntimeError("API unavailable")),
+        ):
+            layer = await orchestrate(
+                prompt="stay on the xAI API plane",
+                store=store,
+                enable_agentic=False,
+                requested_plane="api",
+                fallback_policy="same_plane",
+            )
+
+        store.save_telemetry.assert_awaited_once()
+        saved = store.save_telemetry.await_args
+        assert saved.kwargs["routing"] == layer.routing_receipt
+        assert saved.kwargs["routing"]["authority"] == "grok"
+        assert saved.kwargs["routing"]["attempts"][0]["outcome"] == "error"
+        assert saved.kwargs["billing_source"] == "unknown"
+        assert saved.kwargs["token_kind"] == "unavailable"
+
+    @pytest.mark.asyncio
+    async def test_api_only_terminal_persists_exact_attempt_receipt(self):
+        from src.utils import orchestrate
+
+        store = MagicMock()
+        store.get_similar_task_memories = AsyncMock(return_value=[])
+        store.save_telemetry = AsyncMock()
+        store.save_task_memory = AsyncMock()
+        with patch(
+            "src.utils._select_routing_model",
+            new=AsyncMock(return_value=self._api_selection()),
+        ), patch(
+            "src.utils._call_plane",
+            new=AsyncMock(side_effect=RuntimeError("research API unavailable")),
+        ):
+            layer = await orchestrate(
+                prompt="Research current evidence",
+                mode="research",
+                store=store,
+                enable_agentic=False,
+                requested_plane="api",
+                fallback_policy="cross_plane",
+            )
+
+        assert layer.routing_receipt["why_detail"] == "cross_plane_incompatible"
+        store.save_telemetry.assert_awaited_once()
+        saved = store.save_telemetry.await_args
+        assert saved.kwargs["routing"] == layer.routing_receipt
+        assert saved.kwargs["routing"]["attempts"][0]["plane"] == "API"
+        assert saved.kwargs["billing_source"] == "unknown"
+
+    @pytest.mark.asyncio
+    async def test_direct_cli_success_records_one_physical_attempt(self):
+        from src.utils import orchestrate
+
+        with patch(
+            "src.utils._select_routing_model",
+            new=AsyncMock(return_value=self._cli_selection()),
+        ), patch(
+            "src.utils._call_plane",
+            new=AsyncMock(return_value=("CLI answer", 0, 0.0, True)),
+        ):
+            layer = await orchestrate(
+                prompt="complete the task",
+                enable_agentic=False,
+                requested_plane="cli",
+                fallback_policy="same_plane",
+            )
+
+        assert layer.finish_reason == "final_answer"
+        assert layer.routing_receipt["authority"] == "grok"
+        assert layer.routing_receipt["attempts"] == [
+            {
+                "provider": "xai",
+                "phase": "execution",
+                "attempt": 1,
+                "plane": "CLI",
+                "model": "grok-composer-2.5-fast",
+                "purpose": "fast",
+                "outcome": "completed",
+                "billing_class": "subscription",
+                "billing_source": "subscription_unmetered",
+                "usage_source": "subscription_unmetered",
+                "cost_usd": 0.0,
+            }
+        ]
+
+    @pytest.mark.asyncio
+    async def test_cli_and_api_failure_is_terminal_without_fallback_loop(self):
+        from src.utils import orchestrate
+
+        with patch("src.utils.xai_api_key_configured", return_value=True), \
+             patch(
+                 "src.utils._select_routing_model",
+                 new=AsyncMock(
+                     side_effect=[self._cli_selection(), self._api_selection()]
+                 ),
+             ), \
+             patch("src.utils._call_plane", new_callable=AsyncMock) as mock_call:
+            mock_call.side_effect = [
+                RuntimeError("CLI failed"),
+                RuntimeError("API failed"),
+            ]
+            layer = await orchestrate(
+                prompt="complete the task",
+                mode="auto",
+                enable_agentic=False,
+                requested_plane="auto",
+                fallback_policy="cross_plane",
+            )
+
+        assert mock_call.await_count == 2
+        assert layer.finish_reason == "error"
+        assert layer.plane == "API"
+        assert layer.degraded is True
+        assert layer.fallback_occurred is True
+        assert layer.routing_receipt["why_detail"] == "cli_and_api_failed"
+        assert [attempt["plane"] for attempt in layer.routing_receipt["attempts"]] == [
+            "CLI",
+            "API",
+        ]
+        assert all(
+            attempt["outcome"] == "error"
+            for attempt in layer.routing_receipt["attempts"]
+        )
+
+    @pytest.mark.asyncio
+    async def test_explicit_api_start_can_recover_on_cli_when_policy_crosses(self):
+        from src.utils import orchestrate
+
+        mock_select = AsyncMock(return_value=self._api_selection())
+        secret = "xai-123456789SECRET"
+        messages = [
+            {"role": "user", "content": "Earlier objective"},
+            {"role": "assistant", "content": "Earlier observation"},
+            {"role": "user", "content": "complete the task"},
+        ]
+        with patch("src.utils._select_routing_model", new=mock_select), \
+             patch("src.utils._call_plane", new_callable=AsyncMock) as mock_call:
+            mock_call.side_effect = [
+                RuntimeError(f"API failed with Bearer {secret}"),
+                ("CLI recovered answer", 0, 0.0, True),
+            ]
+            layer = await orchestrate(
+                prompt="complete the task",
+                session="grok-session",
+                mode="auto",
+                enable_agentic=False,
+                dynamic_sys_prompt="Objective TTL: 2030-01-01T00:00:00Z",
+                input_messages=messages,
+                requested_plane="api",
+                fallback_policy="cross_plane",
+            )
+
+        assert mock_select.await_count == 2
+        assert mock_select.await_args_list[1].kwargs["requested_plane"] == "cli"
+        assert mock_call.await_count == 2
+        assert mock_call.await_args_list[0].args[0] == "reasoning"
+        assert mock_call.await_args_list[1].args[0] == "cli-fallback"
+        assert mock_call.await_args_list[1].args[2] == "grok-session"
+        assert mock_call.await_args_list[1].kwargs["input_messages"] == messages
+        fallback_system = mock_call.await_args_list[1].args[4]
+        assert "Objective TTL: 2030-01-01T00:00:00Z" in fallback_system
+        assert "Re-observe current state" in fallback_system
+        assert secret not in fallback_system
+        assert layer.generation == "CLI recovered answer"
+        assert layer.plane == "CLI-Fallback"
+        assert layer.finish_reason == "fallback"
+        assert layer.routing_receipt["why_detail"] == "api_to_cli_fallback"
+        assert [item["plane"] for item in layer.routing_receipt["attempts"]] == [
+            "API",
+            "CLI",
+        ]
+        assert layer.routing_receipt["attempts"][0]["billing_source"] == (
+            "unknown_after_failure"
+        )
+        assert layer.routing_receipt["attempts"][0]["cost_usd"] is None
+        assert layer.routing_receipt["attempts"][1]["billing_source"] == (
+            "subscription_unmetered"
+        )
+        receipt_text = json.dumps(layer.routing_receipt)
+        assert secret not in receipt_text
+        assert "[REDACTED" in receipt_text
+
+    @pytest.mark.asyncio
+    async def test_cli_cross_actual_selection_moves_api_only_request_to_api(self):
+        from src.utils import orchestrate
+
+        research_model = "grok-4.20-multi-agent"
+        cli_status = {
+            "ready": True,
+            "models": ["grok-composer-2.5-fast"],
+            "default_model": "grok-composer-2.5-fast",
+        }
+        with patch("src.utils.grok_cli_plane_status", return_value=cli_status), \
+             patch(
+                 "src.utils._MODEL_RESOLVER.catalog_snapshot",
+                 new=AsyncMock(
+                     return_value=([research_model], "xai_api_live", True)
+                 ),
+             ), \
+             patch(
+                 "src.utils._call_plane",
+                 new=AsyncMock(return_value=("research answer", 20, 0.01, False)),
+             ) as mock_call:
+            layer = await orchestrate(
+                prompt="Research current evidence",
+                mode="research",
+                requested_model=research_model,
+                enable_agentic=False,
+                requested_plane="cli",
+                fallback_policy="cross_plane",
+            )
+
+        assert mock_call.await_count == 1
+        assert mock_call.await_args.args[0] == "reasoning"
+        assert layer.generation == "research answer"
+        assert layer.plane == "API"
+        assert layer.finish_reason == "fallback"
+        assert layer.fallback_occurred is True
+        assert layer.fallback_occurred == layer.routing_receipt["fallback_occurred"]
+        assert layer.routing_receipt["authority"] == "grok"
+        assert layer.routing_receipt["why_detail"] == "selection_plane_fallback"
+        assert [
+            (attempt["plane"], attempt["outcome"])
+            for attempt in layer.routing_receipt["selection_attempts"]
+        ] == [("CLI", "error"), ("API", "selected")]
+
+    @pytest.mark.asyncio
+    async def test_api_plane_is_authoritative_for_slug_also_known_to_cli(self):
+        from src.utils import orchestrate
+
+        cli_model = "grok-composer-2.5-fast"
+        with patch(
+            "src.utils._MODEL_RESOLVER.catalog_snapshot",
+            new=AsyncMock(return_value=([cli_model], "xai_api_live", True)),
+        ), patch(
+            "src.utils._call_plane",
+            new=AsyncMock(return_value=("API answer", 4, 0.01, False)),
+        ) as mock_call:
+            layer = await orchestrate(
+                prompt="complete the task",
+                requested_model=cli_model,
+                enable_agentic=False,
+                requested_plane="api",
+                fallback_policy="same_plane",
+            )
+
+        mock_call.assert_awaited_once()
+        assert mock_call.await_args.args[0] == "reasoning"
+        assert mock_call.await_args.kwargs["requested_model"] == cli_model
+        assert layer.finish_reason == "final_answer"
+        assert layer.routing_receipt["requested_plane"] == "API"
+        assert layer.routing_receipt["resolved_plane"] == "API"
+        assert layer.routing_receipt["fallback_occurred"] is False
+        assert layer.plane == "API"
+
+    @pytest.mark.asyncio
+    async def test_exact_shared_pin_survives_api_to_cli_execution_fallback(self):
+        from src.utils import orchestrate
+
+        cli_model = "grok-composer-2.5-fast"
+        cli_status = {
+            "ready": True,
+            "models": [cli_model],
+            "default_model": cli_model,
+        }
+        with patch(
+            "src.utils._MODEL_RESOLVER.catalog_snapshot",
+            new=AsyncMock(return_value=([cli_model], "xai_api_live", True)),
+        ), patch("src.utils.grok_cli_plane_status", return_value=cli_status), patch(
+            "src.utils._call_plane",
+            new=AsyncMock(
+                side_effect=[
+                    RuntimeError("API failed"),
+                    ("CLI answer", 0, 0.0, True),
+                ]
+            ),
+        ) as mock_call:
+            layer = await orchestrate(
+                prompt="complete the task",
+                requested_model=cli_model,
+                enable_agentic=False,
+                requested_plane="api",
+                fallback_policy="cross_plane",
+            )
+
+        assert mock_call.await_count == 2
+        assert [
+            item.kwargs["requested_model"] for item in mock_call.await_args_list
+        ] == [cli_model, cli_model]
+        assert layer.finish_reason == "fallback"
+        assert layer.routing_receipt["requested_plane"] == "API"
+        assert layer.routing_receipt["resolved_plane"] == "CLI"
+        assert layer.routing_receipt["fallback_occurred"] is True
+        assert layer.routing_receipt["fallback"]["from_model"] == cli_model
+        assert layer.routing_receipt["fallback"]["to_model"] == cli_model
+
+    @pytest.mark.asyncio
+    async def test_exact_shared_pin_survives_cli_to_api_execution_fallback(self):
+        from src.utils import orchestrate
+
+        shared_model = "grok-shared-exact"
+        cli_status = {
+            "ready": True,
+            "models": [shared_model],
+            "default_model": shared_model,
+        }
+        with patch("src.utils.xai_api_key_configured", return_value=True), patch(
+            "src.utils.grok_cli_plane_status", return_value=cli_status
+        ), patch(
+            "src.utils._MODEL_RESOLVER.catalog_snapshot",
+            new=AsyncMock(return_value=([shared_model], "xai_api_live", True)),
+        ), patch(
+            "src.utils._call_plane",
+            new=AsyncMock(
+                side_effect=[
+                    RuntimeError("CLI failed"),
+                    ("API answer", 8, 0.02, False),
+                ]
+            ),
+        ) as mock_call:
+            layer = await orchestrate(
+                prompt="complete the task",
+                requested_model=shared_model,
+                enable_agentic=False,
+                requested_plane="cli",
+                fallback_policy="cross_plane",
+            )
+
+        assert mock_call.await_count == 2
+        assert [
+            item.kwargs["requested_model"] for item in mock_call.await_args_list
+        ] == [shared_model, shared_model]
+        assert layer.finish_reason == "fallback"
+        assert layer.model == shared_model
+        assert layer.routing_receipt["fallback"]["from_model"] == shared_model
+        assert layer.routing_receipt["fallback"]["to_model"] == shared_model
+
+    @pytest.mark.asyncio
+    async def test_exact_pin_absent_from_alternate_catalog_never_substitutes(self):
+        from src.utils import orchestrate
+
+        pinned = "grok-api-only-exact"
+        cli_status = {
+            "ready": True,
+            "models": ["grok-composer-2.5-fast"],
+            "default_model": "grok-composer-2.5-fast",
+        }
+        with patch(
+            "src.utils._MODEL_RESOLVER.catalog_snapshot",
+            new=AsyncMock(return_value=([pinned], "xai_api_live", True)),
+        ), patch(
+            "src.utils.grok_cli_plane_status", return_value=cli_status
+        ), patch(
+            "src.utils._call_plane",
+            new=AsyncMock(side_effect=RuntimeError("API failed")),
+        ) as mock_call:
+            layer = await orchestrate(
+                prompt="complete the task",
+                requested_model=pinned,
+                enable_agentic=False,
+                requested_plane="api",
+                fallback_policy="cross_plane",
+            )
+
+        mock_call.assert_awaited_once()
+        assert mock_call.await_args.kwargs["requested_model"] == pinned
+        assert layer.finish_reason == "error"
+        assert layer.routing_receipt["why_detail"] == "api_and_cli_failed"
+        assert "will not substitute" in layer.generation
+        assert [item["model"] for item in layer.routing_receipt["attempts"]] == [
+            pinned
+        ]
+
+    @pytest.mark.asyncio
+    async def test_agentic_nonanswer_crosses_once_without_same_plane_fast_call(self):
+        from src.utils import MetaLayer, orchestrate
+
+        agentic_calls = []
+
+        async def rejected_agentic(
+            loop, prompt, session=None, history=None, input_messages=None
+        ):
+            agentic_calls.append(prompt)
+            loop.attempt_recorder(
+                plane="API",
+                model=loop.model,
+                outcome="nonanswer",
+                purpose="agentic:depth 1/8",
+                tokens=4,
+                cost_usd=0.01,
+                usage_source="provider_exact",
+            )
+            return MetaLayer(
+                generation="I'll inspect that next.",
+                finish_reason="error",
+                tokens=4,
+                cost_usd=0.01,
+                plane="API",
+            )
+
+        with patch(
+            "src.utils._select_routing_model",
+            new=AsyncMock(
+                side_effect=[self._api_selection(), self._cli_selection()]
+            ),
+        ), patch("src.utils.AgentLoop.run", new=rejected_agentic), patch(
+            "src.utils._call_plane",
+            new=AsyncMock(return_value=("CLI recovered", 0, 0.0, True)),
+        ) as mock_call:
+            layer = await orchestrate(
+                prompt="complete the task",
+                requested_plane="api",
+                fallback_policy="cross_plane",
+            )
+
+        assert agentic_calls == ["complete the task"]
+        mock_call.assert_awaited_once()
+        assert mock_call.await_args.args[0] == "cli-fallback"
+        assert layer.finish_reason == "fallback"
+        assert [item["plane"] for item in layer.routing_receipt["attempts"]] == [
+            "API",
+            "CLI",
+        ]
+
+    @pytest.mark.asyncio
+    async def test_thinking_nonanswer_crosses_once_without_api_fast_call(self):
+        from src.utils import MetaLayer, orchestrate
+
+        async def rejected_thinking(*_args, attempt_recorder=None, **_kwargs):
+            attempt_recorder(
+                plane="API",
+                model="grok-build-0.1",
+                outcome="nonanswer",
+                purpose="thinking:depth 1/8",
+                tokens=5,
+                cost_usd=0.02,
+                usage_source="provider_exact",
+            )
+            return MetaLayer(
+                generation="Let me work on that.",
+                finish_reason="error",
+                tokens=5,
+                cost_usd=0.02,
+                plane="API",
+            )
+
+        with patch(
+            "src.utils._select_routing_model",
+            new=AsyncMock(
+                side_effect=[self._api_selection(), self._cli_selection()]
+            ),
+        ), patch(
+            "src.utils.run_thinking_loop", new=rejected_thinking
+        ), patch(
+            "src.utils._call_plane",
+            new=AsyncMock(return_value=("CLI recovered", 0, 0.0, True)),
+        ) as mock_call:
+            layer = await orchestrate(
+                prompt="solve the hard task",
+                thinking_mode=True,
+                enable_agentic=False,
+                requested_plane="api",
+                fallback_policy="cross_plane",
+            )
+
+        mock_call.assert_awaited_once()
+        assert mock_call.await_args.args[0] == "cli-fallback"
+        assert layer.finish_reason == "fallback"
+        assert [item["plane"] for item in layer.routing_receipt["attempts"]] == [
+            "API",
+            "CLI",
+        ]
+
+    @pytest.mark.asyncio
+    async def test_api_only_runtime_failure_never_falls_back_to_cli(self):
+        from src.utils import orchestrate
+
+        research_model = "grok-4.20-multi-agent"
+        with patch(
+            "src.utils._MODEL_RESOLVER.catalog_snapshot",
+            new=AsyncMock(return_value=([research_model], "xai_api_live", True)),
+        ), patch(
+            "src.utils._call_plane",
+            new=AsyncMock(side_effect=RuntimeError("API research failed")),
+        ) as mock_call:
+            layer = await orchestrate(
+                prompt="Research current evidence",
+                mode="research",
+                requested_model=research_model,
+                enable_agentic=False,
+                requested_plane="api",
+                fallback_policy="cross_plane",
+            )
+
+        assert mock_call.await_count == 1
+        assert layer.finish_reason == "error"
+        assert layer.plane == "API"
+        assert layer.routing_receipt["why_detail"] == "cross_plane_incompatible"
+        assert [attempt["plane"] for attempt in layer.routing_receipt["attempts"]] == [
+            "API"
+        ]
+
+    @pytest.mark.asyncio
+    async def test_api_only_selection_fallback_failure_does_not_loop_to_cli(self):
+        from src.utils import orchestrate
+
+        research_model = "grok-4.20-multi-agent"
+        cli_status = {
+            "ready": True,
+            "models": ["grok-composer-2.5-fast"],
+            "default_model": "grok-composer-2.5-fast",
+        }
+        with patch("src.utils.grok_cli_plane_status", return_value=cli_status), \
+             patch(
+                 "src.utils._MODEL_RESOLVER.catalog_snapshot",
+                 new=AsyncMock(
+                     return_value=([research_model], "xai_api_live", True)
+                 ),
+             ), \
+             patch(
+                 "src.utils._call_plane",
+                 new=AsyncMock(side_effect=RuntimeError("API research failed")),
+             ) as mock_call:
+            layer = await orchestrate(
+                prompt="Research current evidence",
+                mode="research",
+                requested_model=research_model,
+                enable_agentic=False,
+                requested_plane="cli",
+                fallback_policy="cross_plane",
+            )
+
+        assert mock_call.await_count == 1
+        assert layer.finish_reason == "error"
+        assert layer.plane == "API"
+        assert layer.fallback_occurred is True
+        assert layer.degraded is True
+        assert layer.routing_receipt["fallback_occurred"] is True
+        assert layer.routing_receipt["why_detail"] == (
+            "selection_fallback_execution_failed"
+        )
+        assert [item["plane"] for item in layer.routing_receipt["attempts"]] == [
+            "API"
+        ]
+
+    @pytest.mark.asyncio
+    async def test_profile_failure_can_cross_once_during_selection(self):
+        from src.utils import orchestrate
+
+        def _profile(model):
+            if model == "grok-composer-2.5-fast":
+                raise RuntimeError("CLI profile unavailable")
+            return {"profile": "api-profile", "reasoning_effort": "high"}
+
+        with patch(
+            "src.utils._select_routing_model",
+            new=AsyncMock(
+                side_effect=[self._cli_selection(), self._api_selection()]
+            ),
+        ), patch("src.utils.load_grok_profile", side_effect=_profile), patch(
+            "src.utils._call_plane",
+            new=AsyncMock(return_value=("API answer", 12, 0.003, False)),
+        ) as mock_call:
+            layer = await orchestrate(
+                prompt="complete the task",
+                enable_agentic=False,
+                requested_plane="cli",
+                fallback_policy="cross_plane",
+            )
+
+        assert mock_call.await_count == 1
+        assert layer.generation == "API answer"
+        assert layer.finish_reason == "fallback"
+        selection_attempts = layer.routing_receipt["selection_attempts"]
+        assert [item["outcome"] for item in selection_attempts] == [
+            "error",
+            "selected",
+        ]
+        assert selection_attempts[0]["error_type"] == "RuntimeError"
+
+    @pytest.mark.asyncio
+    async def test_reasoning_requirement_failure_can_cross_once_during_selection(self):
+        from src.utils import orchestrate
+
+        def _profile(model):
+            effort = "low" if model == "grok-composer-2.5-fast" else "high"
+            return {"profile": f"{effort}-profile", "reasoning_effort": effort}
+
+        with patch(
+            "src.utils._select_routing_model",
+            new=AsyncMock(
+                side_effect=[self._cli_selection(), self._api_selection()]
+            ),
+        ), patch("src.utils.load_grok_profile", side_effect=_profile), patch(
+            "src.utils._call_plane",
+            new=AsyncMock(return_value=("API answer", 12, 0.003, False)),
+        ) as mock_call:
+            layer = await orchestrate(
+                prompt="complete the task",
+                enable_agentic=False,
+                require_reasoning_level="high",
+                requested_plane="cli",
+                fallback_policy="cross_plane",
+            )
+
+        assert mock_call.await_count == 1
+        assert layer.finish_reason == "fallback"
+        assert [
+            (item["plane"], item["outcome"])
+            for item in layer.routing_receipt["selection_attempts"]
+        ] == [("CLI", "error"), ("API", "selected")]
+        assert "reasoning effort" in layer.routing_receipt["selection_attempts"][0][
+            "error"
+        ]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("policy", "side_effects", "expected_detail"),
+        (
+            ("same_plane", [RuntimeError("selection unavailable")], "selection_failed"),
+            (
+                "cross_plane",
+                [RuntimeError("CLI unavailable"), RuntimeError("API unavailable")],
+                "selection_failed_both_planes",
+            ),
+        ),
+    )
+    async def test_selection_failures_are_persisted_with_exact_receipt(
+        self, tmp_path, policy, side_effects, expected_detail
+    ):
+        from src.utils import GrokSessionStore, orchestrate
+
+        store = GrokSessionStore(db_path=tmp_path / f"{expected_detail}.db")
+        try:
+            with patch(
+                "src.utils._select_routing_model",
+                new=AsyncMock(side_effect=side_effects),
+            ):
+                layer = await orchestrate(
+                    prompt="preserve the failed selection",
+                    store=store,
+                    enable_agentic=False,
+                    requested_plane="cli",
+                    fallback_policy=policy,
+                )
+
+            assert layer.routing_receipt["why_detail"] == expected_detail
+            rows = await store.get_telemetry_stats()
+            assert len(rows) == 1
+            assert json.loads(rows[0]["metadata"])["routing"] == (
+                layer.routing_receipt
+            )
+            memories = await store.get_recent_model_stats()
+            assert memories == [
+                {
+                    "plane": "local",
+                    "model": "unresolved",
+                    "samples": 1,
+                    "success_rate": 0.0,
+                    "avg_cost": 0.0,
+                    "avg_latency": pytest.approx(layer.latency),
+                }
+            ]
+        finally:
+            await store.close()
+
+    @pytest.mark.asyncio
+    async def test_api_and_cli_failure_redacts_both_plane_errors(self, caplog):
+        from src.utils import orchestrate
+
+        api_secret = "xai-123456789API"
+        cli_secret = "xai-123456789CLI"
+        with patch(
+            "src.utils._select_routing_model",
+            new=AsyncMock(return_value=self._api_selection()),
+        ), patch("src.utils._call_plane", new_callable=AsyncMock) as mock_call:
+            mock_call.side_effect = [
+                RuntimeError(f"API failed: Bearer {api_secret}"),
+                RuntimeError(f"CLI failed: Bearer {cli_secret}"),
+            ]
+            layer = await orchestrate(
+                prompt="complete the task",
+                enable_agentic=False,
+                requested_plane="api",
+                fallback_policy="cross_plane",
+            )
+
+        assert mock_call.await_count == 2
+        assert layer.finish_reason == "error"
+        rendered = json.dumps(
+            {"generation": layer.generation, "receipt": layer.routing_receipt}
+        )
+        assert api_secret not in rendered
+        assert cli_secret not in rendered
+        assert rendered.count("[REDACTED") >= 2
+        assert api_secret not in caplog.text
+        assert cli_secret not in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_cloudrun_api_failure_returns_redacted_authority_receipt(self):
+        from src.utils import orchestrate
+
+        secret = "xai-123456789CLOUD"
+        with patch(
+            "src.utils._select_routing_model",
+            new=AsyncMock(return_value=self._api_selection()),
+        ), patch(
+            "src.utils._call_plane",
+            new=AsyncMock(side_effect=RuntimeError(f"Bearer {secret}")),
+        ), patch("src.utils.is_cloudrun_runtime", return_value=True):
+            layer = await orchestrate(
+                prompt="complete the task",
+                enable_agentic=False,
+                requested_plane="api",
+                fallback_policy="cross_plane",
+            )
+
+        assert layer.finish_reason == "error"
+        assert layer.plane == "API"
+        assert layer.routing_receipt["provider"] == "xai"
+        assert layer.routing_receipt["authority"] == "grok"
+        assert layer.routing_receipt["why_detail"] == "cli_unavailable_in_cloudrun"
+        assert len(layer.routing_receipt["attempts"]) == 1
+        rendered = json.dumps(
+            {"generation": layer.generation, "receipt": layer.routing_receipt}
+        )
+        assert secret not in rendered
+
+    @pytest.mark.asyncio
+    async def test_repeated_cli_nonanswer_recovers_on_xai_api(self):
+        from src.utils import orchestrate
+
+        promise = "I'll run the audit now and report back."
+        with patch("src.utils.xai_api_key_configured", return_value=True), \
+             patch(
+                 "src.utils._select_routing_model",
+                 new=AsyncMock(
+                     side_effect=[self._cli_selection(), self._api_selection()]
+                 ),
+             ), \
+             patch("src.utils._call_plane", new_callable=AsyncMock) as mock_call:
+            mock_call.side_effect = [
+                (promise, 0, 0.0, True),
+                (promise, 0, 0.0, True),
+                ("API delivered the result.", 18, 0.004, False),
+            ]
+            layer = await orchestrate(
+                prompt="Audit the repository",
+                mode="auto",
+                enable_agentic=False,
+                requested_plane="auto",
+                fallback_policy="cross_plane",
+            )
+
+        assert mock_call.await_count == 3
+        assert [call.args[0] for call in mock_call.await_args_list] == [
+            "cli-fallback",
+            "cli-fallback",
+            "reasoning",
+        ]
+        assert layer.generation == "API delivered the result."
+        assert layer.finish_reason == "fallback"
+        assert layer.plane == "API"
+        assert layer.routing_receipt["why_detail"] == "cli_to_api_fallback"
+        assert layer.routing_receipt["completion_recovery"] == {
+            "attempted": True,
+            "reason": "nonanswer_completion",
+            "succeeded": False,
+            "attempts": 1,
+        }
+        assert [
+            (item["attempt"], item["plane"], item["outcome"])
+            for item in layer.routing_receipt["attempts"]
+        ] == [
+            (1, "CLI", "nonanswer"),
+            (2, "CLI", "nonanswer"),
+            (3, "API", "completed"),
+        ]
+
+    @pytest.mark.asyncio
+    async def test_repeated_cli_nonanswer_stays_cli_with_same_plane_policy(self):
+        from src.utils import orchestrate
+
+        promise = "I'll run the audit now and report back."
+        mock_select = AsyncMock(return_value=self._cli_selection())
+        with patch("src.utils.xai_api_key_configured", return_value=True), \
+             patch("src.utils._select_routing_model", new=mock_select), \
+             patch("src.utils._call_plane", new_callable=AsyncMock) as mock_call:
+            mock_call.side_effect = [
+                (promise, 0, 0.0, True),
+                (promise, 0, 0.0, True),
+            ]
+            layer = await orchestrate(
+                prompt="Audit the repository",
+                mode="auto",
+                enable_agentic=False,
+                requested_plane="cli",
+                fallback_policy="same_plane",
+            )
+
+        assert mock_select.await_count == 1
+        assert mock_call.await_count == 2
+        assert layer.finish_reason == "error"
+        assert layer.plane == "CLI"
+        assert layer.fallback_occurred is False
+        assert layer.routing_receipt["why_detail"] == "same_plane_failure"
+        assert layer.routing_receipt["completion_recovery"]["attempted"] is True
+
+    @pytest.mark.asyncio
+    async def test_repeated_api_nonanswer_can_recover_on_cli(self):
+        from src.utils import orchestrate
+
+        promise = "I'll run the audit now and report back."
+        store = MagicMock()
+        store.get_similar_task_memories = AsyncMock(return_value=[])
+        store.save_telemetry = AsyncMock()
+        store.save_task_memory = AsyncMock()
+        with patch(
+            "src.utils._select_routing_model",
+            new=AsyncMock(return_value=self._api_selection()),
+        ), patch("src.utils._call_plane", new_callable=AsyncMock) as mock_call:
+            mock_call.side_effect = [
+                (promise, 7, 0.001, False),
+                (promise, 8, 0.002, False),
+                ("CLI delivered the result.", 0, 0.0, True),
+            ]
+            layer = await orchestrate(
+                prompt="Audit the repository",
+                mode="auto",
+                enable_agentic=False,
+                store=store,
+                requested_plane="api",
+                fallback_policy="cross_plane",
+            )
+
+        assert mock_call.await_count == 3
+        assert layer.generation == "CLI delivered the result."
+        assert layer.finish_reason == "fallback"
+        assert layer.routing_receipt["why_detail"] == "api_to_cli_fallback"
+        assert [
+            (item["plane"], item["outcome"], item["cost_usd"])
+            for item in layer.routing_receipt["attempts"]
+        ] == [
+            ("API", "nonanswer", 0.001),
+            ("API", "nonanswer", 0.002),
+            ("CLI", "completed", 0.0),
+        ]
+        assert layer.cost_usd == pytest.approx(0.003)
+        assert layer.tokens == 15
+        assert store.save_telemetry.await_args.args[4] == pytest.approx(0.003)
+        assert store.save_telemetry.await_args.kwargs["tokens"] == 15
+        assert store.save_telemetry.await_args.kwargs["token_kind"] == "partial"
+        assert store.save_telemetry.await_args.kwargs["billing_source"] == (
+            "xai_response_exact"
+        )
+
+    @pytest.mark.asyncio
+    async def test_known_api_usage_survives_api_retry_and_cli_failure(self):
+        from src.utils import orchestrate
+
+        promise = "I'll run the audit now and report back."
+        store = MagicMock()
+        store.get_similar_task_memories = AsyncMock(return_value=[])
+        store.save_telemetry = AsyncMock()
+        store.save_task_memory = AsyncMock()
+        with patch(
+            "src.utils._select_routing_model",
+            new=AsyncMock(return_value=self._api_selection()),
+        ), patch("src.utils._call_plane", new_callable=AsyncMock) as mock_call:
+            mock_call.side_effect = [
+                (promise, 7, 0.001, False),
+                RuntimeError("API correction failed"),
+                RuntimeError("CLI recovery failed"),
+            ]
+            layer = await orchestrate(
+                prompt="Audit the repository",
+                mode="auto",
+                enable_agentic=False,
+                store=store,
+                requested_plane="api",
+                fallback_policy="cross_plane",
+            )
+
+        assert mock_call.await_count == 3
+        assert layer.finish_reason == "error"
+        assert layer.cost_usd == pytest.approx(0.001)
+        assert layer.tokens == 7
+        assert store.save_telemetry.await_args.args[4] == pytest.approx(0.001)
+        assert store.save_telemetry.await_args.kwargs["tokens"] == 7
+        assert store.save_telemetry.await_args.kwargs["token_kind"] == "partial"
+        assert store.save_telemetry.await_args.kwargs["billing_source"] == "partial"
+
+    def test_partial_provider_usage_is_never_labeled_exact(self):
+        from src.utils import (
+            _provider_response_usage,
+            _telemetry_usage_kwargs,
+            _xai_execution_attempt_receipt,
+        )
+
+        response = MagicMock()
+        response.usage.prompt_tokens = 7
+        response.usage.completion_tokens = None
+        response.cost_usd = 0.004
+        tokens, cost, source = _provider_response_usage(response)
+        attempt = _xai_execution_attempt_receipt(
+            1,
+            plane="API",
+            model="grok-shared",
+            outcome="completed",
+            purpose="fast",
+            tokens=tokens,
+            cost_usd=cost,
+            usage_source=source,
+        )
+        telemetry = _telemetry_usage_kwargs(
+            plane="API",
+            model="grok-shared",
+            tokens=tokens or 0,
+            prompt="task",
+            output="answer",
+            routing={"attempts": [attempt]},
+        )
+
+        assert (tokens, cost, source) == (7, 0.004, "partial")
+        assert attempt["billing_source"] == "partial"
+        assert telemetry["token_kind"] == "partial"
+        assert telemetry["billing_source"] == "partial"
+
+    @pytest.mark.parametrize(
+        "attempt_planes",
+        (("CLI", "API"), ("API", "CLI")),
+        ids=("cli-to-api", "api-to-cli"),
+    )
+    def test_cross_plane_tokens_are_partial_but_api_billing_stays_exact(
+        self, attempt_planes
+    ):
+        from src.utils import (
+            _telemetry_usage_kwargs,
+            _xai_execution_attempt_receipt,
+        )
+
+        attempts = []
+        for ordinal, plane in enumerate(attempt_planes, start=1):
+            attempts.append(
+                _xai_execution_attempt_receipt(
+                    ordinal,
+                    plane=plane,
+                    model=(
+                        "grok-composer-2.5-fast"
+                        if plane == "CLI"
+                        else "grok-build-0.1"
+                    ),
+                    outcome="completed",
+                    purpose="cross-plane-recovery",
+                    tokens=None if plane == "CLI" else 15,
+                    cost_usd=0.0 if plane == "CLI" else 0.006,
+                    usage_source=(
+                        "subscription_unmetered"
+                        if plane == "CLI"
+                        else "provider_exact"
+                    ),
+                )
+            )
+
+        telemetry = _telemetry_usage_kwargs(
+            plane=attempt_planes[-1],
+            model=attempts[-1]["model"],
+            tokens=15,
+            prompt="task",
+            output="answer",
+            routing={"attempts": attempts},
+        )
+
+        api_attempt = next(item for item in attempts if item["plane"] == "API")
+        cli_attempt = next(item for item in attempts if item["plane"] == "CLI")
+        assert api_attempt["tokens"] == 15
+        assert api_attempt["cost_usd"] == pytest.approx(0.006)
+        assert api_attempt["billing_source"] == "xai_response_exact"
+        assert "tokens" not in cli_attempt
+        assert telemetry["tokens"] == 15
+        assert telemetry["token_kind"] == "partial"
+        assert telemetry["billing_source"] == "xai_response_exact"
+
+    @pytest.mark.asyncio
+    async def test_cli_partial_output_reaches_api_recovery_context_and_receipt(self):
+        from src.utils import _GrokCLIExecutionError, orchestrate
+
+        partial = "receipt effect-7: edited file before transport failed"
+        cli_error = _GrokCLIExecutionError(
+            "Grok CLI error: transport failed", partial_output=partial
+        )
+        with patch("src.utils.xai_api_key_configured", return_value=True), patch(
+            "src.utils._select_routing_model",
+            new=AsyncMock(
+                side_effect=[self._cli_selection(), self._api_selection()]
+            ),
+        ), patch("src.utils._call_plane", new_callable=AsyncMock) as mock_call:
+            mock_call.side_effect = [
+                cli_error,
+                ("API recovered safely", 10, 0.002, False),
+            ]
+            layer = await orchestrate(
+                prompt="complete the task",
+                enable_agentic=False,
+                requested_plane="cli",
+                fallback_policy="cross_plane",
+            )
+
+        assert mock_call.await_count == 2
+        assert partial in mock_call.await_args_list[1].args[4]
+        assert layer.finish_reason == "fallback"
+        assert layer.routing_receipt["failure"]["partial_output"] == partial
+        assert layer.routing_receipt["failure"]["partial_effect_possible"] is True
+        assert layer.routing_receipt["attempts"][0]["partial_output"] == partial
 
 
 class TestCompletionContentContract:
@@ -2111,6 +3492,7 @@ class TestHonestOutcomes:
                 mode="auto",
                 store=mock_store,
                 dynamic_sys_prompt="sys",
+                fallback_policy="same_plane",
             )
 
         assert layer.generation == content
@@ -2152,10 +3534,22 @@ class TestHonestOutcomes:
             "rejected both responses and produced no result."
         )
         assert layer.finish_reason == "error"
-        assert mock_call.await_count == 2
+        assert mock_call.await_count == 4
         assert "# Original request\nAudit the repository" in (
             mock_call.await_args_list[1].args[1]
         )
+        assert "# Original request\nAudit the repository" in (
+            mock_call.await_args_list[3].args[1]
+        )
+        assert [
+            (item["plane"], item["outcome"])
+            for item in layer.routing_receipt["attempts"]
+        ] == [
+            ("API", "nonanswer"),
+            ("API", "nonanswer"),
+            ("CLI", "nonanswer"),
+            ("CLI", "nonanswer"),
+        ]
         assert layer.routing_receipt["completion_recovery"] == {
             "attempted": True,
             "reason": "nonanswer_completion",
@@ -2163,6 +3557,8 @@ class TestHonestOutcomes:
             "attempts": 1,
         }
         assert mock_store.save_telemetry.await_args.args[2] == 0
+        assert mock_store.save_telemetry.await_args.args[4] == pytest.approx(0.002)
+        assert layer.cost_usd == pytest.approx(0.002)
         assert mock_store.save_task_memory.await_args.kwargs["success"] == 0
 
     @pytest.mark.asyncio
@@ -2491,6 +3887,89 @@ class TestThinkingLoop:
         assert "verdict=pass" in layer.reflection
 
     @pytest.mark.asyncio
+    async def test_thinking_counts_agent_sample_and_reflection_parse_calls(self):
+        from src.utils import run_thinking_loop
+
+        attempts = []
+
+        def record_attempt(**attempt):
+            attempts.append(attempt)
+
+        candidate = _make_response(
+            content="complete result", tool_calls=[], cost_usd=0.01
+        )
+        agent_chat = MagicMock()
+        agent_chat.sample.return_value = candidate
+        agent_chat.append = MagicMock()
+
+        review_response = MagicMock()
+        review_response.usage.prompt_tokens = 2
+        review_response.usage.completion_tokens = 1
+        review_response.cost_usd = 0.002
+        reflection_chat = MagicMock()
+        reflection_chat.parse.return_value = (
+            review_response,
+            ReflectionVerdict(status="pass"),
+        )
+        reflection_chat.append = MagicMock()
+
+        client = MagicMock()
+        client.chat.create.side_effect = [agent_chat, reflection_chat]
+        with patch("src.utils.get_xai_client", return_value=client), patch(
+            "src.utils.resolve_model", new=AsyncMock(return_value="grok-4.3")
+        ), patch("src.utils.get_model_max_tokens", return_value=131072):
+            layer = await run_thinking_loop(
+                "solve this",
+                model="grok-4.3",
+                attempt_recorder=record_attempt,
+                defer_telemetry=True,
+            )
+
+        assert layer.finish_reason == "final_answer"
+        assert agent_chat.sample.call_count == 1
+        assert reflection_chat.parse.call_count == 1
+        assert len(attempts) == 2
+        assert [attempt["purpose"] for attempt in attempts] == [
+            "thinking:depth 1",
+            "reflection",
+        ]
+        assert [attempt["cost_usd"] for attempt in attempts] == [
+            pytest.approx(0.01),
+            pytest.approx(0.002),
+        ]
+
+    @pytest.mark.asyncio
+    async def test_thinking_history_uses_injected_store(self):
+        from src.utils import run_thinking_loop
+
+        injected_store = MagicMock(name="injected_store")
+        captured = {}
+
+        async def fake_run(self, prompt, session=None, history=None, input_messages=None):
+            captured["history"] = history
+            return TestThinkingLoop._attempt_layer()
+
+        expected_history = [{"role": "user", "content": "prior turn"}]
+        history_loader = AsyncMock(return_value=expected_history)
+        with patch("src.utils.load_history", new=history_loader), patch(
+            "src.utils.AgentLoop.run", new=fake_run
+        ), patch(
+            "src.utils._reflect_on_answer",
+            new=AsyncMock(return_value=(None, 0, 0.0)),
+        ):
+            await run_thinking_loop(
+                "continue",
+                session="grok-owned-session",
+                store=injected_store,
+                defer_telemetry=True,
+            )
+
+        history_loader.assert_awaited_once_with(
+            "grok-owned-session", injected_store
+        )
+        assert captured["history"] == expected_history
+
+    @pytest.mark.asyncio
     @pytest.mark.parametrize(
         "promise",
         (
@@ -2791,6 +4270,7 @@ class TestOrchestrateThinkingRoute:
                 thinking_mode=True,
                 enable_agentic=False,
                 dynamic_sys_prompt="sys",
+                fallback_policy="same_plane",
             )
 
         assert layer.route == "fast"
@@ -2822,6 +4302,37 @@ class TestOrchestrateThinkingRoute:
         assert fake_store.save_telemetry.await_args.kwargs["caller"] == "claude-code"
 
     @pytest.mark.asyncio
+    async def test_direct_thinking_telemetry_owns_physical_attempt_receipts(self):
+        from src.utils import run_thinking_loop
+
+        async def fake_run(self, prompt, session=None, history=None, input_messages=None):
+            self.attempt_recorder(
+                plane="API",
+                model=self.model,
+                outcome="completed",
+                purpose="thinking:depth 1/8",
+                tokens=9,
+                cost_usd=0.003,
+                usage_source="provider_exact",
+            )
+            return TestThinkingLoop._attempt_layer()
+
+        fake_store = MagicMock()
+        fake_store.save_telemetry = AsyncMock()
+        with patch("src.utils.AgentLoop.run", new=fake_run), patch(
+            "src.utils._reflect_on_answer",
+            new=AsyncMock(return_value=(None, 0, 0.0)),
+        ):
+            layer = await run_thinking_loop("attribute every call", store=fake_store)
+
+        attempts = layer.routing_receipt["attempts"]
+        assert len(attempts) == 1
+        assert attempts[0]["billing_source"] == "xai_response_exact"
+        assert fake_store.save_telemetry.await_args.kwargs["routing"] == (
+            layer.routing_receipt
+        )
+
+    @pytest.mark.asyncio
     async def test_orchestrate_threads_caller_into_thinking_route(self, monkeypatch):
         """orchestrate resolves the caller once and must hand it to
         run_thinking_loop like it does on the agentic/fast telemetry saves."""
@@ -2843,6 +4354,74 @@ class TestOrchestrateThinkingRoute:
             )
 
         assert captured["caller"] == "claude-code"
+
+    @pytest.mark.asyncio
+    async def test_orchestrate_persists_final_thinking_receipt_exactly_once(self):
+        from src.utils import orchestrate
+
+        captured = {}
+
+        async def fake_thinking(prompt, **kwargs):
+            captured.update(kwargs)
+            recorder = kwargs["attempt_recorder"]
+            recorder(
+                plane="API",
+                model="grok-build-0.1",
+                outcome="completed",
+                purpose="thinking:depth 1",
+                tokens=11,
+                cost_usd=0.01,
+            )
+            recorder(
+                plane="API",
+                model="grok-build-0.1",
+                outcome="completed",
+                purpose="reflection",
+                tokens=3,
+                cost_usd=0.002,
+            )
+            return MetaLayer(
+                generation="verified candidate",
+                finish_reason="final_answer",
+                plane="API",
+                route="thinking",
+                tokens=14,
+                cost_usd=0.012,
+                routing_receipt=dict(kwargs["routing_receipt"]),
+            )
+
+        selection = (
+            "grok-build-0.1",
+            "reasoning",
+            {
+                "route_class": "reasoning",
+                "resolved_model": "grok-build-0.1",
+                "catalog": {"source": "xai_api_live", "fallback": False},
+            },
+            True,
+        )
+        store = MagicMock()
+        store.get_similar_task_memories = AsyncMock(return_value=[])
+        store.save_telemetry = AsyncMock()
+        store.save_task_memory = AsyncMock()
+        with patch(
+            "src.utils._select_routing_model", new=AsyncMock(return_value=selection)
+        ), patch("src.utils.run_thinking_loop", new=fake_thinking):
+            layer = await orchestrate(
+                prompt="hardest task",
+                thinking_mode=True,
+                store=store,
+                requested_plane="api",
+                fallback_policy="same_plane",
+            )
+
+        assert captured["defer_telemetry"] is True
+        assert len(layer.routing_receipt["attempts"]) == 2
+        store.save_telemetry.assert_awaited_once()
+        assert (
+            store.save_telemetry.await_args.kwargs["routing"]
+            == layer.routing_receipt
+        )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -3712,6 +5291,22 @@ class TestUtilsQuickWins:
 
         monkeypatch.setenv("UNIGROK_CLI_TIMEOUT", "33")
         monkeypatch.setenv("UNIGROK_RUNTIME", "local")
+        server_secrets = {
+            "XAI_API_KEY": "xai-inference",
+            "XAI_MANAGEMENT_API_KEY": "xai-management",
+            "GROK_API_KEY": "grok-api",
+            "OPENAI_API_KEY": "openai-api",
+            "ANTHROPIC_API_KEY": "anthropic-api",
+            "CLAUDE_API_KEY": "claude-api",
+            "GEMINI_API_KEY": "gemini-api",
+            "GOOGLE_API_KEY": "google-api",
+            "GOOGLE_APPLICATION_CREDENTIALS": "/private/vertex-adc.json",
+            "UNIGROK_API_KEYS": "gateway-client-secret",
+        }
+        for name, value in server_secrets.items():
+            monkeypatch.setenv(name, value)
+        monkeypatch.setenv("GROK_AUTH_PATH", "/oauth/auth.json")
+        monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "benign-project-id")
 
         class FakeProc:
             returncode = 0
@@ -3724,6 +5319,7 @@ class TestUtilsQuickWins:
 
         async def fake_exec(*cmd, **kwargs):
             captured["env"] = kwargs["env"]
+            captured["start_new_session"] = kwargs["start_new_session"]
             return FakeProc()
 
         monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
@@ -3734,7 +5330,53 @@ class TestUtilsQuickWins:
         assert is_cli is True
         assert content == "cli output"
         assert captured["timeout"] == 33.0
-        assert "XAI_API_KEY" not in captured["env"]
+        assert captured["start_new_session"] is True
+        assert server_secrets.keys().isdisjoint(captured["env"])
+        assert captured["env"]["GROK_AUTH_PATH"] == "/oauth/auth.json"
+        assert captured["env"]["GOOGLE_CLOUD_PROJECT"] == "benign-project-id"
+
+    @pytest.mark.asyncio
+    @pytest.mark.skipif(not hasattr(os, "killpg"), reason="POSIX process groups")
+    async def test_owned_process_group_timeout_reaps_descendant(self, tmp_path):
+        from src.utils import communicate_with_timeout
+
+        child_pid_file = tmp_path / "child.pid"
+        script = (
+            "import subprocess,sys,time; "
+            "child=subprocess.Popen([sys.executable,'-c',"
+            "'import time; time.sleep(60)'], start_new_session=True); "
+            "open(sys.argv[1],'w').write(str(child.pid)); "
+            "time.sleep(60)"
+        )
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable,
+            "-c",
+            script,
+            str(child_pid_file),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            start_new_session=True,
+        )
+        proc._unigrok_process_group = True
+        child_pid = None
+        try:
+            with pytest.raises(asyncio.TimeoutError):
+                await communicate_with_timeout(proc, 0.3)
+            assert proc.returncode is not None
+            assert child_pid_file.exists()
+            child_pid = int(child_pid_file.read_text())
+            for _ in range(100):
+                try:
+                    os.kill(child_pid, 0)
+                except ProcessLookupError:
+                    break
+                await asyncio.sleep(0.01)
+            else:
+                pytest.fail("descendant survived owned process-group timeout")
+        finally:
+            if child_pid is not None:
+                with contextlib.suppress(ProcessLookupError):
+                    os.kill(child_pid, signal.SIGKILL)
 
     @pytest.mark.asyncio
     async def test_cli_has_no_implicit_wall_clock_timeout(self, monkeypatch):
@@ -3778,6 +5420,53 @@ class TestCliPlaneV2:
         store.save_session = AsyncMock()
         store.load_messages = AsyncMock(return_value=[])
         return store
+
+    @pytest.mark.asyncio
+    async def test_api_plane_replays_history_from_injected_store(self):
+        from src.utils import _call_plane
+
+        injected_store = MagicMock(name="injected_store")
+        expected_history = [
+            {"role": "user", "content": "prior objective"},
+            {"role": "assistant", "content": "prior receipt"},
+        ]
+        history_loader = AsyncMock(return_value=expected_history)
+        response = _make_response(
+            content="continued from injected history",
+            tool_calls=[],
+            cost_usd=0.003,
+        )
+        chat = MagicMock()
+        chat.sample.return_value = response
+        chat.append = MagicMock()
+        client = MagicMock()
+        client.chat.create.return_value = chat
+        attempts = []
+
+        def record_attempt(**attempt):
+            attempts.append(attempt)
+
+        with patch("src.utils.load_history", new=history_loader), patch(
+            "src.utils.get_xai_client", return_value=client
+        ):
+            content, tokens, cost, is_cli = await _call_plane(
+                "reasoning",
+                "continue",
+                "grok-owned-session",
+                injected_store,
+                "sys",
+                requested_model="grok-build-0.1",
+                attempt_recorder=record_attempt,
+            )
+
+        history_loader.assert_awaited_once_with(
+            "grok-owned-session", injected_store
+        )
+        assert content == "continued from injected history"
+        assert is_cli is False
+        assert tokens > 0
+        assert cost == pytest.approx(0.003)
+        assert len(attempts) == chat.sample.call_count == 1
 
     @pytest.mark.asyncio
     async def test_cli_forwards_effort_max_turns_and_json_schema_exact_argv(self, monkeypatch):
@@ -3914,7 +5603,22 @@ class TestCliPlaneV2:
 
         monkeypatch.delenv("UNI_GROK_TESTING", raising=False)
         monkeypatch.setenv("HOME", str(tmp_path))
-        monkeypatch.setenv("XAI_API_KEY", "must-not-reach-cli")
+        server_secrets = {
+            "XAI_API_KEY": "xai-inference",
+            "XAI_MANAGEMENT_API_KEY": "xai-management",
+            "GROK_API_KEY": "grok-api",
+            "OPENAI_API_KEY": "openai-api",
+            "ANTHROPIC_API_KEY": "anthropic-api",
+            "CLAUDE_API_KEY": "claude-api",
+            "GEMINI_API_KEY": "gemini-api",
+            "GOOGLE_API_KEY": "google-api",
+            "GOOGLE_APPLICATION_CREDENTIALS": "/private/vertex-adc.json",
+            "UNIGROK_API_KEYS": "gateway-client-secret",
+        }
+        for name, value in server_secrets.items():
+            monkeypatch.setenv(name, value)
+        monkeypatch.setenv("GROK_AUTH_PATH", "/oauth/auth.json")
+        monkeypatch.setenv("UNIGROK_RUNTIME", "local")
         (tmp_path / ".grok").mkdir()
         (tmp_path / ".grok" / "auth.json").write_text("{}", encoding="utf-8")
         monkeypatch.setattr(utils, "grok_cli_available", lambda: True)
@@ -3939,20 +5643,37 @@ class TestCliPlaneV2:
         assert status["models"] == ["grok-4.5"]
         assert captured["cmd"] == ["/tmp/grok", "models"]
         assert captured["kwargs"]["timeout"] == 3.0
-        assert "XAI_API_KEY" not in captured["kwargs"]["env"]
+        assert server_secrets.keys().isdisjoint(captured["kwargs"]["env"])
+        assert captured["kwargs"]["env"]["GROK_AUTH_PATH"] == "/oauth/auth.json"
+        assert captured["kwargs"]["env"]["UNIGROK_RUNTIME"] == "local"
 
-    def test_cli_oauth_env_strips_api_credentials(self, monkeypatch):
+    def test_cli_oauth_env_strips_all_server_credentials_only(self, monkeypatch):
         from src import utils
 
-        monkeypatch.setenv("XAI_API_KEY", "api-secret")
-        monkeypatch.setenv("GROK_API_KEY", "alternate-secret")
-        monkeypatch.setenv("KEEP_ME", "yes")
+        server_secrets = {
+            "XAI_API_KEY": "xai-inference",
+            "XAI_MANAGEMENT_API_KEY": "xai-management",
+            "GROK_API_KEY": "grok-api",
+            "OPENAI_API_KEY": "openai-api",
+            "ANTHROPIC_API_KEY": "anthropic-api",
+            "CLAUDE_API_KEY": "claude-api",
+            "GEMINI_API_KEY": "gemini-api",
+            "GOOGLE_API_KEY": "google-api",
+            "GOOGLE_APPLICATION_CREDENTIALS": "/private/vertex-adc.json",
+            "UNIGROK_API_KEYS": "gateway-client-secret",
+        }
+        for name, value in server_secrets.items():
+            monkeypatch.setenv(name, value)
+        monkeypatch.setenv("GROK_AUTH_PATH", "/oauth/auth.json")
+        monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "benign-project-id")
+        monkeypatch.setenv("UNIGROK_RUNTIME", "local")
 
         child_env = utils.grok_cli_oauth_env()
 
-        assert "XAI_API_KEY" not in child_env
-        assert "GROK_API_KEY" not in child_env
-        assert child_env["KEEP_ME"] == "yes"
+        assert server_secrets.keys().isdisjoint(child_env)
+        assert child_env["GROK_AUTH_PATH"] == "/oauth/auth.json"
+        assert child_env["GOOGLE_CLOUD_PROJECT"] == "benign-project-id"
+        assert child_env["UNIGROK_RUNTIME"] == "local"
 
     def test_example_env_is_never_loaded_as_runtime_configuration(
         self, monkeypatch, tmp_path
@@ -3993,7 +5714,20 @@ class TestCliPlaneV2:
             '{"mcpServers":{"unsafe":{}}}', encoding="utf-8"
         )
         monkeypatch.setenv("HOME", str(source_home))
-        monkeypatch.setenv("XAI_API_KEY", "must-not-leak")
+        server_secrets = {
+            "XAI_API_KEY": "xai-inference",
+            "XAI_MANAGEMENT_API_KEY": "xai-management",
+            "GROK_API_KEY": "grok-api",
+            "OPENAI_API_KEY": "openai-api",
+            "ANTHROPIC_API_KEY": "anthropic-api",
+            "CLAUDE_API_KEY": "claude-api",
+            "GEMINI_API_KEY": "gemini-api",
+            "GOOGLE_API_KEY": "google-api",
+            "GOOGLE_APPLICATION_CREDENTIALS": "/private/vertex-adc.json",
+            "UNIGROK_API_KEYS": "gateway-client-secret",
+        }
+        for name, value in server_secrets.items():
+            monkeypatch.setenv(name, value)
         monkeypatch.setenv("UNRELATED_SECRET", "must-not-leak")
 
         with utils._isolated_grok_cli_runtime() as (cwd, env):
@@ -4004,7 +5738,7 @@ class TestCliPlaneV2:
             assert not (Path(env["HOME"]) / ".grok" / "auth.json").exists()
             assert not (Path(env["HOME"]) / ".grok" / "settings.json").exists()
             assert env["PWD"] == str(cwd)
-            assert "XAI_API_KEY" not in env
+            assert server_secrets.keys().isdisjoint(env)
             assert "UNRELATED_SECRET" not in env
 
         assert not isolated_root.exists()
@@ -4172,8 +5906,18 @@ class TestCliPlaneV2:
             {"role": "user", "content": "Remember marker MISSING-SESSION-MARKER"},
             {"role": "assistant", "content": "Marker stored"},
         ]
+        attempts = []
+
+        def record_attempt(**attempt):
+            attempts.append(attempt)
+
         content, _, _, is_cli = await _call_plane(
-            "cli-fallback", "What marker did I give you?", "sess", store, "sys"
+            "cli-fallback",
+            "What marker did I give you?",
+            "sess",
+            store,
+            "sys",
+            attempt_recorder=record_attempt,
         )
 
         assert (content, is_cli) == ("recovered from server history", True)
@@ -4186,6 +5930,11 @@ class TestCliPlaneV2:
         retry_prompt = fresh_cmd[fresh_cmd.index("-p") + 1]
         assert "MISSING-SESSION-MARKER" in retry_prompt
         assert retry_prompt.count("What marker did I give you?") == 1
+        assert len(attempts) == len(captured["cmds"]) == 2
+        assert [attempt["outcome"] for attempt in attempts] == [
+            "error",
+            "completed",
+        ]
         store.load_messages.assert_awaited_once()
         store.save_session.assert_awaited_once_with(
             "sess",
@@ -4540,7 +6289,7 @@ class TestCliPlaneV2:
     @pytest.mark.asyncio
     async def test_cli_failure_records_breaker(self, monkeypatch):
         from src import utils
-        from src.utils import _call_plane
+        from src.utils import _GrokCLIExecutionError, _call_plane
 
         monkeypatch.setenv("UNIGROK_RUNTIME", "local")
         monkeypatch.setattr(utils, "_BREAKER_STATE", {})
@@ -4552,14 +6301,19 @@ class TestCliPlaneV2:
             return FakeProc()
 
         async def fake_communicate(proc, timeout_sec, input_data=None):
-            return b"", b"boom"
+            return (
+                b'{"text":"receipt effect-7: edited file"}',
+                b"boom with Bearer xai-123456789SECRET",
+            )
 
         monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
         monkeypatch.setattr("src.utils.communicate_with_timeout", fake_communicate)
 
-        with pytest.raises(RuntimeError, match="Grok CLI error: boom"):
+        with pytest.raises(_GrokCLIExecutionError, match="Grok CLI error: boom") as exc_info:
             await _call_plane("cli-fallback", "hi", None, None, "sys")
 
+        assert exc_info.value.partial_output == "receipt effect-7: edited file"
+        assert "xai-123456789SECRET" not in str(exc_info.value)
         assert utils._BREAKER_STATE["grok-composer-2.5-fast"]["consecutive_failures"] == 1
 
 

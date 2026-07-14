@@ -43,7 +43,7 @@ class AgentResult(BaseResult):
     )
     dialed_port: Optional[int] = Field(None, description="Phoneword mode port used as the default, if any.")
     requested_plane: Optional[Literal["auto", "cli", "api"]] = Field(
-        None, description="Caller-selected credential plane contract."
+        None, description="Caller-selected starting credential plane."
     )
     resolved_plane: Optional[Literal["API", "CLI", "CLI-Fallback", "local"]] = Field(
         None, description="Credential plane that actually executed the request."

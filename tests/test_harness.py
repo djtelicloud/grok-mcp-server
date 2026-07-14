@@ -199,14 +199,19 @@ async def test_cloudrun_orchestrate_does_not_cli_fallback(monkeypatch):
     monkeypatch.setattr("src.utils._call_plane", mock_call_plane)
 
     with patch("asyncio.create_subprocess_exec") as mock_exec:
-        with pytest.raises(RuntimeError, match="Cloud Run"):
-            await utils.orchestrate(
-                prompt="hello",
-                dynamic_sys_prompt="system",
-                store=None,
-                enable_agentic=False,
-                requested_model="grok-4.3",
-            )
+        layer = await utils.orchestrate(
+            prompt="hello",
+            dynamic_sys_prompt="system",
+            store=None,
+            enable_agentic=False,
+            requested_model="grok-4.3",
+        )
 
     mock_exec.assert_not_called()
     assert mock_call_plane.await_count == 1
+    assert layer.finish_reason == "error"
+    assert "Cloud Run" in layer.generation
+    assert layer.routing_receipt["provider"] == "xai"
+    assert layer.routing_receipt["authority"] == "grok"
+    assert layer.routing_receipt["why_detail"] == "cli_unavailable_in_cloudrun"
+    assert len(layer.routing_receipt["attempts"]) == 1

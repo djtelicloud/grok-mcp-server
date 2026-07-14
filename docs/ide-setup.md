@@ -265,14 +265,16 @@ docker compose run --rm grok-cli-auth
 ```
 
 The device-code flow is deliberately separate from ordinary startup and from
-every IDE project. UniGrok strips `XAI_API_KEY` from CLI subprocesses, so a CLI
-route must use verified grok.com OAuth instead of silently consuming API quota.
+every IDE project. UniGrok strips all server-owned provider, management,
+gateway, and credential-file variables from CLI subprocesses, so a CLI route
+must use verified grok.com OAuth instead of consuming API quota or exposing a
+subordinate-provider credential.
 The startup log and `/runtimez` report `ready`, `needs_auth`, `unreachable`, or
 other bounded state. When CLI auth is absent, the container still starts and
 the API plane remains available.
 
 After the service is running, use the project-independent `setup_command`
 returned by `/runtimez` or `grok_mcp_status`. It repairs ownership of older
-named volumes, drops to the unprivileged service uid, removes API-key variables,
+named volumes, drops to the unprivileged service uid, removes server credentials,
 and starts `grok login --device-auth`. The command is intentionally returned by
 the service so agents do not guess a stale bootstrap sequence.

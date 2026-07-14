@@ -97,7 +97,8 @@ No dial owns separate state or broadens authorization.
 ### Guiding Principles:
 * **Local dual-plane execution**: The server utilizes a Cloud API Plane (via `xai-sdk`) and a Local CLI Plane (via the native `grok` command-line tool) to ensure resilience against network failures or credential issues.
   The planes are credential-isolated: the API SDK receives `XAI_API_KEY`, while
-  every CLI child has API-key variables removed and must use a verified
+  every CLI child has server-owned API, management, gateway, subordinate-
+  provider, and credential-file variables removed and must use a verified
   grok.com OAuth session from the machine-level `unigrok-cli-auth` Docker
   volume. Device-code bootstrap is an explicit one-time helper, never an
   interactive container-start side effect and never project-specific.
@@ -185,13 +186,15 @@ margin, which also provides deterministic anti-flap hysteresis.
 
 The local plane policy defaults to `cli_first`: compatible unpinned planning
 and coding work use the authenticated Grok CLI subscription. The public agent
-also exposes a strict `plane=cli|api` contract plus `fallback_policy`; strict
-requests never cross the subscription/API billing boundary, and model pins are
-validated against the selected live catalog. Thinking, vision, and multi-agent
-research remain API-native. Discovery, status, `/runtimez`, and every public
-agent result carry the same versioned `credential_planes` contract. Agents
-prompt once per notice id and must obtain user approval before installation,
-device auth, or secure server-environment changes.
+also exposes `plane=cli|api` as the starting-plane selector plus an independent
+`fallback_policy`: `same_plane` never crosses the subscription/API billing
+boundary, while `cross_plane` permits one bounded recovery on the other xAI
+plane. Model pins are validated against the selected starting catalog.
+Thinking, vision, and multi-agent research remain API-native. Discovery,
+status, `/runtimez`, and every public agent result carry the same versioned
+`credential_planes` contract. Agents prompt once per notice id and must obtain
+user approval before installation, device auth, or secure server-environment
+changes.
 
 CLI candidate slugs come from the model list returned by the cached,
 API-key-stripped OAuth health probe. Reasoning prefers the reported CLI default

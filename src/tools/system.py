@@ -978,7 +978,7 @@ async def grok_mcp_discover_self(include_models: bool = False) -> SystemResult:
                     "policy": credential_planes["policy"],
                     "preferred_plane": credential_planes["preferred_plane"],
                     "effective_plane": credential_planes["effective_plane"],
-                    "rule": "Plane and model are independent contracts: strict CLI/API requests never cross billing boundaries; auto preserves compatible routing.",
+                    "rule": "Plane selects the starting credential; same_plane forbids billing-boundary crossing and cross_plane permits bounded recovery.",
                 },
                 "planes": {
                     "CLI": {

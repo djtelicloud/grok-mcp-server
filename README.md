@@ -108,9 +108,12 @@ and SQLite. It does not make a paid API call to validate an API key. Use host
 port `4765` for IDEs and browsers; `8080` is only the container's internal port.
 
 For an explicit no-API-billing agent call, set `plane="cli"` and
-`fallback_policy="same_plane"`. Use `plane="api"` for a strict metered API
-call. The default `plane="auto"` remains backward compatible; the Control
-Center defaults to the safer subscription-only contract.
+`fallback_policy="same_plane"`. For a metered API-only call, pair
+`plane="api"` with the same policy. `plane` selects the first attempt;
+`fallback_policy="cross_plane"` permits bounded recovery on the other xAI
+credential plane and reports the resolved plane and billing class. The default
+`plane="auto"` remains backward compatible; the Control Center defaults to the
+safer subscription-only contract.
 
 This is a standalone, workspace-neutral service. The image runs its baked
 application from `/app`, keeps mutable data in a Docker volume at `/state`, and
@@ -408,9 +411,10 @@ flowchart LR
 
 Full design detail lives in [architecture.md](architecture.md).
 
-UniGrok strips `XAI_API_KEY` from every CLI subprocess. This prevents a CLI
-invocation from silently charging the API credential and makes the reported
-CLI/API routing split a real credential and allowance boundary.
+UniGrok strips every server-owned API, management, gateway, and subordinate-
+provider credential from each CLI subprocess while preserving the Grok OAuth
+path. This prevents silent API billing or credential exposure and makes the
+reported CLI/API routing split a real credential and allowance boundary.
 
 The Control Center usage ledger keeps those planes honest: xAI API requests
 store the exact per-response billed cost; CLI subscription requests store local

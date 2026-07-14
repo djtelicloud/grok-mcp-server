@@ -19,7 +19,8 @@ not provide a kernel or network isolation boundary.
 
 ## Protected assets
 
-- Server-held `XAI_API_KEY` and the Docker-held Grok CLI OAuth session.
+- Server-held xAI, OpenAI, Anthropic, Google, and gateway credentials, plus the
+  Docker-held Grok CLI OAuth session.
 - OAuth subjects, gateway bearer keys, prompts, files, session history, and
   telemetry.
 - Attached contributor workspace source and Git state.

@@ -223,6 +223,30 @@ async def test_save_telemetry_persists_usage_provenance(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_save_telemetry_persists_partial_cross_plane_usage(tmp_path):
+    store = GrokSessionStore(db_path=tmp_path / "partial-usage.db")
+    try:
+        await store.save_telemetry(
+            "intent",
+            "CLI-Fallback",
+            0,
+            1.2,
+            0.001,
+            model="grok-composer-2.5-fast",
+            tokens=7,
+            token_kind="partial",
+            billing_source="partial",
+        )
+        row = (await store.get_telemetry_stats())[0]
+        metadata = telemetry_metadata(row)
+        assert metadata["tokens"] == 7
+        assert metadata["token_kind"] == "partial"
+        assert metadata["billing_source"] == "partial"
+    finally:
+        await store.close()
+
+
+@pytest.mark.asyncio
 async def test_save_telemetry_bounds_routing_by_persisted_compact_json(tmp_path):
     store = GrokSessionStore(db_path=tmp_path / "routing-bound.db")
     try:
@@ -234,10 +258,70 @@ async def test_save_telemetry_bounds_routing_by_persisted_compact_json(tmp_path)
         assert len(json.dumps(bounded)) > 6000
 
         await store.save_telemetry("bounded", "API", 1, 0.1, 0.0, routing=bounded)
-        await store.save_telemetry("oversized", "API", 1, 0.1, 0.0, routing=oversized)
+        with pytest.raises(ValueError, match="core exceeds"):
+            await store.save_telemetry(
+                "oversized", "API", 1, 0.1, 0.0, routing=oversized
+            )
 
         rows = {row["intent"]: telemetry_metadata(row) for row in await store.get_telemetry_stats()}
         assert rows["bounded"]["routing"] == bounded
-        assert "routing" not in rows["oversized"]
+        assert "oversized" not in rows
+    finally:
+        await store.close()
+
+
+@pytest.mark.asyncio
+async def test_telemetry_attempt_split_round_trips_exact_receipt_and_detects_tamper(
+    tmp_path,
+):
+    store = GrokSessionStore(db_path=tmp_path / "routing-attempts.db")
+    attempts = [
+        {
+            "provider": "xai",
+            "phase": "execution",
+            "attempt": index,
+            "plane": "API" if index % 2 else "CLI",
+            "model": "shared-live-slug",
+            "purpose": "reflection",
+            "outcome": "error" if index < 90 else "completed",
+            "error": "bounded failure evidence " + ("x" * 80),
+        }
+        for index in range(1, 101)
+    ]
+    receipt = {
+        "v": 1,
+        "provider": "xai",
+        "authority": "grok",
+        "requested_plane": "auto",
+        "resolved_plane": "API",
+        "attempts": attempts,
+    }
+    try:
+        await store.save_telemetry(
+            "many-attempts", "API", 0, 1.0, 0.1, routing=receipt
+        )
+        row = (await store.get_telemetry_stats())[0]
+        assert telemetry_metadata(row)["routing"] == receipt
+
+        async with store._conn.execute(
+            "SELECT metadata FROM telemetry WHERE id = ?", (row["id"],)
+        ) as cursor:
+            raw_parent = (await cursor.fetchone())[0]
+        assert len(raw_parent) < 7500
+        async with store._conn.execute(
+            "SELECT COUNT(*), MAX(length(attempt_json)) FROM telemetry_attempts"
+        ) as cursor:
+            count, max_chars = await cursor.fetchone()
+        assert count == len(attempts)
+        assert max_chars <= 4096
+
+        await store._conn.execute(
+            "UPDATE telemetry_attempts SET attempt_json = ? "
+            "WHERE telemetry_id = ? AND attempt_ordinal = 1",
+            (json.dumps({"tampered": True}), row["id"]),
+        )
+        await store._conn.commit()
+        with pytest.raises(RuntimeError, match="digest mismatch"):
+            await store.get_telemetry_stats()
     finally:
         await store.close()
