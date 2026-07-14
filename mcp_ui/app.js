@@ -1,9 +1,9 @@
-import { parseMarkdown, sanitizeHref } from "./markdown.js?v=grok-v0.6.0-r9";
+import { parseMarkdown, sanitizeHref } from "./markdown.js?v=grok-v0.6.0-r10";
 
 // Must match the <meta name="unigrok-ui-version"> baked into index.html and
 // src/version.py UI_ASSET_VERSION; a mismatch means the browser paired a
 // cached page with a different script build (the stale-skew failure class).
-const UI_ASSET_VERSION = "grok-v0.6.0-r9";
+const UI_ASSET_VERSION = "grok-v0.6.0-r10";
 
 const LAYOUT_KEY = "unigrok.mcp.console.layout.v2";
 
@@ -37,7 +37,6 @@ const TAB_IDS = new Set([
   "tab-onboarding",
   "tab-metrics",
   "tab-models",
-  "tab-console",
 ]);
 
 function readLayout() {
@@ -1050,6 +1049,13 @@ function renderSpendGlance(payload) {
   }
 }
 
+function actionableCredentialNotice(contract) {
+  const notices = (contract?.notices || []).filter((notice) => notice.prompt_user);
+  return notices.find((notice) => notice.blocking)
+    || (contract?.effective_plane === "none" ? notices[0] : null)
+    || null;
+}
+
 function renderSetupStatus(data, ready = true, detailText = null) {
   // Offline → show install card. Ready-but-degraded → named checks + credential alert.
   $("quickStartCard")?.classList.toggle("hidden", Boolean(ready) || Boolean(detailText));
@@ -1058,8 +1064,8 @@ function renderSetupStatus(data, ready = true, detailText = null) {
   const effective = contract.effective_plane || "none";
   const runtime = data?.runtime || "unknown";
   const tools = $("toolCountChip")?.textContent?.replace(/^tools:\s*/i, "") || "…";
-  const notices = (contract.notices || []).filter((notice) => notice.prompt_user);
-  const attention = notices.map((notice) => notice.message).join(" ");
+  const notice = actionableCredentialNotice(contract);
+  const attention = notice?.message || "";
 
   const hero = $("readinessHero");
   const title = $("readinessTitle");
@@ -1148,7 +1154,7 @@ function renderCredentialPlanes(contract) {
   const effective = contract.effective_plane || "none";
   planeChip.innerText = `plane: ${preferred} first → ${effective}`;
 
-  const notice = (contract.notices || []).find((item) => item.prompt_user);
+  const notice = actionableCredentialNotice(contract);
   if (!notice) {
     alertCard.classList.add("hidden");
     return;
@@ -2350,14 +2356,10 @@ function init() {
   if ($("tab-schemas") && !$("tab-schemas").hidden) setupSchemaExplorer();
   if ($("tab-guard") && !$("tab-guard").hidden) setupReasoningGuard();
   if ($("tab-okf") && !$("tab-okf").hidden) setupOkfClipboard();
-  setupConsoleActions();
-
   // Proactive safety checks initialization
   checkBrowserCompatibility();
   setupDockerRestart();
   setupCredentialActions();
-  setupApiKeyWizard();
-  setupCostEstimator();
   setupMetricsControls();
 
   $("refreshModelsBtn").addEventListener("click", loadPlaneModelCatalog);

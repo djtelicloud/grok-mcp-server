@@ -7,9 +7,9 @@
     <meta name="unigrok-ui-regions" content="navigation,workbench,rpc-inspector,rpc-logs,result-facts" />
     <!-- Version handshake: app.js compares this against its own build constant
          and self-heals a stale-cached page with one revalidating reload. -->
-    <meta name="unigrok-ui-version" content="grok-v0.6.0-r9" />
-  <link rel="stylesheet" href="./tokens.css?v=grok-v0.6.0-r9" />
-  <link rel="stylesheet" href="./styles.css?v=grok-v0.6.0-r9" />
+    <meta name="unigrok-ui-version" content="grok-v0.6.0-r10" />
+  <link rel="stylesheet" href="./tokens.css?v=grok-v0.6.0-r10" />
+  <link rel="stylesheet" href="./styles.css?v=grok-v0.6.0-r10" />
   </head>
   <body>
     <main class="app-shell">
@@ -74,9 +74,6 @@
           <button id="tab-btn-models" type="button" class="nav-btn" data-tab="tab-models" role="tab" aria-selected="false" aria-controls="tab-models" tabindex="-1" title="Models &amp; planes">
             <span class="btn-icon" aria-hidden="true">◫</span><span class="btn-label">Planes</span>
           </button>
-          <button id="tab-btn-console" type="button" class="nav-btn" data-tab="tab-console" role="tab" aria-selected="false" aria-controls="tab-console" tabindex="-1" title="Legacy connectivity probe — not daily chat">
-            <span class="btn-icon" aria-hidden="true">▶</span><span class="btn-label">Legacy smoke</span>
-          </button>
           <a id="nav-link-site" class="nav-link" href="https://grokmcp.org" target="_blank" rel="noopener noreferrer" title="Project site">
             <span class="btn-icon" aria-hidden="true">↗</span><span class="btn-label">Docs site</span>
           </a>
@@ -87,128 +84,6 @@
         <!-- Main Workbench Content Area -->
         <section id="workbench" class="workbench" data-region="workbench" aria-label="Active tool workspace">
           
-          <!-- TAB 1: Agent Playground -->
-          <div id="tab-console" class="tab-panel" role="tabpanel" aria-labelledby="tab-btn-console" data-region="tab-console">
-            <div class="panel-header">
-              <h2>Legacy connectivity smoke</h2>
-              <span class="panel-header-hint">Not daily chat · IDE MCP is primary</span>
-            </div>
-            <p class="panel-desc">Optional one-shot probe that the gateway can answer. Daily Grok chat belongs in your IDE via <code>http://localhost:4765/mcp</code>. Prefer Health for setup and paste snippets.</p>
-
-            <div class="form-layout playground-form">
-              <div id="apiKeyWizard" class="wizard-card hidden">
-                <h4>🔑 UniGrok Gateway Access</h4>
-                <p class="wizard-desc">This is the optional UniGrok client token, not your xAI API key. Never paste XAI_API_KEY into this page.</p>
-                <div class="wizard-inputs">
-                  <input id="wizardTokenInput" type="password" autocomplete="off" spellcheck="false" placeholder="Client token..." class="wizard-input" aria-label="Client token" />
-                  <button id="saveWizardTokenBtn" type="button" class="small-btn-glow">Save Token</button>
-                </div>
-              </div>
-              <div class="form-group task-composer">
-                <label for="promptInput">Your task
-                  <textarea id="promptInput" rows="5" placeholder="Describe what you want Grok to do, or choose a preset below…" aria-label="Prompt task message input"></textarea>
-                </label>
-                <div class="estimator-row">
-                  <span id="costEstimator" class="estimator-text">Local input estimate: ~0 tokens</span>
-                  <label class="budget-guard-label">
-                    <input id="budgetGuardToggle" type="checkbox" checked aria-label="Toggle large prompt safety guard" /> Large Prompt Guard
-                  </label>
-                </div>
-              </div>
-              <div class="form-actions playground-action-dock">
-                <button id="sendBtn" type="button" class="primary-btn-glow" aria-label="Run task with agent">Run Task</button>
-                <button id="clearBtn" type="button" class="secondary-btn" aria-label="Clear history log">Clear History</button>
-              </div>
-            </div>
-
-            <div class="task-presets" aria-label="Task presets">
-              <button id="runSampleBtn" type="button" class="preset-btn" data-prompt="Reply with exactly: UniGrok agent is ready.">Run zero-config sample</button>
-              <button type="button" class="preset-btn prompt-preset" data-prompt="Explain which credential plane and model you would use for a coding task, and why.">Explain routing</button>
-              <button type="button" class="preset-btn prompt-preset" data-prompt="Review this code or error and give me the three most useful next steps:\n\n">Review code or error</button>
-            </div>
-
-            <!-- Scrollable Conversation Log — kept adjacent to the composer so
-                 the chat loop (type, run, read) never crosses secondary UI. -->
-            <div class="conversation-wrapper">
-              <div class="section-title">Playground session</div>
-              <div id="conversation" class="transcript" role="log" aria-live="polite" aria-label="Playground conversation"></div>
-            </div>
-
-            <details class="run-options">
-              <summary>Run options · SuperGrok subscription · Auto</summary>
-              <div class="form-layout">
-              <div class="form-group row-group">
-                <label for="planeInput">
-                  Run With
-                  <select id="planeInput" aria-label="Credential plane selection">
-                    <option value="cli" selected>SuperGrok subscription (Recommended)</option>
-                    <option value="auto">Smart routing (may use metered API)</option>
-                    <option value="api">Developer API (Metered)</option>
-                  </select>
-                </label>
-                <label for="modeInput">
-                  Execution Mode
-                  <select id="modeInput" aria-label="Execution mode selection">
-                    <option value="auto">auto - Smart query evaluation</option>
-                    <option value="fast">fast - Single-turn toolless path</option>
-                    <option value="reasoning">reasoning - Multi-step planner path</option>
-                    <option value="thinking">thinking - Reflected agent loop</option>
-                    <option value="research">research - Citation-grounded fanout</option>
-                  </select>
-                </label>
-                <label for="modelInput">
-                  Pin Model Override
-                  <select id="modelInput" aria-label="Pin model override selection">
-                    <option value="">auto (Recommended)</option>
-                    <!-- Populated dynamically -->
-                  </select>
-                </label>
-                <p id="planeHint" class="plane-hint">Subscription only · no developer API billing</p>
-              </div>
-
-              <details class="advanced-settings">
-                <summary>Advanced RPC settings</summary>
-                <div class="advanced-grid">
-                  <label>Session ID
-                    <input id="sessionInput" type="text" placeholder="auto-generated per browser session" />
-                  </label>
-                  <label>Client ID
-                    <input id="clientIdInput" type="text" value="uni-grok-console" />
-                  </label>
-                  <label>Billing Caller (X-Caller)
-                    <input id="callerInput" type="text" placeholder="e.g. swarm-agent-0" />
-                  </label>
-                  <label>Failure Policy
-                    <select id="fallbackPolicyInput">
-                      <option value="same_plane" selected>Stay on selected plane</option>
-                      <option value="cross_plane">Allow cross-plane fallback</option>
-                    </select>
-                  </label>
-                  <label>Injected System Rules
-                    <textarea id="systemPromptInput" rows="3" placeholder="Additional system prompt instructions..."></textarea>
-                  </label>
-                  <label>Workspace Context
-                    <textarea id="workspaceContextInput" rows="3" placeholder="Optional project material to ground this run (secrets are redacted server-side; over the char limit is rejected)."></textarea>
-                  </label>
-                  <label>Workspace Label
-                    <input id="workspaceLabelInput" type="text" placeholder="e.g. uni-grok-mcp @ HEAD" />
-                  </label>
-                </div>
-              </details>
-              <button id="copyConsoleCallBtn" type="button" class="small-btn-glow">Copy tool call</button>
-            </div>
-            </details>
-
-            <section class="playground-launcher" aria-label="Quick start actions">
-              <div>
-                <span class="model-kicker">No prompt needed</span>
-                <strong>Is UniGrok ready?</strong>
-                <p>Checks credentials, planes, routing policy, and local telemetry without spending an inference turn.</p>
-              </div>
-              <button id="verifySetupBtn" type="button" class="primary-btn-glow">Verify Setup</button>
-            </section>
-          </div>
-
           <!-- TAB 2: Result Shape Guide -->
           <div id="tab-schemas" class="tab-panel retired-panel" hidden>
             <div class="panel-header">
@@ -642,6 +517,6 @@ docker compose up --build -d</code></pre>
 
       </section>
     </main>
-  <script type="module" src="./app.js?v=grok-v0.6.0-r9"></script>
+  <script type="module" src="./app.js?v=grok-v0.6.0-r10"></script>
   </body>
 </html>

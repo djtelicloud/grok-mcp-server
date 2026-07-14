@@ -4,6 +4,13 @@ All notable changes to UniGrok MCP will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- **Console is health, evidence, and pasteables only**: removed the legacy
+  browser `agent` playground and its provider-spending controls from the Core
+  UI. Daily Grok work now has one documented path—IDE → UniGrok MCP—while the
+  local Console remains the machine-owner view for readiness, credential
+  planes, costs, receipts, and copyable setup actions.
+
 ### Fixed
 - **Control Center answers survive stale browser caches**: `/ui` and `/docs`
   responses now carry `Cache-Control: no-cache` (Starlette's `StaticFiles`

@@ -47,9 +47,9 @@ def test_mcp_ui_static_files_are_served(monkeypatch):
     assert index.status_code == 200
     assert "<title>UniGrok Gateway Console v0.6.0</title>" in index.text
     assert '<span class="version-badge">v0.6.0</span>' in index.text
-    assert 'script type="module" src="./app.js?v=grok-v0.6.0-r9"' in index.text
-    assert '<link rel="stylesheet" href="./styles.css?v=grok-v0.6.0-r9" />' in index.text
-    assert '<link rel="stylesheet" href="./tokens.css?v=grok-v0.6.0-r9" />' in index.text
+    assert 'script type="module" src="./app.js?v=grok-v0.6.0-r10"' in index.text
+    assert '<link rel="stylesheet" href="./styles.css?v=grok-v0.6.0-r10" />' in index.text
+    assert '<link rel="stylesheet" href="./tokens.css?v=grok-v0.6.0-r10" />' in index.text
     assert "Console" in index.text
     assert 'id="surfaceModeBadge"' in index.text
     assert 'id="tab-btn-schemas"' not in index.text
@@ -65,12 +65,14 @@ def test_mcp_ui_static_files_are_served(monkeypatch):
     assert 'Swarm Optimizer' not in index.text
     assert 'product-law' in index.text
     assert "Bearer token" not in index.text
-    assert "Legacy connectivity smoke" in index.text
-    assert 'id="verifySetupBtn"' in index.text
-    assert 'id="runSampleBtn"' in index.text
-    assert "IDE MCP is primary" in index.text or "Legacy connectivity smoke" in index.text
+    assert 'id="tab-btn-console"' not in index.text
+    assert 'id="tab-console"' not in index.text
+    assert 'id="verifySetupBtn"' not in index.text
+    assert 'id="runSampleBtn"' not in index.text
+    assert "Chat lives in your IDE" in index.text
     assert "Legacy Mode" not in index.text
-    assert "verifyPlaygroundSetup" in script.text
+    init_body = script.text.split("function init()", 1)[1]
+    assert "setupConsoleActions();" not in init_body
     assert "switchTab(\"tab-onboarding\")" in script.text or "switchTab('tab-onboarding')" in script.text
     assert script.status_code == 200
     assert "tools/call" in script.text
@@ -151,7 +153,9 @@ def test_mcp_ui_static_files_are_served(monkeypatch):
     assert "Models &amp; Credential Planes" in index.text
     assert 'id="copyCredentialActionBtn"' in index.text
     assert "renderCredentialPlanes" in script.text
-    assert "Never paste XAI_API_KEY into this page" in index.text
+    assert "actionableCredentialNotice" in script.text
+    assert 'contract?.effective_plane === "none"' in script.text
+    assert "Never put XAI_API_KEY in IDE MCP settings" in index.text
     assert "Optional organization API comparison" in index.text
     assert "renderRoutingReceipts" in script.text
     assert 'fetchMcpCall("grok_mcp_discover_self", { include_models: true })' in script.text
@@ -177,16 +181,9 @@ def test_mcp_ui_static_files_are_served(monkeypatch):
     assert "mcp.console.layout.v2" in script.text
     assert "grid-template-columns: 1fr !important" not in styles.text
     assert "fonts.googleapis.com" not in index.text
-    assert 'id="planeInput"' in index.text
-    assert 'value="cli" selected' in index.text
-    assert 'id="fallbackPolicyInput"' in index.text
-    assert 'value="same_plane" selected' in index.text
+    assert 'id="planeInput"' not in index.text
+    assert 'id="fallbackPolicyInput"' not in index.text
     assert 'id="factBilling"' in index.text
-    assert "syncModelOptions" in script.text
-    assert "Explicit pins use metered API" in script.text
-    assert "Direct CLI-only pins" in script.text
-    assert 'plane: $("planeInput").value' in script.text
-    assert 'fallback_policy: $("fallbackPolicyInput").value' in script.text
 
 
 def test_mcp_ui_swarm_playground_is_served_and_honest(monkeypatch):
@@ -283,7 +280,7 @@ def test_mcp_ui_layout_engine_is_local_and_ide_first():
     assert '.console-grid[data-inspector="hidden"]' in styles.text
     assert '.console-grid[data-inspector="drawer"]' in styles.text
     assert 'data-inspector-drawer="closed"' in index.text
-    assert 'class="form-actions playground-action-dock"' in index.text
+    assert 'class="form-actions playground-action-dock"' not in index.text
     assert "Health" in index.text
     assert 'id="advancedNav"' not in index.text
     assert "product-law" in index.text
@@ -359,13 +356,13 @@ def test_mcp_ui_browser_warning():
     assert "Browser note" in index.text
 
 
-def test_mcp_ui_token_drift_wizard():
+def test_mcp_ui_has_no_browser_credential_wizard():
     with TestClient(create_app(), base_url="http://localhost:8080") as client:
         index = client.get("/ui/")
     assert index.status_code == 200
-    assert 'id="apiKeyWizard"' in index.text
-    assert 'id="wizardTokenInput"' in index.text
-    assert 'id="saveWizardTokenBtn"' in index.text
+    assert 'id="apiKeyWizard"' not in index.text
+    assert 'id="wizardTokenInput"' not in index.text
+    assert 'id="saveWizardTokenBtn"' not in index.text
 
 
 def test_mcp_ui_token_storage_is_in_memory_only():
@@ -376,13 +373,13 @@ def test_mcp_ui_token_storage_is_in_memory_only():
     assert 'localStorage.getItem("unigrok.clientToken"' not in script.text
 
 
-def test_mcp_ui_cost_estimator():
+def test_mcp_ui_has_no_browser_inference_cost_estimator():
     with TestClient(create_app(), base_url="http://localhost:8080") as client:
         index = client.get("/ui/")
     assert index.status_code == 200
-    assert 'id="costEstimator"' in index.text
-    assert 'id="budgetGuardToggle"' in index.text
-    assert "Local input estimate" in index.text
+    assert 'id="costEstimator"' not in index.text
+    assert 'id="budgetGuardToggle"' not in index.text
+    assert "Local input estimate" not in index.text
     assert "Estimated Cost" not in index.text
 
 
@@ -391,8 +388,10 @@ def test_mcp_ui_accessibility_audit():
         index = client.get("/ui/")
         styles = client.get("/ui/styles.css")
     assert index.status_code == 200
-    assert 'aria-label="Prompt task message input"' in index.text
-    assert 'aria-label="Client token"' in index.text
+    assert 'aria-label="Console sections"' in index.text
+    assert 'aria-label="Gateway status"' in index.text
+    assert 'aria-label="Prompt task message input"' not in index.text
+    assert 'aria-label="Client token"' not in index.text
     assert styles.status_code == 200
     assert "prefers-reduced-motion" in styles.text
 
@@ -426,7 +425,7 @@ def test_mcp_ui_markdown_renderer_is_shared_and_escape_first():
     assert "\\u000E-\\u001F" in renderer.text
     # app.js imports the shared renderer at the current cache-bust version and
     # no longer defines its own.
-    assert 'from "./markdown.js?v=grok-v0.6.0-r9"' in script.text
+    assert 'from "./markdown.js?v=grok-v0.6.0-r10"' in script.text
     assert "import { parseMarkdown" in script.text
     assert "function parseMarkdown" not in script.text
     assert "renderMarkdownInto" in script.text
@@ -482,10 +481,9 @@ def test_mcp_ui_github_review_widget_is_marked_and_honest():
     assert "data.degraded" in page.text
 
 
-def test_mcp_ui_surfaces_receipts_and_session_honesty():
-    """Stage 3/5: the facts pane holds the agent receipt only (background calls
-    don't clobber it), citations and mode provenance are surfaced, workspace
-    context is exercisable, and the session id is per-browser."""
+def test_mcp_ui_retains_receipt_inspection_without_browser_chat():
+    """Historical agent receipts remain inspectable, while the Core UI no
+    longer exposes a prompt, workspace-context, or browser-session surface."""
     with TestClient(create_app(), base_url="http://localhost:8080") as client:
         index = client.get("/ui/")
         script = client.get("/ui/app.js")
@@ -496,28 +494,22 @@ def test_mcp_ui_surfaces_receipts_and_session_honesty():
     for fid in ("factRequestedMode", "factModeSource", "factDialedPort"):
         assert f'id="{fid}"' in index.text
     assert "payload.requested_mode" in script.text
-    # Workspace context is wired to the agent tool arguments.
-    assert 'id="workspaceContextInput"' in index.text
-    assert "args.workspace_context" in script.text
-    assert "args.workspace_label" in script.text
-    # Per-browser session id, and the old shared default is gone.
-    assert "console-session-1" not in index.text
-    assert "genSessionId" in script.text
-    # Clear History is honest that the server session persists.
-    assert "clearConversation" in script.text
-    assert "server still holds the prior session" in script.text
+    assert 'id="workspaceContextInput"' not in index.text
+    assert 'id="sessionInput"' not in index.text
+    assert 'id="promptInput"' not in index.text
+    assert "setupConsoleActions();" not in script.text.split("function init()", 1)[1]
 
 
 def test_mcp_ui_accessibility_and_dead_code_cleanup():
-    """Stage 6: live regions on the transcript and offline banner, keyboard-
-    operable OKF list, password token field, and removed dead code."""
+    """Status remains accessible after browser-chat controls are removed."""
     with TestClient(create_app(), base_url="http://localhost:8080") as client:
         index = client.get("/ui/")
         script = client.get("/ui/app.js")
         styles = client.get("/ui/styles.css")
-    assert 'id="conversation" class="transcript" role="log" aria-live="polite"' in index.text
     assert 'id="dockerOfflineAlert" class="alert-banner hidden" role="alert"' in index.text
-    assert 'id="wizardTokenInput" type="password"' in index.text
+    assert 'role="tablist" aria-label="Console sections"' in index.text
+    assert 'id="conversation"' not in index.text
+    assert 'id="wizardTokenInput"' not in index.text
     # OKF list items are buttons, not click-only divs.
     assert 'document.createElement("button")' in script.text
     # Dead code is gone.
