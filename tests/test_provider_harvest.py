@@ -58,7 +58,7 @@ def _request(request_id: str) -> ProviderRequest:
         ),
         route=RouteClass.PLANNING,
         model="gpt-5.1",
-        messages=[ProviderMessage(role="user", content="Give Grok one observation.")],
+        messages=(ProviderMessage(role="user", content="Give Grok one observation."),),
     )
 
 
@@ -157,7 +157,11 @@ class FakeCollections:
         return self.collection
 
     def list_documents(
-        self, collection_id: str, *, limit: int, filter: str  # noqa: A002
+        self,
+        collection_id: str,
+        *,
+        limit: int,
+        filter: str,  # noqa: A002
     ):
         self.calls.append(("list_documents", (collection_id, limit, filter)))
         episode_id = filter.split('"')[1]
@@ -248,8 +252,7 @@ async def test_terminal_outbox_leases_resumes_and_never_deadletters(tmp_path):
     assert await store.lease_provider_attempts_for_harvest("lease-early", 30, 25) == []
 
     await store._conn.execute(
-        "UPDATE provider_attempts SET harvest_attempts = 1000000 "
-        "WHERE attempt_id = ?",
+        "UPDATE provider_attempts SET harvest_attempts = 1000000 WHERE attempt_id = ?",
         (terminal["attempt_id"],),
     )
     await store._conn.commit()
@@ -281,6 +284,7 @@ async def test_lost_batch_lease_does_not_abort_remaining_uploads(tmp_path):
     await _completed(store, 1)
     await _completed(store, 2)
     service = FakeCollections()
+
     class ReclaimingStore:
         def __init__(self):
             self.reclaimed = False
@@ -295,9 +299,7 @@ async def test_lost_batch_lease_does_not_abort_remaining_uploads(tmp_path):
             if not self.reclaimed:
                 self.reclaimed = True
                 clock.advance(6)
-                await store.lease_provider_attempts_for_harvest(
-                    "new-owner", 30, 1
-                )
+                await store.lease_provider_attempts_for_harvest("new-owner", 30, 1)
             return await store.mark_provider_attempt_harvest_synced(*args)
 
         async def mark_provider_attempt_harvest_retry(self, *args):
@@ -320,13 +322,13 @@ async def test_lost_batch_lease_does_not_abort_remaining_uploads(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_owner_without_enough_remaining_lease_cannot_start_remote_effect(tmp_path):
+async def test_owner_without_enough_remaining_lease_cannot_start_remote_effect(
+    tmp_path,
+):
     clock = MutableClock(datetime.now(UTC) + timedelta(seconds=1))
     store = GrokSessionStore(tmp_path / "stale-before-effect.db", clock=clock)
     row = await _completed(store)
-    stale_rows = await store.lease_provider_attempts_for_harvest(
-        "stale-owner", 5, 1
-    )
+    stale_rows = await store.lease_provider_attempts_for_harvest("stale-owner", 5, 1)
     assert len(stale_rows) == 1
     # The owner still holds the row for one second, but a one-second blocking
     # call plus the safety margin no longer fits inside its authority window.
@@ -384,9 +386,7 @@ async def test_missing_credentials_or_client_leave_rows_pending_without_cloud_ca
     monkeypatch.delenv("XAI_MANAGEMENT_API_KEY", raising=False)
     monkeypatch.setattr(provider_utils, "XAI_API_KEY", "xai-inference-test-value")
     missing_management = XAIWorkerEpisodeUploader(client_factory=forbidden_factory)
-    result = await ProviderAttemptHarvester(
-        uploader=missing_management
-    ).run_once(store)
+    result = await ProviderAttemptHarvester(uploader=missing_management).run_once(store)
     assert result.status == "unavailable"
     assert result.reason == "management_key_missing"
     assert factory_calls == 0
@@ -425,7 +425,9 @@ async def test_missing_credentials_or_client_leave_rows_pending_without_cloud_ca
 
 
 @pytest.mark.asyncio
-async def test_document_is_deterministic_explicitly_subordinate_and_unverified(tmp_path):
+async def test_document_is_deterministic_explicitly_subordinate_and_unverified(
+    tmp_path,
+):
     store = GrokSessionStore(tmp_path / "document.db")
     row = await _completed(store)
     first = worker_episode_document(row)
@@ -435,10 +437,9 @@ async def test_document_is_deterministic_explicitly_subordinate_and_unverified(t
     payload = json.loads(first)
     assert payload["version"] == "unigrok-worker-episode/v2"
     assert "episode_id" not in payload
-    assert (
-        row["harvest_document_digest"].removeprefix("sha256:")
-        in worker_episode_document_name(row)
-    )
+    assert row["harvest_document_digest"].removeprefix(
+        "sha256:"
+    ) in worker_episode_document_name(row)
     assert payload["authority"] == {
         "role": "subordinate_worker_evidence",
         "supervisor": "grok",
@@ -511,7 +512,9 @@ async def test_upload_uses_unique_identity_and_retry_is_idempotent(tmp_path):
             "description": "SHA-256 of the exact frozen episode document bytes",
         },
     ]
-    upload_call = next(value for name, value in service.calls if name == "upload_document")
+    upload_call = next(
+        value for name, value in service.calls if name == "upload_document"
+    )
     assert upload_call[3] == {
         "episode_id": row["harvest_episode_id"],
         "document_digest": row["harvest_document_digest"],
@@ -686,7 +689,9 @@ async def test_upload_failure_is_secret_safe_and_retries_with_bounded_backoff(
     assert row["harvest_status"] == "retry_wait"
     assert "xai-management-test-secret" not in row["harvest_error"]
     assert "REDACTED" in row["harvest_error"]
-    assert datetime.fromisoformat(row["harvest_next_at"]) == clock.value + timedelta(seconds=7)
+    assert datetime.fromisoformat(row["harvest_next_at"]) == clock.value + timedelta(
+        seconds=7
+    )
 
     service.fail_mode = None
     clock.advance(7)
@@ -779,9 +784,7 @@ async def test_corrupt_due_row_is_deferred_without_starving_healthy_row(tmp_path
         "attempt_id": corrupt["attempt_id"],
         "harvest_status": "retry_wait",
         "harvest_attempts": 1,
-        "harvest_next_at": (
-            clock.value + timedelta(seconds=86_400)
-        ).isoformat(),
+        "harvest_next_at": (clock.value + timedelta(seconds=86_400)).isoformat(),
         "harvest_error": "integrity:provider_attempt_decode_failed",
     }
     assert rows[1]["harvest_status"] == "synced"
@@ -814,9 +817,7 @@ async def test_schema_corruption_is_not_quarantined_as_a_row_failure(tmp_path):
 
 
 def test_worker_collection_cannot_alias_verified_task_memory(monkeypatch):
-    monkeypatch.setenv(
-        "UNIGROK_WORKER_EPISODE_COLLECTION", "unigrok-task-memories-v2"
-    )
+    monkeypatch.setenv("UNIGROK_WORKER_EPISODE_COLLECTION", "unigrok-task-memories-v2")
     with pytest.raises(ValueError, match="cannot share"):
         XAIWorkerEpisodeUploader(
             client_factory=lambda: SimpleNamespace(collections=FakeCollections()),
@@ -870,9 +871,7 @@ async def test_collection_name_is_frozen_with_cached_identity(tmp_path, monkeypa
 
     assert first == second
     assert uploader.collection_name == "worker-episodes-a"
-    create_names = [
-        value[0] for name, value in service.calls if name == "create"
-    ]
+    create_names = [value[0] for name, value in service.calls if name == "create"]
     assert create_names == ["worker-episodes-a"]
     assert "worker-episodes-b" not in repr(service.calls)
     assert [name for name, _ in service.calls].count("upload_document") == 1

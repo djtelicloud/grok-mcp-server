@@ -16,6 +16,7 @@ from .contracts import (
     ProviderId,
     ProviderRequest,
     ProviderResponse,
+    transport_resource_identity,
 )
 from .errors import ProviderConfigurationError, ProviderProtocolError
 
@@ -47,6 +48,10 @@ class AnthropicAdapter(HTTPProviderAdapter):
             endpoint_host=ANTHROPIC_HOST,
             endpoint_kind="first_party_api",
             credential_kind="api_key",
+            transport_resource_identity=transport_resource_identity(
+                "anthropic_api_endpoint",
+                ANTHROPIC_ENDPOINT,
+            ),
             credential_env_names=ANTHROPIC_KEY_NAMES,
             credential_state=self._credential_state(ANTHROPIC_KEY_NAMES),
             models=load_model_pins(self.channel, self._environ),

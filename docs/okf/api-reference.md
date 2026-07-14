@@ -976,12 +976,17 @@ schedule it. The future Grok-owned broker is responsible for invocation.
 ### Method: `ProviderAttemptHarvester.run_once` {#provider_harvest-providerattemptharvester-run_once}
 
 ```python
-async def ProviderAttemptHarvester.run_once(self, store: Any) -> ProviderHarvestRun
+async def ProviderAttemptHarvester.run_once(self, store: Any, *, deadline_monotonic: float | None=None) -> ProviderHarvestRun
 ```
 
 **Keywords:** provider, attempt, harvester, run, once
 
-Run at most one bounded batch; unavailable credentials lease nothing.
+Run one bounded batch inside an optional caller-owned deadline.
+
+The caller deadline is absolute so cancellation cannot accidentally
+grant a background SDK thread a fresh per-row lease. Every row token
+is bounded by both that deadline and the local outbox lease, and is
+revoked in ``finally`` even when this coroutine is cancelled.
 
 ## providers/base.py {#providers-base}
 
@@ -1029,6 +1034,121 @@ def opaque_fingerprint(value: str) -> str
 
 Identify a non-secret account/project without exposing its raw value.
 
+## providers/broker.py {#providers-broker}
+
+### Class: `BrokerCancellationPersistenceError` {#providers-broker-brokercancellationpersistenceerror}
+
+```python
+class BrokerCancellationPersistenceError
+```
+
+**Keywords:** broker, cancellation, persistence, error
+
+A cancelled physical attempt could not be durably terminalized.
+
+### Class: `WorkerFallbackPolicy` {#providers-broker-workerfallbackpolicy}
+
+```python
+class WorkerFallbackPolicy
+```
+
+**Keywords:** worker, fallback, policy
+
+Bound one delegation to subscription-only or one metered fallback.
+
+### Class: `GrokWorkerLaneAuthorization` {#providers-broker-grokworkerlaneauthorization}
+
+```python
+class GrokWorkerLaneAuthorization
+```
+
+**Keywords:** grok, worker, lane, authorization
+
+Plan-bound authorization for one immutable provider lane snapshot.
+
+### Method: `GrokWorkerLaneAuthorization.from_descriptor` {#providers-broker-grokworkerlaneauthorization-from_descriptor}
+
+```python
+def GrokWorkerLaneAuthorization.from_descriptor(cls, descriptor: ProviderDescriptor) -> 'GrokWorkerLaneAuthorization'
+```
+
+**Keywords:** grok, worker, lane, authorization, from, descriptor
+
+Freeze a reviewed descriptor into digest-only plan authority.
+
+### Class: `GrokWorkerDelegation` {#providers-broker-grokworkerdelegation}
+
+```python
+class GrokWorkerDelegation
+```
+
+**Keywords:** grok, worker, delegation
+
+One semantic worker request chosen by the Grok supervisor.
+
+The Grok-owned plan carries only content digests for reviewed physical
+lane snapshots. The broker still applies the fixed same-provider ladder,
+while starts carry the full material needed to verify those digests.
+
+### Class: `GrokDelegationPlan` {#providers-broker-grokdelegationplan}
+
+```python
+class GrokDelegationPlan
+```
+
+**Keywords:** grok, delegation, plan
+
+Content-addressed internal plan bound to one exact Grok turn.
+
+``supervisor='grok'`` and a Grok-shaped model ID are validation constraints,
+not authentication.  The future runtime integration must accept plans only
+from its trusted Grok session state, never directly from an MCP caller.
+
+### Class: `BrokerAttemptEvidence` {#providers-broker-brokerattemptevidence}
+
+```python
+class BrokerAttemptEvidence
+```
+
+**Keywords:** broker, attempt, evidence
+
+One physical attempt, with worker output exposed only after durability.
+
+### Method: `GrokWorkerBrokerResult.validate_against_plan` {#providers-broker-grokworkerbrokerresult-validate_against_plan}
+
+```python
+def GrokWorkerBrokerResult.validate_against_plan(self, plan: GrokDelegationPlan | Mapping[str, Any]) -> 'GrokWorkerBrokerResult'
+```
+
+**Keywords:** grok, worker, broker, result, validate, against, plan
+
+Bind exported evidence to one exact originating Grok plan.
+
+The result intentionally does not duplicate model-visible prompts or
+fallback policy. Consumers holding the originating plan must cross the
+same explicit boundary used by :meth:`GrokWorkerBroker.execute` before
+trusting delegation labels or attempt identities.
+
+### Class: `GrokWorkerBroker` {#providers-broker-grokworkerbroker}
+
+```python
+class GrokWorkerBroker
+```
+
+**Keywords:** grok, worker, broker
+
+Execute strict subordinate attempts while preserving Grok authority.
+
+### Method: `GrokWorkerBroker.execute` {#providers-broker-grokworkerbroker-execute}
+
+```python
+async def GrokWorkerBroker.execute(self, plan: GrokDelegationPlan | Mapping[str, Any]) -> GrokWorkerBrokerResult
+```
+
+**Keywords:** grok, worker, broker, execute
+
+Run one plan and return transport evidence for Grok synthesis only.
+
 ## providers/config.py {#providers-config}
 
 ### Function: `load_model_pins` {#providers-config-load_model_pins}
@@ -1045,6 +1165,16 @@ Invalid values fail closed while naming only the environment variable, never
 its content.
 
 ## providers/contracts.py {#providers-contracts}
+
+### Function: `transport_resource_identity` {#providers-contracts-transport_resource_identity}
+
+```python
+def transport_resource_identity(namespace: str, value: str) -> str
+```
+
+**Keywords:** transport, resource, identity
+
+Return a secret-safe stable identity for one configured transport resource.
 
 ### Class: `GrokSupervisorBinding` {#providers-contracts-groksupervisorbinding}
 
@@ -1083,6 +1213,21 @@ The supervisor deadline is model-visible and shared by every transport.
 Keeping this construction in the contract module lets the adapter, the
 attempt ledger, and the Grok broker layer hash the same logical request.
 
+### Class: `ProviderExecutionBinding` {#providers-contracts-providerexecutionbinding}
+
+```python
+class ProviderExecutionBinding
+```
+
+**Keywords:** provider, execution, binding
+
+Stable physical-lane material frozen into a provider attempt start.
+
+Availability metadata and credential names are intentionally excluded.
+Model pins, supported routes, and physical caps are included so a trusted
+plan can authorize the exact lane snapshot without depending on a live
+registry during durable replay.
+
 ### Class: `ProviderAttemptStart` {#providers-contracts-providerattemptstart}
 
 ```python
@@ -1092,6 +1237,10 @@ class ProviderAttemptStart
 **Keywords:** provider, attempt, start
 
 Grok-authorized identity for one physical subordinate channel call.
+
+Versions 1 and 2 remain parseable for ledger inspection and migration
+tooling. Broker evidence and replay intentionally fail closed unless the
+start is version 3 with complete plan-bound lane material.
 
 ### Class: `ProviderFailureReceipt` {#providers-contracts-providerfailurereceipt}
 
@@ -1112,6 +1261,16 @@ class ProviderAttemptResult
 **Keywords:** provider, attempt, result
 
 One subordinate worker return or failure for Grok synthesis.
+
+### Function: `provider_result_matches_start` {#providers-contracts-provider_result_matches_start}
+
+```python
+def provider_result_matches_start(start: ProviderAttemptStart, result: ProviderAttemptResult) -> bool
+```
+
+**Keywords:** provider, result, matches, start
+
+Return whether one normalized result is bound to its exact v2 start.
 
 ### Function: `is_safe_model_id` {#providers-contracts-is_safe_model_id}
 

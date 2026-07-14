@@ -26,9 +26,13 @@ from .contracts import (
     ProviderRequest,
     ProviderResponse,
     StrictContract,
+    transport_resource_identity,
 )
 from .errors import ProviderConfigurationError
-from .google_common import build_generate_content_payload, parse_generate_content_response
+from .google_common import (
+    build_generate_content_payload,
+    parse_generate_content_response,
+)
 
 
 GOOGLE_CLOUD_SCOPE = "https://www.googleapis.com/auth/cloud-platform"
@@ -75,7 +79,9 @@ async def load_google_adc_identity(timeout_seconds: float = 60.0) -> ADCIdentity
 
         credentials.refresh(bounded_request)
         token = str(getattr(credentials, "token", None) or "")
-        return ADCIdentity(access_token=SecretStr(token), project_id=str(project_id or ""))
+        return ADCIdentity(
+            access_token=SecretStr(token), project_id=str(project_id or "")
+        )
 
     try:
         identity = await asyncio.to_thread(load)
@@ -115,9 +121,19 @@ class VertexADCAdapter(HTTPProviderAdapter):
             endpoint_host=self._host,
             endpoint_kind="vertex_ai",
             credential_kind="google_adc",
+            transport_resource_identity=(
+                transport_resource_identity(
+                    "vertex_project",
+                    self._configured_project,
+                )
+                if self._configured_project is not None
+                else None
+            ),
             credential_env_names=VERTEX_CREDENTIAL_NAMES,
             # ADC may come from a workload identity or metadata server without
             # any environment variable, so availability is resolved at call time.
+            # The standalone adapter still supports that mode, but the broker
+            # cannot authorize it until a project identity is pinned explicitly.
             credential_state=CredentialState.DEFERRED,
             models=load_model_pins(self.channel, self._environ),
             max_output_tokens=32_768,

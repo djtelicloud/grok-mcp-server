@@ -16,8 +16,12 @@ from .contracts import (
     ProviderId,
     ProviderRequest,
     ProviderResponse,
+    transport_resource_identity,
 )
-from .google_common import build_generate_content_payload, parse_generate_content_response
+from .google_common import (
+    build_generate_content_payload,
+    parse_generate_content_response,
+)
 
 
 GEMINI_HOST = "generativelanguage.googleapis.com"
@@ -44,6 +48,10 @@ class GeminiAdapter(HTTPProviderAdapter):
             endpoint_host=GEMINI_HOST,
             endpoint_kind="first_party_api",
             credential_kind="api_key",
+            transport_resource_identity=transport_resource_identity(
+                "gemini_api_endpoint",
+                GEMINI_HOST,
+            ),
             credential_env_names=GEMINI_KEY_NAMES,
             credential_state=self._credential_state(GEMINI_KEY_NAMES),
             models=load_model_pins(self.channel, self._environ),

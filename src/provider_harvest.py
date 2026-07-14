@@ -15,6 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import hashlib
 import json
+import math
 import os
 import re
 import threading
@@ -255,6 +256,14 @@ class _ProviderHarvestEffectAuthority:
         if not 0 < duration <= 300.0:
             raise ValueError("provider harvest effect authority is out of bounds")
         return cls(expires_monotonic=time.monotonic() + duration)
+
+    @classmethod
+    def until(cls, deadline_monotonic: float) -> "_ProviderHarvestEffectAuthority":
+        deadline = float(deadline_monotonic)
+        remaining = deadline - time.monotonic()
+        if not math.isfinite(deadline) or not 0 < remaining <= 300.0:
+            raise ValueError("provider harvest effect deadline is out of bounds")
+        return cls(expires_monotonic=deadline)
 
     def revoke(self) -> None:
         self._revoked.set()
@@ -649,8 +658,29 @@ class ProviderAttemptHarvester:
             f"{kind}:{detail or 'provider_harvest_failed'}", 500
         )
 
-    async def run_once(self, store: Any) -> ProviderHarvestRun:
-        """Run at most one bounded batch; unavailable credentials lease nothing."""
+    async def run_once(
+        self,
+        store: Any,
+        *,
+        deadline_monotonic: float | None = None,
+    ) -> ProviderHarvestRun:
+        """Run one bounded batch inside an optional caller-owned deadline.
+
+        The caller deadline is absolute so cancellation cannot accidentally
+        grant a background SDK thread a fresh per-row lease. Every row token
+        is bounded by both that deadline and the local outbox lease, and is
+        revoked in ``finally`` even when this coroutine is cancelled.
+        """
+
+        now_monotonic = time.monotonic()
+        effective_deadline = (
+            math.inf if deadline_monotonic is None else float(deadline_monotonic)
+        )
+        if deadline_monotonic is not None:
+            if effective_deadline <= now_monotonic:
+                raise TimeoutError("provider harvest deadline expired")
+            if not math.isfinite(effective_deadline):
+                raise ValueError("provider harvest deadline is out of bounds")
 
         client, reason = self.uploader.prepare_client()
         if client is None:
@@ -663,78 +693,108 @@ class ProviderAttemptHarvester:
         lease_lost = 0
         state_errors = 0
         for _ in range(self.batch_size):
-            authority = _ProviderHarvestEffectAuthority.for_seconds(self.lease_seconds)
-            rows = await store.lease_provider_attempts_for_harvest(
-                lease_id,
-                self.lease_seconds,
-                1,
+            remaining = effective_deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("provider harvest deadline expired")
+            authority = _ProviderHarvestEffectAuthority.until(
+                min(
+                    effective_deadline,
+                    time.monotonic() + self.lease_seconds,
+                )
             )
-            if not rows:
-                authority.revoke()
-                break
-            row = rows[0]
-            leased += 1
             try:
-                fresh = await store.provider_attempt_harvest_lease_is_fresh(
-                    row["attempt_id"],
+                rows = await store.lease_provider_attempts_for_harvest(
                     lease_id,
-                    self.call_timeout_seconds + 0.5,
+                    self.lease_seconds,
+                    1,
                 )
-            except Exception:
-                authority.revoke()
-                state_errors += 1
-                continue
-            if not fresh:
-                authority.revoke()
-                lease_lost += 1
-                continue
-            try:
-                remote_file_id = await _utils.run_blocking(
-                    self.uploader.upload,
-                    client,
-                    row,
-                    authority,
-                    timeout=self.call_timeout_seconds,
-                )
-            except Exception as exc:
-                authority.revoke()
+                if not rows:
+                    break
+                row = rows[0]
+                leased += 1
                 try:
-                    marked = await store.mark_provider_attempt_harvest_retry(
+                    authority.require_active()
+                except PermissionError as exc:
+                    raise TimeoutError("provider harvest deadline expired") from exc
+                required_lease_remaining = min(
+                    self.call_timeout_seconds + 0.5,
+                    authority.expires_monotonic - time.monotonic(),
+                )
+                try:
+                    fresh = await store.provider_attempt_harvest_lease_is_fresh(
                         row["attempt_id"],
                         lease_id,
-                        self._safe_error(exc),
-                        self._retry_delay(int(row["harvest_attempts"])),
+                        max(0.0, required_lease_remaining),
                     )
                 except Exception:
-                    # The row remains leased and becomes retryable on expiry.
-                    # Do not let one state-transition failure suppress the rest
-                    # of this bounded batch or expose its exception text.
+                    state_errors += 1
+                    continue
+                if not fresh:
+                    lease_lost += 1
+                    continue
+                call_remaining = authority.expires_monotonic - time.monotonic()
+                if call_remaining <= 0:
+                    raise TimeoutError("provider harvest deadline expired")
+                effective_call_timeout = min(
+                    self.call_timeout_seconds,
+                    call_remaining,
+                )
+                try:
+                    authority.require_active()
+                except PermissionError as exc:
+                    raise TimeoutError("provider harvest deadline expired") from exc
+                try:
+                    remote_file_id = await _utils.run_blocking(
+                        self.uploader.upload,
+                        client,
+                        row,
+                        authority,
+                        timeout=effective_call_timeout,
+                    )
+                except Exception as exc:
+                    # Revoke before any local retry bookkeeping. A timed-out
+                    # thread may still return from its current SDK call, but
+                    # it cannot start a follow-up list/create/upload effect.
+                    authority.revoke()
+                    try:
+                        marked = await store.mark_provider_attempt_harvest_retry(
+                            row["attempt_id"],
+                            lease_id,
+                            self._safe_error(exc),
+                            self._retry_delay(int(row["harvest_attempts"])),
+                        )
+                    except Exception:
+                        # The row remains leased and becomes retryable on expiry.
+                        # Do not let one state-transition failure suppress the rest
+                        # of this bounded batch or expose its exception text.
+                        state_errors += 1
+                        continue
+                    if marked:
+                        retry_wait += 1
+                    else:
+                        lease_lost += 1
+                    continue
+
+                authority.revoke()
+                try:
+                    marked = await store.mark_provider_attempt_harvest_synced(
+                        row["attempt_id"],
+                        lease_id,
+                        remote_file_id,
+                    )
+                except Exception:
+                    # The deterministic remote episode can be recovered after the
+                    # lease expires. Continue without claiming local completion.
                     state_errors += 1
                     continue
                 if marked:
-                    retry_wait += 1
+                    synced += 1
                 else:
+                    # Another process reclaimed the expired lease. It will find
+                    # the same unique episode_id and recover this remote write.
                     lease_lost += 1
-                continue
-
-            authority.revoke()
-            try:
-                marked = await store.mark_provider_attempt_harvest_synced(
-                    row["attempt_id"],
-                    lease_id,
-                    remote_file_id,
-                )
-            except Exception:
-                # The deterministic remote episode can be recovered after the
-                # lease expires. Continue without claiming local completion.
-                state_errors += 1
-                continue
-            if marked:
-                synced += 1
-            else:
-                # Another process reclaimed the expired lease.  It will find
-                # the same unique episode_id and recover this remote write.
-                lease_lost += 1
+            finally:
+                authority.revoke()
         if leased == 0:
             return ProviderHarvestRun(status="idle")
         return ProviderHarvestRun(
