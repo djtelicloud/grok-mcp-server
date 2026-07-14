@@ -39,7 +39,7 @@ jobs:
     # Lab fallback when vars unset: self-hosted + loopback CLI (Mac required).
     # See docs/design/hosted-review-p0.md and docs/chatgpt-github-app.md.
     runs-on: ${{ fromJSON(vars.UNIGROK_REVIEW_RUNNER_JSON || '["self-hosted","unigrok-review"]') }}
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       # Run only trusted default-branch code. Never check out, execute, install,
       # or import code from the reviewed PR.

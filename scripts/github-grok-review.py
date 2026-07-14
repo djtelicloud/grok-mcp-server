@@ -182,9 +182,9 @@ async def _call_unigrok(arguments: dict[str, Any]) -> dict[str, Any]:
     gateway_token = _gateway_bearer_token()
     if gateway_token:
         headers["Authorization"] = f"Bearer {gateway_token}"
-    async with httpx.AsyncClient(headers=headers, timeout=180.0) as client:
+    async with httpx.AsyncClient(headers=headers, timeout=540.0) as client:
         async with streamable_http_client(url, http_client=client) as (read, write, _):
-            async with ClientSession(read, write, read_timeout_seconds=timedelta(seconds=180)) as session:
+            async with ClientSession(read, write, read_timeout_seconds=timedelta(seconds=540)) as session:
                 await session.initialize()
                 result = await session.call_tool("review_pull_request", arguments)
     if result.isError:
