@@ -24,7 +24,7 @@ collaborators such as Curtis). Product language freeze:
 | Core UI `/ui/` | Health, cost ledger, plane status, pasteable IDE actions | Observe + paste only; IDE MCP is the chat path |
 | Cloud Console entry | GitHub OAuth + live write+ collaborator check (`write` / `maintain` / `admin`) | Same; always fail closed |
 | Swarm | Contributor mode; prefer `dry_run` | Same; never default-apply |
-| Land / merge | Codex/`scripts/land` + required exact-head Codex Approval | Unchanged; Grok review is advisory only |
+| Land / merge | **Medium/high:** Codex/`scripts/land` + exact-head Codex Approval when required. **Green low-risk (docs/rules/tests):** Cursor Approver/merger may land when Codex is busy if protection allows (see dual-supervisor design). Grok review is advisory only | Dual supervisor: Cursor low-risk; Codex medium/high + land culture |
 
 ## Local setup (insider)
 
@@ -142,3 +142,4 @@ explicit Codex/project-admin integration session.
 - [docs/ide-setup.md](docs/ide-setup.md)
 - [architecture.md](architecture.md)
 - [docs/threat-model.md](docs/threat-model.md)
+- [docs/design/dual-supervisor-land.md](docs/design/dual-supervisor-land.md)
