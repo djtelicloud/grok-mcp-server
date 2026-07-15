@@ -393,6 +393,33 @@ def test_discover_bootstrap_uses_validated_public_surface_in_cloudrun(monkeypatc
     )
 
 
+def test_discover_bootstrap_expands_validated_public_origin_in_cloudrun(monkeypatch):
+    from src.tools.system import _build_discover_bootstrap
+
+    monkeypatch.setenv("UNIGROK_RUNTIME", "cloudrun")
+    monkeypatch.setenv("UNIGROK_PUBLIC_MCP_URL", "https://mcp.grokmcp.org")
+    bootstrap = _build_discover_bootstrap(
+        contributor=False,
+        workspace_attached=False,
+        credential_planes={
+            "service_usable": True,
+            "degraded": False,
+            "api": {"available": True},
+            "cli": {"available": False},
+            "notices": [],
+        },
+        request_context={"client_id_present": True, "host_port": None},
+    )
+
+    assert bootstrap["surfaces"] == {
+        "canonical_mcp": "https://mcp.grokmcp.org/mcp",
+        "healthz": "https://mcp.grokmcp.org/healthz",
+        "readyz": "https://mcp.grokmcp.org/readyz",
+        "runtimez": "https://mcp.grokmcp.org/runtimez",
+        "ui": "https://mcp.grokmcp.org/ui/",
+    }
+
+
 def test_discover_bootstrap_swarm_policy_matches_runtime_parser(monkeypatch):
     from src.tools.system import _build_discover_bootstrap
 
