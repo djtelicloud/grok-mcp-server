@@ -2,7 +2,9 @@
 
 Last updated: 2026-07-15
 Owner: Codex
-Status: GitHub maintainer sweep complete; Control rollout awaiting Cloud Run retry; Stage 1 live generation and training remain blocked
+Status: GitHub and security are clean. The remote MCP is live after regional
+failover. The Control rollout awaits Cloud Run recovery; Stage 1 live generation
+and training remain blocked.
 
 This is the project-scoped handoff for new Codex chats. Verify drift-prone Git,
 CI, runtime, DNS, cloud, and benchmark state live before acting. Never record
@@ -50,32 +52,42 @@ credentials, OAuth codes, tokens, or private keys here.
 
 ## Latest maintainer sweep
 
-- Protected PRs #127, #131, #132, and #133 are merged. They repaired the stale
-  CodeQL/default-branch findings, integrated the patch-equivalent contributor
-  backlog, hardened Cursor Cloud service-token scopes and introspection, and
-  removed the final clear-text-logging data-flow pattern. The final security
-  repair passed 1,987 tests and `scripts/land` certified exact head
-  `58b0fa722c19a51d9d12355d3937676b467dc206` before protected merge.
-- Superseded PRs #121, #124-#130 were closed with evidence; their obsolete
-  remote branches and two older fully merged branches were deleted. No open PR
-  or unresolved review thread remains. Contributor worktrees and every remote
-  branch with unique commits were preserved.
+- Protected PRs #148-#153 are merged. They hardened maintainer integration,
+  made runtime markers tree-aware and portable, warned about the unrelated
+  public `mcp-grok` package, corrected RFC 9728 challenge metadata, and made a
+  missing OAuth bearer fail before remote introspection. The final repair passed
+  2,019 tests and `scripts/land` certified exact content head
+  `9d90342bbfb4c7b701c460bb9278e575a8c7dd5b` before protected merge.
 - Local `main` and protected `origin/main` agree at merge commit
-  `026078bd92fb2afd488ec371f3508bfba8f0bd30`. Exact-main CI and all three
-  CodeQL analyzers passed; code scanning, Dependabot, and secret scanning have
-  no open alerts.
-- The Control Center image for merged auth head `cc8cc064fc42` was built as
-  digest `sha256:7a932052851edfaf9b5fdfe7945db313d5c4a543cf542dac35efab59ed854c6a`.
-  A zero-traffic `us-east1` candidate is still in provider-managed transient
-  retry with no container logs; production traffic remains on the prior healthy
-  revision. Do not shift traffic until the candidate reports Ready.
-- Production `https://control.grokmcp.org/`, OAuth metadata, the protected
-  `/control` redirect, and inactive-token introspection remain healthy. The
-  existing revision and image are the rollback path.
-- Issue #65 remains the only open issue. Its comments and the exact-head gate
-  still conflict about Stage 1 authority, so further provider generation,
-  dataset writes, training, and sealed evaluation remain blocked.
-- Release and source versions agree at 0.6.0. The empty GitHub Wiki remains
-  enabled even though product docs forbid
-  a separate Wiki; changing that repository setting still requires an explicit
-  maintainer decision.
+  `0d64a49ccf593780bbc80c00f4a419d1e413e0ef`. Exact-main CI and all three
+  CodeQL analyzers passed. At the sweep snapshot before this handoff PR, there
+  were no other open PRs, issues, discussions, review threads, code-scanning
+  alerts, Dependabot alerts, secret-scanning alerts, or draft private
+  advisories.
+- Merged task worktrees, local task branches, remote `codex/*` branches, and
+  stale local remote-tracking refs are removed. The shared checkout is clean;
+  its runtime source marker is tree-equivalent to `main`; stable and contributor
+  services are ready.
+- Remote MCP runtime image digest
+  `sha256:5b66e410262a127a8245bebc36ea34e1e90fc2a605ade2e31310e42030264b32`
+  was built from application head `0d64a49ccf593780bbc80c00f4a419d1e413e0ef`
+  and is live on ready revision `unigrok-remote-mcp-0d64a49` in `us-central1`.
+  The global backend points only to the central regional NEG. Repeated public
+  `/healthz`, `/readyz`, protected-resource metadata, and unauthenticated MCP
+  probes pass; the challenge advertises the exact metadata document URL.
+- `us-east1` route activation repeatedly stalled before container startup with
+  a provider internal error, including on an isolated probe. The exact image
+  started successfully in `us-central1`, proving the code, image, IAM, and
+  secret bindings. East is detached from the load balancer and restored to its
+  prior healthy revision as a rollback asset. Personalized Service Health is
+  now enabled; it reports no active Cloud Run incident.
+- The Control Center remains healthy on revision
+  `unigrok-control-center-ab8d77b`. Its newer east candidate has the same
+  provider-managed activation failure and remains at zero traffic. Production
+  `https://control.grokmcp.org/`, OAuth metadata, and the protected control flow
+  remain healthy.
+- Release, source, and plugin versions agree at 0.6.0. Publishing a new release,
+  accepting the `google-genai` 2.x migration, or changing the enabled empty
+  GitHub Wiki remains a maintainer decision. Stage 2 generation, dataset writes,
+  training, and sealed evaluation remain blocked by their existing exact-head
+  authorization gates.
