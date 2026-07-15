@@ -110,6 +110,10 @@ Not live / Blocked / Who (brand)** plus the **task title**.
 
 ## Cursor Automations (PR Approver / Security Reviewer / Bugbot)
 
+Cursor-native always-on mirror for agents that load `.cursor/rules`:
+[`.cursor/rules/cursor-automations-single-pass.mdc`](../.cursor/rules/cursor-automations-single-pass.mdc).
+Keep that file aligned with this section.
+
 These rules apply to Cursor Automations and Bugbot Autofix on this repo:
 
 - **Single-agent only.** Do not spawn parallel subagents, “review modules,” or repeated fan-out batches. One serial pass per run.
