@@ -425,9 +425,9 @@ The system can be deployed in a lightweight `python:3.11-slim` container, mounti
 
 ---
 
-## 9. Data Hydration vs Intelligence Rehydrate
+## 9. Glossary: The Three "Hydrate" Concepts
 
-UniGrok explicitly separates two fundamentally different concepts of "rehydration":
+UniGrok keeps three similarly named concepts separate:
 
 ### 9.1 Runtime Telemetry Process Hydration (`src/hydration.py`)
 Responsible for recovering bounded in-process accumulators, daily budgets, and cost gates after a process restart without re-arming exhausted budgets or losing metrics.
@@ -440,4 +440,10 @@ Responsible for recovering bounded in-process accumulators, daily budgets, and c
 Responsible for recovering agent product context across chat sessions (e.g., brand guidelines, land gates, task continuity, next steps).
 - **Owner**: `session-rehydrate` skill / public rehydrate packs.
 - **Source of Truth**: Git + disk (`.agents/`, private continuity files).
-- **Mechanism**: Never folded into the public SQLite telemetry store; remains a prompt-driven skill behavior.
+- **Mechanism**: A prompt-driven skill behavior; never folded into the public SQLite telemetry store.
+
+### 9.3 Hydration Lanes / Scratchpads
+Disposable Git worktrees used to isolate contributor changes without dirtying shared `main`.
+- **Owner**: The contributor or integration lane that created the worktree.
+- **Source of Truth**: Git commits and the reviewed pull request, not the scratchpad directory itself.
+- **Mechanism**: Preserve active or unique worktrees; remove only finished, merged, clean scratchpads after verifying no agent still owns them.
