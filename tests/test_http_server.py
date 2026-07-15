@@ -268,6 +268,11 @@ def test_cloudrun_accepts_oauth_introspection_without_static_keys(monkeypatch):
         "https://control.grokmcp.org/oauth/introspect",
     )
 
+    def forbid_http_client(*_args, **_kwargs):
+        raise AssertionError("missing bearer tokens must not reach OAuth introspection")
+
+    monkeypatch.setattr("src.http_server.httpx.AsyncClient", forbid_http_client)
+
     with TestClient(create_app()) as client:
         response = client.get("/metrics")
 
