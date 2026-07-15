@@ -5,10 +5,12 @@
 - Audit HEAD: `e2c06347eceda1c739863344863e8da39f875cbb` (main)
 - Date: 2026-07-15
 - Method: read-only fan-out (5 parallel Explore passes) over `src/`, docs, and
-  skills. Every verdict is cited to `file:line`. The four load-bearing
-  root-cause claims were re-verified by direct read before publication.
-- Author lane: Claude Code (map / contract / doc-truth). Runtime fixes flagged
-  below belong to the Grok plane-truth lane; landing belongs to Codex.
+  skills, every verdict cited to `file:line`. §5–§6 were **re-verified against
+  the test suite** after the first draft, which downgraded two items originally
+  called "runtime defects" to intended/tested behavior (see §6). The actionable
+  output is the verified **doc drift** in §5 items 3–8, fixed in this PR.
+- Author lane: Claude Code (map / contract / doc-truth). This audit produced
+  **no runtime fix** — re-verification found no clean defect to patch.
 
 Verdict legend: **Live** (wired + exercised) · **Partial** (wired but
 incomplete/guarded) · **Stub** (present, not functional) · **Doc-only**
@@ -30,7 +32,7 @@ does not exist).
 | Anti-ping-pong (downgrade to `same_plane` after selection fallback) | Live | `src/utils.py:11775` |
 | CLI→API execution fallback gate | Live | `src/utils.py:12101` |
 | API→CLI execution fallback + `same_plane` block | Live | `src/utils.py:12418` |
-| Cross-plane capability incompatibility guard | **Partial — fails open on non-answer** | `src/utils.py:12469` |
+| Cross-plane recovery gate (thinking/research non-answer → CLI) | Live — **intended** cross-once recovery, tested | `src/utils.py:12469`; test `tests/test_utils.py:2695` |
 | Routing receipt / `attempts` assembly | Live | `src/utils.py:11613`, `12035` |
 | API cost/token accounting (provider-exact, degrades honestly) | Live | `src/utils.py:8356` |
 | CLI cost/token accounting (hard-zero, unmetered by design) | Live-by-design | `src/utils.py:10835` |
@@ -89,12 +91,14 @@ flags (`thinking_mode`, `enable_agentic`) plus `mode` for reasoning/research.
 
 ## 5. Doc-vs-code delta (the headline output)
 
-Ranked by impact. Items 1–2 are the live defect; 3–8 are doc drift.
+Items 3–8 are **verified doc drift** and are fixed in this PR. Items 1–2 were
+initially flagged as "live defects" but **re-verification against the test suite
+downgraded them** — see §6 for the correction. Only 3–8 are actionable drift.
 
-| # | Claim / doc | Reality | Kind | Fix location |
+| # | Claim / doc | Reality (re-verified) | Kind | Location |
 |---|---|---|---|---|
-| 1 | `thinking` "runs the agent loop plus a schema-enforced reflection review" (implies robust) | On a rejected non-answer under default `cross_plane`, the compatibility guard **fails open** and the run silently drops to a **non-reasoning CLI fallback** returning a zero-token stub as `response`. See §6. | **Code defect** | `src/utils.py:12469-12474` (guard) + `7606-7643` (classifier) + `src/tools/chats.py:190` (`response` never blanked on `error`) |
-| 2 | streaming-json is parsed incrementally (implied complete) | Parser exits on EOF with **no `end`-event check** (`if not line: break`); a preamble line on a truncated-but-clean stream becomes the whole answer. | **Latent code gap** | `src/utils.py:10495-10531` |
+| 1 | `thinking` non-answer → CLI "stub" (originally called a defect) | **NOT a defect.** Under `cross_plane` a rejected thinking/agentic non-answer is *designed* to cross once to CLI and return `finish_reason="fallback"` — asserted by `tests/test_utils.py:2695`. The guard at `12469` *implements* that recovery. Residual: the CLI recovery output can be low-quality; that is a **product tradeoff** (return something vs. nothing), not a bug. See §6. | Not a defect — corrected | `src/utils.py:12469`; `tests/test_utils.py:2695` |
+| 2 | `_is_nonanswer_completion` "has no substance floor" | Overstated. The classifier is **deliberately prompt-aware** with ~40 contract cases (`tests/test_utils.py:3332-3432`): promise+evidence accepted, unsolicited plans rejected, advice-prompt bullets accepted. The one narrow real gap is missing gerund openers (`exploring`/`digging into`) — but the observed string also trips a false evidence match (`"answer is grounded…"`), so it is not a clean fix. **Tuning tradeoff, not a bug.** | Overstated — corrected | `src/utils.py:7481-7643`; `tests/test_utils.py:3332` |
 | 3 | "`grok --check` for plane readiness" | Readiness actually runs `grok models` and greps `"logged in with grok.com"`; `--check` is never invoked (`docs/okf/faq.md:283` even says `--check` is *not* a health probe). | Doc contradicts code | `CLAUDE.md:38`, `.agents/AGENTS.md:45` |
 | 4 | "deterministic `-s` native session ids" | Code emits `--session-id`/`--resume`/`--fork-session` and the id is a **stored random UUID**, not deterministic (determinism only in fork-on-collision). `AGENTS.md` is already correct; `CLAUDE.md` is not. | Self-inconsistent docs | `CLAUDE.md:37-38` |
 | 5 | `research` "pins the planning route" | `classify_route` returns the **research** class and pins the multi-agent slug, not planning. | Doc inaccurate | `src/http_server.py:1970-1971` |
@@ -104,53 +108,48 @@ Ranked by impact. Items 1–2 are the live defect; 3–8 are doc drift.
 
 ---
 
-## 6. Live routing bug — full chain (evidenced by this audit's own consult)
+## 6. The preamble observation — and why it is NOT a routing bug (corrected)
+
+**This section corrects an over-claim in the first draft of this matrix.** The
+first draft called the behavior below a "live routing defect" with "surgical
+fixes for the Grok lane." Re-verification against the test suite shows the
+behavior is **intended and tested**. The honest conclusion is recorded here.
 
 **Symptom (observed live):** two `mcp__unigrok__agent` calls returned only a
-status preamble. `thinking` mode: `response = "I'll ground this in…"`,
-`finish_reason="fallback"`, `failure.error = "Thinking route returned a rejected
-non-answer completion."`. Retried `reasoning` mode resolved to CLI fast and
-returned `response = "Digging into the real gaps…"`, `finish_reason="final_answer"`,
-`tokens=0`. Only pinning `plane=api, fallback_policy=same_plane` produced a real
-answer.
+status preamble. `thinking` mode: `finish_reason="fallback"`, and the reflection
+gate raised `"Thinking route returned a rejected non-answer completion."`.
+Retried on the CLI-recovering path it returned `"Digging into the real gaps…"`.
+Pinning `plane=api, fallback_policy=same_plane` produced a full answer.
 
-**Two distinct failure modes, both real:**
+**Why this is intended, not a defect:**
 
-**(A) Preamble accepted as a final answer** — `reasoning`→CLI path.
-`_is_nonanswer_completion` (`src/utils.py:7606-7643`) rejects only empty
-strings, recognized promise-verb prefixes without delivered evidence
-(`_PROMISE_ONLY_PREFIX_RE`), and bulleted plans. A non-empty lead-in that isn't
-matched as a promise and carries no completion evidence falls through to
-`return False` at `:7643` → `_completion_finish_reason` leaves
-`finish_reason="final_answer"` (`:7649-7653`). `"I'll ground this…"` matched the
-promise regex and was correctly rejected; `"Digging into…"` did not match and
-slipped through. **Root gap:** no minimum-substance floor, and the promise-verb
-list is incomplete.
+1. `tests/test_utils.py:2695` (`test_thinking_nonanswer_crosses_once_without_api_fast_call`)
+   **asserts** that under `cross_plane`, a rejected thinking non-answer crosses
+   **once** to the CLI plane and returns `finish_reason="fallback"` with
+   `attempts == ["API", "CLI"]`. The guard at `src/utils.py:12469` and the raise
+   at `11827` are the *mechanism* for that recovery — working as designed.
+2. Under `same_plane` the cross is correctly blocked (`src/utils.py:12418`);
+   that is why the `api`+`same_plane` pin forced the API side to actually answer.
+3. `_is_nonanswer_completion` (`src/utils.py:7606-7643`) is **deliberately
+   prompt-aware** and has ~40 passing contract cases
+   (`tests/test_utils.py:3332-3432`). It accepts "promise + delivered evidence",
+   rejects *unsolicited* plans, and accepts bulleted answers when the prompt asks
+   "what should I do". My earlier probe ran it with an empty prompt, which is not
+   how production calls it.
 
-**(B) Thinking non-answer → non-reasoning CLI stub** — `thinking` path.
-1. Thinking AgentLoop emits preamble-only content (`src/utils.py:8812` / `8888-8895`).
-2. `finish_reason` set to `"error"` by the classifier (`:7646-7653`).
-3. Raised at `src/utils.py:11827-11833` (verified verbatim) under `cross_plane`.
-4. Caught at `:11861`, which **sets `cross_plane_intelligence_error`**.
-5. The CLI-compatibility guard at `src/utils.py:12469-12474` (verified verbatim)
-   is `not ((thinking_mode and cross_plane_intelligence_error is None) or …)`.
-   Because step 4 set the error, `thinking_mode and (error is None)` is
-   `True and False = False` → the guard **fails open** → `cli_execution_compatible = True`.
-6. Execution drops into the CLI fallback (`:12559+`) run with `thinking_mode=False`
-   — a non-reasoning CLI agent, no reflection — returning `tokens=0` and its
-   stub `layer.generation` verbatim as `response` (`src/tools/chats.py:190`).
+**What is actually true (a product tradeoff, not a bug):** the default
+`cross_plane` policy recovers a rejected thinking/agentic non-answer by handing
+off to the CLI plane, and the CLI recovery can produce a lower-quality
+completion (no reflection loop). The system chose "return a CLI recovery" over
+"return nothing." Whether that default is right is a **product judgment for the
+maintainers**, not a defect to patch. A caller who wants the API reflection loop
+to deliver-or-fail should pin `fallback_policy=same_plane`.
 
-**Surgical fixes (Grok plane-truth lane to implement, Codex to land):**
-- Guard `src/utils.py:12469`: a `thinking` non-answer should not become
-  CLI-eligible merely because the error flag was set — the guard's intent is the
-  opposite. Gate on `thinking_mode` directly, independent of
-  `cross_plane_intelligence_error`.
-- Classifier `src/utils.py:7606`: add a substance/length floor and treat a
-  CLI reply whose only content is a lead-in line as a non-answer.
-- Response contract `src/tools/chats.py:190`: do not surface `layer.generation`
-  as `response` when `finish_reason=="error"`.
-- Parser `src/utils.py:10495`: require a seen `end` event (or mark partial)
-  before treating accumulated `parts` as complete.
+**Narrow, real, low-value residue (not fixed here):** the gerund promise-openers
+list at `src/utils.py:7489` misses `exploring`/`digging into`/`looking into`.
+Adding them is low-risk but does not even fix the observed string (it trips a
+false evidence match on `"…the answer is grounded…"`), so it is left as a note,
+not a change. No runtime fix is warranted by this audit.
 
 ---
 
@@ -174,11 +173,10 @@ These are correctly labeled in the docs and should not be re-flagged:
 
 ## 8. Recommended next actions, by lane
 
-- **Claude Code (now):** land deltas #3–#8 as a doc/skill drift-closure PR
-  (CLAUDE.md/AGENTS/skill/architecture.md), and ship this matrix as the shared
-  truth artifact. Design the runtime fix spec for #1–#2.
-- **Grok (plane-truth lane):** implement the four surgical runtime fixes in §6.
-- **Codex (supervisor):** review exact head and land.
-- **NOT Claude's:** the runtime `_call_plane`/fallback *implementation*,
-  productizing `/ui/`, or expanding private intelligence IP into the public
-  adapter.
+- **Done in this PR:** deltas #3–#8 (the verified doc drift) corrected in
+  `CLAUDE.md` / `AGENTS.md` / `architecture.md` / the `agent` docstring.
+- **No runtime change:** §5 items 1–2 were re-verified and found to be intended,
+  tested behavior (§6) — this audit warrants no code fix.
+- **Open, deferred:** delta #8 (the ~20-tool legacy directory vs "`agent` is the
+  only public entry") needs a registration audit of the actual public MCP
+  surface before the `architecture.md:322-339` text can be corrected honestly.
