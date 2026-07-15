@@ -2,12 +2,15 @@
   "mcpServers": {
     "unigrok": {
       "url": "http://localhost:4765/mcp",
-      "headers": { "X-Client-ID": "plugin" }
+      "headers": {
+        "X-Client-ID": "vscode"
+      }
     },
-    "unigrok-stdio": {
-      "command": "uv",
-      "args": ["run", "--directory", "${PLUGIN_ROOT}", "python", "main.py"],
-      "cwd": "${PLUGIN_ROOT}"
+    "unigrok-forge": {
+      "url": "http://localhost:4766/mcp",
+      "headers": {
+        "X-Client-ID": "vscode-forge"
+      }
     }
   }
 }
