@@ -51,7 +51,6 @@ Read (skim) when available:
 
 - `.agents/AGENTS.md` — multi-agent git, MCP endpoint, credentials boundary
 - Root `AGENTS.md` if present
-- Root `CLAUDE.md` if present
 
 ### 2. Continuity (private brain)
 
