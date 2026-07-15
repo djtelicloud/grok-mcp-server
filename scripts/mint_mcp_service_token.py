@@ -36,15 +36,6 @@ from cryptography.hazmat.primitives import hashes, hmac
 
 TOKEN_PREFIX = "ugtoken."
 MAX_TTL = 600
-ALLOWED_SCOPES = frozenset(
-    {
-        "unigrok:connect",
-        "unigrok:invoke",
-        "unigrok:review",
-        "unigrok:chat",
-        "unigrok:status",
-    }
-)
 
 # service → primary capability scope (connect is always included)
 SERVICE_SPECS: dict[str, dict[str, Any]] = {
