@@ -203,7 +203,7 @@ they are not UniGrok credential planes and will not appear on Control Center →
 | Cursor-native Grok 4.5 (Composer) | Cursor / xAI via Cursor | Cursor model picker | Ordinary IDE-local edits and Automations loops |
 | Cursor native non-Grok | Cursor / that provider | Cursor model picker | You intentionally want a non-Grok host model |
 | UniGrok MCP `agent` (default route) | UniGrok CLI sub and/or xAI API key | Control Center **Planes** + MCP | Shared Grok, `@grok` peer review, dual-plane cost/route receipts |
-| UniGrok MCP `agent` pinned `grok-build-0.1` | Same UniGrok planes (model pin only) | Control Center **Planes** + MCP | Code-heavy implementation via UniGrok |
+| UniGrok MCP `agent` pinned `grok-build-0.1` | UniGrok API plane (model pin; no new plane) | Control Center **Planes** + MCP | Code-heavy implementation via UniGrok |
 
 **Decision card (Cursor Grok 4.5 session):**
 
@@ -213,7 +213,7 @@ they are not UniGrok credential planes and will not appear on Control Center →
   CLI vs API plane truth, metered cost receipts, or a second opinion that
   other brands can also query through `http://localhost:4765/mcp`.
 - Pin **`grok-build-0.1`** on UniGrok `agent` for code-heavy implementation —
-  a model pin only, not a separate credential plane.
+  it selects an API-plane model, not a separate credential plane.
 - Do not treat Cursor-native Grok 4.5 as a UniGrok plane — Control Center will
   not show that spend under **Planes**.
 
