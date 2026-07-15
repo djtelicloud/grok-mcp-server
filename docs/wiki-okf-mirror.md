@@ -14,9 +14,13 @@ and public intelligence packs. It is **never** source of truth.
 ## Rules
 
 1. **Do not hand-edit** wiki pages as product docs.
-2. **Regenerate** from OKF on release (or via `scripts/publish_okf_wiki_mirror.py`).
+2. **Regenerate** from OKF on release via
+   `scripts/publish_okf_wiki_mirror.py`; it prunes stale pages and includes the
+   manifest-listed JSON schema/data artifacts as rendered pages.
 3. Wiki pages must say they are a **mirror** and link to OKF index.
 4. If the mirror is stale or missing, that is not a product outage — use OKF.
+5. Publish with a deletion-aware copy such as the script's printed
+   `rsync --delete` recipe so removed sources cannot survive in the wiki.
 
 ## Why this is better than an empty wiki
 

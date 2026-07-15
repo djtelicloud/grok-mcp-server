@@ -307,12 +307,14 @@ def test_public_docs_surfaces_wiki_is_okf_mirror_only():
 
     assert "## 8. Where docs live" in readme
     assert "https://grokmcp.org/docs/okf/index.md" in readme
-    assert "mirror only" in readme.lower() or "Mirror only" in readme
-    assert "GitHub Wiki is a mirror only" in contributing or "mirror only" in contributing.lower()
-    assert "Do **not** hand-edit" in contributing or "Do not hand-edit" in contributing
+    assert "mirror only" in readme.lower()
+    assert "mirror only" in contributing.lower()
+    assert "do not hand-edit" in contributing.lower().replace("**", "")
     assert "publish_okf_wiki_mirror" in contributing
-    assert "never** source of truth" in wiki_policy or "never source of truth" in wiki_policy.lower()
-    assert "Do not hand-edit" in wiki_policy
+    normalized_policy = " ".join(wiki_policy.lower().replace("**", "").split())
+    assert "never source of truth" in normalized_policy
+    assert "do not hand-edit" in normalized_policy
+    assert "rsync --delete" in wiki_policy
 
 
 def test_agent_guidance_preserves_workspace_and_credential_boundaries():

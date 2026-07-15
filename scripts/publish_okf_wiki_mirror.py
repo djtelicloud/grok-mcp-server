@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Build a GitHub Wiki mirror from docs/okf + public intelligence packs.
+"""Build a deterministic GitHub Wiki mirror from public UniGrok knowledge.
 
-Mirror only — never the source of truth. Writes markdown into --out-dir.
-Push to the repo wiki is a separate operator step (or CI with wiki write token).
+Mirror only — never the source of truth. The output directory is replaced on
+each run so deleted OKF pages cannot survive as stale wiki content. Publishing
+to the repository wiki remains a separate operator step.
 
 Example:
   uv run python scripts/publish_okf_wiki_mirror.py --out-dir /tmp/unigrok-wiki
@@ -11,13 +12,16 @@ Example:
 from __future__ import annotations
 
 import argparse
+import json
 import re
-import shutil
+import shlex
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 OKF = ROOT / "docs" / "okf"
 PACKS = ROOT / "docs" / "public-intelligence" / "packs"
+OKF_MANIFEST = OKF / "okf-manifest.json"
+RESERVED_WIKI_SLUGS = {"home", "_sidebar"}
 HOME_BANNER = """\
 > **Mirror only.** Source of truth: [OKF on the site](https://grokmcp.org/docs/okf/index.md)
 > and `docs/okf/` in the repository. Do not hand-edit this wiki.
@@ -25,9 +29,135 @@ HOME_BANNER = """\
 """
 
 
+def _strip_front_matter(text: str) -> str:
+    if not text.startswith("---"):
+        return text
+    parts = text.split("---", 2)
+    return parts[2].lstrip("\r\n") if len(parts) == 3 else text
+
+
 def _slug(name: str) -> str:
-    base = Path(name).stem
-    return re.sub(r"[^A-Za-z0-9._-]+", "-", base).strip("-") or "page"
+    base = Path(name).name
+    if base.lower().endswith(".md"):
+        base = base[:-3]
+    slug = re.sub(r"[^A-Za-z0-9._-]+", "-", base).strip("-") or "page"
+    if slug.casefold() in RESERVED_WIKI_SLUGS:
+        raise ValueError(f"{name!r} produces reserved wiki slug {slug!r}")
+    return slug
+
+
+def _reserve_slug(seen: dict[str, str], slug: str, source: str) -> None:
+    key = slug.casefold()
+    previous = seen.get(key)
+    if previous is not None:
+        raise ValueError(
+            f"wiki slug collision for {slug!r}: {previous!r} and {source!r}"
+        )
+    seen[key] = source
+
+
+def _write_page(
+    out: Path,
+    *,
+    slug: str,
+    body: str,
+    source: str,
+    seen: dict[str, str],
+) -> None:
+    _reserve_slug(seen, slug, source)
+    (out / f"{slug}.md").write_text(HOME_BANNER + body, encoding="utf-8")
+
+
+def _manifest_files() -> tuple[Path, list[Path]]:
+    manifest = json.loads(OKF_MANIFEST.read_text(encoding="utf-8"))
+    names = manifest.get("files")
+    root_name = manifest.get("root")
+    if not isinstance(names, list) or not names:
+        raise ValueError("OKF manifest files must be a non-empty list")
+    if not isinstance(root_name, str) or root_name not in names:
+        raise ValueError("OKF manifest root must name one listed file")
+
+    files: list[Path] = []
+    for name in names:
+        if not isinstance(name, str) or Path(name).name != name:
+            raise ValueError(f"invalid OKF manifest path: {name!r}")
+        path = OKF / name
+        if path.suffix not in {".md", ".json"} or not path.is_file():
+            raise ValueError(f"missing or unsupported OKF artifact: {name!r}")
+        files.append(path)
+    return OKF / root_name, files
+
+
+def _json_page(path: Path) -> str:
+    raw = path.read_text(encoding="utf-8")
+    json.loads(raw)
+    return f"# {path.name}\n\n```json\n{raw.rstrip()}\n```\n"
+
+
+def build_mirror(out: Path) -> list[Path]:
+    out = out.resolve()
+    root = ROOT.resolve()
+    if out == root or out.is_relative_to(root):
+        raise ValueError("--out-dir must be outside the repository")
+
+    out.mkdir(parents=True, exist_ok=True)
+    for old in out.glob("*.md"):
+        old.unlink()
+
+    index_path, okf_files = _manifest_files()
+    pack_files = sorted(PACKS.glob("v*.md")) if PACKS.is_dir() else []
+    seen = {slug: f"generated {slug}" for slug in RESERVED_WIKI_SLUGS}
+
+    index = _strip_front_matter(index_path.read_text(encoding="utf-8"))
+    home = "# UniGrok knowledge (OKF mirror)\n\n" + index
+    home += "\n\n## Public intelligence packs\n\n"
+    for pack in pack_files:
+        home += f"- [[{_slug(pack.name)}|{pack.stem}]]\n"
+    (out / "Home.md").write_text(HOME_BANNER + home, encoding="utf-8")
+
+    markdown_files = [path for path in okf_files if path.suffix == ".md"]
+    json_files = [path for path in okf_files if path.suffix == ".json"]
+    for path in markdown_files:
+        if path == index_path:
+            continue
+        _write_page(
+            out,
+            slug=_slug(path.name),
+            body=_strip_front_matter(path.read_text(encoding="utf-8")),
+            source=str(path.relative_to(ROOT)),
+            seen=seen,
+        )
+    for path in json_files:
+        _write_page(
+            out,
+            slug=_slug(path.name),
+            body=_json_page(path),
+            source=str(path.relative_to(ROOT)),
+            seen=seen,
+        )
+    for path in pack_files:
+        _write_page(
+            out,
+            slug=_slug(path.name),
+            body=_strip_front_matter(path.read_text(encoding="utf-8")),
+            source=str(path.relative_to(ROOT)),
+            seen=seen,
+        )
+
+    sidebar_lines = [HOME_BANNER.strip(), "", "**OKF**", "[[Home]]"]
+    for path in markdown_files:
+        if path != index_path:
+            sidebar_lines.append(f"[[{_slug(path.name)}|{path.stem}]]")
+    if json_files:
+        sidebar_lines.extend(["", "**Schemas and data**"])
+        for path in json_files:
+            sidebar_lines.append(f"[[{_slug(path.name)}|{path.name}]]")
+    if pack_files:
+        sidebar_lines.extend(["", "**Public packs**"])
+        for path in pack_files:
+            sidebar_lines.append(f"[[{_slug(path.name)}|{path.stem}]]")
+    (out / "_Sidebar.md").write_text("\n".join(sidebar_lines) + "\n", encoding="utf-8")
+    return sorted(out.glob("*.md"))
 
 
 def main() -> int:
@@ -36,77 +166,20 @@ def main() -> int:
         "--out-dir",
         type=Path,
         required=True,
-        help="Directory to write wiki markdown (created if missing).",
-    )
-    parser.add_argument(
-        "--clean",
-        action="store_true",
-        help="Remove existing .md files in out-dir before writing.",
+        help="External directory replaced with generated wiki markdown.",
     )
     args = parser.parse_args()
-    out: Path = args.out_dir
-    out.mkdir(parents=True, exist_ok=True)
-    if args.clean:
-        for old in out.glob("*.md"):
-            old.unlink()
+    written = build_mirror(args.out_dir)
+    out = args.out_dir.resolve()
 
-    # Home
-    index = (OKF / "index.md").read_text(encoding="utf-8")
-    # Strip YAML front matter if present
-    if index.startswith("---"):
-        parts = index.split("---", 2)
-        if len(parts) >= 3:
-            index = parts[2].lstrip("\n")
-    home = HOME_BANNER + "# UniGrok knowledge (OKF mirror)\n\n" + index
-    home += "\n\n## Public intelligence packs\n\n"
-    if PACKS.is_dir():
-        for pack in sorted(PACKS.glob("v*.md")):
-            home += f"- [[{_slug(pack.name)}|{pack.stem}]]\n"
-    (out / "Home.md").write_text(home, encoding="utf-8")
-
-    # OKF pages
-    for path in sorted(OKF.glob("*.md")):
-        if path.name == "index.md":
-            continue
-        body = path.read_text(encoding="utf-8")
-        if body.startswith("---"):
-            parts = body.split("---", 2)
-            if len(parts) >= 3:
-                body = parts[2].lstrip("\n")
-        (out / f"{_slug(path.name)}.md").write_text(
-            HOME_BANNER + body, encoding="utf-8"
-        )
-
-    # Public packs
-    if PACKS.is_dir():
-        for path in sorted(PACKS.glob("v*.md")):
-            body = path.read_text(encoding="utf-8")
-            (out / f"{_slug(path.name)}.md").write_text(
-                HOME_BANNER + body, encoding="utf-8"
-            )
-
-    # Sidebar for GitHub wiki
-    sidebar_lines = [
-        HOME_BANNER.strip(),
-        "",
-        "**OKF**",
-        "[[Home]]",
-    ]
-    for path in sorted(OKF.glob("*.md")):
-        if path.name == "index.md":
-            continue
-        sidebar_lines.append(f"[[{_slug(path.name)}|{path.stem}]]")
-    if PACKS.is_dir() and any(PACKS.glob("v*.md")):
-        sidebar_lines.append("")
-        sidebar_lines.append("**Public packs**")
-        for path in sorted(PACKS.glob("v*.md")):
-            sidebar_lines.append(f"[[{_slug(path.name)}|{path.stem}]]")
-    (out / "_Sidebar.md").write_text("\n".join(sidebar_lines) + "\n", encoding="utf-8")
-
-    print(f"Wrote wiki mirror to {out}")
-    print("Push separately, e.g.:")
-    print("  git clone https://github.com/djtelicloud/grok-mcp-server.wiki.git")
-    print("  cp -R out-dir/* wiki-clone/ && cd wiki-clone && git add -A && git commit && git push")
+    print(f"Wrote {len(written)} wiki pages to {out}")
+    print("Publish separately, e.g.:")
+    print(
+        "  git clone https://github.com/djtelicloud/grok-mcp-server.wiki.git "
+        "grok-mcp-server.wiki"
+    )
+    print(f"  rsync -a --delete {shlex.quote(f'{out}/')} grok-mcp-server.wiki/")
+    print("  cd grok-mcp-server.wiki && git add -A && git commit && git push")
     return 0
 
 

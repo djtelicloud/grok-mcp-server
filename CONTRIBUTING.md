@@ -105,7 +105,9 @@ mutate. Pasteable terminal prompts for agents beat multi-step browser forms.
     and https://grokmcp.org/docs/okf/. Do **not** hand-edit wiki pages. To
     refresh the tab for humans, run
     `uv run python scripts/publish_okf_wiki_mirror.py --out-dir /tmp/unigrok-wiki`
-    and push the generated markdown to the repo wiki. See
+    and publish the generated pages with a deletion-aware sync. The generator
+    removes stale pages and renders manifest-listed JSON schemas/data as linked
+    wiki pages. See
     [docs/wiki-okf-mirror.md](docs/wiki-okf-mirror.md).
 - Run `uv run pytest` before opening a PR.
 

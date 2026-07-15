@@ -11,10 +11,20 @@ UniGrok is a **small always-on service** on your machine, not a one-file IDE plu
 git clone https://github.com/djtelicloud/grok-mcp-server.git
 cd grok-mcp-server
 uv run python main.py init          # .env + IDE paste blocks
-# Put your xAI developer key in server .env only (or use CLI auth after compose)
 docker compose up --build -d
+```
+
+Before the readiness check, choose one credential path: put the xAI developer
+key in server `.env` (then restart Compose), or authenticate the CLI subscription
+after the image is up:
+
+```bash
+docker compose run --rm grok-cli-auth
 curl -sf http://localhost:4765/readyz
 ```
+
+API users skip the CLI-auth command and run the same readiness check. CLI-only
+installs must authenticate before `/readyz` can report a usable model plane.
 
 Then paste the MCP block from `init` into your IDE (URL `http://localhost:4765/mcp`,
 stable `X-Client-ID`, **never** put the xAI key in IDE JSON).
@@ -49,6 +59,11 @@ When the user says `@grok` or wants a second opinion:
 3. Hive / deep-think / parallel voting = **opt-in** for hard problems, not every
    turn in foreign apps.
 4. Speak **Ready / Live / Blocked / Who (brand)** + plain task titles.
+
+## Task titles, not numbers
+
+Lead status updates with the provider brand, status, and a plain task title.
+Ticket or PR numbers are optional link footnotes, never the story.
 
 ### Do not copy into foreign apps
 

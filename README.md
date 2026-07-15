@@ -67,23 +67,32 @@ how UniGrok runs on your machine — not as “you are a Docker developer.”
 ```bash
 git clone https://github.com/djtelicloud/grok-mcp-server.git && cd grok-mcp-server
 uv run python main.py init
-# Edit .env: set the xAI developer key (server only) — or use CLI auth after compose
 docker compose up --build -d
-curl --fail -s http://localhost:4765/readyz
 ```
 
 `init` creates `.env` if missing and prints IDE MCP snippets for
 `http://localhost:4765/mcp`. After the service is healthy, you can **close this
 repo** and work in any project with `@grok`.
 
-**CLI subscription path** (optional, after the image is up):
+Before checking readiness, complete **one** credential path:
+
+- **xAI API:** set the developer key in server `.env` before starting Compose
+  (or rerun `docker compose up -d` after editing it).
+- **CLI subscription:** after the image is up, run:
 
 ```bash
 docker compose run --rm grok-cli-auth
 ```
 
+Then verify the usable plane:
+
+```bash
+curl --fail -s http://localhost:4765/readyz
+```
+
 You are ready when `/readyz` reports `"status":"ready"`. `/healthz` only proves
-the process is up.
+the process is up; CLI-only installs must authenticate before this readiness
+check.
 
 ## 4. Connect your IDE (paste this to your agent)
 
