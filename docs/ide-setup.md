@@ -178,6 +178,23 @@ Interactive Composer (including Cursor Grok 4.5 chat) remains outside these
 automation paths; use UniGrok `@grok` peer review when you want dual-plane
 cost/route honesty instead of an Autofix mutation.
 
+### Cursor attribution smoke (live check)
+
+After connect, prove the label from inside Cursor (not from docs alone):
+
+1. Call `grok_mcp_discover_self` and confirm `data.request_context.client_id_present`
+   is true and `client_id_normalized` is `cursor` (or `cursor-forge` on the
+   Forge entry).
+2. Note `grok_mcp_status` Top Callers baseline, then run one cheap
+   `agent` call with `mode=fast` and a unique session marker.
+3. Re-check Top Callers: `http:anon|cursor` (or `|cursor-forge`) should
+   increase by one. Bare `http:anon` means some other client omitted
+   `X-Client-ID` — it is not the healthy Cursor path above.
+
+Repo-root `.mcp.json` may still use `vscode` / `vscode-forge` for the VS Code
+path; Cursor must keep `cursor` / `cursor-forge` in `~/.cursor/mcp.json` or
+project `.cursor/mcp.json` so the two IDEs do not thrash labels.
+
 ### Cursor multi-model vs UniGrok planes
 
 Cursor may list **non-Grok** models for native chat (Claude, GPT, etc.). Those
