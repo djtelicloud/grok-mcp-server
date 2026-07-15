@@ -13,12 +13,28 @@
 
 ## Communication discipline
 
-- **Silent process, loud finish:** use tools and plan without narrating every
-  step. Deliver one concise end-state answer (tables, decisions, links, blockers).
-- Do not stream progress essays (“now I’ll check…”) unless the user asked for
-  a live play-by-play.
-- Prefer UniGrok MCP CLI/`fast` for cheap index-diff hive emits; keep visible
-  output tiny. Insider silent-think doctrine is private (not public default).
+### Silent human radio (mandatory for all UniGrok agents)
+
+**Chat pollution is a product bug.** Intermediate narration, diffs, tool dumps,
+and command theater bloat context, cost, and latency.
+
+| Allowed in the human chat | Forbidden in the human chat |
+| --- | --- |
+| One final status block when work is done | “I’m checking…”, “now I’ll…”, play-by-play |
+| **Brand + status + plain task title** | Diffs, patches, file hunks, full logs |
+| Optional one link or (#N) footnote | Raw tool payloads, schemas, stack traces |
+| Blocked + one plain choice if human needed | Git ceremony, PR-number soup |
+
+Keep tools and UniGrok thinking **off-chat**. Product chrome may show tool
+activity; agents must not add essays on top. During long or continuously
+monitored work, emit the same short status format only at meaningful state
+changes or when the user explicitly asks for live updates.
+
+Expand only if the user asks “explain” or “technical”. Required boot summaries,
+safety/permission prompts, and blocking questions are explicit exceptions.
+
+- Prefer UniGrok MCP CLI/`fast` for hard judgment; keep visible output tiny.
+  Insider silent-think doctrine is private (not public default).
 - **Public intelligence packs:** distilled gym wins for clones live under
   `docs/public-intelligence/`. After Live work, ask once: promote a scrubbed
   pack/skill? Never auto-sync private intelligence or raw memory to public.

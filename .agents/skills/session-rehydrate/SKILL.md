@@ -16,12 +16,13 @@ Intelligence is rehydrated from **git + disk**, not model memory.
 Do this for the whole session after rehydrate:
 
 1. **Think and tool silently.** Prefer tool calls and internal planning over
-   step-by-step narration to the user.
-2. **One end-state answer.** Deliver a concise final report (status table,
-   decisions, links, next action). Do not stream a blog of intermediate work
-   unless the user asked for a live play-by-play.
+   step-by-step narration to the user. No diffs, patches, or tool dumps in chat.
+2. **One end-state answer by default.** Use brand + status + plain task title.
+   The required Rehydrated block below is an explicit boot exception. For long
+   or continuously monitored work, send only short state changes when the user
+   requested live updates.
 3. **No fake progress essays.** “I’m checking X… now Y…” is noise. Use tools;
-   then speak.
+   then speak once per meaningful state change or finish line.
 4. **Human language only to the user:** Ready / Not ready / Live / Not live /
    Blocked / Who (**brand first**) + **plain task title**. Never lead with PR
    numbers. Do not dump git jargon unless they asked for git. “Done / pushed?”
@@ -31,8 +32,8 @@ Do this for the whole session after rehydrate:
    claims, prefer **CLI** + `mode=fast` for index-diff hive polls; keep
    **visible emit tiny**. Insider silent-think doctrine lives in private
    `../unigrok-intelligence/playbooks/silent-think-harness.md` (not public default).
-6. **Exceptions:** user asks “explain as you go”, safety/permission prompts,
-   or a blocking question that needs a human.
+6. **Exceptions:** the required Rehydrated block below, user-requested live
+   updates or explanation, safety/permission prompts, and blocking questions.
 
 This is **session law** when this skill or `.agents/AGENTS.md` is loaded — not
 global Grok TUI settings alone. Start the agent **inside the product checkout**
