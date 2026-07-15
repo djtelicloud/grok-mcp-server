@@ -422,3 +422,22 @@ The server runs on macOS via a lightweight helper script (`grok-mcp-helper.sh`) 
 
 ### 8.2 Production Container Setup
 The system can be deployed in a lightweight `python:3.11-slim` container, mounting the local workspace to process files over standard input/output (`stdio`) streams.
+
+---
+
+## 9. Data Hydration vs Intelligence Rehydrate
+
+UniGrok explicitly separates two fundamentally different concepts of "rehydration":
+
+### 9.1 Runtime Telemetry Process Hydration (`src/hydration.py`)
+Responsible for recovering in-process accumulators, daily budgets, cost gates, and calibration caches after a process restart without re-arming exhausted budgets or losing metrics. 
+- **Owner**: MCP server process (`HydrationService` over `SessionStoreProtocol`).
+- **Source of Truth**: The public consumer SQLite (`grok_sessions.db`).
+- **Mechanism**: Formalized `HydrationHook` classes scoped by `process_day`, `process_lifetime`, or `session`. These hooks are strictly observational, non-mutating, and fail-open.
+- **Pattern**: Lazy, first-need (e.g. caller cost hydrates only on the first request for that caller; semantic budget hydrates on the first sampled evaluation).
+
+### 9.2 Intelligence Session Rehydrate
+Responsible for recovering agent product context across chat sessions (e.g., brand guidelines, land gates, task continuity, next steps).
+- **Owner**: `session-rehydrate` skill / public rehydrate packs.
+- **Source of Truth**: Git + disk (`.agents/`, private continuity files).
+- **Mechanism**: Never folded into the public SQLite telemetry store; remains a prompt-driven skill behavior.
