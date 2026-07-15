@@ -111,15 +111,58 @@ Do not reuse a bare generic session key across unrelated repos.
 
 ### 6. Emit to user (only this)
 
-A short **Rehydrated** block:
+A short **Rehydrated** block, then **required brand next steps**. Table alone
+is incomplete — stopping after the summary is a product failure (observed when
+Gemini/Antigravity and some Copilot hosts only printed the table).
+
+#### 6a. Status table
 
 | Field | Value |
 |-------|--------|
+| brand (you) | Grok / Codex / Claude / Gemini / Cursor / Copilot / … |
 | cwd / branch | … |
 | main / land-status | … |
 | continuity | loaded / missing |
-| open PRs you care about | … |
-| next action | … |
+| open PRs / ready tasks | plain titles first (numbers only as footnotes) |
+
+#### 6b. Next smartest steps (mandatory — your brand)
+
+Immediately after the table, emit **1–2 concrete offers** you are uniquely
+suited to do *now*, grounded in live gates (land-status, continuity, open
+drafts, leftover **your** scratchpads, product gaps). Not generic “wait for
+instructions.” Not someone else’s job.
+
+**Format:**
+
+```text
+### Next smartest steps ([Your brand])
+1. [plain English task title] — [why this brand / what benefit]
+2. [optional second] — …
+```
+
+**How to pick (silent scan, then offer):**
+
+1. Name **your brand** and its strengths from the map below.
+2. Scan live product state for a **real problem or benefit** that map fits.
+3. Prefer work that is ready, safe for a contributor, and human-readable.
+4. If nothing fits, say so once and offer the single best hygiene or doc fix
+   for **your** surface — never an empty next-action cell.
+
+**Brand strengths map (use your row; do not invent peer authority):**
+
+| Brand | Unique strengths | Typical smart offers after hydrate |
+| --- | --- | --- |
+| **Grok CLI** | UniGrok dual-plane, silent radio, MCP gateway, hive/index-diff habits, headless CLI sessions | Plane/routing truth, rehydrate/human-radio law, Control Center readiness, contributor product docs |
+| **Codex** | Supervisor / `scripts/land` only when authorized; protected main; multi-agent coordination | Land Ready packets; prune safe orphans as supervisor; integration review; continuity ownership |
+| **Claude Code** | Deep multi-file review, CLAUDE.md fidelity, finding real defects in code/docs | Code audit of recent Live work; fix issues it spots; skill/AGENTS consistency |
+| **Gemini / Antigravity** | Large context, Google/Antigravity worktree homes, GEMINI.md surface, broad codebase read | Antigravity IDE setup fidelity; large-context architecture/docs consistency; `gemini/*` task worktrees under provider home |
+| **Cursor** (local) | Multi-agent IDE, Bugbot/automations rules, hybrid local MCP | Cursor automation thrash rules; local UniGrok client id; PR approver single-pass discipline |
+| **Cursor Cloud** | GitHub-only remote coding | **No** laptop secrets/tunnels; GitHub-only tasks; optional hosted twin only if connected |
+| **Copilot / Kimi** (VS Code) | VS Code + Copilot instructions, fast in-editor edits | `.github/copilot-instructions.md` fidelity; VS Code MCP setup; plain-title human radio in VS Code |
+
+**Forbidden:** table with only “next action: wait”; peer-brand work presented as
+yours; supervisor land/merge as a non-Codex contributor; empty “I am ready”
+with no opportunity.
 
 Then wait for the user task — or continue if they already gave one.
 

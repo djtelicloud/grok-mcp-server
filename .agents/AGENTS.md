@@ -10,6 +10,10 @@
 - Continuity lives in git/disk: private
   `../unigrok-intelligence/codex/continuity/active-work-latest.md` (if present),
   open PR notes, and `./scripts/land-status` — not chat memory.
+- **Brand next steps are mandatory after the status table.** Every brand must
+  know its own strengths and offer **1–2 plain-title next smartest tasks** it
+  can actually do (problem or benefit), not a table-only “ready.” Details and
+  the brand map live in the session-rehydrate skill §6b.
 
 ## Communication discipline
 
