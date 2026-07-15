@@ -3,7 +3,6 @@
 
 import logging
 import os
-from pathlib import Path
 from typing import Any, Dict, Optional, List, Literal
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import ToolAnnotations

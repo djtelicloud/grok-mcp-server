@@ -49,21 +49,11 @@ from .xai_credentials import (
     _xai_management_key_state,
 )
 from .identity import (
-    _ACTIVE_CALLER,
-    _ACTIVE_CLIENT_ID,
-    _ACTIVE_PRINCIPAL,
-    _ACTIVE_SESSION_ID,
-    caller_from_mcp_context,
     get_active_caller,
     get_active_principal,
     normalize_caller,
-    normalize_principal,
-    reset_active_caller,
-    reset_active_principal,
     resolve_request_caller,
     scoped_session,
-    set_active_caller,
-    set_active_principal,
     telemetry_row_caller,
 )
 
@@ -10616,7 +10606,6 @@ async def _call_plane(
     # API branch streams for real via chat.stream(), forwarding each chunk as
     # a {"type": "content_delta", "text": ...} event before returning the
     # complete response as usual.
-    from xai_sdk import Client
     from xai_sdk.chat import user, system, assistant
 
     if _attempt_reporting is not None:
