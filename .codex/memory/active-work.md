@@ -57,12 +57,21 @@ credentials, OAuth codes, tokens, or private keys here.
   suite, generated-OKF check, Ruff, Docker, site, attribution, and CodeQL checks
   are green. Do not bypass its draft, Code Owner, Codex Approval, or
   protected-merge gates.
-- PR #125 has two current unresolved review threads and a stale generated OKF
-  failure. PR #126 has two current unresolved UI review threads while CI is
-  green. Draft PRs #121 and #124 have no unresolved threads; hosted review
-  smoke runs associated with #121 failed in the read-only review transport.
-  No external thread was resolved or replied to.
+- All seven open PR heads (#121, #124-#129) have green CI and CodeQL. PR #125
+  has two newly actionable onboarding threads plus one addressed-but-unresolved
+  thread. PR #126 has one newly actionable UI cache thread plus one
+  addressed-but-unresolved thread. PR #128 has four current skill/documentation
+  threads and diff whitespace. Draft PRs #121, #124, and #129 have no review
+  threads. No external thread was resolved or replied to.
+- Hosted review smoke runs associated with #121 failed in the read-only MCP
+  transport; no later successful hosted review run exists. Do not silently
+  rerun the API-plane workflow because it may spend metered provider credits.
 - Issue #65 is the only open issue. Its latest comment reports a bounded live
   Stage 1 run, while this handoff and the issue body retain the exact-head
   authorization gate. Treat any further live generation or training as blocked
   until the authority state is reconciled explicitly.
+- Repository metadata, dependency/security automation, release 0.6.0, public
+  endpoints, ports, and agent/plugin metadata were rechecked. The empty GitHub
+  Wiki feature remains enabled even though the product docs explicitly forbid a
+  separate Wiki surface; changing that repository setting needs an explicit
+  maintainer decision.
