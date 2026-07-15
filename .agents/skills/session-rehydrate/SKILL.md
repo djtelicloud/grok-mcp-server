@@ -1,0 +1,130 @@
+---
+name: session-rehydrate
+description: >-
+  Boot a new IDE/agent session into full UniGrok product context. Activate on
+  "rehydrate", "boot", "where were we", "session start", first message after
+  IDE reset, or when the agent was started outside the product checkout.
+---
+
+# Session rehydrate (persist intelligence across chats)
+
+New Grok/Claude/Codex sessions do **not** inherit prior chat transcripts.
+Intelligence is rehydrated from **git + disk**, not model memory.
+
+## Communication discipline (same experience every session)
+
+Do this for the whole session after rehydrate:
+
+1. **Think and tool silently.** Prefer tool calls and internal planning over
+   step-by-step narration to the user.
+2. **One end-state answer.** Deliver a concise final report (status table,
+   decisions, links, next action). Do not stream a blog of intermediate work
+   unless the user asked for a live play-by-play.
+3. **No fake progress essays.** “I’m checking X… now Y…” is noise. Use tools;
+   then speak.
+4. **UniGrok second opinions:** when calling MCP `agent` for hard product
+   claims, prefer **CLI** + `mode=fast` for index-diff hive polls; keep
+   **visible emit tiny**. Insider silent-think doctrine lives in private
+   `unigrok-intelligence/playbooks/silent-think-harness.md` (not public default).
+5. **Exceptions:** user asks “explain as you go”, safety/permission prompts,
+   or a blocking question that needs a human.
+
+This is **session law** when this skill or `.agents/AGENTS.md` is loaded — not
+global Grok TUI settings alone. Start the agent **inside the product checkout**
+so these rules load.
+
+## Boot sequence (run once at session start)
+
+### 0. Workspace
+
+- Prefer cwd: product checkout `…/grok-mcp-server` or a named agent worktree.
+- If cwd is `$HOME` or unrelated, **say so once**, then rehydrate from absolute
+  product paths anyway (or ask to reopen the project folder).
+
+### 1. Product law
+
+Read (skim) when available:
+
+- `.agents/AGENTS.md` — multi-agent git, MCP endpoint, credentials boundary
+- Root `AGENTS.md` if present
+
+### 2. Continuity (private brain)
+
+If the private repo is present at a sibling path or known clone:
+
+```text
+../unigrok-intelligence/codex/continuity/active-work-latest.md
+```
+
+Also useful:
+
+```text
+../unigrok-intelligence/harvest/index-diff-hive/   # recent hive receipts
+../unigrok-intelligence/playbooks/index-diff-hive.md
+../unigrok-intelligence/playbooks/parallel-ship-dag.md
+```
+
+If private paths are missing, continue with public product only; do not invent
+hive/land authority for public installs.
+
+### 3. Live gates
+
+From product root:
+
+```bash
+./scripts/land-status
+```
+
+Note: visible main, worktrees, stable/forge readiness.  
+Primary shared checkout should stay on **clean `main`**. Implementation uses
+**agent-prefixed worktrees** only.
+
+### 4. Runtime (optional quick)
+
+```bash
+curl -sf http://127.0.0.1:4765/readyz
+```
+
+Do not print secrets. Credential plane details via Control Center or
+`grok_mcp_discover_self` when needed.
+
+### 5. UniGrok MCP session key (optional)
+
+For multi-turn `@grok` continuity this calendar day, reuse a project-qualified
+session such as:
+
+```text
+unigrok:ops:YYYY-MM-DD
+```
+
+Do not reuse a bare generic session key across unrelated repos.
+
+### 6. Emit to user (only this)
+
+A short **Rehydrated** block:
+
+| Field | Value |
+|-------|--------|
+| cwd / branch | … |
+| main / land-status | … |
+| continuity | loaded / missing |
+| open PRs you care about | … |
+| next action | … |
+
+Then wait for the user task — or continue if they already gave one.
+
+## What this skill does *not* do
+
+- Does not restore prior chat transcripts
+- Does not land `main` (Codex / `scripts/land` only)
+- Does not run Stage 1 live Needle gen without exact-head authorization
+- Does not teach public users Forge/hive as product defaults
+
+## Persistence checklist (end of meaningful work)
+
+Before leaving a session that produced decisions:
+
+1. Update private `active-work-latest.md` when continuity changed
+2. Put exact head + “ready for Codex land?” on the PR
+3. Leave primary checkout on clean `main`
+4. Hive receipts (if any) under private `harvest/index-diff-hive/`
