@@ -747,9 +747,12 @@ class CallerCostHook:
 
     async def hydrate(self, store: Any, ctx: HydrationContext) -> HydrationResult:
         now = time.time()
+        costs = await asyncio.gather(
+            *(store.get_caller_cost_today(principal) for principal in self.principals)
+        )
         hydrated = {
-            principal: (float(await store.get_caller_cost_today(principal)), now)
-            for principal in self.principals
+            principal: (float(cost), now)
+            for principal, cost in zip(self.principals, costs)
         }
         _CALLER_SPEND_CACHE.update(hydrated)
         return HydrationResult()

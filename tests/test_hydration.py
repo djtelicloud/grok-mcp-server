@@ -123,3 +123,15 @@ async def test_failed_hydration_retries(service):
 def test_invalid_scope_is_rejected(service):
     with pytest.raises(ValueError, match="unsupported hydration scope"):
         service.register(FakeHook("invalid", "request"))
+
+
+@pytest.mark.asyncio
+async def test_first_registration_wins(service):
+    first = FakeHook("stable_hook", "process_lifetime")
+    duplicate = FakeHook("stable_hook", "process_lifetime")
+    service.register(first)
+    service.register(duplicate)
+
+    assert await service.hydrate_hook(first.name) is True
+    assert first.calls == 1
+    assert duplicate.calls == 0

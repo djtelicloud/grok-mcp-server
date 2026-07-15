@@ -63,8 +63,14 @@ class HydrationService:
             raise ValueError("hydration hook name must be non-empty")
         if hook.scope not in _VALID_SCOPES:
             raise ValueError(f"unsupported hydration scope: {hook.scope!r}")
+        if hook.name in self._hooks:
+            return
         with self._hooks_lock:
-            self._hooks[hook.name] = hook
+            if hook.name in self._hooks:
+                return
+            hooks = dict(self._hooks)
+            hooks[hook.name] = hook
+            self._hooks = hooks
 
     @staticmethod
     def _scope_token(
@@ -80,8 +86,7 @@ class HydrationService:
         self, hook_name: str, ctx: Optional[HydrationContext] = None
     ) -> bool:
         """Hydrate one hook, returning whether its scope is hydrated."""
-        with self._hooks_lock:
-            hook = self._hooks.get(hook_name)
+        hook = self._hooks.get(hook_name)
         if hook is None:
             return False
 
@@ -124,10 +129,9 @@ class HydrationService:
                     completed_future.set_result(succeeded)
 
     def _hook_names_for_scope(self, scope: HydrationScope) -> list[str]:
-        with self._hooks_lock:
-            return [
-                hook.name for hook in self._hooks.values() if hook.scope == scope
-            ]
+        return [
+            hook.name for hook in self._hooks.values() if hook.scope == scope
+        ]
 
     async def hydrate_process_day(self) -> None:
         names = self._hook_names_for_scope("process_day")
