@@ -215,8 +215,15 @@ def test_disposable_scratchpad_cleanup_is_consistent():
 
     for text in (shared, skill, root_agents):
         assert "finished disposable scratchpad" in text or "own finished" in text
-        assert "primary main checkout" in text or "primary main" in shared
+        # Each guidance surface must protect primary main (not only shared).
+        assert (
+            "primary main checkout" in text
+            or "primary main" in text
+            or "Never delete another agent" in text
+            or "Never remove peers" in text
+        ), "expected primary-main / peer protection"
     assert "Never delete another agent" in shared or "Never remove peers" in shared
+    assert "primary main" in shared or "primary main checkout" in shared
     assert "Cursor Automations" in shared
     assert "Single-agent only" in shared
     # Old absolute ban must not remain as a hard stop without the exception.
