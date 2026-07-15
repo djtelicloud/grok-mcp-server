@@ -153,7 +153,7 @@ def test_public_docs_surfaces_exclude_github_wiki_as_product():
     )
 
     assert "## 8. Where docs live" in readme
-    assert "https://grokmcp.org/docs/okf/" in readme
+    assert "https://grokmcp.org/docs/okf/index.md" in readme
     assert "There is **no** separate GitHub Wiki product surface" in readme
     assert "GitHub Wiki is not a product surface" in contributing
     assert "Do not hand-edit it as source of" in contributing
