@@ -69,6 +69,12 @@ credentials, OAuth codes, tokens, or private keys here.
   scratchpad, the first and rehydrated `agents/hydrate-data-function`
   scratchpads, and `claude/hydrate-c23d9f` plus `claude/hydrate-0597fe` were
   removed only after clean, process-free, and integrated-state checks.
+- Six residual unregistered Codex task directories were retired after the app
+  reported every owning task completed and unloaded, no process referenced any
+  directory, no directory remained in the Git worktree registry, and no unique
+  remote commit or open PR existed: `503b`, `8cf2`, `8de4`, `cd53`, `e9a9`, and
+  `fbfd`. The active `b161` Codex task and the primary `main` checkout were
+  explicitly excluded and reverified clean after removal.
 - Provider IDEs may automatically rehydrate a clean scratchpad after cleanup.
   A clean zero-ahead worktree is not an orphan while any live process uses it.
   Before supervisor removal, re-check process ownership, dirty state, unique
