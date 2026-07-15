@@ -396,6 +396,43 @@ async def test_auto_exact_pin_keeps_thinking_on_api_under_cli_first(monkeypatch)
 
 
 @pytest.mark.asyncio
+async def test_auto_exact_pin_keeps_thinking_on_api_when_discovery_fails(monkeypatch):
+    from src import utils
+
+    shared_model = "grok-shared-exact"
+    monkeypatch.setenv("UNIGROK_PLANE_POLICY", "cli_first")
+    monkeypatch.setenv("XAI_API_KEY", "configured")
+    monkeypatch.setattr(utils, "XAI_API_KEY", "configured")
+    monkeypatch.setattr(
+        utils,
+        "grok_cli_plane_status",
+        lambda **_: {
+            **READY_CLI,
+            "models": [shared_model],
+            "default_model": shared_model,
+        },
+    )
+    monkeypatch.setattr(
+        utils._MODEL_RESOLVER,
+        "catalog_snapshot",
+        AsyncMock(return_value=([shared_model], "static_fallback", False)),
+    )
+
+    _, _, receipt, _ = await utils._select_routing_model(
+        prompt="Think deeply while discovery is unavailable",
+        mode="auto",
+        thinking_mode=True,
+        requested_model=shared_model,
+        requested_plane="auto",
+        active_store=None,
+        input_messages=None,
+        enable_agentic=True,
+    )
+
+    assert receipt["catalog"]["source"] == "static_fallback"
+
+
+@pytest.mark.asyncio
 async def test_auto_exact_pin_routes_cli_only_live_slug_to_cli(monkeypatch):
     from src import utils
 
