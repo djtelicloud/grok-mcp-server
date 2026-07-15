@@ -163,6 +163,21 @@ def test_mcp_ui_static_files_are_served(monkeypatch):
     assert "CLI subscription" in script.text
     assert "API metered" in script.text
     assert "list.replaceChildren()" in script.text
+    assert "planePinSnippet" in script.text
+    assert "fallback_policy=same_plane" in script.text
+    assert "isFallbackCatalogSource" in script.text
+    assert "renderPlaneRepair" in script.text
+    assert "clearPlaneModelLists" in script.text
+    assert "loadPlaneModelCatalog(false)" in script.text
+    assert 'headers: { "X-Client-ID": "cursor" }' in script.text
+    assert "Cursor is the first-class host IDE" in script.text
+    assert 'id="cliCatalogTrust"' in index.text
+    assert 'id="apiCatalogTrust"' in index.text
+    assert 'id="cliPlaneRepair"' in index.text
+    assert 'id="apiPlaneRepair"' in index.text
+    assert "Cursor is first-class" in index.text
+    assert "catalog-trust-banner" in styles.text
+    assert ".plane-repair" in styles.text
     assert "routing?.why_detail" in script.text
     assert styles.status_code == 200
     assert ".console-grid" in styles.text
