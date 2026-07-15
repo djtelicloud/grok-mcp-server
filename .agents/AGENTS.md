@@ -29,7 +29,7 @@ Dyslexia-hostile jargon in answers is a product failure.
 
 | User says (examples) | Means | Agent does silently | Tell the user |
 | --- | --- | --- | --- |
-| Done? / finished? / is it pushed? / submitted? | Is my task complete and with the supervisor? | Open/update **draft PR** for your lane; hand exact head to supervisor when ready | **Ready for supervisor** / **Not ready** (+ one plain blocker) |
+| Done? / finished? / is it pushed? / submitted? | Is my task complete and with the supervisor? | Open/update **draft PR** for your lane; hand exact HEAD to supervisor when ready | **Ready for supervisor** / **Not ready** (+ one plain blocker) |
 | Live? / shipped? / on main? / in production? | Is it the real product now? | Check protected main / deploy only if you are supervisor | **Live** / **Not live** (+ one plain reason) |
 | Who did this? | Which **brand/agent** | Trailers / evidence | Lead with **Grok / Codex / Claude / …** — never “you wrote it” when an agent did |
 | Clean up / too many folders | Remove finished scratchpads | Own worktree remove; supervisor may prune orphans | **Cleaned** / **Left X (why)** |
@@ -61,15 +61,27 @@ externally use **Ready / Not ready / Live / Not live / Blocked / Who (brand)**.
 ## Multi-Agent Git Coordination
 - **PR-First Contribution Record**: Every change to `origin/main` goes through a pull request. After local verification, an authorized IDE agent may push only its own agent-prefixed task branch and open or update a draft pull request. If that agent lacks GitHub credentials, it hands Codex the exact commit so an authorized Codex session can publish the same branch and draft PR. A commit-only handoff is pre-PR evidence, not a substitute for the PR.
 - **Humans Accountable, Agents Traceable**: The sponsoring GitHub user remains the accountable contributor. Record material IDE/model work with the canonical `Agent-Assisted-By:` trailer and advisory review with `Agent-Reviewed-By:` as defined in [docs/agent-attribution.md](../docs/agent-attribution.md). Never invent `Co-authored-by` identities: use that trailer only for a real person's linked GitHub email or an exact bot identity in `.github/agent-identities.json`.
-- **Codex Owns Final Integration**: The Codex/project-admin role is independent of interface: Codex Desktop, CLI, GitHub Copilot, or another authorized Codex session may perform it. Contributor agents may inspect, edit, test, commit, push their own agent-prefixed branch, and open or update its draft PR. They must not push shared `main`, run `scripts/land`, merge, rebase shared `main`, publish releases or deployments, or delete worktrees unless they are explicitly acting as the Codex/project-admin integration session.
+- **Codex Owns Final Integration**: The Codex/project-admin role is independent of interface: Codex Desktop, CLI, GitHub Copilot, or another authorized Codex session may perform it. Contributor agents may inspect, edit, test, commit, push their own agent-prefixed branch, and open or update its draft PR. They must not push shared `main`, run `scripts/land`, merge, rebase shared `main`, or publish releases or deployments unless they are explicitly acting as the Codex/project-admin integration session. Exception: a contributor **may remove only its own finished disposable scratchpad** (see Worktree lifecycle); never delete peers’ live trees or the primary main checkout.
 - **Shared Main Checkout**: Primary product folder stays on integrated `main`. Agents do not thrash it for experiments.
 - **Do Not Branch-Switch the Shared Folder**: Parallel work uses separate scratchpads so other IDEs keep a stable main folder.
 - **Worktrees Are Disposable Scratchpads**: One task, one contained tree only — under `<repo>/.worktrees/<agent>/<task>/` or `/tmp/unigrok-<agent>-<task>/`. Never sibling clutter like `Documents/…/grok-<feature>/` next to the real repo.
-- **Worktree lifecycle**: Start task → contained tree → draft PR for supervisor → when **Live**, abandoned, or **new task** → **same agent removes its own finished tree**, then create a fresh one. Never delete another agent’s live tree or primary main. Supervisor may prune safe orphans.
-- **Contributor done (user language)**: **Ready for supervisor** = your draft PR is open with exact head + verification. Not “I ran push/merge myself.”
+- **Worktree lifecycle**: Start task → contained tree → draft PR for supervisor → when **Live**, abandoned, or **new task** → **same agent removes its own finished tree**, then create a fresh one. Never delete another agent’s live tree or the primary main checkout. Supervisor may prune safe orphans.
+- **Contributor done (user language)**: **Ready for supervisor** = your draft PR is open with exact HEAD + verification. Not “I ran push/merge myself.”
 - **Supervisor done (user language)**: **Live** only after protected integration succeeds (`LANDED TO MAIN` internally). Else **Not live** / **Blocked** with one plain reason.
 - **Protect main and peers**: Never overwrite dirty main. Never remove peers’ live scratchpads. Your own finished scratchpad **must** go when the task ends.
 - **Cursor Cloud**: GitHub coding needs no laptop UniGrok env/tunnel. Optional Grok = hosted twin only when connected.
 - **Status Check**: Prefer `./scripts/land-status` silently. Many leftover trees = hygiene debt; clean yours before starting more.
 - **`.worktrees/` is local only** (gitignored scratch).
 - **Workspace Memory**: For implementation, debugging, architecture, and review work, use `.agents/skills/unigrok-workspace-memory/SKILL.md` when available. Recall with the agent worktree's own full HEAD. After `scripts/land` succeeds, record one concise landed outcome; never write Git Notes directly. Memory mirror failure is reportable but does not undo a verified landing.
+
+## Cursor Automations (PR Approver / Security Reviewer / Bugbot)
+
+These rules apply to Cursor Automations and Bugbot Autofix on this repo:
+
+- **Single-agent only.** Do not spawn parallel subagents, “review modules,” or repeated fan-out batches. One serial pass per run.
+- **No branch thrash.** Stay on the PR head you were given. Do not create extra branches/PRs unless the automation’s job is explicitly Autofix and a fix commit is required.
+- **One action per head SHA.** Post at most one approval **or** one concise review comment for a given PR head. If an active run for the same automation + head already exists, exit without duplicating work.
+- **Ignore bot echo.** Do not re-trigger meaningful work solely because `cursor[bot]`, Bugbot, Copilot, Gemini, or Codex left a review comment.
+- **Approver path:** wait for Cursor Bugbot to finish; require green required checks; approve only low-risk diffs with no unresolved medium/high Bugbot findings; otherwise comment blockers and stop.
+- **Security Reviewer path:** inspect the PR diff + existing review threads once; report only actionable unresolved security findings; exit cleanly. Never attempt multi-module orchestration.
+- **Bugbot Autofix path:** apply the minimal doc/code fix for the cited finding on the existing PR branch; commit and push that branch only.

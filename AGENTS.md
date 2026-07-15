@@ -107,8 +107,10 @@ risks, human sponsor, and canonical provider/model provenance from
 session reviews the exact current head, binds approval to that head, alone runs
 `./scripts/land` from a `codex/*` integration branch, completes the protected
 merge, and synchronizes local `main`. Contributor agents must not push shared
-`main`, land, merge, release, deploy, or delete worktrees unless explicitly
-acting in that integration role. Passing tests, committing, pushing, or opening
+`main`, land, merge, release, or deploy unless explicitly acting in that
+integration role. Exception: a contributor may remove only its own finished
+disposable scratchpad (see `.agents/AGENTS.md` Worktree lifecycle); never delete
+peers’ live trees or the primary main checkout. Passing tests, committing, pushing, or opening
 a PR is not completion: do not call integrated work complete until the PR is
 merged, `origin/main` and local `main` agree, and the landing receipt names the
 reviewed commit.
@@ -149,3 +151,8 @@ Process IP and harvest live in private `djtelicloud/unigrok-intelligence`. See [
 **Commands:** dependency sync and tests/lint gates are in [CONTRIBUTING.md](CONTRIBUTING.md) / [README.md](README.md) (`uv sync`, `uv run pytest`, `uv run python -m compileall -q src evals main.py`). Ruff is available via the `dev` dependency group but is not the required land gate; the suite currently has many pre-existing ruff findings.
 
 **UI:** Control Center test bench at `http://localhost:4765/ui/`; core product path remains MCP at `http://localhost:4765/mcp`.
+
+**Cursor Automations:** PR Approver, Security Reviewer, and Bugbot Autofix must follow
+`.agents/AGENTS.md` section **Cursor Automations** — single-agent serial pass, one
+action per PR head SHA, no parallel subagent fan-out, no bot-echo retriggers. Security
+Reviewer must not launch “all review modules in parallel.”

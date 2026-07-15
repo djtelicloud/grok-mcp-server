@@ -205,6 +205,25 @@ def test_session_rehydrate_skills_use_project_qualified_continuity():
     assert "Root `CLAUDE.md` if present" in claude_skill
 
 
+def test_disposable_scratchpad_cleanup_is_consistent():
+    """Own finished scratchpads may be removed; peer/main deletion stays forbidden."""
+    shared = (ROOT / ".agents" / "AGENTS.md").read_text(encoding="utf-8")
+    skill = (ROOT / ".agents" / "skills" / "uni-grok-mcp" / "SKILL.md").read_text(
+        encoding="utf-8"
+    )
+    root_agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
+
+    for text in (shared, skill, root_agents):
+        assert "finished disposable scratchpad" in text or "own finished" in text
+        assert "primary main checkout" in text or "primary main" in shared
+    assert "Never delete another agent" in shared or "Never remove peers" in shared
+    assert "Cursor Automations" in shared
+    assert "Single-agent only" in shared
+    # Old absolute ban must not remain as a hard stop without the exception.
+    assert "or delete worktrees unless they are explicitly acting" not in shared
+    assert "Never remove task worktrees after landing" not in skill
+
+
 def test_public_docs_surfaces_exclude_github_wiki_as_product():
     """Public knowledge is README + OKF; GitHub Wiki is not a second tree."""
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
