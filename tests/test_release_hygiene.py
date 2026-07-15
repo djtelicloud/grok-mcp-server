@@ -214,13 +214,13 @@ def test_disposable_scratchpad_cleanup_is_consistent():
     root_agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
 
     for text in (shared, skill, root_agents):
-        assert "finished disposable scratchpad" in text or "own finished" in text
+        normalized = " ".join(text.split())
+        assert "finished disposable scratchpad" in normalized
         # Each guidance surface must protect primary main (not only shared).
         assert (
-            "primary main checkout" in text
-            or "primary main" in text
-            or "Never delete another agent" in text
-            or "Never remove peers" in text
+            "primary main checkout" in normalized
+            or "Never delete another agent" in normalized
+            or "never delete peers" in normalized
         ), "expected primary-main / peer protection"
     assert "Never delete another agent" in shared or "Never remove peers" in shared
     assert "primary main" in shared or "primary main checkout" in shared
