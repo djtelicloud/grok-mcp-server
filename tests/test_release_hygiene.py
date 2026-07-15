@@ -275,7 +275,7 @@ def test_rehydrate_requires_brand_specific_next_steps() -> None:
         assert "Brand strengths map" in skill
         assert "Gemini / Antigravity" in skill
         assert "Copilot / Kimi" in skill
-        assert "Table alone" in skill or "table alone" in skill.lower()
+        assert "table alone" in skill.lower()
     assert "Next smartest steps (Gemini)" in gemini_rules
     assert "table-only rehydrate is incomplete" in gemini_rules
     assert "Next smartest steps (Copilot)" in copilot
