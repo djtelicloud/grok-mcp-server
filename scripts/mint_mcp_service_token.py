@@ -25,13 +25,14 @@ from __future__ import annotations
 
 import argparse
 import base64
-import hmac
 import json
 import os
 import secrets
 import sys
 import time
 from typing import Any, Mapping, Optional
+
+from cryptography.hazmat.primitives import hashes, hmac
 
 TOKEN_PREFIX = "ugtoken."
 DEFAULT_TTL = 120
@@ -66,11 +67,9 @@ def sign_cookie_payload(payload: Mapping[str, Any], secret: str) -> str:
     body = _b64url(json.dumps(payload, separators=(",", ":"), ensure_ascii=True).encode("utf-8"))
     if len(body) > 4_096:
         raise ValueError("cookie payload is too large")
-    signature = hmac.digest(
-        secret.encode("utf-8"),
-        body.encode("utf-8"),
-        "sha256",
-    )
+    signer = hmac.HMAC(secret.encode("utf-8"), hashes.SHA256())
+    signer.update(body.encode("utf-8"))
+    signature = signer.finalize()
     return f"{body}.{_b64url(signature)}"
 
 

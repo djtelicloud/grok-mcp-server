@@ -896,6 +896,7 @@ version = "0.6.0"
 source = { editable = "." }
 dependencies = [
     { name = "aiosqlite" },
+    { name = "cryptography" },
     { name = "google-auth", extra = ["requests"] },
     { name = "httpx" },
     { name = "jsonschema" },
@@ -934,6 +935,7 @@ dev = [
 requires-dist = [
     { name = "aiosqlite", specifier = ">=0.20.0" },
     { name = "coverage", marker = "extra == 'forge'", specifier = ">=7.6" },
+    { name = "cryptography", specifier = ">=49,<50" },
     { name = "google-auth", extras = ["requests"], specifier = ">=2.40,<3" },
     { name = "google-genai", marker = "extra == 'campaign'", specifier = ">=1.25,<2" },
     { name = "httpx", specifier = ">=0.28.1" },
