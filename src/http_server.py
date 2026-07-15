@@ -583,7 +583,10 @@ class GatewayAuthMiddleware:
         response = _json_error("Unauthorized", status_code=401, code="unauthorized")
         # RFC 9728: point clients at the protected-resource metadata document.
         if _oauth_introspection_url():
-            metadata_url = _oauth_protected_resource_metadata_url()
+            metadata_url = _oauth_protected_resource_metadata_url(
+                path=path,
+                query_string=scope.get("query_string", b""),
+            )
             if metadata_url:
                 response.headers["WWW-Authenticate"] = (
                     f'Bearer resource_metadata="{metadata_url}", '
@@ -968,16 +971,22 @@ def _validated_https_url(value: str) -> Optional[str]:
 def _public_mcp_resource() -> Optional[str]:
     resource = _validated_https_url(os.environ.get("UNIGROK_PUBLIC_MCP_URL", ""))
     if resource and not urlsplit(resource).path:
-        return f"{resource}/mcp"
-    return resource
+        resource = f"{resource}/mcp"
+    if resource and urlsplit(resource).path == "/mcp":
+        return resource
+    return None
 
 
-def _oauth_protected_resource_metadata_url() -> Optional[str]:
-    """Return the RFC 9728 metadata URL for the configured MCP resource."""
+def _oauth_protected_resource_metadata_url(
+    *, path: str, query_string: bytes
+) -> Optional[str]:
+    """Return metadata only when the request exactly matches the MCP resource."""
     resource = _public_mcp_resource()
     if resource is None:
         return None
     parsed = urlsplit(resource)
+    if path != parsed.path or query_string:
+        return None
     return (
         f"{parsed.scheme}://{parsed.netloc}"
         f"/.well-known/oauth-protected-resource{parsed.path}"
