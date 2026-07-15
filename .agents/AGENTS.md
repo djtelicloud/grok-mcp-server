@@ -13,12 +13,15 @@
 
 ## Communication discipline
 
-- **Silent process, loud finish:** use tools and plan without narrating every
-  step. Deliver one concise end-state answer (tables, decisions, links, blockers).
-- Do not stream progress essays (“now I’ll check…”) unless the user asked for
-  a live play-by-play.
-- Prefer UniGrok MCP CLI/`fast` for cheap index-diff hive emits; keep visible
-  output tiny. Insider silent-think doctrine is private (not public default).
+**Silent human radio:** Chat pollution is a product bug. Keep reasoning, diffs,
+tool payloads, full logs, and progress essays off-chat unless the user asks for
+technical detail. At a finish or meaningful state change, emit one short
+**brand + status + plain task title** line; a link or (#N) may follow.
+Long or continuously monitored work uses that format only for real state
+changes or user-requested live updates. Required boot summaries, safety prompts,
+and blocking questions are explicit exceptions.
+- Prefer UniGrok MCP CLI/`fast` for hard judgment; keep visible output tiny.
+  Insider silent-think doctrine is private (not public default).
 - **Public intelligence packs:** distilled gym wins for clones live under
   `docs/public-intelligence/`. After Live work, ask once: promote a scrubbed
   pack/skill? Never auto-sync private intelligence or raw memory to public.

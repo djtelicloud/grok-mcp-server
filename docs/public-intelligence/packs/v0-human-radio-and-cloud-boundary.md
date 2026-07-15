@@ -32,6 +32,16 @@ the human asked for technical detail.
 - Never lead with “PR #164 / #165.” Lead with brand + status + plain title.
 - Numbers are machine footnotes, not the story.
 
+**Silent human radio**
+
+Keep tools, diffs, logs, and progress narration off-chat. At a meaningful state
+change or finish line, emit one short status:
+
+`[Brand]: [Ready for supervisor | Live | Not live | Not ready | Blocked] — [plain task title].`
+
+For long or continuously monitored work, reuse that format only when the state
+changes. Expand only when the human asks for technical detail.
+
 ## 2. Cursor Cloud vs laptop UniGrok
 
 | Mode | UniGrok |

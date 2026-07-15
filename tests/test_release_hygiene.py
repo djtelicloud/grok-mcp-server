@@ -222,6 +222,39 @@ def test_agent_statuses_lead_with_plain_task_titles() -> None:
         assert "Never lead with PR" in guidance
 
 
+def test_agent_human_radio_stays_silent_and_consistent() -> None:
+    shared_rules = (ROOT / ".agents" / "AGENTS.md").read_text(encoding="utf-8")
+    agent_skill = (
+        ROOT / ".agents" / "skills" / "session-rehydrate" / "SKILL.md"
+    ).read_text(encoding="utf-8")
+    claude_skill = (
+        ROOT / ".claude" / "skills" / "session-rehydrate" / "SKILL.md"
+    ).read_text(encoding="utf-8")
+    gemini_rules = (ROOT / ".gemini" / "GEMINI.md").read_text(encoding="utf-8")
+    public_pack = (
+        ROOT
+        / "docs"
+        / "public-intelligence"
+        / "packs"
+        / "v0-human-radio-and-cloud-boundary.md"
+    ).read_text(encoding="utf-8")
+
+    assert "Chat pollution is a product bug" in shared_rules
+    assert "meaningful state" in shared_rules
+    for skill in (agent_skill, claude_skill):
+        assert "No diffs, patches, or tool dumps in chat" in skill
+        assert "required Rehydrated block below" in skill
+        assert "updates at meaningful state" in skill
+    assert "diffs, tool dumps, progress essays" in gemini_rules
+    silent_pack = public_pack.split("**Silent human radio**", maxsplit=1)[1]
+    assert (
+        "[Ready for supervisor | Live | Not live | Not ready | Blocked]"
+        in silent_pack
+    )
+    assert "continuously monitored work" in silent_pack
+    assert "Root `CLAUDE.md` if present" in claude_skill
+
+
 def test_disposable_scratchpad_cleanup_is_consistent():
     """Own finished scratchpads may be removed; peer/main deletion stays forbidden."""
     shared = (ROOT / ".agents" / "AGENTS.md").read_text(encoding="utf-8")
