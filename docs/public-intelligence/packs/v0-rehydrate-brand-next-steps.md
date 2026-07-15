@@ -36,7 +36,7 @@ Antigravity and Copilot / Kimi sessions) stopped at the table. Humans need both
 | live gates | … |
 | open work | plain titles first |
 
-### Next smartest steps ([Your brand])
+### Next smartest steps (Your brand)
 1. [plain English task title] — [why this brand / what benefit]
 2. [optional second] — …
 ```
