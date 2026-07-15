@@ -219,6 +219,7 @@ def test_disposable_scratchpad_cleanup_is_consistent():
     claude_rehydrate = (
         ROOT / ".claude" / "skills" / "session-rehydrate" / "SKILL.md"
     ).read_text(encoding="utf-8")
+    claude_root = (ROOT / "CLAUDE.md").read_text(encoding="utf-8")
 
     for text in (shared, skill, root_agents):
         normalized = " ".join(text.split())
@@ -238,6 +239,11 @@ def test_disposable_scratchpad_cleanup_is_consistent():
     assert "Ready / Not ready / Live / Not live / Blocked" in gemini
     for rehydrate in (agent_rehydrate, claude_rehydrate):
         assert "If this task is done (Live, abandoned, or new task assigned)" in rehydrate
+    assert "own finished disposable scratchpad" in " ".join(claude_root.split())
+    assert "Never remove peer worktrees or the primary main checkout" in " ".join(
+        claude_root.split()
+    )
+    assert "or remove worktrees. A" not in claude_root
     # Old absolute ban must not remain as a hard stop without the exception.
     assert "or delete worktrees unless they are explicitly acting" not in shared
     assert "Never remove task worktrees after landing" not in skill

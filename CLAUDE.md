@@ -95,10 +95,13 @@ an authorized Codex session for publication. Include changed paths, tests,
 risks, human sponsor, and the canonical Anthropic Claude provider/model trailer
 defined in [docs/agent-attribution.md](docs/agent-attribution.md) in the PR or
 handoff. Do not push shared `main`, run `scripts/land`, merge or rebase
-shared `main`, publish tags/releases/deployments, or remove worktrees. A
-Codex/project-admin session—whether in Codex Desktop, CLI, GitHub Copilot, or
-another authorized Codex surface—reviews the exact head and runs the landing
-gate; only `LANDED TO MAIN: <sha>` plus the protected merge proves integration.
+shared `main`, publish tags/releases/deployments, or remove worktrees other
+than the contributor's own finished disposable scratchpad after it is Live,
+abandoned, or superseded by a new task. Never remove peer worktrees or the
+primary main checkout. A Codex/project-admin session—whether in Codex Desktop,
+CLI, GitHub Copilot, or another authorized Codex surface—reviews the exact head
+and runs the landing gate; only `LANDED TO MAIN: <sha>` plus the protected merge
+proves integration.
 
 For implementation, debugging, architecture, or review, use
 `.agents/skills/unigrok-workspace-memory/SKILL.md`. Recall against the Claude
