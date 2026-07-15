@@ -52,51 +52,32 @@ credentials, OAuth codes, tokens, or private keys here.
 
 ## Latest maintainer sweep
 
-- Protected PRs #148-#154 are merged. They hardened maintainer integration,
-  made runtime markers tree-aware and portable, warned about the unrelated
-  public `mcp-grok` package, corrected RFC 9728 challenge metadata, and made a
-  missing OAuth bearer fail before remote introspection. They also recorded the
-  regional recovery contract and refreshed this handoff. The final repair passed
-  2,019 tests and `scripts/land` certified exact content head
-  `615c70404390e2ec3c624f2b8ea5215f8a94cac7` before protected merge.
-- Local `main` and protected `origin/main` agree at merge commit
-  `2bf6647384922aa1b9e6162e645bd37560936133`. Exact-main CI and all three
-  CodeQL analyzers passed. At the sweep snapshot before the current handoff
-  repair, there were no open PRs, issues, discussions, review threads,
-  code-scanning alerts, Dependabot alerts, secret-scanning alerts, or draft
-  private advisories.
-- Merged task worktrees, local task branches, remote `codex/*` branches, and
-  stale local remote-tracking refs are removed. The shared checkout is clean;
-  its runtime source marker is tree-equivalent to `main`; stable and contributor
-  services are ready.
-- Remote MCP runtime image digest
-  `sha256:5b66e410262a127a8245bebc36ea34e1e90fc2a605ade2e31310e42030264b32`
-  was built from application head `0d64a49ccf593780bbc80c00f4a419d1e413e0ef`
-  and is live on ready revision `unigrok-remote-mcp-0d64a49` in `us-central1`.
-  The global backend points only to the central regional NEG. Repeated public
-  `/healthz`, `/readyz`, protected-resource metadata, and unauthenticated MCP
-  probes pass; the challenge advertises the exact metadata document URL.
-- `us-east1` route activation repeatedly stalled before container startup with
-  a provider internal error, including on an isolated probe. The exact image
-  started successfully in `us-central1`, proving the code, image, IAM, and
-  secret bindings. East is detached from the load balancer and restored to its
-  prior healthy revision as a rollback asset. Personalized Service Health is
-  now enabled; it reports no active Cloud Run incident.
-- The Control Center image digest
-  `sha256:0a38494d0ebc01475ba168da4e8ed921b55d7f0d2d8de50646d5b407ccb2ca15`
-  is live on ready revision `unigrok-control-center-eb454cd` in `us-central1`.
-  Its site source tree is unchanged through current `main`. The URL map points
-  the control hostname to central-only backend
-  `unigrok-control-center-backend-central`; repeated project API, homepage,
-  discovery, `llms.txt`, and OAuth contract probes pass, and central request
-  logs confirm service of the public hostname.
-- Removing the east NEG from the active backend produced a transient provider
-  propagation gap and was rolled back automatically. The successful cutover
-  instead staged an independent central backend and atomically changed the URL
-  map. The prior `unigrok-control-center-backend` is now east-only and preserved
-  with healthy revision `unigrok-control-center-ab8d77b` as the immediate
-  rollback target. The newer east candidate remains at zero traffic because of
-  the provider-managed activation failure.
+- PR #163 merged the reviewed PR #162 policy work plus Codex repairs for generic
+  rehydrate, Gemini cleanup timing, Claude root cleanup, and release-hygiene
+  coverage. `scripts/land` certified exact content head
+  `7f5a51005e713fdbe8e59849d88fc6bf303cff65` after 2,023 tests; protected
+  merge commit `e10dd73c12d84f0a37bda6ebd9435f55e45ce398` is synchronized locally
+  and remotely.
+- Exact-main CI and all three CodeQL analyzers passed. The checked GitHub state
+  has zero open PRs, issues, discussions, code-scanning alerts, Dependabot
+  alerts, secret-scanning alerts, vulnerability alerts, or draft advisories;
+  the remote has only `main`.
+- Codex removed its finished integration scratchpad and branch. Preserve the
+  active detached Codex thread worktree and Grok's `grok/fix-162-ready`
+  worktree; neither is ahead of `main`.
+- Stable `:4765` and contributor `:4766` are ready, and the runtime marker is
+  tree-equivalent to `main`. PR #163 changed no server, container, dependency,
+  MCP UI, or Control Center source, so no Cloud Run rebuild was required.
+- Remote MCP is live at 100% on ready `us-central1` revision
+  `unigrok-remote-mcp-7c7c30e`, image digest
+  `sha256:a377d3c89cea616360cabe5cf162f5ba187fffd25a8541004cd13d32f5b03f81`.
+  Public health, readiness, and OAuth protected-resource probes pass.
+- Control Center is live at 100% on ready `us-central1` revision
+  `unigrok-control-center-617e8cf`, image digest
+  `sha256:7519dc2aafb8b06fc972ddd18f5a39cf5704976c7c341752f0814c8d4fe16242`.
+  Homepage, public project API, and OAuth discovery probes pass.
+- Healthy east rollback assets remain `unigrok-remote-mcp-00004-54c` and
+  `unigrok-control-center-ab8d77b`; east is not an active global route.
 - Release, source, and plugin versions agree at 0.6.0. Publishing a new release,
   accepting the `google-genai` 2.x migration, or changing the enabled empty
   GitHub Wiki remains a maintainer decision. Stage 2 generation, dataset writes,
