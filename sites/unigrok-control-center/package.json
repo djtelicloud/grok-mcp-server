@@ -27,7 +27,7 @@
     "react-dom": "19.2.7"
   },
   "devDependencies": {
-    "@cloudflare/vite-plugin": "1.44.0",
+    "@cloudflare/vite-plugin": "1.45.0",
     "@tailwindcss/postcss": "4.3.2",
     "@types/node": "22.19.19",
     "@types/react": "19.2.17",
@@ -42,7 +42,7 @@
     "typescript": "5.9.3",
     "vinext": "0.2.1",
     "vite": "8.1.4",
-    "wrangler": "4.110.0"
+    "wrangler": "4.111.0"
   },
   "overrides": {
     "postcss": "8.5.10"
