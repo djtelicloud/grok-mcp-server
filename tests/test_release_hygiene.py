@@ -144,6 +144,24 @@ def test_public_setup_surfaces_use_the_grok_phoneword_endpoint():
         assert "http://localhost:8080" not in text, path
 
 
+def test_session_rehydrate_skills_use_project_qualified_continuity():
+    agent_skill = (ROOT / ".agents" / "skills" / "session-rehydrate" / "SKILL.md").read_text(
+        encoding="utf-8"
+    )
+    claude_skill = (ROOT / ".claude" / "skills" / "session-rehydrate" / "SKILL.md").read_text(
+        encoding="utf-8"
+    )
+    shared_rules = (ROOT / ".agents" / "AGENTS.md").read_text(encoding="utf-8")
+
+    for text in (agent_skill, claude_skill, shared_rules):
+        assert "../unigrok-intelligence/" in text
+        assert "`unigrok-intelligence/" not in text
+    for text in (agent_skill, claude_skill):
+        assert "djtelicloud-grok-mcp-server:ops:YYYY-MM-DD" in text
+        assert "unigrok:ops:YYYY-MM-DD" not in text
+    assert "Root `CLAUDE.md` if present" in claude_skill
+
+
 def test_public_docs_surfaces_exclude_github_wiki_as_product():
     """Public knowledge is README + OKF; GitHub Wiki is not a second tree."""
     readme = (ROOT / "README.md").read_text(encoding="utf-8")

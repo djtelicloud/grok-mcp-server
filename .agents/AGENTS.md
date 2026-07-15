@@ -8,7 +8,7 @@
   **boot** / **where were we**, follow
   [`.agents/skills/session-rehydrate/SKILL.md`](skills/session-rehydrate/SKILL.md).
 - Continuity lives in git/disk: private
-  `unigrok-intelligence/codex/continuity/active-work-latest.md` (if present),
+  `../unigrok-intelligence/codex/continuity/active-work-latest.md` (if present),
   open PR notes, and `./scripts/land-status` — not chat memory.
 
 ## Communication discipline

@@ -1135,12 +1135,39 @@ function renderSurfaceModeBadge(data) {
   }
 }
 
+function credentialPlaneCatalogSignature(contract) {
+  const plane = (name) => {
+    const view = contract?.[name] || {};
+    return {
+      available: Boolean(view.available),
+      state: String(view.state || ""),
+      auth: String(view.auth || ""),
+      binary: Boolean(view.binary),
+    };
+  };
+  return JSON.stringify({
+    policy: String(contract?.policy || ""),
+    effectivePlane: String(contract?.effective_plane || ""),
+    serviceUsable: Boolean(contract?.service_usable),
+    degraded: Boolean(contract?.degraded),
+    api: plane("api"),
+    cli: plane("cli"),
+  });
+}
+
 async function fetchRuntimeStatus() {
   try {
     const res = await fetch("/runtimez");
     if (!res.ok) throw new Error();
     const data = await res.json();
     if (data.credential_planes) {
+      const priorSignature = credentialPlaneCatalogSignature(state.credentialPlanes);
+      const nextSignature = credentialPlaneCatalogSignature(data.credential_planes);
+      if (state.modelCatalog && priorSignature !== nextSignature) {
+        // Catalog availability/source is credential-dependent. Force the next
+        // Planes render to discover a fresh snapshot after Recheck changes it.
+        state.modelCatalog = null;
+      }
       state.credentialPlanes = data.credential_planes;
     }
     $("runtimeChip").innerText = `runtime: ${data.runtime || "unknown"}`;

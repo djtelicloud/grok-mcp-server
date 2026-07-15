@@ -175,6 +175,10 @@ def test_mcp_ui_static_files_are_served(monkeypatch):
     assert '"skipped"' not in fallback_set
     # Plane selector must warm dual-plane catalog, not only /v1/models.
     assert "if (!state.modelCatalog && !state.modelCatalogLoading)" in script.text
+    # Credential rechecks must invalidate credential-dependent catalog snapshots.
+    assert "credentialPlaneCatalogSignature" in script.text
+    assert "priorSignature !== nextSignature" in script.text
+    assert "state.modelCatalog = null" in script.text
     assert 'headers: { "X-Client-ID": "cursor" }' in script.text
     assert "Cursor is the first-class host IDE" in script.text
     assert 'id="cliCatalogTrust"' in index.text

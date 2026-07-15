@@ -25,7 +25,7 @@ Do this for the whole session after rehydrate:
 4. **UniGrok second opinions:** when calling MCP `agent` for hard product
    claims, prefer **CLI** + `mode=fast` for index-diff hive polls; keep
    **visible emit tiny**. Insider silent-think doctrine lives in private
-   `unigrok-intelligence/playbooks/silent-think-harness.md` (not public default).
+   `../unigrok-intelligence/playbooks/silent-think-harness.md` (not public default).
 5. **Exceptions:** user asks “explain as you go”, safety/permission prompts,
    or a blocking question that needs a human.
 
@@ -75,7 +75,7 @@ From product root:
 ./scripts/land-status
 ```
 
-Note: visible main, worktrees, stable/forge readiness.  
+Note: visible main, worktrees, stable/forge readiness.
 Primary shared checkout should stay on **clean `main`**. Implementation uses
 **agent-prefixed worktrees** only.
 
@@ -94,7 +94,7 @@ For multi-turn `@grok` continuity this calendar day, reuse a project-qualified
 session such as:
 
 ```text
-unigrok:ops:YYYY-MM-DD
+djtelicloud-grok-mcp-server:ops:YYYY-MM-DD
 ```
 
 Do not reuse a bare generic session key across unrelated repos.

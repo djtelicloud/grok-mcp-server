@@ -1052,11 +1052,14 @@ def _build_discover_bootstrap(
     api = credential_planes.get("api") if isinstance(credential_planes.get("api"), dict) else {}
     cli = credential_planes.get("cli") if isinstance(credential_planes.get("cli"), dict) else {}
     swarm_policy = _swarm_policy()
+    cloudrun = is_cloudrun_runtime()
 
     can_chat = service_usable
     can_spend_api = bool(api.get("available"))
-    can_mutate_workspace = bool(contributor and workspace_attached)
-    can_use_swarm = bool(contributor and swarm_policy in ("dry_run", "active"))
+    can_mutate_workspace = bool(contributor and workspace_attached and not cloudrun)
+    can_use_swarm = bool(
+        contributor and not cloudrun and swarm_policy in ("dry_run", "active")
+    )
 
     if not request_context.get("client_id_present"):
         warnings.append(
@@ -1110,6 +1113,14 @@ def _build_discover_bootstrap(
     else:
         status = "OK"
 
+    connected_port = request_context.get("host_port")
+    surface_port = (
+        connected_port
+        if isinstance(connected_port, int) and not isinstance(connected_port, bool)
+        else 4765
+    )
+    local_surface = f"http://localhost:{surface_port}"
+
     return {
         "schema_version": 1,
         "status": status,
@@ -1128,11 +1139,11 @@ def _build_discover_bootstrap(
             "global settings without explicit consent. Never print secret values."
         ),
         "surfaces": {
-            "canonical_mcp": "http://localhost:4765/mcp",
-            "healthz": "http://localhost:4765/healthz",
-            "readyz": "http://localhost:4765/readyz",
-            "runtimez": "http://localhost:4765/runtimez",
-            "ui": "http://localhost:4765/ui/",
+            "canonical_mcp": f"{local_surface}/mcp",
+            "healthz": f"{local_surface}/healthz",
+            "readyz": f"{local_surface}/readyz",
+            "runtimez": f"{local_surface}/runtimez",
+            "ui": f"{local_surface}/ui/",
         },
         "first_connect_checklist": [
             "Call grok_mcp_discover_self and read data.bootstrap + data.request_context.",

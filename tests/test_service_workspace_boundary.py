@@ -332,6 +332,54 @@ def test_resolve_notice_action_fills_from_plane_views():
     assert resolved_cli == cli_action
 
 
+def test_discover_bootstrap_surfaces_follow_connected_port(monkeypatch):
+    from src.tools.system import _build_discover_bootstrap
+
+    monkeypatch.setenv("UNIGROK_RUNTIME", "local")
+    bootstrap = _build_discover_bootstrap(
+        contributor=False,
+        workspace_attached=False,
+        credential_planes={
+            "service_usable": True,
+            "degraded": False,
+            "api": {"available": True},
+            "cli": {"available": True},
+            "notices": [],
+        },
+        request_context={"client_id_present": True, "host_port": 9090},
+    )
+
+    assert bootstrap["surfaces"] == {
+        "canonical_mcp": "http://localhost:9090/mcp",
+        "healthz": "http://localhost:9090/healthz",
+        "readyz": "http://localhost:9090/readyz",
+        "runtimez": "http://localhost:9090/runtimez",
+        "ui": "http://localhost:9090/ui/",
+    }
+
+
+def test_discover_bootstrap_disables_workspace_mutation_in_cloudrun(monkeypatch):
+    from src.tools.system import _build_discover_bootstrap
+
+    monkeypatch.setenv("UNIGROK_RUNTIME", "cloudrun")
+    monkeypatch.setenv("UNIGROK_SWARM", "active")
+    bootstrap = _build_discover_bootstrap(
+        contributor=True,
+        workspace_attached=True,
+        credential_planes={
+            "service_usable": True,
+            "degraded": False,
+            "api": {"available": True},
+            "cli": {"available": False},
+            "notices": [],
+        },
+        request_context={"client_id_present": True, "host_port": None},
+    )
+
+    assert bootstrap["can_mutate_workspace"] is False
+    assert bootstrap["can_use_swarm"] is False
+
+
 @pytest.mark.asyncio
 async def test_discover_self_bootstrap_next_actions_include_plane_actions(monkeypatch):
     monkeypatch.setenv("UNIGROK_SERVICE_MODE", "stable")
