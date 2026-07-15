@@ -360,6 +360,42 @@ async def test_auto_exact_pin_uses_live_plane_membership_and_policy(
 
 
 @pytest.mark.asyncio
+async def test_auto_exact_pin_keeps_thinking_on_api_under_cli_first(monkeypatch):
+    from src import utils
+
+    shared_model = "grok-shared-exact"
+    monkeypatch.setenv("UNIGROK_PLANE_POLICY", "cli_first")
+    monkeypatch.setattr(
+        utils,
+        "grok_cli_plane_status",
+        lambda **_: {
+            **READY_CLI,
+            "models": [shared_model],
+            "default_model": shared_model,
+        },
+    )
+    monkeypatch.setattr(
+        utils._MODEL_RESOLVER,
+        "catalog_snapshot",
+        AsyncMock(return_value=([shared_model], "xai_api_live", True)),
+    )
+
+    selected, _, receipt, _ = await utils._select_routing_model(
+        prompt="Think deeply with the exact shared model",
+        mode="auto",
+        thinking_mode=True,
+        requested_model=shared_model,
+        requested_plane="auto",
+        active_store=None,
+        input_messages=None,
+        enable_agentic=True,
+    )
+
+    assert selected == shared_model
+    assert receipt["catalog"]["source"] == "xai_api_live"
+
+
+@pytest.mark.asyncio
 async def test_auto_exact_pin_routes_cli_only_live_slug_to_cli(monkeypatch):
     from src import utils
 
@@ -412,6 +448,23 @@ async def test_strict_cli_rejects_api_only_model(monkeypatch):
             prompt="Pin API coding model", mode="auto", thinking_mode=False,
             requested_model="grok-build-0.1", requested_plane="cli", active_store=None,
             input_messages=None, enable_agentic=True,
+        )
+
+
+@pytest.mark.asyncio
+async def test_strict_cli_rejects_exact_pin_for_thinking(monkeypatch):
+    from src import utils
+
+    with pytest.raises(ValueError, match="API-only"):
+        await utils._select_routing_model(
+            prompt="Think deeply",
+            mode="auto",
+            thinking_mode=True,
+            requested_model="grok-4.5",
+            requested_plane="cli",
+            active_store=None,
+            input_messages=None,
+            enable_agentic=True,
         )
 
 
