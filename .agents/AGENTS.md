@@ -126,3 +126,6 @@ These rules apply to Cursor Automations and Bugbot Autofix on this repo:
 - **Security Reviewer path:** inspect the PR diff + existing review threads once; report only actionable unresolved security findings; exit cleanly. Never attempt multi-module orchestration.
 - **Bugbot Autofix path:** apply the minimal doc/code fix for the cited finding on the existing PR branch; commit and push that branch only.
 - **Autofix fidelity:** one cited finding → one minimal fix → one push on the given PR head. Do not reopen review modules, spawn peers, or “also fix” adjacent nits. If another Autofix / Approver / Security run is already active for this head, exit.
+
+Live operator checklist: `docs/ide-setup.md` → **Bugbot Autofix live fidelity smoke**.
+Keep that checklist aligned with the bullets above.

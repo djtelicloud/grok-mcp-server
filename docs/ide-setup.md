@@ -157,6 +157,27 @@ own `cursor` / `cursor-forge` labels in `~/.cursor/mcp.json` or
 [`.cursor/rules/cursor-automations-single-pass.mdc`](../.cursor/rules/cursor-automations-single-pass.mdc)
 encodes PR Approver / Security Reviewer / Bugbot Autofix single-pass discipline.
 
+### Bugbot Autofix live fidelity smoke
+
+After the Autofix fidelity contract is Live, verify Automations still obey it
+before trusting the next Autofix run:
+
+1. Confirm shared law and Cursor mirror still match: `.agents/AGENTS.md` →
+   **Cursor Automations** and
+   [`.cursor/rules/cursor-automations-single-pass.mdc`](../.cursor/rules/cursor-automations-single-pass.mdc)
+   both include **Autofix fidelity** (one cited finding → one minimal fix →
+   one push) plus the Composer role gate (interactive chat is not Autofix
+   authorization).
+2. On the next real Bugbot finding: Autofix must stay on the given PR head,
+   touch only the cited finding, push once, and exit if another
+   Autofix / Approver / Security run is already active for that head.
+3. Fail the smoke if Autofix spawns peers, reopens “review modules,” or
+   “also fixes” adjacent nits — that is thrash, not fidelity.
+
+Interactive Composer (including Cursor Grok 4.5 chat) remains outside these
+automation paths; use UniGrok `@grok` peer review when you want dual-plane
+cost/route honesty instead of an Autofix mutation.
+
 ### Cursor multi-model vs UniGrok planes
 
 Cursor may list **non-Grok** models for native chat (Claude, GPT, etc.). Those

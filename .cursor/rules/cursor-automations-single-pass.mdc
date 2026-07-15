@@ -21,4 +21,6 @@ When in one of those automation roles on this repo:
 - **Bugbot Autofix path:** apply the minimal doc/code fix for the cited finding on the existing PR branch; commit and push that branch only.
 - **Autofix fidelity:** one cited finding → one minimal fix → one push on the given PR head. Do not reopen review modules, spawn peers, or “also fix” adjacent nits. If another Autofix / Approver / Security run is already active for this head, exit.
 
+Live operator checklist (ide-setup): **Bugbot Autofix live fidelity smoke**.
+
 Canonical shared copy: `.agents/AGENTS.md` → **Cursor Automations**.
