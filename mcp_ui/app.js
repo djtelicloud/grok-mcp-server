@@ -237,11 +237,10 @@ const state = {
   credentialPlanes: null,
 };
 
+// Only static/fallback model lists — not operational unavailable/skipped sources.
 const FALLBACK_CATALOG_SOURCES = new Set([
   "cli-fallback",
   "xai_api_fallback",
-  "cloudrun-disabled",
-  "skipped",
 ]);
 
 // --- DOM Selector Helper ---
@@ -1305,7 +1304,14 @@ function updatePlaneControls() {
     hint.innerText = "Subscription first · cross-plane fallback may incur API charges";
     hint.classList.add("metered");
   }
-  syncModelOptions();
+  // Console plane pins filter from the dual-plane catalog. Startup only warms
+  // /v1/models (API). Load plane catalogs when the user changes plane before
+  // visiting Planes, so CLI pins are not API-only slugs with same_plane.
+  if (!state.modelCatalog && !state.modelCatalogLoading) {
+    loadPlaneModelCatalog(false);
+  } else {
+    syncModelOptions();
+  }
 }
 
 function readableCatalogSource(source) {
