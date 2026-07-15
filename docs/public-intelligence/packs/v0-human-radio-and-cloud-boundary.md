@@ -20,8 +20,15 @@ the human asked for technical detail.
 
 **Example finish line**
 
-> I finished building X. Tests passed. Sent to coordinator under PR #N — Title.  
+> **Grok:** Ready for supervisor — built X. Tests passed.  
+> Sent to coordinator as “X task title” (#N only if a link helps).  
 > If the goal is A, next is B. If the goal is C, next is D.
+
+**Task titles, not numbers**
+
+- A coordinator packet **is** a task. **Title = task name** in human speech.
+- Never lead with “PR #164 / #165.” Lead with brand + status + plain title.
+- Numbers are machine footnotes, not the story.
 
 ## 2. Cursor Cloud vs laptop UniGrok
 
