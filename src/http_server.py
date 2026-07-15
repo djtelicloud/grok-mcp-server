@@ -85,6 +85,9 @@ MODE_DIAL_PORTS: Dict[int, Literal["auto", "fast", "reasoning", "thinking", "res
 _ACTIVE_MODE_DIAL: contextvars.ContextVar[Optional[tuple[int, str]]] = contextvars.ContextVar(
     "unigrok_active_mode_dial", default=None
 )
+_ACTIVE_HOST_PORT: contextvars.ContextVar[Optional[int]] = contextvars.ContextVar(
+    "unigrok_active_host_port", default=None
+)
 
 
 def _json_error(message: str, status_code: int = 400, code: str = "invalid_request_error") -> JSONResponse:
@@ -372,6 +375,21 @@ def _mode_dials_enabled() -> bool:
     return os.environ.get("UNIGROK_MODE_DIALS", "").strip().lower() in ("1", "true", "yes")
 
 
+def mode_dials_enabled() -> bool:
+    """Public alias for whether phoneword mode-dial ports are enabled."""
+    return _mode_dials_enabled()
+
+
+def get_active_mode_dial() -> Optional[tuple[int, str]]:
+    """Return the phoneword mode dial bound for this HTTP request, if any."""
+    return _ACTIVE_MODE_DIAL.get()
+
+
+def get_active_host_port() -> Optional[int]:
+    """Return the Host header port for this HTTP request, when parseable."""
+    return _ACTIVE_HOST_PORT.get()
+
+
 def _host_port(scope: Dict[str, Any]) -> Optional[int]:
     host = (_scope_header(scope, b"host") or "").strip()
     if not host:
@@ -405,11 +423,13 @@ class ModeDialContextMiddleware:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
-        token = _ACTIVE_MODE_DIAL.set(_mode_dial_for_scope(scope))
+        host_token = _ACTIVE_HOST_PORT.set(_host_port(scope))
+        dial_token = _ACTIVE_MODE_DIAL.set(_mode_dial_for_scope(scope))
         try:
             await self.app(scope, receive, send)
         finally:
-            _ACTIVE_MODE_DIAL.reset(token)
+            _ACTIVE_MODE_DIAL.reset(dial_token)
+            _ACTIVE_HOST_PORT.reset(host_token)
 
 
 # These endpoints are deliberately safe for public health checks and agent

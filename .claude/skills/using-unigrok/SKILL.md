@@ -1,103 +1,137 @@
 ---
 name: using-unigrok
-description: Claude Code guidance for querying xAI Grok through the shared UniGrok MCP gateway. Activate when the user says "@grok", asks to query Grok, wants a Grok second opinion or peer review, or needs web/X search grounding.
+description: How to query xAI Grok through the UniGrok MCP gateway. Activate when the user says "@grok", asks to query Grok, wants a second-model opinion or peer review from Grok, or needs web/X search grounding.
 ---
 
-# Using UniGrok from Claude Code
+# Using the UniGrok Grok Gateway
 
-This is the Claude Code adaptation of the canonical gateway skill
-([skills/using-unigrok/SKILL.md](../../../skills/using-unigrok/SKILL.md));
-it adds only what is specific to Claude Code sessions.
+UniGrok exposes one headline MCP tool: `agent`. It self-routes across Grok
+models and two billing planes, and returns structured metadata with every
+answer. **Primary chat path for every project is IDE → UniGrok MCP**. The local
+browser UI is an optional trusted-loopback test/control surface whose agent
+playground can invoke providers and spend metered credits.
 
-## Tool resolution
+## The `agent` tool
 
-The gateway's headline tool is `agent`, but its full Claude Code name depends
-on how the MCP server was registered:
+Call `agent` with:
 
-- `mcp__unigrok__agent` — connected through this repository's project
-  `.mcp.json` (server name `unigrok`).
-- `mcp__grok__agent` — connected through a user-scope registration named
-  `grok` (the Codex-compatible name).
+- `prompt` (required): the task or question, with enough context to act on.
+- `mode` (optional): `auto` (default), `fast` (single-turn, cheapest),
+  `reasoning` (multi-step planner), `thinking` (reflected agent loop), or
+  `research` (citation-grounded fanout).
+- `model` (optional): pin a Grok model id such as `grok-4.5`; leave unset to
+  let routing choose.
+- `session` (optional): a stable, project-qualified key such as
+  `owner-repo:task` for multi-turn continuity. Do not reuse a generic session
+  key across repositories.
+- `workspace_context` (optional): deliberately selected excerpts, diffs, or
+  errors when the task depends on the caller's project. The stable service
+  cannot browse the IDE workspace automatically.
+- `workspace_label` (optional): descriptive metadata for the supplied context.
+  It does not isolate sessions; the project-qualified `session` key does.
 
-Prefer the project-controlled `unigrok` registration. `.claude/settings.json`
-pre-allows its `agent`, `grok_mcp_status`, and `grok_mcp_discover_self` tools.
-A user-owned `grok` alias is not controlled by this repository; verify that it
-points to the expected UniGrok endpoint before approving or using its tools.
+Every result includes `response` plus metadata: `model`, `route`, `plane`
+(`API` or `CLI`), `cost_usd`, `tokens`, `latency_sec`, and `citations` when
+search grounding was used.
 
-## Calling `agent`
+## Mode selection guidance
 
-- `prompt` (required); `mode` optional: `auto` (default), `fast`, `reasoning`,
-  `thinking`, `research`.
-- `workspace_context`: the stable service is workspace-neutral and cannot see
-  the open folder — attach selected excerpts, `git diff` output, or errors
-  yourself. An optional `workspace_label` is descriptive metadata only; it does
-  not isolate sessions.
-- `session`: pass a stable, project-qualified key such as `owner-repo:task`.
-  The server namespaces it beneath a server-derived principal and the
-  caller-controlled `X-Client-ID` label (`plugin` in this repository's current
-  `.mcp.json`). A generic key can collide across repositories that reuse a
-  common label such as `claude-code`. Reuse preserves continuity and can reduce
-  repeated-context API input cost when caching hits, but savings are not
-  guaranteed and CLI provider cost remains unavailable.
-- `model`: pin only when asked; pins validate against the live catalog. An
-  explicit `plane=cli|api` should pair with `fallback_policy="same_plane"`
-  when billing planes must not cross.
-
-Every result returns `response` plus `model`, `route`, `plane`, `why`,
-`degraded`, `cost_usd`, `tokens`, `latency_sec`, and `citations` when search
-grounding ran. Surface `cost_usd` when the user cares about spend.
-
-## Claude Code patterns
-
-- **Second opinion before handoff**: send the branch diff via
-  `workspace_context` with `mode=reasoning` for a Grok peer review.
-- **Long calls should not block the turn**: `research` and `thinking` runs can
-  take minutes; wrap them in a background subagent (Agent tool) and keep
-  working, then relay the result.
-- **Health first**: on connection trouble, check `GET /healthz` on port 4765
-  and `grok_mcp_status`; `8080` is container-internal and never reachable from
-  the host.
-
-## Registering in another repository
-
-The gateway is machine-global; projects need no UniGrok files. Teammates run:
-
-```bash
-claude mcp add --transport http unigrok http://localhost:4765/mcp \
-  --header "X-Client-ID: claude-code"
-```
-
-`X-Client-ID` is a caller-controlled attribution and session label, not an
-authenticated identity. The server derives the principal; the default
-unauthenticated loopback service derives the shared `http:anon` principal for
-one local budget/security trust domain. There is no cross-user isolation without
-configured auth. Because many repositories can reuse
-`X-Client-ID: claude-code`, always project-qualify the `session` key;
-`workspace_label` remains descriptive only. Control Center:
-`http://localhost:4765/ui/`.
-
-## Safety
-
-- Never request `XAI_API_KEY` in chat or write it into any IDE config; the
-  credential belongs to the server.
-- Treat `credential_planes` notices from status or agent results as the source
-  of truth; ask the user before device authentication, installation, or secret
-  configuration.
-- Translate provider and transport errors into one concrete next action; the
-  user should not need to understand planes or JSON-RPC.
-
+- Quick factual or single-file questions → `fast`.
+- Design reviews, audits, multi-step analysis → `reasoning`.
+- Tasks needing self-critique → `thinking`.
+- Current-events or source-cited answers → `research` (uses web + X search).
 
 ## Parallel ship (contributor, private)
 
-Dual-lane shipping process lives in private `djtelicloud/unigrok-intelligence`.
-Public product installs never require it.
+Dual-lane product+intelligence shipping process lives in the **private**
+repository `djtelicloud/unigrok-intelligence` (playbooks + `grok-parallel-ship`
+skill). Public product installs never require it.
+
+Do **not** invent multi-provider public chat tools. UniGrok's public `agent`
+remains Grok-routed; other providers stay behind Grok-supervised adapters.
 
 
 ## Plan critique habit (opt-in)
 
-When the user is about to see a multi-step Implementation Plan, prefer calling
-UniGrok `agent` (`thinking` or `reasoning`) for a second opinion, then improve
-the plan before presenting it **only when the user wants a Grok second opinion**
-(including `@grok`). Do not silently spend metered API credits without consent.
-Do not invent a second MCP port or Forge workflow for public installs. Public
-path remains `http://localhost:4765/mcp` only.
+When the user is about to see a multi-step **Implementation Plan**, prefer:
+
+1. Call UniGrok `agent` (`thinking` or `reasoning`) with the draft plan.
+2. Incorporate feedback silently.
+3. Only then present the improved plan to the user.
+
+Do this when the user wants a Grok second opinion (including `@grok`). Do **not**
+silently spend metered API credits without consent. Do **not** auto-generate
+skill trees into foreign projects without permission. Never copy the UniGrok
+repository’s contributor `.agents` tree into the user’s other apps.
+
+## Cost awareness
+
+Check `cost_usd` in each response. Session reuse preserves continuity and can
+reduce repeated-context API input cost when caching hits; it does not guarantee
+savings. The default `cli_first` policy prefers compatible, unpinned work on an
+authenticated CLI subscription. Explicit plane selection should pair with
+`fallback_policy="same_plane"` when the request must not cross into a different
+credential or billing plane; `cross_plane` allows bounded failover. CLI
+provider cost remains unavailable, so report local counts and estimated tokens,
+not invented subscription cost or remaining provider quota.
+
+## Safe onboarding behavior
+
+- On first connect in a session, call `grok_mcp_discover_self` and read
+  `data.bootstrap` + `data.request_context` before inventing setup steps.
+- Treat `credential_planes` notices from status or an agent result as the
+  source of truth. Ask before device authentication, installation, or secret
+  configuration.
+- Never request `XAI_API_KEY` in chat or write it into the caller's project.
+- The stable service is workspace-neutral: do not assume MCP registration
+  grants filesystem access. Use `workspace_context` or local file tools only
+  when those tools are actually exposed in the current trusted
+  contributor/stdio session.
+- Translate provider and transport errors into one concrete next action for
+  the user; do not require them to understand planes, MCP transport, or JSON-RPC.
+- Public product path is `http://localhost:4765/mcp` only. Do not invent a
+  second port, Forge, Swarm, or land workflow for ordinary end-user installs.
+
+## First-connect diagnostics (server + local)
+
+**Server (always available via MCP):**
+
+1. Call `grok_mcp_discover_self`.
+2. Honor `data.bootstrap.status` (`OK` / `WARN` / `ERR`) and gates
+   (`can_chat`, `can_spend_api`, `can_mutate_workspace`, `can_use_swarm`).
+3. Read `data.request_context`: surface (`stable_core` / `contributor_forge` /
+   `mode_dial`), `client_id_present`, optional Host port / mode dial.
+4. Prompt once per `credential_planes` notice id; follow
+   `data.bootstrap.next_actions` when present.
+5. Optional: `include_models: true` when model routing matters.
+
+**Local IDE audit (only with user permission; report only):**
+
+UniGrok cannot read global IDE settings over HTTP. With consent, use local tools
+to check and **report** (never rewrite without explicit permission; never print
+secret values):
+
+- User MCP configs point daily chat at `http://localhost:4765/mcp`.
+- Stable `X-Client-ID` per IDE (claude-code, vscode, codex, cursor, antigravity).
+- No `XAI_API_KEY` (or other secrets) embedded in MCP JSON.
+- Project `.mcp.json` (if any) is dual HTTP for UniGrok worktrees, never
+  broken `unigrok-stdio` with `${PLUGIN_ROOT}`.
+- Optional `using-unigrok` skill present; do not copy contributor `.agents`
+  trees into foreign apps.
+- Unique leverage: which planes are ready, whether Forge tools appear only when
+  intentionally connected to the contributor surface, mode dials if enabled.
+
+Then one cheap verification: `agent` with `mode=fast` or `grok_mcp_status`.
+
+## Endpoint
+
+The shared gateway runs at `http://localhost:4765/mcp` (Streamable HTTP).
+Health: `GET /healthz`. Optional local Core UI: `http://localhost:4765/ui/`
+(trusted machine-owner test/control surface with a provider-calling agent
+playground). `X-Client-ID` is a caller-controlled
+attribution and session label beneath a server-derived principal; it is not
+authentication. The default unauthenticated loopback service derives the shared
+`http:anon` principal for one local budget/security trust domain, so there is
+no cross-user isolation without configured auth. Project-qualify every session
+key: a generic key can collide across repositories when the same client label
+is reused.

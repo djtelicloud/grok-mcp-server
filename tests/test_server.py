@@ -398,13 +398,30 @@ async def test_discover_self_tool():
     assert res.finish_reason == "final_answer"
     assert res.route == "discovery"
     assert res.data["okf_version"] == "0.1"
+    assert res.data["schema_version"] == 2
     assert res.data["name"] == "uni-grok-mcp"
     assert "/docs/okf/index.md" in res.data["files"]
     assert "/docs/okf/api-reference.md" in res.data["files"]
     assert "UniGrok MCP Discovery" in res.response
+    assert "Bootstrap (first connect)" in res.response
     assert "credential_planes" in res.data
     assert res.data["credential_planes"]["preferred_plane"] in {"CLI", "API"}
     assert "local_usage" in res.data["credential_planes"]
+    assert "request_context" in res.data
+    assert "bootstrap" in res.data
+    bootstrap = res.data["bootstrap"]
+    assert bootstrap["schema_version"] == 1
+    assert bootstrap["status"] in {"OK", "WARN", "ERR"}
+    assert bootstrap["caller_config_audit"] == "not_available_on_service"
+    assert isinstance(bootstrap["first_connect_checklist"], list)
+    assert bootstrap["first_connect_checklist"]
+    assert res.data["request_context"]["surface"] in {
+        "stable_core",
+        "contributor_forge",
+        "mode_dial",
+    }
+    assert "can_chat" in bootstrap
+    assert "can_mutate_workspace" in bootstrap
 
 
 @pytest.mark.asyncio
