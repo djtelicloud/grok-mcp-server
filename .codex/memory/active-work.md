@@ -60,19 +60,22 @@ credentials, OAuth codes, tokens, or private keys here.
   `b6d58b44a27bb75bdac1e0e7ea003d057cefba11` after 2,037 tests. Protected
   merge commit `d277bf3b6948be1421943258e49a6554d36d9de5` is synchronized
   locally and remotely.
-- Exact-main CI and all three CodeQL analyzers passed. The checked GitHub state
-  has zero open PRs, code-scanning alerts, Dependabot alerts, secret-scanning
-  alerts, or draft advisories.
-- Codex pruned five finished or superseded Grok scratchpads and their stale
-  branches after proving no agent process used them and their outcomes were
-  merged or covered by passing release-hygiene tests.
+- Continuity refresh PR #174 is Live at
+  `88cb5c03819e405b038a705bbb7a1b3eb376bf11`; exact-main CI and all three
+  CodeQL analyzers passed. The checked GitHub state has zero open PRs,
+  code-scanning alerts, Dependabot alerts, secret-scanning alerts, or draft
+  advisories.
+- Five finished or superseded Grok scratchpads, one empty Antigravity
+  scratchpad, and the completed data-function scratchpad are removed. Each was
+  clean and process-free before supervisor cleanup; the data-function tree was
+  removed concurrently by its owning lane before Codex pruned its merged local
+  branch.
 - Preserve the active detached Codex thread worktree, the active
-  `agents/hydrate-data-function` worktree, the active
   `claude/hydrate-c23d9f` worktree, and the primary `main` checkout.
 - Stable `:4765` and contributor `:4766` are ready. The contributor runtime
-  marker is `b6d58b44a27bb75bdac1e0e7ea003d057cefba11` and matches the
-  current main tree. The final commit changed only a test assertion, so no
-  additional runtime restart was needed.
+  marker is `df7f6a811a15b2ae10e39e1aa0a1ce358930884a` and matches the
+  current main tree. The continuity-only landing changed no runtime source, so
+  no additional restart was needed.
 - Remote MCP is live at 100% on ready `us-central1` revision
   `unigrok-remote-mcp-7c7c30e`, image digest
   `sha256:a377d3c89cea616360cabe5cf162f5ba187fffd25a8541004cd13d32f5b03f81`.
