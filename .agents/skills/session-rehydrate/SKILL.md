@@ -16,12 +16,11 @@ Intelligence is rehydrated from **git + disk**, not model memory.
 Do this for the whole session after rehydrate:
 
 1. **Think and tool silently.** Prefer tool calls and internal planning over
-   step-by-step narration to the user.
-2. **One end-state answer.** Deliver a concise final report (status table,
-   decisions, links, next action). Do not stream a blog of intermediate work
-   unless the user asked for a live play-by-play.
+   step-by-step narration to the user. No diffs, patches, or tool dumps in chat.
+2. **One end-state answer only.** Brand + status + plain task title (e.g.
+   `Grok: Ready for supervisor — …`). Nothing before that except product chrome.
 3. **No fake progress essays.** “I’m checking X… now Y…” is noise. Use tools;
-   then speak.
+   then speak once.
 4. **Human language only to the user:** Ready / Not ready / Live / Not live /
    Blocked / Who (**brand first**). Do not dump git jargon unless they asked
    for git. “Done / pushed?” means **Ready for supervisor**, not a git lecture.

@@ -51,3 +51,11 @@ reach new public clones—not private SQLite or chat logs.
 
 After something is **Live**, ask once: promote a public pack/skill update?
 If yes, scrub and open a product PR under `docs/public-intelligence/`.
+
+## Silent final answer
+
+Do all work off-chat. When finished, emit **only**:
+
+`[Brand]: [Ready for supervisor | Live | Not ready | Blocked] — [plain task title].`
+
+No diffs, logs, or “I’m checking…” in human chat. Expand only if asked.
