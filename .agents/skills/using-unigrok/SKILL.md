@@ -50,6 +50,14 @@ skill). Public product installs never require it.
 Do **not** invent multi-provider public chat tools. UniGrok's public `agent`
 remains Grok-routed; other providers stay behind Grok-supervised adapters.
 
+## Public intelligence packs
+
+New clones start smarter via **reviewed recipes** under
+`docs/public-intelligence/` (not private memory dumps). Read the latest pack
+in `docs/public-intelligence/packs/` when onboarding agents. Contributors:
+after work is Live, ask once whether to promote a scrubbed pack/skill update.
+Never continuous-sync private intelligence into public.
+
 
 ## Plan critique habit (opt-in)
 

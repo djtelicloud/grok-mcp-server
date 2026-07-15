@@ -19,6 +19,9 @@
   a live play-by-play.
 - Prefer UniGrok MCP CLI/`fast` for cheap index-diff hive emits; keep visible
   output tiny. Insider silent-think doctrine is private (not public default).
+- **Public intelligence packs:** distilled gym wins for clones live under
+  `docs/public-intelligence/`. After Live work, ask once: promote a scrubbed
+  pack/skill? Never auto-sync private intelligence or raw memory to public.
 
 ## Human language (user-facing — mandatory)
 
