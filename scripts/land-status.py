@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -16,6 +17,8 @@ from land import LandError, common_git_dir, git, main_worktree, worktrees
 def tree_id(repo: Path, revision: str) -> str | None:
     """Resolve a commit tree without letting a stale marker break status."""
 
+    if re.fullmatch(r"[0-9a-f]{40}", revision) is None:
+        return None
     try:
         return git(repo, "rev-parse", "--verify", f"{revision}^{{tree}}")
     except LandError:
@@ -34,10 +37,14 @@ def main() -> int:
         runtime_head = "unknown"
     if runtime_head == main_head:
         relation = "matches main"
-    elif tree_id(primary, runtime_head) == tree_id(primary, main_head):
-        relation = "matches main tree"
     else:
-        relation = "differs or not yet recorded"
+        runtime_tree = tree_id(primary, runtime_head)
+        main_tree = tree_id(primary, main_head)
+        relation = (
+            "matches main tree"
+            if runtime_tree is not None and runtime_tree == main_tree
+            else "differs or not yet recorded"
+        )
     print(f"Contributor runtime source marker: {runtime_head} ({relation})")
     print("Worktrees:")
     for item in worktrees(repo):

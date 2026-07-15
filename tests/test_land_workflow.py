@@ -146,6 +146,24 @@ def test_land_status_accepts_tree_equivalent_protected_merge(repo_with_agent):
     )
 
 
+def test_land_status_missing_marker_cannot_resolve_unknown_ref(repo_with_agent):
+    main, _ = repo_with_agent
+    git(main, "branch", "unknown", "main")
+
+    result = subprocess.run(
+        ["python3", str(ROOT / "scripts" / "land-status.py")],
+        cwd=main,
+        check=True,
+        text=True,
+        capture_output=True,
+    )
+
+    assert (
+        "Contributor runtime source marker: unknown "
+        "(differs or not yet recorded)" in result.stdout
+    )
+
+
 def test_land_refuses_behind_reviewed_head(repo_with_agent, monkeypatch):
     main, agent = repo_with_agent
     write(main / "main-only.txt", "other agent\n")
