@@ -4,6 +4,7 @@ import test from "node:test";
 import type { GitHubAuthConfig } from "../app/lib/github-auth-config";
 import { fetchImmutableReviewEvidence } from "../app/lib/github-review-broker";
 import { GET as authorizeGet, POST as authorizePost } from "../app/oauth/authorize/route";
+import { POST as introspectPost } from "../app/oauth/introspect/route";
 import { createGitHubSessionCookie } from "../app/lib/github-oauth";
 import { loadGitHubAuthConfig } from "../app/lib/github-auth-config";
 import {
@@ -101,6 +102,83 @@ test("cursor-cloud service tokens require the exact fixed scope bundle", async (
   };
   const malformed = `ugtoken.${await signCookiePayload(missingStatus, oauth.secret)}`;
   assert.equal(await readAccessToken(oauth, malformed, now + 1_000), null);
+});
+
+test("introspection exposes claims only for a valid bearer with the required scope", async () => {
+  const environment = {
+    APP_BASE_URL: oauth.issuer,
+    MCP_RESOURCE_URL: oauth.resource,
+    MCP_TOKEN_SECRET: oauth.secret,
+  };
+  const previous = new Map(Object.keys(environment).map((key) => [key, process.env[key]]));
+  Object.assign(process.env, environment);
+  try {
+    const inactiveRequests = [
+      new Request(`${oauth.issuer}/oauth/introspect`, {
+        body: new URLSearchParams({ required_scope: "unigrok:review" }),
+        method: "POST",
+      }),
+      new Request(`${oauth.issuer}/oauth/introspect`, {
+        body: new URLSearchParams({ required_scope: "unigrok:review" }),
+        headers: { authorization: "Bearer invalid.invalid.invalid" },
+        method: "POST",
+      }),
+    ];
+    for (const request of inactiveRequests) {
+      const response = await introspectPost(request);
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get("cache-control"), "no-store");
+      assert.deepEqual(await response.json(), { active: false });
+    }
+
+    const token = await createServiceAccessToken(oauth, "github-review-broker", "unigrok:review");
+    const introspect = (requiredScope: string) => introspectPost(new Request(
+      `${oauth.issuer}/oauth/introspect`,
+      {
+        body: new URLSearchParams({ required_scope: requiredScope }),
+        headers: { authorization: `Bearer ${token}` },
+        method: "POST",
+      },
+    ));
+    const wrongScope = await introspect("unigrok:invoke");
+    assert.equal(wrongScope.status, 200);
+    assert.deepEqual(await wrongScope.json(), { active: false });
+
+    const allowed = await introspect("unigrok:review");
+    assert.equal(allowed.status, 200);
+    assert.equal(allowed.headers.get("cache-control"), "no-store");
+    const claims = await allowed.json() as Record<string, unknown>;
+    assert.equal(claims.active, true);
+    assert.equal(claims.aud, oauth.resource);
+    assert.equal(claims.client_id, "service:github-review-broker");
+    assert.equal(claims.iss, oauth.issuer);
+    assert.equal(claims.scope, "unigrok:connect unigrok:review");
+    assert.equal(claims.sub, "service:github-review-broker");
+    assert.equal(claims.token_type, "Bearer");
+  } finally {
+    for (const [key, value] of previous) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
+
+test("introspection fails unavailable without server OAuth configuration", async () => {
+  const previous = process.env.MCP_TOKEN_SECRET;
+  delete process.env.MCP_TOKEN_SECRET;
+  try {
+    const response = await introspectPost(new Request(`${oauth.issuer}/oauth/introspect`, {
+      body: new URLSearchParams({ required_scope: "unigrok:review" }),
+      headers: { authorization: "Bearer invalid.invalid.invalid" },
+      method: "POST",
+    }));
+    assert.equal(response.status, 503);
+    assert.equal(response.headers.get("cache-control"), "no-store");
+    assert.deepEqual(await response.json(), { active: false });
+  } finally {
+    if (previous === undefined) delete process.env.MCP_TOKEN_SECRET;
+    else process.env.MCP_TOKEN_SECRET = previous;
+  }
 });
 
 test("authorization requires same-origin explicit consent before issuing a code", async () => {
