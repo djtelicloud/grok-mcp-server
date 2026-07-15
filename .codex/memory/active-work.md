@@ -1,8 +1,8 @@
 # Codex Active Work
 
-Last updated: 2026-07-14
+Last updated: 2026-07-15
 Owner: Codex
-Status: Maintainer sweep complete; Stage 1 live generation and training remain blocked
+Status: Maintainer repair locally landed; protected PR merge pending; Stage 1 live generation and training remain blocked
 
 This is the project-scoped handoff for new Codex chats. Verify drift-prone Git,
 CI, runtime, DNS, cloud, and benchmark state live before acting. Never record
@@ -50,12 +50,28 @@ credentials, OAuth codes, tokens, or private keys here.
 
 ## Latest maintainer sweep
 
-- Local `main` and `origin/main` are synchronized at
-  `5e5d921a0bc6f102df4469f4ce9cc7a37b2bde7e`.
-- The landing receipt printed `LANDED TO MAIN` after 1,564 tests. Main CI and
-  CodeQL are green at that exact commit.
-- The landed repair prevents release-hygiene tests from scanning ignored local
-  IDE worktree metadata. The pre-existing untracked `scratch_swarm/` remains
-  untouched.
-- Open draft PRs #64 and #73-#76 remain review-required. PR #73, #75, and #76
-  have current unresolved review feedback; no external thread was changed.
+- Local `main`, the contributor runtime source marker, and the pushed task
+  branch are at the PR #127 repair series. Protected `origin/main` remains at
+  its pre-merge head until the review gates pass.
+- Draft PR #127 contains the minimal CodeQL and public OKF-link repair. Its full
+  suite, generated-OKF check, Ruff, Docker, site, attribution, and CodeQL checks
+  are green. Do not bypass its draft, Code Owner, Codex Approval, or
+  protected-merge gates.
+- All seven open PR heads (#121, #124-#129) have green CI and CodeQL. PR #125
+  has two newly actionable onboarding threads plus one addressed-but-unresolved
+  thread. PR #126 has one newly actionable UI cache thread plus one
+  addressed-but-unresolved thread. PR #128 has four current skill/documentation
+  threads and diff whitespace. Draft PRs #121, #124, and #129 have no review
+  threads. No external thread was resolved or replied to.
+- Hosted review smoke runs associated with #121 failed in the read-only MCP
+  transport; no later successful hosted review run exists. Do not silently
+  rerun the API-plane workflow because it may spend metered provider credits.
+- Issue #65 is the only open issue. Its latest comment reports a bounded live
+  Stage 1 run, while this handoff and the issue body retain the exact-head
+  authorization gate. Treat any further live generation or training as blocked
+  until the authority state is reconciled explicitly.
+- Repository metadata, dependency/security automation, release 0.6.0, public
+  endpoints, ports, and agent/plugin metadata were rechecked. The empty GitHub
+  Wiki feature remains enabled even though the product docs explicitly forbid a
+  separate Wiki surface; changing that repository setting needs an explicit
+  maintainer decision.

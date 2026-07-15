@@ -25,14 +25,14 @@ from __future__ import annotations
 
 import argparse
 import base64
-import hashlib
-import hmac
 import json
 import os
 import secrets
 import sys
 import time
 from typing import Any, Mapping, Optional
+
+from cryptography.hazmat.primitives import hashes, hmac
 
 TOKEN_PREFIX = "ugtoken."
 DEFAULT_TTL = 120
@@ -67,7 +67,9 @@ def sign_cookie_payload(payload: Mapping[str, Any], secret: str) -> str:
     body = _b64url(json.dumps(payload, separators=(",", ":"), ensure_ascii=True).encode("utf-8"))
     if len(body) > 4_096:
         raise ValueError("cookie payload is too large")
-    signature = hmac.new(secret.encode("utf-8"), body.encode("utf-8"), hashlib.sha256).digest()
+    signer = hmac.HMAC(secret.encode("utf-8"), hashes.SHA256())
+    signer.update(body.encode("utf-8"))
+    signature = signer.finalize()
     return f"{body}.{_b64url(signature)}"
 
 
@@ -127,6 +129,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     except ValueError as exc:
         raise SystemExit("UNIGROK_TOKEN_TTL_SECONDS must be an integer") from exc
 
+    issued_at = int(time.time())
     token = mint_service_access_token(
         secret=secret,
         issuer=issuer,
@@ -134,13 +137,17 @@ def main(argv: Optional[list[str]] = None) -> int:
         service=service,
         scope=scope,
         ttl_seconds=ttl,
+        now=issued_at,
     )
     if args.print_claims:
-        # Decode payload segment only for operator debugging (no secret).
-        body = token[len(TOKEN_PREFIX) :].split(".", 1)[0]
-        pad = "=" * (-len(body) % 4)
-        claims = json.loads(base64.urlsafe_b64decode(body + pad))
-        print(json.dumps({"sub": claims["sub"], "exp": claims["exp"], "scope": claims["scope"]}, sort_keys=True), file=sys.stderr)
+        # Report independently constructed, non-secret metadata. Never decode
+        # or log any value derived from the signed bearer token.
+        claims_metadata = {
+            "exp": issued_at + ttl,
+            "scope": ["unigrok:connect", scope],
+            "sub": f"service:{service}",
+        }
+        print(json.dumps(claims_metadata, sort_keys=True), file=sys.stderr)
     sys.stdout.write(token)
     if sys.stdout.isatty():
         sys.stdout.write("\n")
