@@ -951,6 +951,55 @@ def _swarm_policy() -> str:
     return "off"
 
 
+def _markdown_inline_label(value: Any) -> str:
+    """Escape untrusted labels for single-line Markdown inline code spans.
+
+    Client ids come from the untrusted ``X-Client-ID`` header. Strip backticks
+    and collapse control/whitespace so discover prose cannot break fencing or
+    inject misleading multi-line content.
+    """
+    text = str(value if value is not None else "")
+    text = text.replace("`", "").replace("\r", " ").replace("\n", " ")
+    text = " ".join(text.split())
+    return text or "(missing)"
+
+
+def _resolve_notice_action(
+    notice: dict[str, Any],
+    *,
+    api: dict[str, Any],
+    cli: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Resolve a credential notice to a full bounded action object.
+
+    Notices often carry only ``action_id``; the executable action lives on the
+    plane view (``credential_planes.api.action`` / ``cli.action``).
+    """
+    direct = notice.get("action")
+    if isinstance(direct, dict):
+        return direct
+
+    action_id = notice.get("action_id")
+    plane = str(notice.get("plane") or "").upper()
+    candidates: list[dict[str, Any]] = []
+    if plane == "API" and isinstance(api.get("action"), dict):
+        candidates.append(api["action"])
+    elif plane == "CLI" and isinstance(cli.get("action"), dict):
+        candidates.append(cli["action"])
+    else:
+        for view in (api, cli):
+            if isinstance(view.get("action"), dict):
+                candidates.append(view["action"])
+
+    if action_id:
+        for candidate in candidates:
+            if candidate.get("id") == action_id:
+                return candidate
+    if candidates:
+        return candidates[0]
+    return None
+
+
 def _build_discover_request_context(*, contributor: bool) -> dict[str, Any]:
     """Assemble request-scoped onboarding identity without secrets."""
     # Late imports avoid cycles: http_server registers these tools at import time.
@@ -1035,11 +1084,11 @@ def _build_discover_bootstrap(
                 "message": notice.get("message") or "Credential plane notice.",
             }
         )
-        action = notice.get("action") if isinstance(notice.get("action"), dict) else None
+        action = _resolve_notice_action(notice, api=api, cli=cli)
         if action or notice.get("action_id"):
             next_actions.append(
                 {
-                    "id": notice.get("action_id") or notice_id,
+                    "id": (action or {}).get("id") or notice.get("action_id") or notice_id,
                     "prompt_user": bool(notice.get("prompt_user", True)),
                     "action": action,
                 }
@@ -1227,9 +1276,11 @@ async def grok_mcp_discover_self(include_models: bool = False) -> SystemResult:
                 "(not a second UniGrok to install). Prefer the canonical 4765 endpoint.\n"
             )
 
-        client_label = request_context.get("client_id_normalized") or "(missing)"
-        surface = request_context.get("surface") or "stable_core"
-        bootstrap_status = bootstrap.get("status") or "WARN"
+        client_label = _markdown_inline_label(
+            request_context.get("client_id_normalized")
+        )
+        surface = _markdown_inline_label(request_context.get("surface") or "stable_core")
+        bootstrap_status = _markdown_inline_label(bootstrap.get("status") or "WARN")
 
         doc_text = (
             "# UniGrok MCP Discovery & Self-Description\n\n"
