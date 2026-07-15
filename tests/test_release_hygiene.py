@@ -429,3 +429,25 @@ def test_agent_rules_allow_draft_pr_submission_but_reserve_final_integration():
     assert "GitHub Copilot" in claude_rules
     assert "Codex Integration Owner" in gemini_rules
     assert "scripts/land" in copilot_rules
+
+
+def test_dual_supervisor_land_law_is_consistent() -> None:
+    """Cursor may land green low-risk when Codex is busy; medium/high stays Codex."""
+    shared = (ROOT / ".agents" / "AGENTS.md").read_text(encoding="utf-8")
+    rules = (
+        ROOT / ".cursor" / "rules" / "cursor-automations-single-pass.mdc"
+    ).read_text(encoding="utf-8")
+    design = (ROOT / "docs" / "design" / "dual-supervisor-land.md").read_text(
+        encoding="utf-8"
+    )
+    contributing = (ROOT / "CONTRIBUTING.md").read_text(encoding="utf-8")
+
+    assert "Dual supervisor (Codex + Cursor)" in shared
+    assert "Cursor low-risk land" in shared
+    assert "Low-risk land path (when Codex busy)" in shared
+    assert "Low-risk land path (when Codex busy)" in rules
+    assert "One land owner per PR head" in shared or "one land owner" in shared.lower()
+    assert "low-risk" in design.lower()
+    assert "Codex Approval" in design
+    assert "risk:low" in design
+    assert "dual-supervisor" in contributing.lower() or "Dual supervisor" in contributing
