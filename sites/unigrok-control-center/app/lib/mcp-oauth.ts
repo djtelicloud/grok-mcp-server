@@ -195,21 +195,45 @@ export async function exchangeAuthorizationCode(
   };
 }
 
+/** Allowed headless services and the capability scopes they may hold. */
+export const MCP_SERVICE_SPECS = Object.freeze({
+  "github-review-broker": {
+    scopes: Object.freeze(["unigrok:review"] as const),
+    ttlSeconds: 120,
+  },
+  "cursor-cloud": {
+    // Status is granted only inside the fixed cursor-cloud bundle below.
+    scopes: Object.freeze(["unigrok:invoke"] as const),
+    ttlSeconds: TOKEN_TTL_SECONDS,
+  },
+} as const);
+
+export type McpServiceName = keyof typeof MCP_SERVICE_SPECS;
+
 export async function createServiceAccessToken(
   config: McpOAuthConfig,
-  service: "github-review-broker",
-  scope: "unigrok:review",
+  service: McpServiceName,
+  scope: "unigrok:review" | "unigrok:invoke" | "unigrok:status",
   now = Date.now(),
 ): Promise<string> {
+  const spec = MCP_SERVICE_SPECS[service];
+  if (!spec || !(spec.scopes as readonly string[]).includes(scope)) {
+    throw new McpOAuthError("invalid_scope");
+  }
   const iat = Math.floor(now / 1_000);
+  // cursor-cloud always gets invoke+status so discover/status + agent work.
+  const granted =
+    service === "cursor-cloud"
+      ? ["unigrok:connect", "unigrok:invoke", "unigrok:status"]
+      : ["unigrok:connect", scope];
   const claims: McpAccessClaims = {
     aud: config.resource,
-    exp: iat + 120,
+    exp: iat + spec.ttlSeconds,
     iat,
     iss: config.issuer,
     jti: randomBase64Url(24),
     kind: "service",
-    scope: ["unigrok:connect", scope],
+    scope: granted,
     sub: `service:${service}`,
     v: 1,
   };
@@ -268,7 +292,33 @@ function isAccessClaims(value: unknown, config: McpOAuthConfig, now: number): va
     !Array.isArray(record.scope) ||
     record.scope.some((scope) => typeof scope !== "string" || !MCP_OAUTH_SCOPES.includes(scope))
   ) return false;
-  if (record.kind === "service") return record.sub === "service:github-review-broker";
+  if (record.kind === "service") {
+    if (record.sub === "service:github-review-broker") {
+      return (
+        Array.isArray(record.scope) &&
+        record.scope.length === 2 &&
+        record.scope.includes("unigrok:connect") &&
+        record.scope.includes("unigrok:review") &&
+        record.scope.every((scope) => scope === "unigrok:connect" || scope === "unigrok:review")
+      );
+    }
+    if (record.sub === "service:cursor-cloud") {
+      return (
+        Array.isArray(record.scope) &&
+        record.scope.length === 3 &&
+        record.scope.includes("unigrok:connect") &&
+        record.scope.includes("unigrok:invoke") &&
+        record.scope.includes("unigrok:status") &&
+        record.scope.every(
+          (scope) =>
+            scope === "unigrok:connect" ||
+            scope === "unigrok:invoke" ||
+            scope === "unigrok:status",
+        )
+      );
+    }
+    return false;
+  }
   return Number.isSafeInteger(record.githubId) && record.sub === `github:${record.githubId}` && typeof record.githubLogin === "string";
 }
 

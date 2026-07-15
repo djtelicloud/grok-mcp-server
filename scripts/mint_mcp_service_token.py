@@ -5,8 +5,8 @@ Matches Control Center ``createServiceAccessToken``:
 HMAC-SHA256 over base64url(JSON claims), token prefix ``ugtoken.``.
 
 Production remote MCP validates via Control introspection — never install a
-long-lived static client key on Cloud Run. This script only produces ~120s
-tokens for GitHub Actions / ops smoke.
+long-lived static client key on Cloud Run. This script only produces short-lived
+tokens for GitHub Actions, Cursor Cloud agents, and ops smoke.
 
 Environment (required):
   UNIGROK_MCP_TOKEN_SECRET  — same value as Control ``MCP_TOKEN_SECRET``
@@ -14,9 +14,9 @@ Environment (required):
   UNIGROK_MCP_RESOURCE_URL  — e.g. https://mcp.grokmcp.org/mcp
 
 Optional:
-  UNIGROK_SERVICE_NAME      — default github-review-broker
-  UNIGROK_SERVICE_SCOPE     — default unigrok:review
-  UNIGROK_TOKEN_TTL_SECONDS — default 120 (max 600)
+  UNIGROK_SERVICE_NAME      — github-review-broker | cursor-cloud
+  UNIGROK_SERVICE_SCOPE     — unigrok:review (broker) | unigrok:invoke (cursor-cloud)
+  UNIGROK_TOKEN_TTL_SECONDS — default per service (max 600)
 
 Prints the bearer token to stdout only (no logs of the secret).
 """
@@ -35,18 +35,25 @@ from typing import Any, Mapping, Optional
 from cryptography.hazmat.primitives import hashes, hmac
 
 TOKEN_PREFIX = "ugtoken."
-DEFAULT_TTL = 120
 MAX_TTL = 600
-ALLOWED_SCOPES = frozenset(
-    {
-        "unigrok:connect",
-        "unigrok:invoke",
-        "unigrok:review",
-        "unigrok:chat",
-        "unigrok:status",
-    }
-)
-ALLOWED_SERVICES = frozenset({"github-review-broker"})
+
+# service → primary capability scope (connect is always included)
+SERVICE_SPECS: dict[str, dict[str, Any]] = {
+    "github-review-broker": {
+        "scopes": frozenset({"unigrok:review"}),
+        "default_scope": "unigrok:review",
+        "default_ttl": 120,
+        "max_ttl": 120,
+    },
+    # Cursor Cloud / headless IDE agents: invoke + status (discover/status tools).
+    "cursor-cloud": {
+        # Status is granted only inside the fixed cursor-cloud bundle below.
+        "scopes": frozenset({"unigrok:invoke"}),
+        "default_scope": "unigrok:invoke",
+        "default_ttl": 600,
+        "max_ttl": 600,
+    },
+}
 
 
 def _b64url(data: bytes) -> str:
@@ -73,37 +80,54 @@ def sign_cookie_payload(payload: Mapping[str, Any], secret: str) -> str:
     return f"{body}.{_b64url(signature)}"
 
 
+def _service_token_parameters(
+    service: str,
+    scope: Optional[str],
+    ttl_seconds: Optional[int],
+) -> tuple[str, int, list[str]]:
+    """Validate a service request and return its exact scope/TTL bundle."""
+    if service not in SERVICE_SPECS:
+        raise ValueError(f"service not allowed: {service}")
+    spec = SERVICE_SPECS[service]
+    primary = (scope or spec["default_scope"]).strip()
+    if primary not in spec["scopes"]:
+        raise ValueError(f"scope not allowed for service {service}: {primary}")
+    ttl = int(ttl_seconds if ttl_seconds is not None else spec["default_ttl"])
+    max_ttl = int(spec["max_ttl"])
+    if not (1 <= ttl <= min(max_ttl, MAX_TTL)):
+        raise ValueError(f"ttl_seconds must be 1..{min(max_ttl, MAX_TTL)} for {service}")
+    if service == "cursor-cloud":
+        granted = ["unigrok:connect", "unigrok:invoke", "unigrok:status"]
+    else:
+        granted = ["unigrok:connect", primary]
+    return primary, ttl, granted
+
+
 def mint_service_access_token(
     *,
     secret: str,
     issuer: str,
     resource: str,
     service: str = "github-review-broker",
-    scope: str = "unigrok:review",
-    ttl_seconds: int = DEFAULT_TTL,
+    scope: Optional[str] = None,
+    ttl_seconds: Optional[int] = None,
     now: Optional[int] = None,
     jti: Optional[str] = None,
 ) -> str:
-    if service not in ALLOWED_SERVICES:
-        raise ValueError(f"service not allowed: {service}")
-    # Service mint is review-only; invoke/chat/status stay for user OAuth.
-    if scope != "unigrok:review":
-        raise ValueError(f"scope not allowed for service mint: {scope}")
+    _primary, ttl, granted = _service_token_parameters(service, scope, ttl_seconds)
     if not issuer.startswith("https://") or issuer.endswith("/"):
         raise ValueError("issuer must be an https origin without trailing slash")
     if not resource.startswith("https://") or not resource.endswith("/mcp"):
         raise ValueError("resource must be https://…/mcp")
-    if not (1 <= int(ttl_seconds) <= MAX_TTL):
-        raise ValueError(f"ttl_seconds must be 1..{MAX_TTL}")
     iat = int(now if now is not None else time.time())
     claims = {
         "aud": resource,
-        "exp": iat + int(ttl_seconds),
+        "exp": iat + ttl,
         "iat": iat,
         "iss": issuer,
         "jti": jti or _b64url(secrets.token_bytes(24)),
         "kind": "service",
-        "scope": ["unigrok:connect", scope],
+        "scope": granted,
         "sub": f"service:{service}",
         "v": 1,
     }
@@ -123,13 +147,15 @@ def main(argv: Optional[list[str]] = None) -> int:
     issuer = os.environ.get("UNIGROK_OAUTH_ISSUER", "https://control.grokmcp.org").strip()
     resource = os.environ.get("UNIGROK_MCP_RESOURCE_URL", "https://mcp.grokmcp.org/mcp").strip()
     service = os.environ.get("UNIGROK_SERVICE_NAME", "github-review-broker").strip()
-    scope = os.environ.get("UNIGROK_SERVICE_SCOPE", "unigrok:review").strip()
+    scope = os.environ.get("UNIGROK_SERVICE_SCOPE", "").strip() or None
+    raw_ttl = os.environ.get("UNIGROK_TOKEN_TTL_SECONDS", "").strip()
     try:
-        ttl = int(os.environ.get("UNIGROK_TOKEN_TTL_SECONDS", str(DEFAULT_TTL)))
+        ttl = int(raw_ttl) if raw_ttl else None
     except ValueError as exc:
         raise SystemExit("UNIGROK_TOKEN_TTL_SECONDS must be an integer") from exc
 
     issued_at = int(time.time())
+    _primary, resolved_ttl, granted = _service_token_parameters(service, scope, ttl)
     token = mint_service_access_token(
         secret=secret,
         issuer=issuer,
@@ -140,11 +166,9 @@ def main(argv: Optional[list[str]] = None) -> int:
         now=issued_at,
     )
     if args.print_claims:
-        # Report independently constructed, non-secret metadata. Never decode
-        # or log any value derived from the signed bearer token.
         claims_metadata = {
-            "exp": issued_at + ttl,
-            "scope": ["unigrok:connect", scope],
+            "exp": issued_at + resolved_ttl,
+            "scope": granted,
             "sub": f"service:{service}",
         }
         print(json.dumps(claims_metadata, sort_keys=True), file=sys.stderr)
