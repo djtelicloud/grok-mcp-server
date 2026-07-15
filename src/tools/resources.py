@@ -36,7 +36,9 @@ def _to_json(payload: Any) -> str:
 # The workspace document is read by every connected agent, so every section
 # is clamped: agent-instruction files per-file, the git log block, the
 # session listing, and the assembled document as a whole.
-_WORKSPACE_DOC_LIMIT = 6000
+# Keep enough headroom for the shared rules' coordination sections while the
+# total resource clamp still bounds the payload sent to every connected agent.
+_WORKSPACE_DOC_LIMIT = 8000
 _WORKSPACE_TOTAL_LIMIT = 24000
 _WORKSPACE_SESSION_LIMIT = 20
 _WORKSPACE_GIT_TTL_SEC = 30.0

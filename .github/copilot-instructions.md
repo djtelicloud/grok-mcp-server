@@ -7,6 +7,20 @@ Use the shared workspace skill at `.github/skills/using-unigrok/SKILL.md` when
 the user asks for Grok usage, "@grok" queries, second-model review, or
 cross-repo UniGrok guidance in VS Code.
 
+## Session rehydrate — brand next steps (Copilot / Kimi)
+
+On **rehydrate** / **boot** / first message after IDE reset, follow
+`.agents/skills/session-rehydrate/SKILL.md`. After the short status table you
+**must** emit **Next smartest steps (Copilot)** (or Kimi if that is the host
+model brand) with **1–2 concrete offers**. A table-only rehydrate is incomplete.
+
+- **Your strengths:** VS Code in-editor speed; this file’s fidelity; VS Code MCP
+  client setup; plain-title human radio for sponsor status.
+- **Pick live work** from land-status, open Ready packets, or VS Code / Copilot
+  setup gaps — never invent supervisor land authority.
+- Lead with brand + Ready/Live/Blocked + plain task title. Never lead with PR
+  numbers.
+
 For normal feature work:
 
 1. Keep the shared checkout on `main`; work in an isolated agent-prefixed

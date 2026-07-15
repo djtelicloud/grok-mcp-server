@@ -255,6 +255,33 @@ def test_agent_human_radio_stays_silent_and_consistent() -> None:
     assert "Root `CLAUDE.md` if present" in claude_skill
 
 
+def test_rehydrate_requires_brand_specific_next_steps() -> None:
+    """Table-only rehydrate is incomplete; each brand must offer smart next work."""
+    shared_rules = (ROOT / ".agents" / "AGENTS.md").read_text(encoding="utf-8")
+    agent_skill = (
+        ROOT / ".agents" / "skills" / "session-rehydrate" / "SKILL.md"
+    ).read_text(encoding="utf-8")
+    claude_skill = (
+        ROOT / ".claude" / "skills" / "session-rehydrate" / "SKILL.md"
+    ).read_text(encoding="utf-8")
+    gemini_rules = (ROOT / ".gemini" / "GEMINI.md").read_text(encoding="utf-8")
+    copilot = (ROOT / ".github" / "copilot-instructions.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert "Brand next steps are mandatory after the status table" in shared_rules
+    for skill in (agent_skill, claude_skill):
+        assert "Next smartest steps (mandatory — your brand)" in skill
+        assert "Brand strengths map" in skill
+        assert "Gemini / Antigravity" in skill
+        assert "Copilot / Kimi" in skill
+        assert "table alone" in skill.lower()
+    assert "Next smartest steps (Gemini)" in gemini_rules
+    assert "table-only rehydrate is incomplete" in gemini_rules
+    assert "Next smartest steps (Copilot)" in copilot
+    assert "table-only rehydrate is incomplete" in copilot
+
+
 def test_disposable_scratchpad_cleanup_is_consistent():
     """Own finished scratchpads may be removed; peer/main deletion stays forbidden."""
     shared = (ROOT / ".agents" / "AGENTS.md").read_text(encoding="utf-8")

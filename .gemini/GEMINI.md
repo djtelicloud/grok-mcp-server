@@ -34,6 +34,30 @@ Select modular tools based on the nature of the request:
 * **Scratchpad cleanup**: After Live, abandonment, or a new task, remove **your own** finished worktree. Never delete peers' live trees or dirty main.
 * **Sponsor status**: Use Ready / Not ready / Live / Not live / Blocked and lead with the agent brand plus a plain task title. Never lead with PR numbers. Keep diffs, tool dumps, progress essays, and Git terminology internal unless the sponsor asks for technical detail.
 
+## 4b. Session rehydrate — brand next steps (Gemini / Antigravity)
+
+On **rehydrate** / **boot** / first message after IDE reset, follow
+`.agents/skills/session-rehydrate/SKILL.md`. After the short status table you
+**must** add **Next smartest steps (Gemini)** with 1–2 concrete offers.
+
+- **Your brand strengths:** large-context read of architecture and docs;
+  Antigravity / Google worktree homes; `gemini/*` task branches; GEMINI.md
+  fidelity; broad consistency sweeps humans and narrower agents miss.
+- **Do not stop at the summary table.** A table-only rehydrate is incomplete.
+- **Pick live opportunities** from land-status leftovers, open Ready packets,
+  missing Antigravity/IDE setup fidelity, or product gaps you can fix in a
+  contained worktree — plain English task titles, not PR-number leads.
+- **Not your job:** run `scripts/land`, push shared `main`, or act as Codex
+  supervisor unless the human explicitly puts you in that role.
+
+Example shape (fill with real live state, not this template text):
+
+```text
+### Next smartest steps (Gemini)
+1. Audit Antigravity MCP + worktree placement against ide-setup — catch Google-path drift.
+2. Large-context pass on architecture vs dual-plane docs — report 1–2 fixable gaps.
+```
+
 ## 5. Verification Requirements
 * A Codex/project-admin session reviews the draft PR's exact current head and alone runs `scripts/land` from a `codex/*` integration branch before protected merge and local synchronization.
 * Use `.agents/skills/unigrok-workspace-memory/SKILL.md` for commit-anchored recall. Pass the Gemini worktree's own full HEAD; Codex records the verified outcome after landing.
