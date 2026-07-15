@@ -159,18 +159,26 @@ encodes PR Approver / Security Reviewer / Bugbot Autofix single-pass discipline.
 
 ### Cursor multi-model vs UniGrok planes
 
-Cursor may list **non-Grok** models for native chat (Claude, GPT, etc.). Those
-paths are **Cursor-native billing and routing** — they are not UniGrok planes
-and will not appear on Control Center → **Planes**.
+Cursor may list **native** models for Composer/chat (including **Grok 4.5**,
+Claude, GPT, etc.). Those paths are **Cursor-native billing and routing** —
+they are not UniGrok credential planes and will not appear on Control Center →
+**Planes**.
 
-| Path | Who bills / routes | Where you see models |
-|------|--------------------|----------------------|
-| Cursor native multi-model | Cursor / that provider | Cursor model picker |
-| UniGrok MCP `agent` | UniGrok CLI sub and/or xAI API key | Control Center **Planes** + MCP |
+| Path | Who bills / routes | Where you see models | Use when |
+|------|--------------------|----------------------|----------|
+| Cursor-native Grok 4.5 (Composer) | Cursor / xAI via Cursor | Cursor model picker | Fast IDE-local edits, Automations/Bugbot loops, in-editor context |
+| Cursor native non-Grok | Cursor / that provider | Cursor model picker | You intentionally want a non-Grok host model |
+| UniGrok MCP `agent` | UniGrok CLI sub and/or xAI API key | Control Center **Planes** + MCP | Shared Grok across IDEs, server-side keys, CLI-first policy, exact API cost, `@grok` peer review, dual-plane routing receipts |
 
-Use UniGrok when you want shared Grok across every IDE, server-side keys,
-CLI-first policy, exact API cost, and `@grok` peer review. Use Cursor’s own
-picker when you intentionally want a non-Grok host model.
+**Decision card (Cursor Grok 4.5 session):**
+
+- Stay on **Cursor-native Grok 4.5** for ordinary Composer coding and
+  Automations work inside this IDE.
+- Call **UniGrok** (`agent` / `@grok`) when you need cross-IDE continuity,
+  CLI vs API plane truth, metered cost receipts, or a second opinion that
+  other brands can also query through `http://localhost:4765/mcp`.
+- Do not treat Cursor-native Grok 4.5 as a UniGrok plane — Control Center will
+  not show that spend under **Planes**.
 
 ## Claude Code (CLI)
 
