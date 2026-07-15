@@ -60,20 +60,25 @@ credentials, OAuth codes, tokens, or private keys here.
   `b6d58b44a27bb75bdac1e0e7ea003d057cefba11` after 2,037 tests. Protected
   merge commit `d277bf3b6948be1421943258e49a6554d36d9de5` is synchronized
   locally and remotely.
-- Continuity refresh PR #174 is Live at
-  `88cb5c03819e405b038a705bbb7a1b3eb376bf11`; exact-main CI and all three
+- Lane cleanup PR #175 is Live at
+  `8f4ed94b5bd0927bfa87c0888618e374d03716ad`; exact-main CI and all three
   CodeQL analyzers passed. The checked GitHub state has zero open PRs,
   code-scanning alerts, Dependabot alerts, secret-scanning alerts, or draft
   advisories.
 - Five finished or superseded Grok scratchpads, one empty Antigravity
-  scratchpad, and the completed data-function scratchpad are removed. Each was
-  clean and process-free before supervisor cleanup; the data-function tree was
-  removed concurrently by its owning lane before Codex pruned its merged local
-  branch.
-- Preserve the active detached Codex thread worktree, the active
-  `claude/hydrate-c23d9f` worktree, and the primary `main` checkout.
+  scratchpad, the first completed data-function scratchpad, and the old
+  `claude/hydrate-c23d9f` scratchpad were removed only after clean,
+  process-free, and integrated-state checks.
+- Provider IDEs may automatically rehydrate a clean scratchpad after cleanup.
+  A clean zero-ahead worktree is not an orphan while any live process uses it.
+  Before supervisor removal, re-check process ownership, dirty state, unique
+  commits, and open task packets; never rely on this handoff as a live lock.
+- Always preserve the active detached Codex thread worktree and the primary
+  `main` checkout. At the last verified sweep,
+  `agents/hydrate-data-function` and `claude/hydrate-0597fe` were active
+  rehydrated lanes and therefore protected.
 - Stable `:4765` and contributor `:4766` are ready. The contributor runtime
-  marker is `df7f6a811a15b2ae10e39e1aa0a1ce358930884a` and matches the
+  marker is `e05b265ddf5ffaf0e56f9c95dec2b15755fc123b` and matches the
   current main tree. The continuity-only landing changed no runtime source, so
   no additional restart was needed.
 - Remote MCP is live at 100% on ready `us-central1` revision
