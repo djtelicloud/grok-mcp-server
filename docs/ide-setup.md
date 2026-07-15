@@ -159,18 +159,41 @@ encodes PR Approver / Security Reviewer / Bugbot Autofix single-pass discipline.
 
 ### Cursor multi-model vs UniGrok planes
 
-Cursor may list **non-Grok** models for native chat (Claude, GPT, etc.). Those
-paths are **Cursor-native billing and routing** — they are not UniGrok planes
-and will not appear on Control Center → **Planes**.
+Cursor may list **native** models for Composer/chat (including **Grok 4.5**,
+Claude, GPT, etc.). Those paths are **Cursor-native billing and routing** —
+they are not UniGrok credential planes and will not appear on Control Center →
+**Planes**.
 
-| Path | Who bills / routes | Where you see models |
-|------|--------------------|----------------------|
-| Cursor native multi-model | Cursor / that provider | Cursor model picker |
-| UniGrok MCP `agent` | UniGrok CLI sub and/or xAI API key | Control Center **Planes** + MCP |
+| Path | Who bills / routes | Where you see models | Use when |
+|------|--------------------|----------------------|----------|
+| Cursor-native Grok 4.5 (Composer) | Cursor / xAI via Cursor | Cursor model picker | Ordinary IDE-local edits and Automations loops |
+| Cursor native non-Grok | Cursor / that provider | Cursor model picker | You intentionally want a non-Grok host model |
+| UniGrok MCP `agent` (default route) | UniGrok CLI sub and/or xAI API key | Control Center **Planes** + MCP | Shared Grok, `@grok` peer review, dual-plane cost/route receipts |
+| UniGrok MCP `agent` pinned `grok-build-0.1` | Same UniGrok planes (model pin only) | Control Center **Planes** + MCP | Code-heavy implementation via UniGrok |
 
-Use UniGrok when you want shared Grok across every IDE, server-side keys,
-CLI-first policy, exact API cost, and `@grok` peer review. Use Cursor’s own
-picker when you intentionally want a non-Grok host model.
+#### When to pin `grok-build-0.1` via UniGrok
+
+- Pin **`grok-build-0.1`** on the UniGrok `agent` model for code-heavy
+  implementation (multi-file changes, refactors, build-oriented work).
+- Use **Cursor-native Grok 4.5** in Composer for ordinary edits and day-to-day
+  chat-driven changes.
+- **`grok-build-0.1` is a model pin on the UniGrok agent path**, not a separate
+  credential plane — CLI vs API still follows UniGrok plane policy.
+
+#### Live routing receipt (Cursor Build exercise)
+
+Same micro-prompt run once pinned to Build and once on UniGrok `fast`
+(2026-07-15, caller `cursor`):
+
+| Lane | Model | Plane | Cost | Note |
+|------|-------|-------|------|------|
+| UniGrok Build pin | `grok-build-0.1` | API | metered (~$0.004) | Short bullets; weaker plane disclaimer |
+| UniGrok fast | `grok-composer-2.5-fast` | CLI | subscription $0 | Clearer “not a separate plane” bullet |
+| Cursor Composer | Grok 4.5 (this session) | Cursor-native | Cursor billing | Applied one Autofix-style docs fix from the cited gap |
+
+**Autofix fidelity exercise:** cited finding = “ide-setup lacks Build pin
+guidance.” One minimal fix on this branch only (this section). No peer fan-out,
+no adjacent nits.
 
 ## Claude Code (CLI)
 
