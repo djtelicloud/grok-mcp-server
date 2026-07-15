@@ -264,6 +264,12 @@ check `codex mcp --help`. Keep the server name as `grok`; this repo's
 }
 ```
 
+> [!WARNING]
+> **Secret & Worktree Safety**
+> - **No Secrets in Configs**: Never copy `XAI_API_KEY`, Google ADC credentials, or host `~/.gemini/config` files into this repository or the IDE MCP config JSON. 
+> - **Isolated Worktrees**: Operate inside `.worktrees/gemini/<task>/` (or the provider home). Do not pollute Documents with loose checkouts or mutate the primary shared `main` checkout.
+
+
 > [!NOTE]
 > IDEs cache MCP schemas. After adding or changing a tool, reconnect the Forge
 > MCP entry or reload the IDE window (in Antigravity: **Developer: Reload
