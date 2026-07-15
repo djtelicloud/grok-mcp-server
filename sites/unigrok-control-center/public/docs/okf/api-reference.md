@@ -3999,7 +3999,7 @@ Return whether one unambiguous xAI management credential is configured.
 ### Function: `xai_management_key_state` {#utils-xai_management_key_state}
 
 ```python
-def xai_management_key_state() -> str
+def xai_management_key_state() -> XAIManagementKeyState
 ```
 
 **Keywords:** xai, management, key, state

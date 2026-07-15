@@ -43,6 +43,7 @@ from .credentials import (
     credential_plane_policy,
 )
 from .xai_credentials import (
+    XAIManagementKeyState,
     _require_xai_management_key,
     _xai_management_key_state,
 )
@@ -1972,7 +1973,7 @@ def xai_management_key_configured() -> bool:
     return xai_management_key_state() == "configured"
 
 
-def xai_management_key_state() -> str:
+def xai_management_key_state() -> XAIManagementKeyState:
     """Return configured, missing, or conflict without exposing either secret."""
 
     return _xai_management_key_state()
@@ -11107,6 +11108,9 @@ async def _select_routing_model(
         input_messages=input_messages,
         enable_agentic=enable_agentic,
     )
+    api_only_exact_pin = bool(
+        thinking_mode or mode == "research" or features.get("has_image")
+    )
 
     if requested_model:
         model = await resolve_model(requested_model)
@@ -11117,6 +11121,11 @@ async def _select_routing_model(
             )
         catalog_source = "not_consulted"
         if requested_plane == "cli":
+            if api_only_exact_pin:
+                raise ValueError(
+                    "Thinking, vision, and research capabilities are API-only "
+                    "and cannot start on the CLI plane."
+                )
             cli_status = grok_cli_plane_status()
             cli_models = {str(item) for item in cli_status.get("models", []) if str(item)}
             if not cli_status.get("ready") or model not in cli_models:
@@ -11143,7 +11152,14 @@ async def _select_routing_model(
             )
             api_contains = api_available and model in set(api_models)
             policy = credential_plane_policy(cloudrun=is_cloudrun_runtime())
-            if policy == "cli_first" and cli_contains:
+            if api_only_exact_pin and api_contains:
+                catalog_source = api_source
+            elif api_only_exact_pin and api_available:
+                raise ValueError(
+                    f"Model '{model}' is unavailable on the xAI developer API "
+                    "plane required by this capability."
+                )
+            elif policy == "cli_first" and cli_contains:
                 catalog_source = "grok_cli_live"
             elif api_contains:
                 catalog_source = api_source
