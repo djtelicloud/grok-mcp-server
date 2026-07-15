@@ -36,6 +36,42 @@ Enable the server under Cursor **Settings → MCP**. Cursor and the gateway must
 run on the same machine: `localhost` inside a remote development container or
 SSH host refers to that remote environment, not your laptop.
 
+## How do I connect VS Code Copilot to both the stable and Forge lanes? {#vscode-copilot-connect}
+
+**Keywords:** vscode, copilot, forge, mcp.json, dual lane, vscode-forge
+
+Use `.vscode/mcp.json` for a repository-local setup or the user-level VS Code
+MCP config when you want the same lanes in every workspace:
+
+```json
+{
+  "servers": {
+    "unigrok": {
+      "type": "http",
+      "url": "http://localhost:4765/mcp",
+      "headers": { "X-Client-ID": "vscode" }
+    },
+    "unigrok-forge": {
+      "type": "http",
+      "url": "http://localhost:4766/mcp",
+      "headers": { "X-Client-ID": "vscode-forge" }
+    }
+  }
+}
+```
+
+Use `unigrok` on port `4765` for ordinary Copilot chat and other
+workspace-neutral requests. Add `unigrok-forge` on port `4766` only while
+developing UniGrok itself, where you need repository-mounted file/git/test
+tools, workspace memory, or Swarm. Keep `XAI_API_KEY` out of the IDE config:
+credentials belong to the server-side `.env` or the authenticated Grok CLI
+plane.
+
+For day-to-day use, start with `agent(mode="fast")` or the default `auto`
+route on the stable lane and escalate to `reasoning` only when the repo state,
+tool surface, or model routing needs a deeper pass. Reload the VS Code window
+after adding the Forge lane if the tool list still looks stale.
+
 ## Do I need an xAI API key in every IDE? {#shared-api-key}
 
 **Keywords:** api key, xai api key, credentials, ide, shared gateway

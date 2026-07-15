@@ -134,3 +134,90 @@ live catalog returned by the `grok models` readiness probe. Coding prefers
 composer; reasoning prefers the CLI's reported default. Explicit API model
 pins remain on API even when the same slug is also exposed by the CLI
 subscription.
+
+## VS Code + GitHub Copilot integration patterns
+
+For VS Code Copilot and similar MCP clients, the stable HTTP `agent` is the
+default entrypoint. Keep the caller identity stable with
+`X-Client-ID: vscode`, call `grok_mcp_discover_self` early in a session, and
+use live `tools/list` as the contract before assuming a tool exists.
+
+### Mode and plane habits
+
+- Use `mode="fast"` for quick explanations, narrow refactors, and low-stakes
+  second opinions.
+- Use `mode="reasoning"` for design review, repo-wide tradeoffs, or when the
+  model should spend effort before answering.
+- Use `mode="thinking"` only when you explicitly want the slower reflection
+  loop; use `mode="research"` only when grounded fan-out is worth the extra
+  cost and latency.
+- Leave `plane="auto"` for normal CLI-first behavior. Use
+  `fallback_policy="same_plane"` when you must not cross the billing boundary,
+  especially for pinned API models or explicit CLI-only review flows.
+- Qualify `session` by task or repository so repeated Copilot follow-ups stay
+  attached to the same logical thread.
+
+### Supplying local evidence
+
+The stable HTTP surface is workspace-neutral. When Copilot needs local repo
+evidence, pass only the selected text through `workspace_context` and label it
+with `workspace_label`. Do not assume MCP registration grants filesystem
+authority over the open folder.
+
+```json
+{
+  "prompt": "Review this refactor plan for risk.",
+  "mode": "reasoning",
+  "session": "djtelicloud/grok-mcp-server:refactor-plan",
+  "workspace_label": "djtelicloud/grok-mcp-server",
+  "workspace_context": "Diff excerpt or error text chosen by Copilot"
+}
+```
+
+### Reading the response metadata
+
+Treat the structured response as the authoritative execution receipt:
+
+- `route`, `plane`, `model`, `why`, and `degraded` explain what ran and why.
+- `cost_usd`, `tokens`, and `latency_sec` support cost-aware IDE behavior.
+- `routing` carries the bounded routing explanation object safe for display and
+  logging.
+- `credentials.notices` is the action list for missing auth or repair steps.
+  Prompt once per notice id and do not ask the user to paste `XAI_API_KEY`
+  into chat or MCP config.
+
+```json
+{
+  "response": "No blocking findings.",
+  "model": "grok-4.5",
+  "route": "agentic",
+  "plane": "CLI",
+  "why": "cost",
+  "degraded": false,
+  "cost_usd": 0.0
+}
+```
+
+### Copilot-friendly request patterns
+
+Use these as bounded templates for common IDE flows:
+
+```json
+{
+  "prompt": "Summarize this stack trace and propose the first fix.",
+  "mode": "fast",
+  "session": "repo:bug-123",
+  "workspace_context": "Selected traceback"
+}
+```
+
+```json
+{
+  "prompt": "Give a second-opinion review of this patch.",
+  "mode": "reasoning",
+  "plane": "cli",
+  "fallback_policy": "same_plane",
+  "session": "repo:review-branch",
+  "workspace_context": "Selected diff hunk"
+}
+```
