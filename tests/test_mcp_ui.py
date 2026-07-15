@@ -179,6 +179,14 @@ def test_mcp_ui_static_files_are_served(monkeypatch):
     assert "credentialPlaneCatalogSignature" in script.text
     assert "priorSignature !== nextSignature" in script.text
     assert "state.modelCatalog = null" in script.text
+    assert "state.modelCatalogGeneration += 1" in script.text
+    assert 'state.activeTab === "tab-models"' in script.text
+    assert 'clearModelOptions("auto route")' in script.text
+    assert "generation !== state.modelCatalogGeneration" in script.text
+    legacy_loader = script.text.split("async function loadModelsList()", 1)[1].split(
+        "function syncModelOptions()", 1
+    )[0]
+    assert '$("modelInput")' not in legacy_loader
     assert 'headers: { "X-Client-ID": "cursor" }' in script.text
     assert "Cursor is the first-class host IDE" in script.text
     assert 'id="cliCatalogTrust"' in index.text

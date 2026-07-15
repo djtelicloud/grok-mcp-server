@@ -943,12 +943,9 @@ def load_okf_manifest() -> dict[str, Any]:
 
 def _swarm_policy() -> str:
     """Return the process Swarm policy: off | dry_run | active."""
-    raw = os.environ.get("UNIGROK_SWARM", "off").strip().lower()
-    if raw in ("dry_run", "active"):
-        return raw
-    if raw in ("1", "true", "yes", "on"):
-        return "active"
-    return "off"
+    from ..swarm.config import swarm_mode
+
+    return swarm_mode()
 
 
 def _markdown_inline_label(value: Any) -> str:
@@ -1149,7 +1146,7 @@ def _build_discover_bootstrap(
             "Call grok_mcp_discover_self and read data.bootstrap + data.request_context.",
             "Prompt once per credential_planes notice id; never ask for XAI_API_KEY in chat.",
             "Confirm X-Client-ID is set for this IDE (data.request_context.client_id_present).",
-            "With permission, audit local IDE MCP configs for http://localhost:4765/mcp and no keys in JSON.",
+            f"With permission, audit local IDE MCP configs for {local_surface}/mcp and no keys in JSON.",
             "Optional: one cheap agent(mode=fast) or grok_mcp_status after planes are ready.",
             "Public installs: do not invent a second product port, Swarm, or land workflow.",
         ],
@@ -1236,7 +1233,7 @@ async def grok_mcp_discover_self(include_models: bool = False) -> SystemResult:
             "name": "uni-grok-mcp",
             "service_mode": "contributor" if contributor else "stable",
             "requires_project_files": False,
-            "canonical_endpoint": "http://localhost:4765/mcp",
+            "canonical_endpoint": bootstrap["surfaces"]["canonical_mcp"],
             "mode_dials": {
                 "optional": True,
                 "enabled": bool(request_context.get("mode_dials_enabled")),
