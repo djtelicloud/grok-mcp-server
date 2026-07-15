@@ -213,12 +213,13 @@ def test_agent_statuses_lead_with_plain_task_titles() -> None:
     claude_skill = (
         ROOT / ".claude" / "skills" / "session-rehydrate" / "SKILL.md"
     ).read_text(encoding="utf-8")
+    gemini_rules = (ROOT / ".gemini" / "GEMINI.md").read_text(encoding="utf-8")
 
     assert "Task titles, not ticket numbers" in shared_rules
     assert "never the lead" in shared_rules
-    for skill in (agent_skill, claude_skill):
-        assert "plain task title" in skill
-        assert "Never lead with PR" in skill
+    for guidance in (agent_skill, claude_skill, gemini_rules):
+        assert "plain task title" in guidance
+        assert "Never lead with PR" in guidance
 
 
 def test_disposable_scratchpad_cleanup_is_consistent():
