@@ -101,9 +101,12 @@ mutate. Pasteable terminal prompts for agents beat multi-step browser forms.
   - **Agents / machine-readable knowledge:** `docs/okf/` (generated pieces via
     `scripts/generate_okf.py`, mirrored to the public site and gateway)
   - **Insiders:** this file + `docs/design/*`
-  - **GitHub Wiki is not a product surface.** Do not hand-edit it as source of
-    truth, do not auto-publish full OKF into `.wiki.git`, and do not send
-    public users there. Prefer disabling the Wiki tab or leaving it empty.
+  - **GitHub Wiki is a mirror only (optional).** Source of truth is `docs/okf/`
+    and https://grokmcp.org/docs/okf/. Do **not** hand-edit wiki pages. To
+    refresh the tab for humans, run
+    `uv run python scripts/publish_okf_wiki_mirror.py --out-dir /tmp/unigrok-wiki`
+    and push the generated markdown to the repo wiki. See
+    [docs/wiki-okf-mirror.md](docs/wiki-okf-mirror.md).
 - Run `uv run pytest` before opening a PR.
 
 Human contributors and coding agents use the same evidence contract: intent,
