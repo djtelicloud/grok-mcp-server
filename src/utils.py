@@ -11159,6 +11159,12 @@ async def _select_routing_model(
                     f"Model '{model}' is unavailable on the xAI developer API "
                     "plane required by this capability."
                 )
+            elif api_only_exact_pin and xai_api_key_configured():
+                # An exact pin is still executable when live catalog discovery
+                # is temporarily unavailable. Keep API-only capabilities on
+                # the credentialed API plane instead of silently downgrading
+                # them to a shared CLI slug under cli_first.
+                catalog_source = api_source
             elif policy == "cli_first" and cli_contains:
                 catalog_source = "grok_cli_live"
             elif api_contains:
