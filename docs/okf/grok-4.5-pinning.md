@@ -56,6 +56,26 @@ Explicit `plane="cli"` or `plane="api"` requests are strict. Use
 boundaries is forbidden. `cross_plane` allows only bounded, compatible
 recovery; it does not make a model available on a catalog where it is absent.
 
+## Product law (Grok-owned dual-plane + model pins)
+
+- **Public dual-plane is xAI only:** credential planes are the metered
+  `plane="api"` path (`XAI_API_KEY`) and the subscription `plane="cli"` path
+  (Grok CLI OAuth). Default policy remains `cli_first`.
+- **Slug ≠ plane:** pin a model id only when it appears in the **live catalog
+  for that plane**. Never invent model ids from product marketing names.
+- **Grok Build product ≠ shared catalog membership:** the coding-agent product
+  surface and the API slug `grok-build-0.1` are related but not interchangeable
+  identities. A model is shared across planes only when **both** live catalogs
+  list the exact same id.
+- **Process hydration ≠ session rehydrate:** in-process budget/cache recovery
+  (`src/hydration.py`) is not chat/session boot from git/disk
+  (`session-rehydrate` skill). Do not overload either surface with
+  “model-aware file hydration.”
+- **Multi-provider package stays inert:** `src.providers` supplies future
+  subordinate contracts and is **not wired** into the public `agent` final
+  answer path. OpenAI/Anthropic/Google workers must not be promoted to public
+  final output without a separate product decision.
+
 ## Live Catalog Discovery & Fallbacks
 UniGrok caches live catalog discovery. If API discovery fails, its bundled
 directory supplies routing candidates, but execution still requires the

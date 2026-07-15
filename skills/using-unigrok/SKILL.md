@@ -19,8 +19,11 @@ Call `agent` with:
 - `mode` (optional): `auto` (default), `fast` (single-turn, cheapest),
   `reasoning` (multi-step planner), `thinking` (reflected agent loop), or
   `research` (citation-grounded fanout).
-- `model` (optional): pin a Grok model id such as `grok-4.5`; leave unset to
-  let routing choose.
+- `model` (optional): pin a **live catalog** Grok model id such as `grok-4.5`
+  or API coding slug `grok-build-0.1`; leave unset to let routing choose.
+  Never invent ids from product names. The Grok Build IDE product is not the
+  same identity as `grok-build-0.1`. Prefer `plane` + `fallback_policy` when
+  the billing plane must not cross (`cli` vs `api`, `cli_first` default).
 - `session` (optional): a stable, project-qualified key such as
   `owner-repo:task` for multi-turn continuity. Do not reuse a generic session
   key across repositories.
