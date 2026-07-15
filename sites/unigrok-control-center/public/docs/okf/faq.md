@@ -172,10 +172,22 @@ composer model for coding.
 
 **Keywords:** credentials, missing api key, cli auth, install cli, permission
 
-On first connection, inspect `grok_mcp_discover_self.data.credential_planes`.
-Each notice has a stable id, severity, whether it blocks model work, and a
-bounded action. Prompt the user once per notice id and repeat only after the
-reported state changes.
+On first connection, call `grok_mcp_discover_self` and inspect:
+
+1. `data.bootstrap` — `status` (`OK`/`WARN`/`ERR`), gates (`can_chat`,
+   `can_spend_api`, `can_mutate_workspace`, `can_use_swarm`), warnings, and
+   `first_connect_checklist`.
+2. `data.request_context` — whether `X-Client-ID` is present, process surface
+   (`stable_core` vs `contributor_forge` vs phoneword `mode_dial`), and Host
+   port when the HTTP transport supplied one.
+3. `data.credential_planes` — each notice has a stable id, severity, whether it
+   blocks model work, and a bounded action. Prompt the user once per notice id
+   and repeat only after the reported state changes.
+
+`caller_config_audit` is `not_available_on_service` on purpose: UniGrok does not
+read global IDE MCP files or the caller's project. With permission, the IDE
+agent may audit those locally and report only (never rewrite without consent;
+never print secret values).
 
 - CLI missing or unauthenticated: ask permission before installing/rebuilding
   the CLI or running its interactive device-auth command. Continue on API when
