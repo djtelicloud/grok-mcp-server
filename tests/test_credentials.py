@@ -309,6 +309,83 @@ async def test_strict_plane_pin_uses_matching_live_catalog(monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("policy", "expected_source"),
+    (("cli_first", "grok_cli_live"), ("api_first", "xai_api_live")),
+)
+async def test_auto_exact_pin_uses_live_plane_membership_and_policy(
+    monkeypatch, policy, expected_source
+):
+    from src import utils
+
+    shared_model = "grok-shared-exact"
+    monkeypatch.setenv("UNIGROK_PLANE_POLICY", policy)
+    monkeypatch.setattr(
+        utils,
+        "grok_cli_plane_status",
+        lambda **_: {
+            **READY_CLI,
+            "models": [shared_model],
+            "default_model": shared_model,
+        },
+    )
+    monkeypatch.setattr(
+        utils._MODEL_RESOLVER,
+        "catalog_snapshot",
+        AsyncMock(return_value=([shared_model], "xai_api_live", True)),
+    )
+
+    selected, _, receipt, _ = await utils._select_routing_model(
+        prompt="Use the exact shared model",
+        mode="auto",
+        thinking_mode=False,
+        requested_model=shared_model,
+        requested_plane="auto",
+        active_store=None,
+        input_messages=None,
+        enable_agentic=False,
+    )
+
+    assert selected == shared_model
+    assert receipt["catalog"]["source"] == expected_source
+
+
+@pytest.mark.asyncio
+async def test_auto_exact_pin_routes_cli_only_live_slug_to_cli(monkeypatch):
+    from src import utils
+
+    cli_model = "grok-cli-only-exact"
+    monkeypatch.setenv("UNIGROK_PLANE_POLICY", "api_first")
+    monkeypatch.setattr(
+        utils,
+        "grok_cli_plane_status",
+        lambda **_: {
+            **READY_CLI,
+            "models": [cli_model],
+            "default_model": cli_model,
+        },
+    )
+    monkeypatch.setattr(
+        utils._MODEL_RESOLVER,
+        "catalog_snapshot",
+        AsyncMock(return_value=(["grok-api-only"], "xai_api_live", True)),
+    )
+
+    _, _, receipt, _ = await utils._select_routing_model(
+        prompt="Use the exact CLI model",
+        mode="auto",
+        thinking_mode=False,
+        requested_model=cli_model,
+        requested_plane="auto",
+        active_store=None,
+        input_messages=None,
+        enable_agentic=False,
+    )
+
+    assert receipt["catalog"]["source"] == "grok_cli_live"
+
+
+@pytest.mark.asyncio
 async def test_strict_cli_rejects_api_only_model(monkeypatch):
     from src import utils
 

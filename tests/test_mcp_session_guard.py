@@ -1281,6 +1281,64 @@ async def test_sdk_private_registry_removes_orphaned_session_owner():
 
 
 @pytest.mark.asyncio
+async def test_sdk_private_registry_hides_transport_while_termination_is_pending():
+    from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
+
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    class BlockingTransport:
+        async def terminate(self) -> None:
+            started.set()
+            await release.wait()
+
+    manager = StreamableHTTPSessionManager(app=object())
+    manager._server_instances["session-a"] = BlockingTransport()
+    manager._session_owners["session-a"] = object()
+    registry = MCP128SessionTransportRegistry(manager)
+
+    cleanup = asyncio.create_task(registry.remove_and_terminate("session-a"))
+    await asyncio.wait_for(started.wait(), timeout=1)
+    assert await registry.contains("session-a") is False
+    assert "session-a" not in manager._session_owners
+    release.set()
+    assert await asyncio.wait_for(cleanup, timeout=1) is True
+
+
+@pytest.mark.asyncio
+async def test_sdk_private_registry_restores_failed_transport_without_overwriting_replacement():
+    from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
+
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    class FailingTransport:
+        async def terminate(self) -> None:
+            started.set()
+            await release.wait()
+            raise RuntimeError("termination failed")
+
+    manager = StreamableHTTPSessionManager(app=object())
+    original = FailingTransport()
+    replacement = FakeTransport("replacement", [])
+    replacement_owner = object()
+    manager._server_instances["session-a"] = original
+    manager._session_owners["session-a"] = object()
+    registry = MCP128SessionTransportRegistry(manager)
+
+    cleanup = asyncio.create_task(registry.remove_and_terminate("session-a"))
+    await asyncio.wait_for(started.wait(), timeout=1)
+    async with manager._session_creation_lock:
+        manager._server_instances["session-a"] = replacement
+        manager._session_owners["session-a"] = replacement_owner
+    release.set()
+    with pytest.raises(RuntimeError, match="termination failed"):
+        await asyncio.wait_for(cleanup, timeout=1)
+    assert manager._server_instances["session-a"] is replacement
+    assert manager._session_owners["session-a"] is replacement_owner
+
+
+@pytest.mark.asyncio
 async def test_guard_interoperates_with_real_mcp_128_stateful_asgi():
     from mcp.server.fastmcp import FastMCP
 

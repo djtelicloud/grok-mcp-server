@@ -1,4 +1,5 @@
 import json
+import re
 import tomllib
 from pathlib import Path
 
@@ -26,12 +27,28 @@ def test_release_version_is_aligned_across_package_runtime_and_ui():
 
 def test_dependabot_covers_every_shipped_dependency_surface():
     config = (ROOT / ".github" / "dependabot.yml").read_text(encoding="utf-8")
+    blocks = re.split(r"(?m)^\s{2}-\s+", config)[1:]
+    configured: set[tuple[str, str]] = set()
+    for block in blocks:
+        ecosystem_match = re.search(
+            r"(?m)^package-ecosystem:\s*['\"]?([^'\"\s]+)['\"]?\s*$",
+            block,
+        )
+        directory_match = re.search(
+            r"(?m)^\s*directory:\s*['\"]?([^'\"\s]+)['\"]?\s*$",
+            block,
+        )
+        assert ecosystem_match is not None
+        assert directory_match is not None
+        configured.add((ecosystem_match.group(1), directory_match.group(1)))
 
-    assert 'package-ecosystem: "uv"' in config
-    assert 'package-ecosystem: "npm"' in config
-    assert 'package-ecosystem: "github-actions"' in config
-    assert config.count('package-ecosystem: "docker"') == 2
-    assert 'directory: "/sites/unigrok-control-center"' in config
+    assert configured == {
+        ("uv", "/"),
+        ("npm", "/sites/unigrok-control-center"),
+        ("github-actions", "/"),
+        ("docker", "/"),
+        ("docker", "/sites/unigrok-control-center"),
+    }
 
 
 def test_public_runtime_files_do_not_embed_a_developer_home_path():

@@ -9,6 +9,25 @@ from __future__ import annotations
 
 import os
 from collections.abc import Mapping
+from typing import Literal
+
+
+XAIManagementKeyState = Literal["configured", "missing", "conflict"]
+
+
+def _xai_management_key_state(
+    environ: Mapping[str, str] | None = None,
+) -> XAIManagementKeyState:
+    """Return secret-safe management credential configuration state."""
+
+    source = os.environ if environ is None else environ
+    canonical = str(source.get("XAI_MANAGEMENT_API_KEY") or "").strip()
+    sdk_alias = str(source.get("XAI_MANAGEMENT_KEY") or "").strip()
+    if canonical and sdk_alias and canonical != sdk_alias:
+        return "conflict"
+    if canonical or sdk_alias:
+        return "configured"
+    return "missing"
 
 
 def _resolve_optional_xai_management_key(
@@ -17,9 +36,9 @@ def _resolve_optional_xai_management_key(
     """Return one unambiguous management key without logging its value."""
 
     source = os.environ if environ is None else environ
-    canonical = str(source.get("XAI_MANAGEMENT_API_KEY", "")).strip()
-    sdk_alias = str(source.get("XAI_MANAGEMENT_KEY", "")).strip()
-    if canonical and sdk_alias and canonical != sdk_alias:
+    canonical = str(source.get("XAI_MANAGEMENT_API_KEY") or "").strip()
+    sdk_alias = str(source.get("XAI_MANAGEMENT_KEY") or "").strip()
+    if _xai_management_key_state(source) == "conflict":
         raise ValueError(
             "XAI_MANAGEMENT_API_KEY and XAI_MANAGEMENT_KEY are both configured "
             "with different values."

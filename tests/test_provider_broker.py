@@ -1976,6 +1976,66 @@ async def test_subscription_failure_uses_one_same_provider_api_fallback_only():
 
 
 @pytest.mark.asyncio
+async def test_invalid_api_fallback_descriptor_cannot_block_subscription_success():
+    subscription = FakeAdapter(ProviderChannel.OPENAI_MCP_SAMPLING)
+    api = FakeAdapter(ProviderChannel.OPENAI_API)
+    plan = _plan()
+    broker = GrokWorkerBroker(
+        registry={
+            ProviderChannel.OPENAI_MCP_SAMPLING: subscription,
+            ProviderChannel.OPENAI_API: api,
+        },
+        store=FakeStore(),
+        clock=lambda: NOW,
+    )
+    api._descriptor = api.descriptor.model_copy(
+        update={"endpoint_host": "descriptor-drift.invalid"}
+    )
+
+    result = await broker.execute(plan)
+
+    assert result.status == "returned"
+    assert result.delegations[0].reason == "subscription_returned"
+    assert subscription.calls == 1
+    assert api.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_legacy_naive_ttl_projection_is_compared_as_utc():
+    subscription = FakeAdapter(ProviderChannel.OPENAI_MCP_SAMPLING)
+    store = FakeStore()
+    plan = _plan(fallback=False)
+    broker = GrokWorkerBroker(
+        registry={ProviderChannel.OPENAI_MCP_SAMPLING: subscription},
+        store=store,
+        clock=lambda: NOW,
+    )
+    await broker.execute(plan)
+    row = (await store.list_provider_attempts())[0]
+    row["ttl_expires_at"] = row["ttl_expires_at"].removesuffix("+00:00")
+
+    reconstructed = broker._reconstruct_stored_start(row)
+
+    assert reconstructed.request.supervision.ttl_expires_at == (
+        plan.supervision.ttl_expires_at
+    )
+
+
+def test_sampling_claim_inspector_does_not_swallow_process_control_exceptions():
+    adapter = FakeAdapter(ProviderChannel.OPENAI_MCP_SAMPLING)
+
+    def stop_process():
+        raise SystemExit(7)
+
+    adapter.effect_claimed = stop_process
+    with pytest.raises(SystemExit, match="7"):
+        GrokWorkerBroker._sampling_effect_requires_indeterminate(
+            channel=ProviderChannel.OPENAI_MCP_SAMPLING,
+            adapter=adapter,
+        )
+
+
+@pytest.mark.asyncio
 async def test_internal_subscription_failure_does_not_fallback_or_cross_provider():
     subscription = FakeAdapter(
         ProviderChannel.GOOGLE_MCP_SAMPLING,

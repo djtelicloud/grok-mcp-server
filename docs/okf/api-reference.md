@@ -1493,7 +1493,7 @@ def provider_result_matches_start(start: ProviderAttemptStart, result: ProviderA
 
 **Keywords:** provider, result, matches, start
 
-Return whether one normalized result is bound to its exact v2 start.
+Return whether one normalized result is bound to its exact v3 start.
 
 ### Function: `is_safe_model_id` {#providers-contracts-is_safe_model_id}
 
@@ -3995,6 +3995,16 @@ def xai_management_key_configured() -> bool
 **Keywords:** xai, management, key, configured
 
 Return whether one unambiguous xAI management credential is configured.
+
+### Function: `xai_management_key_state` {#utils-xai_management_key_state}
+
+```python
+def xai_management_key_state() -> str
+```
+
+**Keywords:** xai, management, key, state
+
+Return configured, missing, or conflict without exposing either secret.
 
 ### Function: `get_xai_inference_client` {#utils-get_xai_inference_client}
 

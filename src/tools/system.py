@@ -1116,7 +1116,17 @@ def _build_discover_bootstrap(
         if isinstance(connected_port, int) and not isinstance(connected_port, bool)
         else 4765
     )
-    local_surface = f"http://localhost:{surface_port}"
+    surface_root = f"http://localhost:{surface_port}"
+    canonical_mcp = f"{surface_root}/mcp"
+    if cloudrun:
+        # Cloud Run has no caller-local surface. Reuse the same validated public
+        # resource that protects OAuth metadata and DNS-rebinding configuration.
+        from ..http_server import _public_mcp_resource
+
+        public_resource = _public_mcp_resource()
+        if public_resource and public_resource.endswith("/mcp"):
+            canonical_mcp = public_resource
+            surface_root = public_resource.removesuffix("/mcp")
 
     return {
         "schema_version": 1,
@@ -1136,17 +1146,17 @@ def _build_discover_bootstrap(
             "global settings without explicit consent. Never print secret values."
         ),
         "surfaces": {
-            "canonical_mcp": f"{local_surface}/mcp",
-            "healthz": f"{local_surface}/healthz",
-            "readyz": f"{local_surface}/readyz",
-            "runtimez": f"{local_surface}/runtimez",
-            "ui": f"{local_surface}/ui/",
+            "canonical_mcp": canonical_mcp,
+            "healthz": f"{surface_root}/healthz",
+            "readyz": f"{surface_root}/readyz",
+            "runtimez": f"{surface_root}/runtimez",
+            "ui": f"{surface_root}/ui/",
         },
         "first_connect_checklist": [
             "Call grok_mcp_discover_self and read data.bootstrap + data.request_context.",
             "Prompt once per credential_planes notice id; never ask for XAI_API_KEY in chat.",
             "Confirm X-Client-ID is set for this IDE (data.request_context.client_id_present).",
-            f"With permission, audit local IDE MCP configs for {local_surface}/mcp and no keys in JSON.",
+            f"With permission, audit local IDE MCP configs for {canonical_mcp} and no keys in JSON.",
             "Optional: one cheap agent(mode=fast) or grok_mcp_status after planes are ready.",
             "Public installs: do not invent a second product port, Swarm, or land workflow.",
         ],

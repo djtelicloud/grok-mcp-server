@@ -715,3 +715,19 @@ def test_unwrap_binds_model_envelope_to_authoritative_attempt_and_ttl():
             receipts=[],
             now=NOW,
         )
+
+
+def test_recursive_mapping_is_normalized_to_completion_contract_error():
+    recursive: dict[str, object] = {}
+    recursive["self"] = recursive
+    with pytest.raises(CompletionContractError, match="nesting depth"):
+        parse_completion_envelope(recursive)
+
+
+def test_invalid_supplied_receipt_is_normalized_to_evidence_error():
+    with pytest.raises(EvidenceResolutionError, match="violates its contract"):
+        validate_evidence_refs(
+            _complete(),
+            [{"receipt_id": "not-a-complete-receipt"}],
+            now=NOW,
+        )

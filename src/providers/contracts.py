@@ -806,7 +806,7 @@ def provider_result_matches_start(
     start: ProviderAttemptStart,
     result: ProviderAttemptResult,
 ) -> bool:
-    """Return whether one normalized result is bound to its exact v2 start."""
+    """Return whether one normalized result is bound to its exact v3 start."""
 
     execution = start.execution
     receipt = result.response.receipt if result.response is not None else result.failure

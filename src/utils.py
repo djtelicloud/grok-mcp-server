@@ -42,7 +42,10 @@ from .credentials import (
     build_credential_plane_contract,
     credential_plane_policy,
 )
-from .xai_credentials import _require_xai_management_key
+from .xai_credentials import (
+    _require_xai_management_key,
+    _xai_management_key_state,
+)
 from .identity import (
     _ACTIVE_CALLER,
     _ACTIVE_CLIENT_ID,
@@ -1282,7 +1285,13 @@ def _redact_provider_episode_text(
 
 
 def _canonical_json_text(value: Any) -> str:
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    )
 
 
 def _content_sha256(text: str) -> str:
@@ -1920,7 +1929,10 @@ class _CollectionsOnlyXAIManagementClient:
         collections = getattr(delegate, "collections", None)
         close = getattr(delegate, "close", None)
         if collections is None or not callable(close):
-            raise RuntimeError("xAI management client interface changed")
+            raise RuntimeError(
+                "xAI management client interface changed: expected collections "
+                "and callable close"
+            )
         object.__setattr__(self, "_collections", collections)
         object.__setattr__(self, "_close_callback", close)
 
@@ -1933,6 +1945,12 @@ class _CollectionsOnlyXAIManagementClient:
 
     def __dir__(self) -> list[str]:
         return ["close", "collections"]
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        raise AttributeError("xAI management facade is read-only")
+
+    def __delattr__(self, name: str) -> None:
+        raise AttributeError("xAI management facade is read-only")
 
     @property
     def collections(self) -> Any:
@@ -1951,11 +1969,13 @@ def _resolve_xai_management_key() -> str:
 def xai_management_key_configured() -> bool:
     """Return whether one unambiguous xAI management credential is configured."""
 
-    try:
-        _resolve_xai_management_key()
-    except ValueError:
-        return False
-    return True
+    return xai_management_key_state() == "configured"
+
+
+def xai_management_key_state() -> str:
+    """Return configured, missing, or conflict without exposing either secret."""
+
+    return _xai_management_key_state()
 
 
 def get_xai_inference_client():
@@ -2680,10 +2700,12 @@ class GrokSessionStore:
                 row = await cursor.fetchone()
                 version = int(row[0])
             if version < 0 or version > _SESSION_STORE_SCHEMA_HEAD:
-                raise RuntimeError(
+                message = (
                     f"unsupported session-store schema version {version}; "
                     f"expected 0..{_SESSION_STORE_SCHEMA_HEAD}"
                 )
+                await self._reset_connection_unlocked()
+                raise RuntimeError(message)
             await self._conn.execute("PRAGMA journal_mode=WAL;")
             await self._conn.execute("PRAGMA synchronous=NORMAL;")
             await self._conn.execute("PRAGMA busy_timeout=30000;")
@@ -5663,7 +5685,7 @@ class GrokSessionStore:
                             """
                             UPDATE provider_attempts SET
                                 harvest_status = 'retry_wait',
-                                harvest_attempts = harvest_attempts + 1,
+                                harvest_attempts = COALESCE(harvest_attempts, 0) + 1,
                                 harvest_next_at = ?, harvest_lease_id = NULL,
                                 harvest_lease_expires_at = NULL,
                                 harvest_error = ?, remote_file_id = NULL,
@@ -5697,7 +5719,7 @@ class GrokSessionStore:
                         """
                         UPDATE provider_attempts SET
                             harvest_status = 'leased',
-                            harvest_attempts = harvest_attempts + 1,
+                            harvest_attempts = COALESCE(harvest_attempts, 0) + 1,
                             harvest_next_at = NULL,
                             harvest_lease_id = ?,
                             harvest_lease_expires_at = ?,
@@ -11110,6 +11132,32 @@ async def _select_routing_model(
                     f"Model '{model}' is not available on the xAI developer API plane."
                 )
             catalog_source = api_source
+        else:
+            cli_status = grok_cli_plane_status()
+            cli_models = {
+                str(item) for item in cli_status.get("models", []) if str(item)
+            }
+            cli_contains = bool(cli_status.get("ready")) and model in cli_models
+            api_models, api_source, api_available = (
+                await _MODEL_RESOLVER.catalog_snapshot()
+            )
+            api_contains = api_available and model in set(api_models)
+            policy = credential_plane_policy(cloudrun=is_cloudrun_runtime())
+            if policy == "cli_first" and cli_contains:
+                catalog_source = "grok_cli_live"
+            elif api_contains:
+                catalog_source = api_source
+            elif cli_contains:
+                catalog_source = "grok_cli_live"
+            elif not cli_status.get("ready") and not api_available:
+                raise ValueError(
+                    f"Cannot verify explicit model '{model}' because neither live "
+                    "xAI catalog is available."
+                )
+            else:
+                raise ValueError(
+                    f"Model '{model}' is unavailable on both live xAI credential planes."
+                )
         receipt = make_routing_receipt(
             mode=mode,
             route_class="pinned",
@@ -11502,7 +11550,11 @@ async def orchestrate(
                 routing_receipt={
                     "provider": "xai",
                     "authority": "grok",
-                    "requested_plane": requested_plane.upper(),
+                    "requested_plane": (
+                        requested_plane.upper()
+                        if requested_plane != "auto"
+                        else "auto"
+                    ),
                     "resolved_plane": None,
                     "fallback_policy": fallback_policy,
                     "fallback_occurred": True,

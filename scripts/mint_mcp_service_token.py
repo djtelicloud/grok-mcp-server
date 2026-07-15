@@ -42,8 +42,10 @@ SERVICE_SPECS: dict[str, dict[str, Any]] = {
     "github-review-broker": {
         "scopes": frozenset({"unigrok:review"}),
         "default_scope": "unigrok:review",
-        "default_ttl": 120,
-        "max_ttl": 120,
+        # Hosted review allows a 9-minute model read. Keep one bounded token
+        # valid for that stream instead of expiring mid-response.
+        "default_ttl": 600,
+        "max_ttl": 600,
     },
     # Cursor Cloud / headless IDE agents: invoke + status (discover/status tools).
     "cursor-cloud": {
@@ -103,6 +105,59 @@ def _service_token_parameters(
     return primary, ttl, granted
 
 
+def _service_access_claims(
+    *,
+    issuer: str,
+    resource: str,
+    service: str = "github-review-broker",
+    scope: Optional[str] = None,
+    ttl_seconds: Optional[int] = None,
+    now: Optional[int] = None,
+    jti: Optional[str] = None,
+) -> dict[str, Any]:
+    _primary, ttl, granted = _service_token_parameters(service, scope, ttl_seconds)
+    if not issuer.startswith("https://") or issuer.endswith("/"):
+        raise ValueError("issuer must be an https origin without trailing slash")
+    if not resource.startswith("https://") or not resource.endswith("/mcp"):
+        raise ValueError("resource must be https://…/mcp")
+    iat = int(now if now is not None else time.time())
+    return {
+        "aud": resource,
+        "exp": iat + ttl,
+        "iat": iat,
+        "iss": issuer,
+        "jti": jti or _b64url(secrets.token_bytes(24)),
+        "kind": "service",
+        "scope": granted,
+        "sub": f"service:{service}",
+        "v": 1,
+    }
+
+
+def _mint_service_access_token_with_claims(
+    *,
+    secret: str,
+    issuer: str,
+    resource: str,
+    service: str = "github-review-broker",
+    scope: Optional[str] = None,
+    ttl_seconds: Optional[int] = None,
+    now: Optional[int] = None,
+    jti: Optional[str] = None,
+) -> tuple[str, dict[str, Any]]:
+    claims = _service_access_claims(
+        issuer=issuer,
+        resource=resource,
+        service=service,
+        scope=scope,
+        ttl_seconds=ttl_seconds,
+        now=now,
+        jti=jti,
+    )
+    token = f"{TOKEN_PREFIX}{sign_cookie_payload(claims, secret)}"
+    return token, claims
+
+
 def mint_service_access_token(
     *,
     secret: str,
@@ -114,24 +169,17 @@ def mint_service_access_token(
     now: Optional[int] = None,
     jti: Optional[str] = None,
 ) -> str:
-    _primary, ttl, granted = _service_token_parameters(service, scope, ttl_seconds)
-    if not issuer.startswith("https://") or issuer.endswith("/"):
-        raise ValueError("issuer must be an https origin without trailing slash")
-    if not resource.startswith("https://") or not resource.endswith("/mcp"):
-        raise ValueError("resource must be https://…/mcp")
-    iat = int(now if now is not None else time.time())
-    claims = {
-        "aud": resource,
-        "exp": iat + ttl,
-        "iat": iat,
-        "iss": issuer,
-        "jti": jti or _b64url(secrets.token_bytes(24)),
-        "kind": "service",
-        "scope": granted,
-        "sub": f"service:{service}",
-        "v": 1,
-    }
-    return f"{TOKEN_PREFIX}{sign_cookie_payload(claims, secret)}"
+    token, _claims = _mint_service_access_token_with_claims(
+        secret=secret,
+        issuer=issuer,
+        resource=resource,
+        service=service,
+        scope=scope,
+        ttl_seconds=ttl_seconds,
+        now=now,
+        jti=jti,
+    )
+    return token
 
 
 def main(argv: Optional[list[str]] = None) -> int:
@@ -154,22 +202,19 @@ def main(argv: Optional[list[str]] = None) -> int:
     except ValueError as exc:
         raise SystemExit("UNIGROK_TOKEN_TTL_SECONDS must be an integer") from exc
 
-    issued_at = int(time.time())
-    _primary, resolved_ttl, granted = _service_token_parameters(service, scope, ttl)
-    token = mint_service_access_token(
+    token, claims = _mint_service_access_token_with_claims(
         secret=secret,
         issuer=issuer,
         resource=resource,
         service=service,
         scope=scope,
         ttl_seconds=ttl,
-        now=issued_at,
     )
     if args.print_claims:
         claims_metadata = {
-            "exp": issued_at + resolved_ttl,
-            "scope": granted,
-            "sub": f"service:{service}",
+            "exp": claims["exp"],
+            "scope": claims["scope"],
+            "sub": claims["sub"],
         }
         print(json.dumps(claims_metadata, sort_keys=True), file=sys.stderr)
     output = token.encode("ascii")

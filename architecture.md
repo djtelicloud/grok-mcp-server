@@ -48,7 +48,7 @@ promote an OpenAI, Anthropic, or Google result to final output.
 
 The three xAI credential roles are separate. Grok CLI OAuth and `XAI_API_KEY`
 authorize their respective inference planes. The optional xAI
-business/management credential (`XAI_MANAGEMENT_API_KEY`) is non-inference
+business/management credential (`XAI_MANAGEMENT_API_KEY`) is a non-inference
 management authority: configuring it neither enables inference nor chooses
 which administrative operations are allowed. Each management operation still
 requires its own explicit authorization boundary.

@@ -197,6 +197,16 @@ async def test_cloudrun_orchestrate_does_not_cli_fallback(monkeypatch):
     monkeypatch.setenv("UNIGROK_RUNTIME", "cloudrun")
     mock_call_plane = AsyncMock(side_effect=RuntimeError("api failed"))
     monkeypatch.setattr("src.utils._call_plane", mock_call_plane)
+    monkeypatch.setattr(
+        utils,
+        "grok_cli_plane_status",
+        lambda **_: {"ready": False, "models": []},
+    )
+    monkeypatch.setattr(
+        utils._MODEL_RESOLVER,
+        "catalog_snapshot",
+        AsyncMock(return_value=(["grok-4.3"], "xai_api_live", True)),
+    )
 
     with patch("asyncio.create_subprocess_exec") as mock_exec:
         layer = await utils.orchestrate(

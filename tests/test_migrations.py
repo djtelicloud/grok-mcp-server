@@ -592,6 +592,8 @@ class TestV17ProviderAttemptCertification:
         try:
             with pytest.raises(RuntimeError, match="unsupported.*18"):
                 await store._ensure_initialized()
+            assert store._conn is None
+            assert store._initialized is False
         finally:
             await store.close()
         conn = sqlite3.connect(db_path)
