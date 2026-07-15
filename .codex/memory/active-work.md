@@ -2,7 +2,7 @@
 
 Last updated: 2026-07-15
 Owner: Codex
-Status: Maintainer repair locally landed; protected PR merge pending; Stage 1 live generation and training remain blocked
+Status: GitHub maintainer sweep complete; Control rollout awaiting Cloud Run retry; Stage 1 live generation and training remain blocked
 
 This is the project-scoped handoff for new Codex chats. Verify drift-prone Git,
 CI, runtime, DNS, cloud, and benchmark state live before acting. Never record
@@ -50,28 +50,32 @@ credentials, OAuth codes, tokens, or private keys here.
 
 ## Latest maintainer sweep
 
-- Local `main`, the contributor runtime source marker, and the pushed task
-  branch are at the PR #127 repair series. Protected `origin/main` remains at
-  its pre-merge head until the review gates pass.
-- Draft PR #127 contains the minimal CodeQL and public OKF-link repair. Its full
-  suite, generated-OKF check, Ruff, Docker, site, attribution, and CodeQL checks
-  are green. Do not bypass its draft, Code Owner, Codex Approval, or
-  protected-merge gates.
-- All seven open PR heads (#121, #124-#129) have green CI and CodeQL. PR #125
-  has two newly actionable onboarding threads plus one addressed-but-unresolved
-  thread. PR #126 has one newly actionable UI cache thread plus one
-  addressed-but-unresolved thread. PR #128 has four current skill/documentation
-  threads and diff whitespace. Draft PRs #121, #124, and #129 have no review
-  threads. No external thread was resolved or replied to.
-- Hosted review smoke runs associated with #121 failed in the read-only MCP
-  transport; no later successful hosted review run exists. Do not silently
-  rerun the API-plane workflow because it may spend metered provider credits.
-- Issue #65 is the only open issue. Its latest comment reports a bounded live
-  Stage 1 run, while this handoff and the issue body retain the exact-head
-  authorization gate. Treat any further live generation or training as blocked
-  until the authority state is reconciled explicitly.
-- Repository metadata, dependency/security automation, release 0.6.0, public
-  endpoints, ports, and agent/plugin metadata were rechecked. The empty GitHub
-  Wiki feature remains enabled even though the product docs explicitly forbid a
-  separate Wiki surface; changing that repository setting needs an explicit
+- Protected PRs #127, #131, #132, and #133 are merged. They repaired the stale
+  CodeQL/default-branch findings, integrated the patch-equivalent contributor
+  backlog, hardened Cursor Cloud service-token scopes and introspection, and
+  removed the final clear-text-logging data-flow pattern. The final security
+  repair passed 1,987 tests and `scripts/land` certified exact head
+  `58b0fa722c19a51d9d12355d3937676b467dc206` before protected merge.
+- Superseded PRs #121, #124-#130 were closed with evidence; their obsolete
+  remote branches and two older fully merged branches were deleted. No open PR
+  or unresolved review thread remains. Contributor worktrees and every remote
+  branch with unique commits were preserved.
+- Local `main` and protected `origin/main` agree at merge commit
+  `026078bd92fb2afd488ec371f3508bfba8f0bd30`. Exact-main CI and all three
+  CodeQL analyzers passed; code scanning, Dependabot, and secret scanning have
+  no open alerts.
+- The Control Center image for merged auth head `cc8cc064fc42` was built as
+  digest `sha256:7a932052851edfaf9b5fdfe7945db313d5c4a543cf542dac35efab59ed854c6a`.
+  A zero-traffic `us-east1` candidate is still in provider-managed transient
+  retry with no container logs; production traffic remains on the prior healthy
+  revision. Do not shift traffic until the candidate reports Ready.
+- Production `https://control.grokmcp.org/`, OAuth metadata, the protected
+  `/control` redirect, and inactive-token introspection remain healthy. The
+  existing revision and image are the rollback path.
+- Issue #65 remains the only open issue. Its comments and the exact-head gate
+  still conflict about Stage 1 authority, so further provider generation,
+  dataset writes, training, and sealed evaluation remain blocked.
+- Release and source versions agree at 0.6.0. The empty GitHub Wiki remains
+  enabled even though product docs forbid
+  a separate Wiki; changing that repository setting still requires an explicit
   maintainer decision.
