@@ -157,6 +157,19 @@ own `cursor` / `cursor-forge` labels in `~/.cursor/mcp.json` or
 [`.cursor/rules/cursor-automations-single-pass.mdc`](../.cursor/rules/cursor-automations-single-pass.mdc)
 encodes PR Approver / Security Reviewer / Bugbot Autofix single-pass discipline.
 
+### Cursor attribution smoke (live check)
+
+After connect, prove the label from inside Cursor (not from docs alone):
+
+1. Call `grok_mcp_discover_self` and confirm `data.request_context.client_id_present`
+   is true and `client_id_normalized` is `cursor` (or `cursor-forge` on the
+   Forge entry).
+2. Note `grok_mcp_status` Top Callers baseline, then run one cheap
+   `agent` call with `mode=fast` and a unique session marker.
+3. Re-check Top Callers: `http:anon|cursor` (or `|cursor-forge`) should
+   increase by one. Bare `http:anon` means some other client omitted
+   `X-Client-ID` — it is not the healthy Cursor path above.
+
 ### Bugbot Autofix live fidelity smoke
 
 After the Autofix fidelity contract is Live, verify Automations still obey it
@@ -180,18 +193,44 @@ cost/route honesty instead of an Autofix mutation.
 
 ### Cursor multi-model vs UniGrok planes
 
-Cursor may list **non-Grok** models for native chat (Claude, GPT, etc.). Those
-paths are **Cursor-native billing and routing** — they are not UniGrok planes
-and will not appear on Control Center → **Planes**.
+Cursor may list **native** models for Composer/chat (including **Grok 4.5**,
+Claude, GPT, etc.). Those paths are **Cursor-native billing and routing** —
+they are not UniGrok credential planes and will not appear on Control Center →
+**Planes**.
 
-| Path | Who bills / routes | Where you see models |
-|------|--------------------|----------------------|
-| Cursor native multi-model | Cursor / that provider | Cursor model picker |
-| UniGrok MCP `agent` | UniGrok CLI sub and/or xAI API key | Control Center **Planes** + MCP |
+| Path | Who bills / routes | Where you see models | Use when |
+|------|--------------------|----------------------|----------|
+| Cursor-native Grok 4.5 (Composer) | Cursor / xAI via Cursor | Cursor model picker | Ordinary IDE-local edits and Automations loops |
+| Cursor native non-Grok | Cursor / that provider | Cursor model picker | You intentionally want a non-Grok host model |
+| UniGrok MCP `agent` (default route) | UniGrok CLI sub and/or xAI API key | Control Center **Planes** + MCP | Shared Grok, `@grok` peer review, dual-plane cost/route receipts |
+| UniGrok MCP `agent` pinned `grok-build-0.1` | Same UniGrok planes (model pin only) | Control Center **Planes** + MCP | Code-heavy implementation via UniGrok |
 
-Use UniGrok when you want shared Grok across every IDE, server-side keys,
-CLI-first policy, exact API cost, and `@grok` peer review. Use Cursor’s own
-picker when you intentionally want a non-Grok host model.
+**Decision card (Cursor Grok 4.5 session):**
+
+- Stay on **Cursor-native Grok 4.5** for ordinary Composer coding and
+  Automations work inside this IDE.
+- Call **UniGrok** (`agent` / `@grok`) when you need cross-IDE continuity,
+  CLI vs API plane truth, metered cost receipts, or a second opinion that
+  other brands can also query through `http://localhost:4765/mcp`.
+- Pin **`grok-build-0.1`** on UniGrok `agent` for code-heavy implementation —
+  a model pin only, not a separate credential plane.
+- Do not treat Cursor-native Grok 4.5 as a UniGrok plane — Control Center will
+  not show that spend under **Planes**.
+
+#### Live routing receipt (Cursor Build exercise)
+
+Same micro-prompt run once pinned to Build and once on UniGrok `fast`
+(2026-07-15, caller `cursor`):
+
+| Lane | Model | Plane | Cost | Note |
+|------|-------|-------|------|------|
+| UniGrok Build pin | `grok-build-0.1` | API | metered (~$0.004) | Short bullets; weaker plane disclaimer |
+| UniGrok fast | `grok-composer-2.5-fast` | CLI | subscription $0 | Clearer “not a separate plane” bullet |
+| Cursor Composer | Grok 4.5 | Cursor-native | Cursor billing | Applied one Autofix-style docs fix from a cited gap |
+
+This section consolidates the Cursor Ready fragment packets (attribution smoke,
+native vs UniGrok routing, Build pin + receipt). Codex may close or squash
+those drafts when this lands; leave Claude / Copilot / Gemini packets alone.
 
 ## Claude Code (CLI)
 
