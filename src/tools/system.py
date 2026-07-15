@@ -11,7 +11,6 @@ import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional, List, Literal
-from urllib.parse import urlsplit
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 from ..models.results import SystemResult
@@ -1125,15 +1124,9 @@ def _build_discover_bootstrap(
         from ..http_server import _public_mcp_resource
 
         public_resource = _public_mcp_resource()
-        if public_resource:
-            if public_resource.endswith("/mcp"):
-                canonical_mcp = public_resource
-                surface_root = public_resource.removesuffix("/mcp")
-            elif not urlsplit(public_resource).path:
-                # Accept a validated bare origin as a deployment convenience,
-                # while keeping non-standard resource paths fail-closed.
-                surface_root = public_resource
-                canonical_mcp = f"{public_resource}/mcp"
+        if public_resource and public_resource.endswith("/mcp"):
+            canonical_mcp = public_resource
+            surface_root = public_resource.removesuffix("/mcp")
 
     return {
         "schema_version": 1,
