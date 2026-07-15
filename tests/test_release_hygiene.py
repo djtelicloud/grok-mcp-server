@@ -244,9 +244,14 @@ def test_agent_human_radio_stays_silent_and_consistent() -> None:
     for skill in (agent_skill, claude_skill):
         assert "No diffs, patches, or tool dumps in chat" in skill
         assert "required Rehydrated block below" in skill
+        assert "updates at meaningful state" in skill
     assert "diffs, tool dumps, progress essays" in gemini_rules
-    assert "Not live" in public_pack
-    assert "continuously monitored work" in public_pack
+    silent_pack = public_pack.split("**Silent human radio**", maxsplit=1)[1]
+    assert (
+        "[Ready for supervisor | Live | Not live | Not ready | Blocked]"
+        in silent_pack
+    )
+    assert "continuously monitored work" in silent_pack
     assert "Root `CLAUDE.md` if present" in claude_skill
 
 

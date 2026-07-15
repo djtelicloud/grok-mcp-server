@@ -19,8 +19,8 @@ Do this for the whole session after rehydrate:
    step-by-step narration to the user. No diffs, patches, or tool dumps in chat.
 2. **One end-state answer by default.** Use brand + status + plain task title.
    The required Rehydrated block below is an explicit boot exception. For long
-   or continuously monitored work, send only short state changes when the user
-   requested live updates.
+   or continuously monitored work, send only short updates at meaningful state
+   changes or when the user requested live updates.
 3. **No fake progress essays.** “I’m checking X… now Y…” is noise. Use tools;
    then speak once per meaningful state change or finish line.
 4. **Human language only to the user:** Ready / Not ready / Live / Not live /
