@@ -26,8 +26,16 @@ def test_build_mirror_prunes_stale_pages_and_covers_manifest(tmp_path: Path) -> 
         if name == manifest["root"]:
             continue
         assert (out / f"{mirror._slug(name)}.md").is_file(), name
-    for pack in mirror.PACKS.glob("v*.md"):
+    pack_manifest = json.loads(mirror.PACK_MANIFEST.read_text(encoding="utf-8"))
+    listed_packs = [mirror.ROOT / pack["body_path"] for pack in pack_manifest["packs"]]
+    for pack in listed_packs:
         assert (out / f"{mirror._slug(pack.name)}.md").is_file(), pack.name
+    generated_pack_names = {
+        path.name for path in written if path.stem.startswith("v0-")
+    }
+    assert generated_pack_names == {
+        f"{mirror._slug(pack.name)}.md" for pack in listed_packs
+    }
 
     schema_page = out / "gno-envelope-v1.schema.json.md"
     schema_text = schema_page.read_text(encoding="utf-8")
@@ -46,6 +54,13 @@ def test_reserved_wiki_slugs_are_rejected(name: str) -> None:
 def test_output_directory_must_stay_outside_repository() -> None:
     with pytest.raises(ValueError, match="outside the repository"):
         mirror.build_mirror(mirror.ROOT / "wiki-output")
+
+
+def test_invalid_json_error_names_the_artifact(tmp_path: Path) -> None:
+    artifact = tmp_path / "broken.schema.json"
+    artifact.write_text("{", encoding="utf-8")
+    with pytest.raises(ValueError, match="broken.schema.json"):
+        mirror._json_page(artifact)
 
 
 def test_subscription_auth_precedes_readiness_check_in_public_docs() -> None:

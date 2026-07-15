@@ -17,10 +17,16 @@ import re
 import shlex
 from pathlib import Path
 
+from jsonschema import Draft202012Validator
+
 ROOT = Path(__file__).resolve().parents[1]
 OKF = ROOT / "docs" / "okf"
 PACKS = ROOT / "docs" / "public-intelligence" / "packs"
 OKF_MANIFEST = OKF / "okf-manifest.json"
+PACK_MANIFEST = PACKS / "manifest.json"
+PACK_SCHEMA = (
+    ROOT / "docs" / "public-intelligence" / "public-intelligence-pack.schema.json"
+)
 RESERVED_WIKI_SLUGS = {"home", "_sidebar"}
 HOME_BANNER = """\
 > **Mirror only.** Source of truth: [OKF on the site](https://grokmcp.org/docs/okf/index.md)
@@ -82,15 +88,50 @@ def _manifest_files() -> tuple[Path, list[Path]]:
         if not isinstance(name, str) or Path(name).name != name:
             raise ValueError(f"invalid OKF manifest path: {name!r}")
         path = OKF / name
-        if path.suffix not in {".md", ".json"} or not path.is_file():
+        if path.suffix.lower() not in {".md", ".json"} or not path.is_file():
             raise ValueError(f"missing or unsupported OKF artifact: {name!r}")
         files.append(path)
     return OKF / root_name, files
 
 
+def _pack_files() -> list[Path]:
+    schema = json.loads(PACK_SCHEMA.read_text(encoding="utf-8"))
+    Draft202012Validator.check_schema(schema)
+    validator = Draft202012Validator(schema)
+    manifest = json.loads(PACK_MANIFEST.read_text(encoding="utf-8"))
+    if set(manifest) != {"schema", "packs"}:
+        raise ValueError("public pack manifest must contain only schema and packs")
+
+    files: list[Path] = []
+    seen: set[Path] = set()
+    packs_root = PACKS.resolve()
+    for pack in manifest["packs"]:
+        validator.validate(pack)
+        if not all(pack["scrub"].values()):
+            raise ValueError(f"public pack {pack['pack_id']!r} is not fully scrubbed")
+        expected = (
+            f"docs/public-intelligence/packs/{pack['version']}-{pack['pack_id']}.md"
+        )
+        if pack["body_path"] != expected:
+            raise ValueError(f"public pack body path must be {expected!r}")
+        path = (ROOT / pack["body_path"]).resolve()
+        if not path.is_relative_to(packs_root) or not path.is_file():
+            raise ValueError(
+                f"missing or escaped public pack body: {pack['body_path']!r}"
+            )
+        if path in seen:
+            raise ValueError(f"duplicate public pack body: {pack['body_path']!r}")
+        seen.add(path)
+        files.append(path)
+    return files
+
+
 def _json_page(path: Path) -> str:
     raw = path.read_text(encoding="utf-8")
-    json.loads(raw)
+    try:
+        json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"invalid JSON in OKF artifact {path.name}: {exc}") from exc
     return f"# {path.name}\n\n```json\n{raw.rstrip()}\n```\n"
 
 
@@ -105,7 +146,7 @@ def build_mirror(out: Path) -> list[Path]:
         old.unlink()
 
     index_path, okf_files = _manifest_files()
-    pack_files = sorted(PACKS.glob("v*.md")) if PACKS.is_dir() else []
+    pack_files = _pack_files()
     seen = {slug: f"generated {slug}" for slug in RESERVED_WIKI_SLUGS}
 
     index = _strip_front_matter(index_path.read_text(encoding="utf-8"))
@@ -115,8 +156,8 @@ def build_mirror(out: Path) -> list[Path]:
         home += f"- [[{_slug(pack.name)}|{pack.stem}]]\n"
     (out / "Home.md").write_text(HOME_BANNER + home, encoding="utf-8")
 
-    markdown_files = [path for path in okf_files if path.suffix == ".md"]
-    json_files = [path for path in okf_files if path.suffix == ".json"]
+    markdown_files = [path for path in okf_files if path.suffix.lower() == ".md"]
+    json_files = [path for path in okf_files if path.suffix.lower() == ".json"]
     for path in markdown_files:
         if path == index_path:
             continue
