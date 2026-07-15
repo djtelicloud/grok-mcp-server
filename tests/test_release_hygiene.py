@@ -24,6 +24,16 @@ def test_release_version_is_aligned_across_package_runtime_and_ui():
     assert plugin["version"] == __version__
 
 
+def test_dependabot_covers_every_shipped_dependency_surface():
+    config = (ROOT / ".github" / "dependabot.yml").read_text(encoding="utf-8")
+
+    assert 'package-ecosystem: "uv"' in config
+    assert 'package-ecosystem: "npm"' in config
+    assert 'package-ecosystem: "github-actions"' in config
+    assert config.count('package-ecosystem: "docker"') == 2
+    assert 'directory: "/sites/unigrok-control-center"' in config
+
+
 def test_public_runtime_files_do_not_embed_a_developer_home_path():
     paths = [
         ROOT / "docker-compose.yml",
