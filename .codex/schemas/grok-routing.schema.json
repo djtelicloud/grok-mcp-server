@@ -7,15 +7,110 @@
     "schema_version",
     "purpose",
     "server",
+    "logical_tools",
+    "model_plane_contract",
     "routes",
     "safety"
   ],
   "properties": {
     "schema_version": {
-      "const": 1
+      "const": 2
     },
     "server": {
       "const": "grok"
+    },
+    "logical_tools": {
+      "type": "object",
+      "required": [
+        "agent",
+        "discovery",
+        "status"
+      ],
+      "properties": {
+        "agent": {
+          "const": "agent"
+        },
+        "discovery": {
+          "const": "grok_mcp_discover_self"
+        },
+        "status": {
+          "const": "grok_mcp_status"
+        }
+      },
+      "additionalProperties": false
+    },
+    "model_plane_contract": {
+      "type": "object",
+      "required": [
+        "catalog_source",
+        "catalog_policy",
+        "default_request",
+        "pin_policy",
+        "fallback_policy",
+        "required_receipt_fields"
+      ],
+      "properties": {
+        "catalog_source": {
+          "const": "grok_mcp_discover_self(include_models=true)"
+        },
+        "catalog_policy": {
+          "type": "string",
+          "minLength": 1
+        },
+        "default_request": {
+          "type": "object",
+          "required": [
+            "mode",
+            "plane",
+            "model"
+          ],
+          "properties": {
+            "mode": {
+              "const": "auto"
+            },
+            "plane": {
+              "const": "auto"
+            },
+            "model": {
+              "type": "null"
+            }
+          },
+          "additionalProperties": false
+        },
+        "pin_policy": {
+          "type": "string",
+          "minLength": 1
+        },
+        "fallback_policy": {
+          "type": "object",
+          "required": [
+            "same_plane",
+            "cross_plane"
+          ],
+          "properties": {
+            "same_plane": {
+              "type": "string",
+              "minLength": 1
+            },
+            "cross_plane": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false
+        },
+        "required_receipt_fields": {
+          "const": [
+            "model",
+            "resolved_plane",
+            "billing_class",
+            "cost_usd",
+            "fallback_policy",
+            "finish_reason"
+          ]
+        }
+      },
+      "additionalProperties": false
     },
     "routes": {
       "type": "array",
@@ -23,4 +118,3 @@
     }
   }
 }
-

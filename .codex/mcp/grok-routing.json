@@ -1,17 +1,45 @@
 {
   "$schema": "../schemas/grok-routing.schema.json",
-  "schema_version": 1,
+  "schema_version": 2,
   "purpose": "Codex-to-UniGrok MCP routing for this project",
   "server": "grok",
+  "logical_tools": {
+    "agent": "agent",
+    "discovery": "grok_mcp_discover_self",
+    "status": "grok_mcp_status"
+  },
+  "model_plane_contract": {
+    "catalog_source": "grok_mcp_discover_self(include_models=true)",
+    "catalog_policy": "Treat each plane's live catalog as authoritative. Never infer plane membership from a product name or persist a model snapshot as routing truth.",
+    "default_request": {
+      "mode": "auto",
+      "plane": "auto",
+      "model": null
+    },
+    "pin_policy": "Pin only an exact model id present in the selected live plane catalog. A model pin selects a model, not a new credential plane.",
+    "fallback_policy": {
+      "same_plane": "Use when crossing the caller's selected credential or billing plane is forbidden.",
+      "cross_plane": "Use only when the user or caller explicitly permits bounded recovery on the other credential plane."
+    },
+    "required_receipt_fields": [
+      "model",
+      "resolved_plane",
+      "billing_class",
+      "cost_usd",
+      "fallback_policy",
+      "finish_reason"
+    ]
+  },
   "routes": [
     {
       "id": "status",
       "when": "Codex needs UniGrok MCP availability, adapter status, or server health.",
       "preferred_tools": [
-        "agent"
+        "grok_mcp_discover_self",
+        "grok_mcp_status"
       ],
       "external_content_risk": "low",
-      "note": "Use mode fast with a short health-check prompt. The public HTTP MCP surface exposes the unified agent tool."
+      "note": "Use discovery with include_models=true when model routing matters; use status for current plane health. Neither check needs an inference call."
     },
     {
       "id": "project-file-context",
@@ -90,6 +118,6 @@
     "do_not_send_secrets": true,
     "warn_before_external_model_review_of_nonpublic_content": true,
     "discover_tools_before_using_provider_specific_deferred_routes": true,
-    "public_http_mcp_entrypoint": "mcp__grok.agent"
+    "public_http_mcp_entrypoint": "agent"
   }
 }
