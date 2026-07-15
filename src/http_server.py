@@ -583,10 +583,14 @@ class GatewayAuthMiddleware:
         response = _json_error("Unauthorized", status_code=401, code="unauthorized")
         # RFC 9728: point clients at the protected-resource metadata document.
         if _oauth_introspection_url():
-            response.headers["WWW-Authenticate"] = (
-                f'Bearer resource_metadata="{_oauth_protected_resource_metadata_url()}", '
-                f'scope="{required_scope}"'
-            )
+            metadata_url = _oauth_protected_resource_metadata_url()
+            if metadata_url:
+                response.headers["WWW-Authenticate"] = (
+                    f'Bearer resource_metadata="{metadata_url}", '
+                    f'scope="{required_scope}"'
+                )
+            else:
+                response.headers["WWW-Authenticate"] = f'Bearer scope="{required_scope}"'
         else:
             response.headers["WWW-Authenticate"] = "Bearer"
         await response(scope, receive, send)
@@ -968,11 +972,11 @@ def _public_mcp_resource() -> Optional[str]:
     return resource
 
 
-def _oauth_protected_resource_metadata_url() -> str:
+def _oauth_protected_resource_metadata_url() -> Optional[str]:
     """Return the RFC 9728 metadata URL for the configured MCP resource."""
     resource = _public_mcp_resource()
     if resource is None:
-        return "/.well-known/oauth-protected-resource/mcp"
+        return None
     parsed = urlsplit(resource)
     return (
         f"{parsed.scheme}://{parsed.netloc}"

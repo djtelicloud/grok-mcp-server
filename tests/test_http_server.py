@@ -261,12 +261,17 @@ def test_cloudrun_requires_api_keys(monkeypatch):
 def test_cloudrun_accepts_oauth_introspection_without_static_keys(monkeypatch):
     monkeypatch.setenv("UNIGROK_RUNTIME", "cloudrun")
     monkeypatch.delenv("UNIGROK_API_KEYS", raising=False)
+    monkeypatch.delenv("UNIGROK_PUBLIC_MCP_URL", raising=False)
     monkeypatch.setenv(
         "UNIGROK_OAUTH_INTROSPECTION_URL",
         "https://control.grokmcp.org/oauth/introspect",
     )
 
-    create_app()
+    with TestClient(create_app()) as client:
+        response = client.get("/metrics")
+
+    assert response.status_code == 401
+    assert response.headers["WWW-Authenticate"] == 'Bearer scope="unigrok:status"'
 
 
 def test_oauth_introspection_enforces_surface_and_tool_scopes(monkeypatch):
