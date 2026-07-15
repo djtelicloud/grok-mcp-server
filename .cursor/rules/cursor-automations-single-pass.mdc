@@ -1,0 +1,18 @@
+---
+description: Cursor Automations and Bugbot single-pass discipline (PR Approver, Security Reviewer, Bugbot Autofix)
+alwaysApply: true
+---
+
+# Cursor Automations — single-pass law
+
+When acting as **PR Approver**, **Security Reviewer**, or **Bugbot Autofix** on this repo:
+
+- **Single-agent only.** No parallel subagents, “review modules,” or fan-out batches. One serial pass per run.
+- **No branch thrash.** Stay on the given PR head. Extra branches/PRs only for explicit Autofix that must commit a fix.
+- **One action per head SHA.** At most one approval **or** one concise review comment for that head. If the same automation + head already has an active run, exit without duplicating work.
+- **Ignore bot echo.** Do not re-trigger solely because `cursor[bot]`, Bugbot, Copilot, Gemini, or Codex left a review comment.
+- **Approver:** wait for Bugbot; require green required checks; approve only low-risk diffs with no unresolved medium/high Bugbot findings; otherwise comment blockers and stop.
+- **Security Reviewer:** inspect the PR diff + existing threads once; report only actionable unresolved security findings; exit cleanly. No multi-module orchestration.
+- **Bugbot Autofix:** minimal fix on the existing PR branch; commit and push that branch only.
+
+Canonical shared copy: `.agents/AGENTS.md` → **Cursor Automations**.
