@@ -174,6 +174,7 @@ def test_oauth_protected_resource_metadata_is_active(monkeypatch, public_mcp_url
     [
         ("", "https://auth.grokmcp.org"),
         ("http://mcp.grokmcp.org/mcp", "https://auth.grokmcp.org"),
+        ("https://mcp.grokmcp.org/tenant/mcp", "https://auth.grokmcp.org"),
         ("https://127.0.0.1/mcp", "https://auth.grokmcp.org"),
         ("https://10.0.0.1/mcp", "https://auth.grokmcp.org"),
         ("https://[::1]/mcp", "https://auth.grokmcp.org"),
@@ -261,12 +262,17 @@ def test_cloudrun_requires_api_keys(monkeypatch):
 def test_cloudrun_accepts_oauth_introspection_without_static_keys(monkeypatch):
     monkeypatch.setenv("UNIGROK_RUNTIME", "cloudrun")
     monkeypatch.delenv("UNIGROK_API_KEYS", raising=False)
+    monkeypatch.delenv("UNIGROK_PUBLIC_MCP_URL", raising=False)
     monkeypatch.setenv(
         "UNIGROK_OAUTH_INTROSPECTION_URL",
         "https://control.grokmcp.org/oauth/introspect",
     )
 
-    create_app()
+    with TestClient(create_app()) as client:
+        response = client.get("/metrics")
+
+    assert response.status_code == 401
+    assert response.headers["WWW-Authenticate"] == 'Bearer scope="unigrok:status"'
 
 
 def test_oauth_introspection_enforces_surface_and_tool_scopes(monkeypatch):
@@ -332,7 +338,35 @@ def test_oauth_introspection_enforces_surface_and_tool_scopes(monkeypatch):
         "unigrok:connect unigrok:invoke",
         "unigrok:connect unigrok:invoke unigrok:review",
     ]
-    assert 'scope="unigrok:connect unigrok:review"' in review.headers["WWW-Authenticate"]
+    assert metrics.headers["WWW-Authenticate"] == 'Bearer scope="unigrok:status"'
+    assert review.headers["WWW-Authenticate"] == (
+        'Bearer resource_metadata="https://mcp.grokmcp.org/'
+        '.well-known/oauth-protected-resource/mcp", '
+        'scope="unigrok:connect unigrok:review"'
+    )
+
+
+def test_oauth_metadata_challenge_omits_mcp_document_for_query_variant(monkeypatch):
+    monkeypatch.setenv("UNIGROK_RUNTIME", "cloudrun")
+    monkeypatch.delenv("UNIGROK_API_KEYS", raising=False)
+    monkeypatch.setenv("UNIGROK_PUBLIC_MCP_URL", "https://mcp.grokmcp.org/mcp")
+    monkeypatch.setenv(
+        "UNIGROK_OAUTH_INTROSPECTION_URL",
+        "https://control.grokmcp.org/oauth/introspect",
+    )
+
+    async def deny(_token, _required_scope):
+        return None
+
+    monkeypatch.setattr("src.http_server._introspect_oauth_token", deny)
+    with TestClient(create_app(), base_url="https://mcp.grokmcp.org") as client:
+        response = client.get(
+            "/mcp?session=unexpected",
+            headers={"Authorization": "Bearer token-value"},
+        )
+
+    assert response.status_code == 401
+    assert response.headers["WWW-Authenticate"] == 'Bearer scope="unigrok:connect"'
 
 
 def test_oauth_introspection_allows_valid_status_token(monkeypatch):
