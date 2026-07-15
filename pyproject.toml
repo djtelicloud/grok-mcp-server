@@ -46,7 +46,7 @@ forge = [
 # Google ADC. The eval runner is intentionally not shipped in the wheel; keep
 # this SDK outside the stable UniGrok runtime dependency set.
 campaign = [
-    "google-genai>=1.25,<2",
+    "google-genai>=2.11.0,<3",
 ]
 
 [project.scripts]
