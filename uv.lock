@@ -936,7 +936,7 @@ requires-dist = [
     { name = "aiosqlite", specifier = ">=0.20.0" },
     { name = "coverage", marker = "extra == 'forge'", specifier = ">=7.6" },
     { name = "cryptography", specifier = ">=49,<50" },
-    { name = "google-auth", extras = ["requests"], specifier = ">=2.40,<3" },
+    { name = "google-auth", extras = ["requests"], specifier = ">=2.56.0,<3" },
     { name = "google-genai", marker = "extra == 'campaign'", specifier = ">=1.25,<2" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "jsonschema", specifier = ">=4.23,<5" },
