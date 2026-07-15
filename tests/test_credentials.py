@@ -255,6 +255,15 @@ async def test_cli_first_keeps_api_only_and_explicit_paths(monkeypatch):
     monkeypatch.setenv("XAI_API_KEY", "configured")
     monkeypatch.setattr(utils, "XAI_API_KEY", "configured")
     monkeypatch.setattr(utils, "cli_plane_ready_for_local_runtime", lambda: True)
+    monkeypatch.setattr(
+        utils,
+        "grok_cli_plane_status",
+        lambda **_: {
+            **READY_CLI,
+            "models": ["grok-4.5", "grok-composer-2.5-fast"],
+            "default_model": "grok-4.5",
+        },
+    )
 
     pinned, _, pinned_receipt, _ = await utils._select_routing_model(
         prompt="Use 4.5", mode="auto", thinking_mode=False,
