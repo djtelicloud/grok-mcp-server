@@ -60,11 +60,13 @@ digests.
 For a bounded manual failover, prefer an atomic URL-map change over removing a
 NEG from the active backend. Stage and verify the replacement region first,
 then create a separate backend with its own verified NEG and the same protocol,
-timeout, CDN, and Cloud Armor contract. Repoint only the relevant URL-map
-default service or path matcher to that backend. During propagation, each edge
-then sees either the complete old backend or the complete replacement backend;
-it never sees an in-place backend with a membership update still propagating.
-Do not alter unrelated host rules that share the URL map.
+timeout, disabled Cloud CDN setting, and Cloud Armor policy. In one validated
+URL-map configuration update, repoint every route that selects the old backend:
+the relevant default service, path-matcher default service, and any associated
+path rules. During propagation, each edge then sees either the complete old
+backend or the complete replacement backend; it never sees an in-place backend
+with a membership update still propagating. Do not alter unrelated host rules
+that share the URL map.
 
 After the URL-map update reports success, require repeated public health,
 readiness, metadata, and unauthenticated challenge probes, plus request-log
