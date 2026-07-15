@@ -137,3 +137,15 @@ new chat does not resume obsolete steps.
 ## Public vs private intelligence
 
 Process IP and harvest live in private `djtelicloud/unigrok-intelligence`. See [docs/design/public-private-git-split.md](docs/design/public-private-git-split.md).
+
+## Cursor Cloud specific instructions
+
+**Repo identity:** the GitHub repository is `djtelicloud/grok-mcp-server`. Product brand is UniGrok; Python package name is `mcp-grok`; CLI entrypoint is `unigrok-mcp`. The string `uni-grok-mcp` appears in agent docs/skills as an internal nickname only — do not treat it as the repo or package name.
+
+**Stable gateway (dev):** prefer `uv run python main.py --http` (binds `127.0.0.1:4765`). `docker compose up --build -d` is the documented shared-service path and is required for the baked Grok CLI binary / `grok-cli-auth` volume; pure HTTP-local cloud sessions do not need Docker for API-plane work.
+
+**Credential planes:** live `agent` inference needs `XAI_API_KEY` in the server `.env` and/or an authenticated CLI plane. Placeholder `your_xai_api_key_here` is treated as missing by the app (see `src/utils.py`), but `GET /readyz` only checks that the env var is non-empty — use `grok_mcp_status` / `grok_mcp_discover_self` (or a real `agent` call) as the usable-plane gate, not `/readyz` alone.
+
+**Commands:** dependency sync and tests/lint gates are in [CONTRIBUTING.md](CONTRIBUTING.md) / [README.md](README.md) (`uv sync`, `uv run pytest`, `uv run python -m compileall -q src evals main.py`). Ruff is available via the `dev` dependency group but is not the required land gate; the suite currently has many pre-existing ruff findings.
+
+**UI:** Control Center test bench at `http://localhost:4765/ui/`; core product path remains MCP at `http://localhost:4765/mcp`.
