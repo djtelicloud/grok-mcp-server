@@ -46,6 +46,7 @@ from .utils import (
     get_xai_management_client,
     run_blocking,
     xai_management_key_configured,
+    xai_management_key_state,
 )
 
 _LOGGER = "GrokMCP"
@@ -334,11 +335,16 @@ class TaskMemoryMirror:
         if task_rag_mode() == "off":
             self.last_known_ready = False
             return False
-        if not has_management_key():
+        management_state = xai_management_key_state()
+        if management_state != "configured":
             # Not an error: the mirror is an optional boost. Report the
             # reason without burning a probe or tripping failure backoff.
             self.last_known_ready = False
-            self._last_error = "xAI management key not set (cloud mirror is optional)"
+            self._last_error = (
+                "xAI management key aliases conflict; cloud mirror is disabled"
+                if management_state == "conflict"
+                else "xAI management key not set (cloud mirror is optional)"
+            )
             return False
 
         def _probe():
@@ -816,6 +822,13 @@ async def _rag_status(store: Any, out: TextIO) -> int:
     if mode == "off":
         print("cloud mirror: off (UNIGROK_TASK_RAG=off)", file=out)
         print("ready: no (UNIGROK_TASK_RAG=off)", file=out)
+    elif xai_management_key_state() == "conflict":
+        print(
+            "cloud mirror: disabled — XAI_MANAGEMENT_API_KEY and "
+            "XAI_MANAGEMENT_KEY conflict",
+            file=out,
+        )
+        print("ready: no (xAI management key aliases conflict)", file=out)
     elif not has_management_key():
         print(
             "cloud mirror: disabled — optional; set XAI_MANAGEMENT_API_KEY "
@@ -860,14 +873,22 @@ async def _rag_backfill(
     if mode == "off":
         print("UNIGROK_TASK_RAG=off — nothing to backfill.", file=out)
         return 1
-    if not has_management_key() and not dry_run:
+    management_state = xai_management_key_state()
+    if management_state != "configured" and not dry_run:
         # --dry-run stays available keyless (purely local outbox inspection).
-        print(
-            "The cloud mirror needs XAI_MANAGEMENT_API_KEY (or SDK alias "
-            "XAI_MANAGEMENT_KEY), separate from the inference key. It is "
-            "OPTIONAL: local semantic routing evidence already works without it.",
-            file=out,
-        )
+        if management_state == "conflict":
+            print(
+                "XAI_MANAGEMENT_API_KEY and XAI_MANAGEMENT_KEY conflict. "
+                "Make the aliases identical or configure only one before backfill.",
+                file=out,
+            )
+        else:
+            print(
+                "The cloud mirror needs XAI_MANAGEMENT_API_KEY (or SDK alias "
+                "XAI_MANAGEMENT_KEY), separate from the inference key. It is "
+                "OPTIONAL: local semantic routing evidence already works without it.",
+                file=out,
+            )
         return 1
     mirror = get_task_memory_mirror()
 

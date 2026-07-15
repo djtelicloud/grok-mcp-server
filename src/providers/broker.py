@@ -1150,7 +1150,9 @@ class GrokWorkerBroker:
             if not callable(inspector):
                 return True
             claimed = inspector()
-        except BaseException:
+        except asyncio.CancelledError:
+            return True
+        except Exception:
             return True
         return claimed if type(claimed) is bool else True
 
@@ -2227,6 +2229,8 @@ class GrokWorkerBroker:
             row_ttl = datetime.fromisoformat(str(row.get("ttl_expires_at")))
         except (TypeError, ValueError) as exc:
             raise ValueError("stored attempt TTL projection is malformed") from exc
+        if row_ttl.tzinfo is None:
+            row_ttl = row_ttl.replace(tzinfo=UTC)
         if row_ttl != supervision.ttl_expires_at:
             raise ValueError("stored attempt TTL projection changed")
         return start
@@ -2910,14 +2914,6 @@ class GrokWorkerBroker:
                     delegation=delegation,
                     plane=CredentialPlane.SUBSCRIPTION,
                 )
-                api = (
-                    self._select_channel(
-                        delegation=delegation,
-                        plane=CredentialPlane.METERED_API,
-                    )
-                    if delegation.fallback.max_metered_api_attempts == 1
-                    else None
-                )
             except Exception:
                 return BrokerDelegationResult(
                     delegation_id=delegation_id,
@@ -2928,6 +2924,7 @@ class GrokWorkerBroker:
                     reason="registry_contract_invalid",
                     attempts=(),
                 )
+            api_authorized = delegation.fallback.max_metered_api_attempts == 1
 
             attempts: list[BrokerAttemptEvidence] = []
             if subscription is not None:
@@ -2977,6 +2974,24 @@ class GrokWorkerBroker:
                         attempts=tuple(attempts),
                     )
 
+            api = None
+            if api_authorized:
+                try:
+                    api = self._select_channel(
+                        delegation=delegation,
+                        plane=CredentialPlane.METERED_API,
+                    )
+                except Exception:
+                    if not attempts:
+                        return BrokerDelegationResult(
+                            delegation_id=delegation_id,
+                            delegation_key=delegation.delegation_key,
+                            provider=delegation.provider,
+                            route=delegation.route,
+                            status="indeterminate",
+                            reason="registry_contract_invalid",
+                            attempts=(),
+                        )
             if api is None:
                 status: Literal["failed", "unavailable"] = (
                     "failed" if attempts else "unavailable"

@@ -1,21 +1,19 @@
 # syntax=docker/dockerfile:1
 
-ARG NODE_IMAGE=node:22.22.0-bookworm-slim@sha256:dd9d21971ec4395903fa6143c2b9267d048ae01ca6d3ea96f16cb30df6187d94
-
-FROM ${NODE_IMAGE} AS dependencies
+FROM node:22.22.0-bookworm-slim@sha256:dd9d21971ec4395903fa6143c2b9267d048ae01ca6d3ea96f16cb30df6187d94 AS dependencies
 WORKDIR /workspace
 ENV NEXT_TELEMETRY_DISABLED=1
 COPY package.json package-lock.json .npmrc ./
 RUN npm ci --ignore-scripts
 
-FROM ${NODE_IMAGE} AS builder
+FROM node:22.22.0-bookworm-slim@sha256:dd9d21971ec4395903fa6143c2b9267d048ae01ca6d3ea96f16cb30df6187d94 AS builder
 WORKDIR /workspace
 ENV NEXT_TELEMETRY_DISABLED=1
 COPY --from=dependencies /workspace/node_modules ./node_modules
 COPY . .
 RUN npm run build:standalone
 
-FROM ${NODE_IMAGE} AS runtime
+FROM node:22.22.0-bookworm-slim@sha256:dd9d21971ec4395903fa6143c2b9267d048ae01ca6d3ea96f16cb30df6187d94 AS runtime
 WORKDIR /app
 
 ENV HOSTNAME=0.0.0.0 \

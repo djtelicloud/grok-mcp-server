@@ -5360,10 +5360,15 @@ class TestUtilsQuickWins:
         proc._unigrok_process_group = True
         child_pid = None
         try:
+            for _ in range(100):
+                if child_pid_file.exists():
+                    break
+                await asyncio.sleep(0.01)
+            else:
+                pytest.fail("child PID was not published before timeout test")
             with pytest.raises(asyncio.TimeoutError):
                 await communicate_with_timeout(proc, 0.3)
             assert proc.returncode is not None
-            assert child_pid_file.exists()
             child_pid = int(child_pid_file.read_text())
             for _ in range(100):
                 try:

@@ -81,6 +81,47 @@ def test_github_review_evidence_digest_is_commit_and_content_bound():
     assert first["evidence_sha256"] != changed["evidence_sha256"]
 
 
+def test_gateway_auth_prefers_short_lived_mint_over_static_fallback(monkeypatch):
+    module = _load_script()
+    captured = {}
+    monkeypatch.setenv("UNIGROK_MCP_TOKEN_SECRET", "s" * 40)
+    monkeypatch.setenv("UNIGROK_CLIENT_TOKEN", "stale-static-token")
+    monkeypatch.setenv("UNIGROK_TOKEN_TTL_SECONDS", "540")
+
+    def fake_mint(**kwargs):
+        captured.update(kwargs)
+        return "fresh-service-token"
+
+    monkeypatch.setattr("scripts.mint_mcp_service_token.mint_service_access_token", fake_mint)
+
+    assert module._gateway_bearer_token() == "fresh-service-token"
+    assert captured["ttl_seconds"] == 540
+    assert captured["service"] == "github-review-broker"
+
+
+def test_gateway_auth_uses_static_token_only_without_signing_secret(monkeypatch):
+    module = _load_script()
+    monkeypatch.delenv("UNIGROK_MCP_TOKEN_SECRET", raising=False)
+    monkeypatch.setenv("UNIGROK_CLIENT_TOKEN", "static-fallback")
+
+    assert module._gateway_bearer_token() == "static-fallback"
+
+
+def test_nested_error_formatter_honors_suppressed_context():
+    module = _load_script()
+
+    try:
+        try:
+            raise ValueError("private implementation detail")
+        except ValueError:
+            raise RuntimeError("public failure") from None
+    except RuntimeError as exc:
+        rendered = module._format_exc(exc)
+
+    assert "RuntimeError: public failure" in rendered
+    assert "private implementation detail" not in rendered
+
+
 def test_github_review_rejects_head_change_before_comment(tmp_path, monkeypatch):
     module = _load_script()
     head = "a" * 40

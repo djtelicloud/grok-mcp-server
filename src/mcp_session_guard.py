@@ -110,22 +110,24 @@ class MCP128SessionTransportRegistry:
             return frozenset(self._instances)
 
     async def remove_and_terminate(self, session_id: str) -> bool:
+        owner_missing = object()
         async with self._creation_lock:
-            transport = self._instances.get(session_id)
+            transport = self._instances.pop(session_id, None)
+            owner = self._owners.pop(session_id, owner_missing)
             if transport is None:
-                self._owners.pop(session_id, None)
                 return False
-        terminate = getattr(transport, "terminate", None)
-        if not callable(terminate):
-            raise RuntimeError("MCP SDK transport termination interface changed")
-        await terminate()
-        async with self._creation_lock:
-            current = self._instances.get(session_id)
-            if current is transport:
-                self._instances.pop(session_id, None)
-            elif current is not None:
-                raise RuntimeError("MCP SDK session transport changed during cleanup")
-            self._owners.pop(session_id, None)
+        try:
+            terminate = getattr(transport, "terminate", None)
+            if not callable(terminate):
+                raise RuntimeError("MCP SDK transport termination interface changed")
+            await terminate()
+        except BaseException:
+            async with self._creation_lock:
+                if session_id not in self._instances:
+                    self._instances[session_id] = transport
+                    if owner is not owner_missing:
+                        self._owners[session_id] = owner
+            raise
         return True
 
 

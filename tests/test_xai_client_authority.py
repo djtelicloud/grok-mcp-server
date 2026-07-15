@@ -12,6 +12,7 @@ from xai_sdk import Client as SDKClient
 
 from src import utils
 from src.provider_harvest import XAIWorkerEpisodeUploader
+from src.xai_credentials import _xai_management_key_state
 
 
 def test_inference_factory_constructs_with_only_inference_authority(monkeypatch):
@@ -177,6 +178,37 @@ def test_management_factory_rejects_conflicting_aliases_before_construction(
         utils.get_xai_management_client()
 
     constructor.assert_not_called()
+
+
+def test_management_key_state_treats_none_as_missing_and_reports_conflict():
+    assert _xai_management_key_state(
+        {"XAI_MANAGEMENT_API_KEY": None, "XAI_MANAGEMENT_KEY": None}
+    ) == "missing"
+    assert _xai_management_key_state(
+        {"XAI_MANAGEMENT_API_KEY": "one", "XAI_MANAGEMENT_KEY": "two"}
+    ) == "conflict"
+
+
+def test_management_facade_is_read_only_and_names_required_interface(monkeypatch):
+    class FakeClient:
+        def __init__(self, **_kwargs):
+            self.collections = object()
+            self.close = MagicMock()
+
+    monkeypatch.setattr("xai_sdk.Client", FakeClient)
+    monkeypatch.setattr(utils, "XAI_API_KEY", "inference-test-key")
+    monkeypatch.setenv("XAI_MANAGEMENT_API_KEY", "management-test-key")
+    monkeypatch.delenv("XAI_MANAGEMENT_KEY", raising=False)
+    monkeypatch.setattr(utils, "_management_client", None)
+    management = utils.get_xai_management_client()
+
+    with pytest.raises(AttributeError, match="read-only"):
+        management._collections = object()
+    with pytest.raises(AttributeError, match="read-only"):
+        del management._close_callback
+
+    with pytest.raises(RuntimeError, match="collections and callable close"):
+        utils._CollectionsOnlyXAIManagementClient(SimpleNamespace(collections=object()))
 
 
 def test_eval_recording_wraps_inference_but_never_management(monkeypatch):

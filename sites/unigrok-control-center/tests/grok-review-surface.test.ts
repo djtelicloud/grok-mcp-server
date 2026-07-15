@@ -66,6 +66,29 @@ test("deriveGrokReviewSurface surfaces failed checks as error without a score", 
   assert.match(surface.message, /failure/);
 });
 
+test("deriveGrokReviewSurface gives failures precedence without claiming recency", () => {
+  const surface = deriveGrokReviewSurface({
+    oauthConfigured: true,
+    reviewChecks: [
+      {
+        conclusion: "success",
+        name: "UniGrok review",
+        pullNumber: 114,
+        status: "completed",
+      },
+      {
+        conclusion: "timed_out",
+        name: "UniGrok review",
+        pullNumber: 115,
+        status: "completed",
+      },
+    ],
+  });
+  assert.equal(surface.state, "error");
+  assert.match(surface.message, /PR #115/);
+  assert.doesNotMatch(surface.message, /Latest/);
+});
+
 test("mcpOAuthConfigured is injectable and fail-closed", () => {
   assert.equal(
     mcpOAuthConfigured(() => {

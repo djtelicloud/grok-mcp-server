@@ -140,16 +140,12 @@ def test_cli_print_claims_uses_independent_non_secret_metadata(
 
     import scripts.mint_mcp_service_token as mod
 
-    monkeypatch.setattr(
-        mod,
-        "mint_service_access_token",
-        lambda **_: f"{TOKEN_PREFIX}opaque-non-json-token",
-    )
+    monkeypatch.setattr(mod, "sign_cookie_payload", lambda *_: "opaque-non-json-token")
     assert mod.main(["--print-claims"]) == 0
     captured = capfd.readouterr()
     assert captured.out.startswith(TOKEN_PREFIX)
     assert json.loads(captured.err) == {
-        "exp": 1_700_000_120,
+        "exp": 1_700_000_600,
         "scope": ["unigrok:connect", "unigrok:review"],
         "sub": "service:github-review-broker",
     }

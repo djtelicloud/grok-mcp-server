@@ -132,10 +132,14 @@ def test_public_discovery_is_sanitized_in_cloudrun(monkeypatch):
         assert internal_field not in response.text
 
 
-def test_oauth_protected_resource_metadata_is_active(monkeypatch):
+@pytest.mark.parametrize(
+    "public_mcp_url",
+    ("https://mcp.grokmcp.org/mcp/", "https://mcp.grokmcp.org"),
+)
+def test_oauth_protected_resource_metadata_is_active(monkeypatch, public_mcp_url):
     monkeypatch.setenv("UNIGROK_RUNTIME", "cloudrun")
     monkeypatch.setenv("UNIGROK_API_KEYS", "client-secret")
-    monkeypatch.setenv("UNIGROK_PUBLIC_MCP_URL", "https://mcp.grokmcp.org/mcp/")
+    monkeypatch.setenv("UNIGROK_PUBLIC_MCP_URL", public_mcp_url)
     monkeypatch.setenv(
         "UNIGROK_OAUTH_AUTHORIZATION_SERVERS",
         "https://auth.grokmcp.org/, https://identity.example.com/tenant",

@@ -6,6 +6,7 @@ import hashlib
 import json
 import sqlite3
 import threading
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -214,6 +215,16 @@ def _effect_authority() -> _ProviderHarvestEffectAuthority:
     return _ProviderHarvestEffectAuthority.for_seconds(30)
 
 
+def test_expired_effect_authority_uses_timeout_error():
+    with pytest.raises(TimeoutError, match="expired"):
+        _ProviderHarvestEffectAuthority.until(time.monotonic() - 1)
+
+
+def test_provider_episode_canonical_json_rejects_nonfinite_numbers():
+    with pytest.raises(ValueError, match="JSON compliant"):
+        provider_utils._canonical_json_text({"value": float("nan")})
+
+
 def _downgrade_current_db_to_v16(path) -> None:
     connection = sqlite3.connect(path)
     try:
@@ -402,7 +413,16 @@ async def test_missing_credentials_or_client_leave_rows_pending_without_cloud_ca
     assert row["harvest_status"] == "pending"
     assert row["harvest_attempts"] == 0
 
+    monkeypatch.setenv("XAI_MANAGEMENT_API_KEY", "canonical-management")
+    monkeypatch.setenv("XAI_MANAGEMENT_KEY", "different-management")
+    conflicting_management = XAIWorkerEpisodeUploader(client_factory=forbidden_factory)
+    result = await ProviderAttemptHarvester(uploader=conflicting_management).run_once(store)
+    assert result.status == "unavailable"
+    assert result.reason == "management_key_conflict"
+    assert factory_calls == 0
+
     monkeypatch.setenv("XAI_MANAGEMENT_API_KEY", "management-test-value")
+    monkeypatch.delenv("XAI_MANAGEMENT_KEY", raising=False)
     monkeypatch.setattr(provider_utils, "XAI_API_KEY", "")
     missing_inference = XAIWorkerEpisodeUploader(client_factory=forbidden_factory)
     result = await ProviderAttemptHarvester(uploader=missing_inference).run_once(store)
@@ -709,6 +729,45 @@ async def test_upload_failure_is_secret_safe_and_retries_with_bounded_backoff(
     assert result.synced == 1
     assert (await store.list_provider_attempts())[0]["harvest_status"] == "synced"
     await store.close()
+
+
+@pytest.mark.asyncio
+async def test_null_legacy_harvest_attempt_count_uses_initial_retry_delay(tmp_path):
+    source_store = GrokSessionStore(tmp_path / "legacy-null-attempt.db")
+    row = await _completed(source_store)
+    await source_store.close()
+    row["harvest_attempts"] = None
+
+    class LegacyRowStore:
+        retry_delay = None
+        leased = False
+
+        async def lease_provider_attempts_for_harvest(self, *_args):
+            if self.leased:
+                return []
+            self.leased = True
+            return [row]
+
+        async def provider_attempt_harvest_lease_is_fresh(self, *_args):
+            return True
+
+        async def mark_provider_attempt_harvest_retry(
+            self, _attempt_id, _lease_id, _error, retry_delay
+        ):
+            self.retry_delay = retry_delay
+            return True
+
+    store = LegacyRowStore()
+    service = FakeCollections(fail_mode="secret_before_write")
+    result = await ProviderAttemptHarvester(
+        uploader=_uploader(service),
+        batch_size=1,
+        backoff_base_seconds=7,
+        lease_id_factory=lambda: "legacy-null-attempt",
+    ).run_once(store)
+
+    assert result.retry_wait == 1
+    assert store.retry_delay == 7
 
 
 @pytest.mark.asyncio

@@ -244,9 +244,14 @@ async def _write_stdin(
 async def _kill_and_reap(process: asyncio.subprocess.Process) -> None:
     try:
         pid = getattr(process, "pid", None)
-        if isinstance(pid, int) and pid > 0:
-            os.killpg(pid, signal.SIGKILL)
-        else:
+        used_process_group = False
+        if isinstance(pid, int) and pid > 0 and hasattr(os, "killpg"):
+            try:
+                os.killpg(pid, signal.SIGKILL)
+                used_process_group = True
+            except AttributeError:
+                pass
+        if not used_process_group:
             process.kill()
     except (ProcessLookupError, OSError):
         pass
@@ -584,7 +589,7 @@ class ClaudeCLIAdapter(HTTPProviderAdapter):
             requested_model=model,
             resolved_model=resolved_model,
             model_source=model_source,
-            response_id=wrapper.uuid,
+            response_id=self._response_id(wrapper.uuid),
             duration_ms=result.duration_ms,
             usage=usage,
             region="host_subscription",
@@ -706,6 +711,17 @@ def _snapshot_sampling_capability_descriptor(
         )
     except (AttributeError, TypeError, ValueError, ValidationError):
         raise ValueError("sampling capability descriptor is invalid") from None
+    client_identity = snapshot.client_identity or ""
+    capability_digest = (
+        f"sha256:{client_identity.removeprefix('mcp-')}"
+        if re.fullmatch(r"mcp-[0-9a-f]{64}", client_identity)
+        else ""
+    )
+    expected_transport_identity = (
+        transport_resource_identity("mcp_sampling_capability", capability_digest)
+        if capability_digest
+        else None
+    )
     if (
         snapshot.provider != provider
         or snapshot.channel != channel
@@ -715,7 +731,8 @@ def _snapshot_sampling_capability_descriptor(
         or snapshot.credential_kind != "mcp_client_subscription"
         or snapshot.billing_class != "subscription"
         or snapshot.client_identity != capability.client_id
-        or snapshot.transport_resource_identity is None
+        or snapshot.display_name != f"{provider.value} IDE subscription"
+        or snapshot.transport_resource_identity != expected_transport_identity
         or snapshot.credential_env_names
         or snapshot.credential_state != CredentialState.DEFERRED
         or snapshot.models != models

@@ -367,7 +367,12 @@ def _json_boundary(payload: Mapping[str, Any] | str | bytes | bytearray) -> str:
 
     if not isinstance(payload, Mapping):
         raise CompletionContractError("completion payload must be a JSON object")
-    require_json(payload)
+    try:
+        require_json(payload)
+    except RecursionError as exc:
+        raise CompletionContractError(
+            "completion payload exceeds the maximum nesting depth"
+        ) from exc
     try:
         encoded = json.dumps(
             payload,
@@ -496,21 +501,24 @@ def _rebase_local_refs(value: Any, root_pointer: str) -> Any:
     if isinstance(value, bool):
         return value
     rebound = deepcopy(value)
-    reference = value.get("$ref")
-    if reference is not None:
-        suffix = "" if reference == "#" else reference[1:]
-        rebound["$ref"] = f"{root_pointer}{suffix}"
-    for keyword in _DIRECT_SUBSCHEMA_KEYWORDS.intersection(value):
-        rebound[keyword] = _rebase_local_refs(value[keyword], root_pointer)
-    for keyword in _ARRAY_SUBSCHEMA_KEYWORDS.intersection(value):
-        rebound[keyword] = [
-            _rebase_local_refs(child, root_pointer) for child in value[keyword]
-        ]
-    for keyword in _MAPPING_SUBSCHEMA_KEYWORDS.intersection(value):
-        rebound[keyword] = {
-            name: _rebase_local_refs(child, root_pointer)
-            for name, child in value[keyword].items()
-        }
+
+    def rebase_in_place(current: Any) -> None:
+        if not isinstance(current, dict):
+            return
+        reference = current.get("$ref")
+        if reference is not None:
+            suffix = "" if reference == "#" else reference[1:]
+            current["$ref"] = f"{root_pointer}{suffix}"
+        for keyword in _DIRECT_SUBSCHEMA_KEYWORDS.intersection(current):
+            rebase_in_place(current[keyword])
+        for keyword in _ARRAY_SUBSCHEMA_KEYWORDS.intersection(current):
+            for child in current[keyword]:
+                rebase_in_place(child)
+        for keyword in _MAPPING_SUBSCHEMA_KEYWORDS.intersection(current):
+            for child in current[keyword].values():
+                rebase_in_place(child)
+
+    rebase_in_place(rebound)
     return rebound
 
 
@@ -623,7 +631,12 @@ def validate_evidence_refs(
         if len(by_id) >= MAX_EVIDENCE_REFS:
             raise EvidenceResolutionError("too many supplied evidence receipts")
         if not isinstance(receipt, EvidenceReceipt):
-            receipt = EvidenceReceipt.model_validate(receipt)
+            try:
+                receipt = EvidenceReceipt.model_validate(receipt)
+            except (TypeError, ValueError, RecursionError) as exc:
+                raise EvidenceResolutionError(
+                    "supplied evidence receipt violates its contract"
+                ) from exc
         if receipt.receipt_id in by_id:
             raise EvidenceResolutionError("supplied receipt IDs must be unique")
         by_id[receipt.receipt_id] = receipt

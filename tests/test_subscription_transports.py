@@ -47,7 +47,9 @@ from src.providers.subscription import (
     _create_sealed_mcp_sampling_adapter,
     _create_sealed_sampling_client_binding,
     _claude_subscription_environment,
+    _kill_and_reap,
     _run_bounded_process,
+    _snapshot_sampling_capability_descriptor,
 )
 
 
@@ -408,6 +410,20 @@ async def test_claude_cli_is_stdin_only_safe_mode_no_tools_and_subscription_hone
 
 
 @pytest.mark.asyncio
+async def test_claude_cli_sanitizes_unsafe_provider_response_id():
+    result = CLIProcessResult(
+        returncode=0,
+        stdout=_claude_result(extra={"uuid": "../../unsafe response id"}),
+        stderr=b"",
+        duration_ms=1,
+    )
+    response = await ClaudeCLIAdapter(
+        environ={}, runner=CapturingRunner(result)
+    ).complete(_request(model="claude-fable-5"))
+    assert response.receipt.response_id is None
+
+
+@pytest.mark.asyncio
 async def test_claude_timeout_and_ttl_are_bounded_before_any_process_effect():
     now = datetime(2030, 1, 1, tzinfo=UTC)
     runner = CapturingRunner()
@@ -566,6 +582,32 @@ async def test_process_runner_kills_child_when_timeout_fires(monkeypatch, tmp_pa
             stdout_limit_bytes=128,
             stderr_limit_bytes=128,
         )
+    assert process.killed is True
+
+
+@pytest.mark.asyncio
+async def test_kill_and_reap_falls_back_when_process_group_kill_is_unavailable(
+    monkeypatch,
+):
+    class FakeProcess:
+        pid = 123
+
+        def __init__(self):
+            self.killed = False
+
+        def kill(self):
+            self.killed = True
+
+        async def wait(self):
+            return -9
+
+    process = FakeProcess()
+
+    def missing_killpg(*_args):
+        raise AttributeError("killpg unavailable")
+
+    monkeypatch.setattr(os, "killpg", missing_killpg, raising=False)
+    await _kill_and_reap(process)
     assert process.killed is True
 
 
@@ -757,6 +799,29 @@ def test_sampling_binding_rejects_bare_callbacks_and_cross_provider_reuse():
             channel=ProviderChannel.ANTHROPIC_MCP_SAMPLING,
             binding=binding,
         )
+
+
+def test_sampling_descriptor_requires_exact_display_and_transport_identity():
+    async def callback(_request):
+        raise AssertionError("validation must remain inert")
+
+    request = _request(model="gpt-5.1")
+    binding = _sampling_binding(callback, request=request)
+    for descriptor in (
+        binding.descriptor.model_copy(update={"display_name": "renamed lane"}),
+        binding.descriptor.model_copy(
+            update={"transport_resource_identity": "sha256:" + "0" * 64}
+        ),
+    ):
+        with pytest.raises(ValueError, match="descriptor is invalid"):
+            _snapshot_sampling_capability_descriptor(
+                descriptor,
+                provider=binding.provider,
+                channel=binding.channel,
+                capability=binding.capability,
+                models=binding.models,
+                route=binding.route,
+            )
     with pytest.raises(TypeError, match="stateful MCP sampling lease"):
         MCPClientSamplingAdapter(
             provider=ProviderId.OPENAI,

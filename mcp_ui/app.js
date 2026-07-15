@@ -1003,9 +1003,6 @@ function syncPrimaryCta(ready, detailText = null) {
   if (offline) {
     btn.textContent = "Copy install commands";
     btn.dataset.cta = "install";
-  } else if (!ready && detailText) {
-    btn.textContent = "Copy IDE MCP config";
-    btn.dataset.cta = "mcp";
   } else {
     btn.textContent = "Copy IDE MCP config";
     btn.dataset.cta = "mcp";
@@ -1110,7 +1107,9 @@ function renderSetupStatus(data, ready = true, detailText = null) {
 
   if (target) {
     const t = document.createElement("strong");
-    t.textContent = ready ? "Gateway is live." : "Gateway needs attention.";
+    t.textContent = ready
+      ? "Gateway is live."
+      : (detailText ? "Gateway needs attention." : "Gateway offline.");
     const d = document.createElement("span");
     d.textContent = ready
       ? ` Runtime: ${runtime} · active credential plane: ${effective}.${attention ? ` ${attention}` : ""}`
@@ -2044,14 +2043,6 @@ function genSessionId() {
   return `console-${token}`;
 }
 
-function resetConversation() {
-  const conversation = $("conversation");
-  if (conversation) conversation.innerHTML = "";
-  const sessionInput = $("sessionInput");
-  if (sessionInput && !sessionInput.value.trim()) sessionInput.value = genSessionId();
-  addMessageBubble("system", "Session started. Ready to execute prompts.");
-}
-
 // Clear History rotates to a fresh session so the next turn starts clean; the
 // prior server-side session is retained under its own id, not deleted here.
 function clearConversation() {
@@ -2625,7 +2616,6 @@ function init() {
     loadWebMcpManifest();
   });
 
-  resetConversation();
   switchTab("tab-onboarding");
 
   window.parseMcpResponse = parseMcpResponse;

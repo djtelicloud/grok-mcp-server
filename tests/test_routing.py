@@ -1,3 +1,7 @@
+from unittest.mock import AsyncMock
+
+import pytest
+
 from src.routing import (
     _messages_have_image,
     choose_model_candidate,
@@ -5,7 +9,6 @@ from src.routing import (
     extract_routing_features,
     make_routing_receipt,
 )
-import pytest
 
 
 def test_features_are_bounded_prompt_free_and_deterministic():
@@ -231,10 +234,16 @@ async def test_research_route_selects_multi_agent_capability(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_explicit_model_short_circuits_catalog(monkeypatch):
+async def test_explicit_model_uses_live_catalog_to_resolve_auto_plane(monkeypatch):
     from src import utils
 
-    monkeypatch.setattr(utils._MODEL_RESOLVER, "catalog_snapshot", pytest.fail)
+    monkeypatch.setattr(
+        utils,
+        "grok_cli_plane_status",
+        lambda **_: {"ready": False, "models": []},
+    )
+    catalog = AsyncMock(return_value=(["grok-4.3"], "xai_api_live", True))
+    monkeypatch.setattr(utils._MODEL_RESOLVER, "catalog_snapshot", catalog)
     model, why, receipt, _ = await utils._select_routing_model(
         prompt="Anything",
         mode="auto",
@@ -247,6 +256,8 @@ async def test_explicit_model_short_circuits_catalog(monkeypatch):
     assert model == "grok-4.3"
     assert why == "pin"
     assert receipt["pin_source"] == "model"
+    assert receipt["catalog"]["source"] == "xai_api_live"
+    catalog.assert_awaited_once_with()
 
 
 @pytest.mark.asyncio

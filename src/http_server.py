@@ -962,7 +962,10 @@ def _validated_https_url(value: str) -> Optional[str]:
 
 
 def _public_mcp_resource() -> Optional[str]:
-    return _validated_https_url(os.environ.get("UNIGROK_PUBLIC_MCP_URL", ""))
+    resource = _validated_https_url(os.environ.get("UNIGROK_PUBLIC_MCP_URL", ""))
+    if resource and not urlsplit(resource).path:
+        return f"{resource}/mcp"
+    return resource
 
 
 def _oauth_authorization_servers() -> List[str]:

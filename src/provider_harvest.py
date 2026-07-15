@@ -261,8 +261,10 @@ class _ProviderHarvestEffectAuthority:
     def until(cls, deadline_monotonic: float) -> "_ProviderHarvestEffectAuthority":
         deadline = float(deadline_monotonic)
         remaining = deadline - time.monotonic()
-        if not math.isfinite(deadline) or not 0 < remaining <= 300.0:
+        if not math.isfinite(deadline) or remaining > 300.0:
             raise ValueError("provider harvest effect deadline is out of bounds")
+        if remaining <= 0:
+            raise TimeoutError("provider harvest effect deadline expired")
         return cls(expires_monotonic=deadline)
 
     def revoke(self) -> None:
@@ -380,7 +382,10 @@ class XAIWorkerEpisodeUploader:
 
     @staticmethod
     def _default_unavailable_reason() -> str | None:
-        if not _utils.xai_management_key_configured():
+        management_state = _utils.xai_management_key_state()
+        if management_state == "conflict":
+            return "management_key_conflict"
+        if management_state == "missing":
             return "management_key_missing"
         if not str(_utils.XAI_API_KEY or "").strip():
             return "inference_client_missing"
@@ -761,7 +766,7 @@ class ProviderAttemptHarvester:
                             row["attempt_id"],
                             lease_id,
                             self._safe_error(exc),
-                            self._retry_delay(int(row["harvest_attempts"])),
+                            self._retry_delay(int(row.get("harvest_attempts") or 0)),
                         )
                     except Exception:
                         # The row remains leased and becomes retryable on expiry.

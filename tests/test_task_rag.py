@@ -1182,3 +1182,20 @@ class TestKeylessOperation:
         assert "cloud mirror: disabled" in text
         assert "XAI_MANAGEMENT_API_KEY" in text
         assert "unsynced: 1" in text
+
+    def test_status_reports_management_alias_conflict_distinctly(
+        self, monkeypatch, tmp_path
+    ):
+        monkeypatch.setenv("UNIGROK_TASK_RAG", "shadow")
+        monkeypatch.setenv("XAI_MANAGEMENT_API_KEY", "canonical-management")
+        monkeypatch.setenv("XAI_MANAGEMENT_KEY", "different-management")
+        out = io.StringIO()
+        with patch("src.rag.get_xai_management_client") as mock_client:
+            code = rag.rag_cli(
+                ["status"],
+                stream=out,
+                store=GrokSessionStore(db_path=tmp_path / "conflict.db"),
+            )
+        mock_client.assert_not_called()
+        assert code == 0
+        assert "aliases conflict" in out.getvalue()

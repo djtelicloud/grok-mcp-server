@@ -1926,6 +1926,7 @@ pre {
   border-radius: var(--radius-sm);
   background: rgba(3, 6, 9, 0.55);
   overflow-x: auto;
+  overflow-y: auto;
   font-size: 12px;
   line-height: 1.55;
   color: var(--ink-soft);

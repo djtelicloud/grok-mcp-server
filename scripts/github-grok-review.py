@@ -136,19 +136,16 @@ def _workflow_run_url(repository: str) -> str | None:
 
 
 def _gateway_bearer_token() -> str:
-    """Resolve MCP auth: static token override, else mint a ~120s service token.
+    """Resolve MCP auth: mint when possible, else use the static fallback.
 
     Production twin validates via Control introspection. Long-lived static
     client keys must not be installed on Cloud Run. When
     ``UNIGROK_MCP_TOKEN_SECRET`` is set (same as Control ``MCP_TOKEN_SECRET``),
     mint ``service:github-review-broker`` with ``unigrok:review``.
     """
-    static = os.environ.get("UNIGROK_CLIENT_TOKEN", "").strip()
-    if static:
-        return static
     secret = os.environ.get("UNIGROK_MCP_TOKEN_SECRET", "").strip()
     if not secret:
-        return ""
+        return os.environ.get("UNIGROK_CLIENT_TOKEN", "").strip()
     # Import path works when run as ``uv run python scripts/github-grok-review.py``
     # with repo root on sys.path (uv / Actions checkout default).
     try:
@@ -167,12 +164,18 @@ def _gateway_bearer_token() -> str:
     if not resource.endswith("/mcp"):
         if resource.endswith(".org") or resource.endswith(".com"):
             resource = f"{resource}/mcp"
+    raw_ttl = os.environ.get("UNIGROK_TOKEN_TTL_SECONDS", "").strip()
+    try:
+        ttl_seconds = int(raw_ttl) if raw_ttl else None
+    except ValueError as exc:
+        raise ValueError("UNIGROK_TOKEN_TTL_SECONDS must be an integer") from exc
     return mint_service_access_token(
         secret=secret,
         issuer=issuer,
         resource=resource,
         service=os.environ.get("UNIGROK_SERVICE_NAME", "github-review-broker").strip(),
         scope=os.environ.get("UNIGROK_SERVICE_SCOPE", "unigrok:review").strip(),
+        ttl_seconds=ttl_seconds,
     )
 
 
@@ -182,7 +185,8 @@ async def _call_unigrok(arguments: dict[str, Any]) -> dict[str, Any]:
     gateway_token = _gateway_bearer_token()
     if gateway_token:
         headers["Authorization"] = f"Bearer {gateway_token}"
-    async with httpx.AsyncClient(headers=headers, timeout=540.0) as client:
+    timeout = httpx.Timeout(connect=15.0, read=540.0, write=30.0, pool=15.0)
+    async with httpx.AsyncClient(headers=headers, timeout=timeout) as client:
         async with streamable_http_client(url, http_client=client) as (read, write, _):
             async with ClientSession(read, write, read_timeout_seconds=timedelta(seconds=540)) as session:
                 await session.initialize()
@@ -330,7 +334,9 @@ def _format_exc(exc: BaseException) -> str:
     if isinstance(exc, BaseExceptionGroup):
         for i, sub in enumerate(exc.exceptions, 1):
             parts.append(f"  [{i}] {_format_exc(sub)}")
-    cause = exc.__cause__ or exc.__context__
+    cause = exc.__cause__
+    if cause is None and not exc.__suppress_context__:
+        cause = exc.__context__
     if cause is not None and cause is not exc:
         parts.append(f"  caused by: {_format_exc(cause)}")
     return "\n".join(parts)

@@ -93,6 +93,8 @@ def test_mcp_ui_static_files_are_served(monkeypatch):
     assert 'id="mcpEndpointDisplay"' in index.text
     assert 'id="copyMcpJsonBtn"' in index.text
     assert 'id="copyAgentPromptBtn"' in index.text
+    assert 'aria-label="Copy Cursor MCP JSON"' in index.text
+    assert 'aria-label="Copy agent setup prompt"' in index.text
     assert 'id="copyPrimaryActionBtn"' in index.text
     assert 'id="agentPromptSnippet"' in index.text
     assert 'id="discoverSelfDetails"' in index.text
@@ -102,6 +104,8 @@ def test_mcp_ui_static_files_are_served(monkeypatch):
     assert "genericMcpJson" in script.text
     assert "agentSetupPrompt" in script.text
     assert "syncPrimaryCta" in script.text
+    assert "resetConversation();" not in script.text
+    assert 'detailText ? "Gateway needs attention." : "Gateway offline."' in script.text
     assert "api_cost_usd ??" in script.text
     assert "details.open = true" in script.text
     assert 'textContent?.replace(/^tools:' in script.text or "textContent?.replace(/^tools:" in script.text
@@ -110,6 +114,7 @@ def test_mcp_ui_static_files_are_served(monkeypatch):
     assert ".plane-card" in styles.text
     assert ".connect-panel" in styles.text
     assert ".connect-snippet-block" in styles.text
+    assert "overflow-y: auto" in styles.text
     assert "startup ingestion is not automatic" in index.text
     assert "before hitting the API" not in script.text
     assert "safely route this call" not in script.text
