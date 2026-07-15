@@ -399,6 +399,8 @@ async def test_discover_manifest_endpoint_follows_connected_port(monkeypatch):
 
     assert result.data["canonical_endpoint"] == "http://localhost:9090/mcp"
     assert result.data["bootstrap"]["surfaces"]["canonical_mcp"] == result.data["canonical_endpoint"]
+    assert "`http://localhost:9090/mcp`" in result.response
+    assert "`http://localhost:9090/ui/`" in result.response
 
 
 def test_discover_bootstrap_disables_workspace_mutation_in_cloudrun(monkeypatch):
