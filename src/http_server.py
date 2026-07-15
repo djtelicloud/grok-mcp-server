@@ -245,7 +245,7 @@ def _oauth_required_scope(path: str, body: bytes = b"") -> str:
 
 async def _introspect_oauth_token(token: str, required_scope: str) -> Optional[Dict[str, Any]]:
     url = _oauth_introspection_url()
-    if not url or len(token) > 8_192:
+    if not url or not token or len(token) > 8_192:
         return None
     try:
         async with httpx.AsyncClient(timeout=5.0, follow_redirects=False) as client:
