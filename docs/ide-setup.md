@@ -141,6 +141,10 @@ Put config in `~/.cursor/mcp.json` (user-global) or project `.cursor/mcp.json`:
 
 Cursor auto-detects HTTP servers from the `url` field. After saving, enable
 the server under Settings → MCP; the `agent` tool appears in Composer/chat.
+Confirm Control Center / telemetry shows caller label `cursor` (not bare
+`http:anon`) after an `agent` call. Repo rule
+[`.cursor/rules/cursor-automations-single-pass.mdc`](../.cursor/rules/cursor-automations-single-pass.mdc)
+encodes PR Approver / Security Reviewer / Bugbot Autofix single-pass discipline.
 
 ### Cursor multi-model vs UniGrok planes
 
