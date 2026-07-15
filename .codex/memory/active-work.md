@@ -66,17 +66,17 @@ credentials, OAuth codes, tokens, or private keys here.
   code-scanning alerts, Dependabot alerts, secret-scanning alerts, or draft
   advisories.
 - Five finished or superseded Grok scratchpads, one empty Antigravity
-  scratchpad, the first completed data-function scratchpad, and the old
-  `claude/hydrate-c23d9f` scratchpad were removed only after clean,
-  process-free, and integrated-state checks.
+  scratchpad, both completed data-function scratchpads, and both completed
+  Claude hydration scratchpads were removed only after clean, process-free,
+  and integrated-state checks.
 - Provider IDEs may automatically rehydrate a clean scratchpad after cleanup.
   A clean zero-ahead worktree is not an orphan while any live process uses it.
   Before supervisor removal, re-check process ownership, dirty state, unique
   commits, and open task packets; never rely on this handoff as a live lock.
-- Always preserve the active detached Codex thread worktree and the primary
-  `main` checkout. At the last verified sweep,
-  `agents/hydrate-data-function` and `claude/hydrate-0597fe` were active
-  rehydrated lanes and therefore protected.
+- Always preserve the detached Codex thread worktree and the primary `main`
+  checkout. At the current verified sweep, no provider hydration scratchpad
+  remains; `agents/hydrate-data-function` and `claude/hydrate-0597fe` were
+  removed only after their processes stopped and all orphan checks passed.
 - Stable `:4765` and contributor `:4766` are ready. The contributor runtime
   marker is `e05b265ddf5ffaf0e56f9c95dec2b15755fc123b` and matches the
   current main tree. The continuity-only landing changed no runtime source, so
