@@ -2,8 +2,8 @@
 
 Last updated: 2026-07-15
 Owner: Codex
-Status: GitHub and security are clean. The remote MCP is live after regional
-failover. The Control rollout awaits Cloud Run recovery; Stage 1 live generation
+Status: GitHub and security are clean. The remote MCP and Control Center are
+live in `us-central1` with east-region rollback assets. Stage 1 live generation
 and training remain blocked.
 
 This is the project-scoped handoff for new Codex chats. Verify drift-prone Git,
@@ -52,18 +52,19 @@ credentials, OAuth codes, tokens, or private keys here.
 
 ## Latest maintainer sweep
 
-- Protected PRs #148-#153 are merged. They hardened maintainer integration,
+- Protected PRs #148-#154 are merged. They hardened maintainer integration,
   made runtime markers tree-aware and portable, warned about the unrelated
   public `mcp-grok` package, corrected RFC 9728 challenge metadata, and made a
-  missing OAuth bearer fail before remote introspection. The final repair passed
+  missing OAuth bearer fail before remote introspection. They also recorded the
+  regional recovery contract and refreshed this handoff. The final repair passed
   2,019 tests and `scripts/land` certified exact content head
-  `9d90342bbfb4c7b701c460bb9278e575a8c7dd5b` before protected merge.
+  `615c70404390e2ec3c624f2b8ea5215f8a94cac7` before protected merge.
 - Local `main` and protected `origin/main` agree at merge commit
-  `0d64a49ccf593780bbc80c00f4a419d1e413e0ef`. Exact-main CI and all three
-  CodeQL analyzers passed. At the sweep snapshot before this handoff PR, there
-  were no other open PRs, issues, discussions, review threads, code-scanning
-  alerts, Dependabot alerts, secret-scanning alerts, or draft private
-  advisories.
+  `2bf6647384922aa1b9e6162e645bd37560936133`. Exact-main CI and all three
+  CodeQL analyzers passed. At the sweep snapshot before the current handoff
+  repair, there were no open PRs, issues, discussions, review threads,
+  code-scanning alerts, Dependabot alerts, secret-scanning alerts, or draft
+  private advisories.
 - Merged task worktrees, local task branches, remote `codex/*` branches, and
   stale local remote-tracking refs are removed. The shared checkout is clean;
   its runtime source marker is tree-equivalent to `main`; stable and contributor
@@ -81,11 +82,21 @@ credentials, OAuth codes, tokens, or private keys here.
   secret bindings. East is detached from the load balancer and restored to its
   prior healthy revision as a rollback asset. Personalized Service Health is
   now enabled; it reports no active Cloud Run incident.
-- The Control Center remains healthy on revision
-  `unigrok-control-center-ab8d77b`. Its newer east candidate has the same
-  provider-managed activation failure and remains at zero traffic. Production
-  `https://control.grokmcp.org/`, OAuth metadata, and the protected control flow
-  remain healthy.
+- The Control Center image digest
+  `sha256:0a38494d0ebc01475ba168da4e8ed921b55d7f0d2d8de50646d5b407ccb2ca15`
+  is live on ready revision `unigrok-control-center-eb454cd` in `us-central1`.
+  Its site source tree is unchanged through current `main`. The URL map points
+  the control hostname to central-only backend
+  `unigrok-control-center-backend-central`; repeated project API, homepage,
+  discovery, `llms.txt`, and OAuth contract probes pass, and central request
+  logs confirm service of the public hostname.
+- Removing the east NEG from the active backend produced a transient provider
+  propagation gap and was rolled back automatically. The successful cutover
+  instead staged an independent central backend and atomically changed the URL
+  map. The prior `unigrok-control-center-backend` is now east-only and preserved
+  with healthy revision `unigrok-control-center-ab8d77b` as the immediate
+  rollback target. The newer east candidate remains at zero traffic because of
+  the provider-managed activation failure.
 - Release, source, and plugin versions agree at 0.6.0. Publishing a new release,
   accepting the `google-genai` 2.x migration, or changing the enabled empty
   GitHub Wiki remains a maintainer decision. Stage 2 generation, dataset writes,
