@@ -11116,13 +11116,12 @@ async def _select_routing_model(
         input_messages=input_messages,
         enable_agentic=enable_agentic,
     )
-    api_only_exact_pin = _api_only_capability_requested(
-        mode=mode,
-        thinking_mode=thinking_mode,
-        features=features,
-    )
-
     if requested_model:
+        api_only_exact_pin = _api_only_capability_requested(
+            mode=mode,
+            thinking_mode=thinking_mode,
+            features=features,
+        )
         model = await resolve_model(requested_model)
         if mode == "research" and not model.startswith("grok-4.20-multi-agent"):
             raise ValueError(
