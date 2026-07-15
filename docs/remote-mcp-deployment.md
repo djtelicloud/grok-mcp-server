@@ -55,13 +55,26 @@ an equivalent Cloud Run service in each region. Give each service its own
 regional serverless NEG and attach only verified, functionally equivalent
 regions to the global backend. A load balancer with multiple serverless NEGs
 routes by proximity, so never attach regions running different reviewed
-digests. A bounded manual failover is: stage and verify the replacement region,
-attach its NEG, wait for the backend update to report the new NEG and for public
-probes to remain healthy, remove the impaired region's NEG, and re-run the
-public health, readiness, metadata, and unauthenticated challenge probes.
-Reattach the prior NEG immediately if any contract fails. Keep the detached
-service intact until the replacement has remained healthy; deleting it is not
-part of a failover.
+digests.
+
+For a bounded manual failover, prefer an atomic URL-map change over removing a
+NEG from the active backend. Stage and verify the replacement region first,
+then create a separate backend with its own verified NEG and the same protocol,
+timeout, CDN, and Cloud Armor contract. Repoint only the relevant URL-map
+default service or path matcher to that backend. During propagation, each edge
+then sees either the complete old backend or the complete replacement backend;
+it never sees an in-place backend with a membership update still propagating.
+Do not alter unrelated host rules that share the URL map.
+
+After the URL-map update reports success, require repeated public health,
+readiness, metadata, and unauthenticated challenge probes, plus request-log
+evidence that the replacement region served the public hostname. Restore the
+previous URL-map backend immediately if any contract fails. Keep the old
+backend, NEG, service, and known revision intact until the replacement has
+remained healthy. Removing them is cleanup after the observation window, not
+part of the cutover. In-place removal of the old NEG is only acceptable after
+the active URL map no longer references that backend; a successful backend API
+update alone is not proof that every edge has finished propagating it.
 
 Keep the previous revision at zero traffic. Roll back by moving 100% traffic to
 that known digest; do not rebuild old source. Disabling the service or removing
