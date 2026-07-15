@@ -950,15 +950,15 @@ class SessionRuntimeRevoker
 
 Revokes all session-owned callback/effect authority before teardown.
 
-### Class: `MCP126SessionTransportRegistry` {#mcp_session_guard-mcp126sessiontransportregistry}
+### Class: `MCP128SessionTransportRegistry` {#mcp_session_guard-mcp128sessiontransportregistry}
 
 ```python
-class MCP126SessionTransportRegistry
+class MCP128SessionTransportRegistry
 ```
 
-**Keywords:** mcp, 126, session, transport, registry
+**Keywords:** mcp, 128, session, transport, registry
 
-Version-checked adapter over MCP SDK 1.26 private session state.
+Version-checked adapter over MCP SDK 1.28 private session state.
 
 This adapter is intentionally constructed with one exact session manager;
 it never discovers or mutates a module-global manager.  A future SDK minor
