@@ -112,7 +112,9 @@ Not live / Blocked / Who (brand)** plus the **task title**.
 
 Cursor-native always-on mirror for agents that load `.cursor/rules`:
 [`.cursor/rules/cursor-automations-single-pass.mdc`](../.cursor/rules/cursor-automations-single-pass.mdc).
-Keep that file aligned with this section.
+Keep that file’s automation-role bullets aligned with this section. Interactive
+Composer is not bound by the automation paths below; the mirror is for
+Automations / Bugbot roles only.
 
 These rules apply to Cursor Automations and Bugbot Autofix on this repo:
 
