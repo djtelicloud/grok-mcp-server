@@ -1,12 +1,13 @@
 # src/server.py
 # Thin FastMCP router importing decomposed tools
 
+import logging
 import os
 import sys
 from typing import Iterable, Optional
 
 from mcp.server.fastmcp import FastMCP
-from .utils import setup_logging, store
+from .utils import setup_logging, store, orchestrate
 
 from contextlib import asynccontextmanager
 
@@ -60,25 +61,79 @@ mcp = FastMCP(
 )
 
 # Import modular tools for registration and public import exports (for backward compatibility / tests)
-from .tools.chats import (
+from .tools.chats import (  # noqa: F401
+    agent,
+    chat,
+    grok_agent,
+    grok_reflect,
+    stateful_chat,
+    retrieve_stateful_response,
+    delete_stateful_response,
+    chat_with_vision,
+    chat_with_files,
     register_chat_tools,
+    GrokAgentInput,
+    GrokReflectionResult,
 )
-from .tools.media import (
+from .tools.media import (  # noqa: F401
+    generate_image,
+    generate_video,
+    extend_video,
     register_media_tools,
 )
-from .tools.system import (
+from .tools.system import (  # noqa: F401
+    grok_mcp_status,
+    grok_mcp_discover_self,
+    list_chat_sessions,
+    get_chat_history,
+    clear_chat_history,
+    list_models,
+    list_models_detailed,
+    xai_upload_file,
+    xai_list_files,
+    xai_get_file,
+    xai_get_file_content,
+    xai_delete_file,
+    read_local_file,
+    list_project_files,
+    remote_code_execution,
+    run_local_tests,
+    web_search,
+    x_search,
     register_system_tools,
+    db_vacuum,
 )
-from .tools.git import (
+from .tools.git import (  # noqa: F401
+    git_status,
+    git_diff,
+    git_log,
+    git_show,
+    git_current_branch,
+    git_create_branch,
+    git_apply_patch,
+    git_commit,
     register_git_tools,
 )
-from .tools.research import (
+from .tools.research import (  # noqa: F401
+    submit_research_job,
+    get_research_job,
+    list_research_jobs,
     register_research_tools,
 )
-from .tools.knowledge import (
+from .tools.knowledge import (  # noqa: F401
+    remember_fact,
+    search_knowledge,
+    forget_fact,
+    distill_session,
     register_knowledge_tools,
 )
-from .tools.workspace_memory import (
+from .tools.workspace_memory import (  # noqa: F401
+    recall_workspace_memory,
+    record_landed_outcome,
+    explain_workspace_evidence,
+    workspace_memory_status,
+    sync_workspace_memory_notes,
+    import_workspace_memory_notes,
     register_workspace_memory_tools,
 )
 from .tools.resources import register_resource_primitives
