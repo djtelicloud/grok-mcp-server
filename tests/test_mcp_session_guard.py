@@ -10,7 +10,7 @@ import pytest
 
 from src.mcp_session_guard import (
     MCP_SESSION_BINDING_SCOPE_KEY,
-    MCP126SessionTransportRegistry,
+    MCP128SessionTransportRegistry,
     MCPSessionBinding,
     StatefulMCPSessionGuard,
 )
@@ -1257,23 +1257,37 @@ async def test_sdk_private_registry_is_instance_scoped_and_terminates_after_remo
     manager = StreamableHTTPSessionManager(app=object())
     transport = FakeTransport("session-a", events)
     manager._server_instances["session-a"] = transport
-    registry = MCP126SessionTransportRegistry(manager)
+    manager._session_owners["session-a"] = object()
+    registry = MCP128SessionTransportRegistry(manager)
 
     assert await registry.session_ids() == frozenset({"session-a"})
     assert await registry.contains("session-a") is True
     assert await registry.remove_and_terminate("session-a") is True
     assert manager._server_instances == {}
+    assert manager._session_owners == {}
     assert events == ["terminate:session-a"]
 
 
 @pytest.mark.asyncio
-async def test_guard_interoperates_with_real_mcp_126_stateful_asgi():
+async def test_sdk_private_registry_removes_orphaned_session_owner():
+    from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
+
+    manager = StreamableHTTPSessionManager(app=object())
+    manager._session_owners["orphaned-session"] = object()
+    registry = MCP128SessionTransportRegistry(manager)
+
+    assert await registry.remove_and_terminate("orphaned-session") is False
+    assert manager._session_owners == {}
+
+
+@pytest.mark.asyncio
+async def test_guard_interoperates_with_real_mcp_128_stateful_asgi():
     from mcp.server.fastmcp import FastMCP
 
     events: list[str] = []
     mcp = FastMCP("guard-integration", stateless_http=False)
     mcp_app = mcp.streamable_http_app()
-    registry = MCP126SessionTransportRegistry(mcp.session_manager)
+    registry = MCP128SessionTransportRegistry(mcp.session_manager)
     guard = StatefulMCPSessionGuard(
         mcp_app,
         registry=registry,
@@ -1318,8 +1332,8 @@ async def test_guard_interoperates_with_real_mcp_126_stateful_asgi():
 def test_sdk_private_registry_rejects_unreviewed_minor(monkeypatch):
     from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 
-    monkeypatch.setattr("src.mcp_session_guard.metadata.version", lambda _: "1.27.0")
+    monkeypatch.setattr("src.mcp_session_guard.metadata.version", lambda _: "1.29.0")
     manager = StreamableHTTPSessionManager(app=object())
 
     with pytest.raises(RuntimeError, match="explicit SDK minor review"):
-        MCP126SessionTransportRegistry(manager)
+        MCP128SessionTransportRegistry(manager)

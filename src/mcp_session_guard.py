@@ -31,7 +31,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 MCP_SESSION_ID_HEADER = b"mcp-session-id"
 MCP_SESSION_BINDING_SCOPE_KEY = "unigrok.mcp_session.binding"
 
-_SDK_PRIVATE_INTERFACE_MINOR = (1, 26)
+_SDK_PRIVATE_INTERFACE_MINOR = (1, 28)
 _SESSION_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._~-]{0,127}$")
 _CLIENT_ID_RE = re.compile(rb"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _SINGLETON_SECURITY_HEADERS = frozenset(
@@ -66,8 +66,8 @@ class SessionRuntimeRevoker(Protocol):
     async def revoke_session(self, session_id: str) -> None: ...
 
 
-class MCP126SessionTransportRegistry:
-    """Version-checked adapter over MCP SDK 1.26 private session state.
+class MCP128SessionTransportRegistry:
+    """Version-checked adapter over MCP SDK 1.28 private session state.
 
     This adapter is intentionally constructed with one exact session manager;
     it never discovers or mutates a module-global manager.  A future SDK minor
@@ -87,14 +87,18 @@ class MCP126SessionTransportRegistry:
             )
 
         instances = getattr(manager, "_server_instances", None)
+        owners = getattr(manager, "_session_owners", None)
         creation_lock = getattr(manager, "_session_creation_lock", None)
         if not isinstance(instances, MutableMapping):
             raise RuntimeError("MCP SDK session registry shape changed")
+        if not isinstance(owners, MutableMapping):
+            raise RuntimeError("MCP SDK session owner registry shape changed")
         if not callable(getattr(creation_lock, "__aenter__", None)) or not callable(
             getattr(creation_lock, "__aexit__", None)
         ):
             raise RuntimeError("MCP SDK session creation lock shape changed")
         self._instances = instances
+        self._owners = owners
         self._creation_lock = creation_lock
 
     async def contains(self, session_id: str) -> bool:
@@ -108,8 +112,9 @@ class MCP126SessionTransportRegistry:
     async def remove_and_terminate(self, session_id: str) -> bool:
         async with self._creation_lock:
             transport = self._instances.get(session_id)
-        if transport is None:
-            return False
+            if transport is None:
+                self._owners.pop(session_id, None)
+                return False
         terminate = getattr(transport, "terminate", None)
         if not callable(terminate):
             raise RuntimeError("MCP SDK transport termination interface changed")
@@ -120,6 +125,7 @@ class MCP126SessionTransportRegistry:
                 self._instances.pop(session_id, None)
             elif current is not None:
                 raise RuntimeError("MCP SDK session transport changed during cleanup")
+            self._owners.pop(session_id, None)
         return True
 
 
