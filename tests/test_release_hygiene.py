@@ -27,9 +27,18 @@ def test_release_version_is_aligned_across_package_runtime_and_ui():
 
 def test_public_install_warns_about_unrelated_pypi_distribution():
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    blocks = re.findall(r"(?m)^> \[!WARNING\]\n((?:^>.*(?:\n|$))+)", readme)
+    warnings = [
+        " ".join(line.removeprefix("> ").strip() for line in block.splitlines()).lower()
+        for block in blocks
+    ]
 
-    assert "UniGrok is not published on PyPI." in readme
-    assert "`pip install mcp-grok` installs an unrelated" in readme
+    assert any(
+        "not published on pypi" in warning
+        and "pip install mcp-grok" in warning
+        and "unrelated project" in warning
+        for warning in warnings
+    )
 
 
 def test_dependabot_covers_every_shipped_dependency_surface():
