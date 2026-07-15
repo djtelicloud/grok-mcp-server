@@ -29,6 +29,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Optional, List, Dict, Any, Literal, Callable, Awaitable
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field as PydanticField
+from .hydration import HydrationContext, HydrationResult, get_hydration_service
 from .routing import (
     ROUTE_CANDIDATES,
     choose_model_candidate,
@@ -736,6 +737,27 @@ def _match_caller_budget(caller: str, budgets: Dict[str, float]) -> Optional[tup
     )
 
 
+class CallerCostHook:
+    scope = "process_day"
+
+    def __init__(self, principals: tuple[str, ...]):
+        self.principals = principals
+        fingerprint = hashlib.sha256("\0".join(principals).encode()).hexdigest()[:12]
+        self.name = f"caller_cost:{fingerprint}"
+
+    async def hydrate(self, store: Any, ctx: HydrationContext) -> HydrationResult:
+        now = time.time()
+        costs = await asyncio.gather(
+            *(store.get_caller_cost_today(principal) for principal in self.principals)
+        )
+        hydrated = {
+            principal: (float(cost), now)
+            for principal, cost in zip(self.principals, costs)
+        }
+        _CALLER_SPEND_CACHE.update(hydrated)
+        return HydrationResult()
+
+
 async def enforce_caller_budget(store_param: Any, caller: Optional[str]) -> None:
     """Pre-execution per-caller daily budget gate.
 
@@ -749,13 +771,21 @@ async def enforce_caller_budget(store_param: Any, caller: Optional[str]) -> None
     """
     if not caller or not os.environ.get("UNIGROK_CALLER_BUDGETS", "").strip():
         return
-    match = _match_caller_budget(caller, _caller_budgets())
+    budgets = _caller_budgets()
+    match = _match_caller_budget(caller, budgets)
     if match is None:
         return
     entry, limit_usd = match
     active_store = store_param if store_param is not None else store
     if active_store is None:
         return
+
+    principals = tuple(sorted(budgets))
+    hook = CallerCostHook(principals)
+    service = get_hydration_service(active_store)
+    service.register(hook)
+    await service.hydrate_hook(hook.name)
+
     now = time.time()
     cached = _CALLER_SPEND_CACHE.get(entry)
     if cached is not None and (now - cached[1]) < _CALLER_SPEND_TTL_SEC:
@@ -9518,7 +9548,6 @@ class RoutingAdvisor:
             # not re-probe on every borderline prompt.
             self._fetched_at = time.time()
         return self._stats
-
     async def _calibration_snapshot(self, store: Any) -> List[Dict[str, Any]]:
         """Fresh eval-calibration rows (updated_at within the TTL window).
         Mirrors _snapshot's caching/bypass rules; a store predating the v6
