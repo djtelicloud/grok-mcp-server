@@ -55,44 +55,44 @@ special mounts.
 Docker Desktop is the current packaging path for the shared service. Treat it as
 how UniGrok runs on your machine — not as “you are a Docker developer.”
 
-## 3. Run the gateway
+## 3. Run the gateway (one path)
 
 > [!WARNING]
 > UniGrok is not published on PyPI.
 > `pip install mcp-grok` installs an unrelated project; use this GitHub checkout.
+> There is no real `npx unigrok` server yet — Docker (or `uv` + compose) **is** the install.
+
+**Fast path (copy/paste):**
 
 ```bash
-git clone https://github.com/djtelicloud/grok-mcp-server.git
-cd grok-mcp-server
+git clone https://github.com/djtelicloud/grok-mcp-server.git && cd grok-mcp-server
 uv run python main.py init
-```
-
-`init` creates `.env` from the template (if missing) and prints IDE MCP snippets
-pointed at `http://localhost:4765/mcp`.
-
-**API path:** set in `.env` (server only):
-
-```bash
-XAI_API_KEY=your_real_xai_api_key
-```
-
-**CLI subscription path** (after the service image is available):
-
-```bash
 docker compose up --build -d
+```
+
+`init` creates `.env` if missing and prints IDE MCP snippets for
+`http://localhost:4765/mcp`. After the service is healthy, you can **close this
+repo** and work in any project with `@grok`.
+
+Before checking readiness, complete **one** credential path:
+
+- **xAI API:** set the developer key in server `.env` before starting Compose
+  (or rerun `docker compose up -d` after editing it).
+- **CLI subscription:** after the image is up, run:
+
+```bash
 docker compose run --rm grok-cli-auth
 ```
 
-**Start (or refresh) the service:**
+Then verify the usable plane:
 
 ```bash
-docker compose up --build -d
-curl --fail -s http://localhost:4765/healthz
 curl --fail -s http://localhost:4765/readyz
 ```
 
 You are ready when `/readyz` reports `"status":"ready"`. `/healthz` only proves
-the process is up.
+the process is up; CLI-only installs must authenticate before this readiness
+check.
 
 ## 4. Connect your IDE (paste this to your agent)
 
@@ -152,10 +152,13 @@ binding path. That control plane does not replace local UniGrok MCP on
 |---|---|
 | Installing / connecting an IDE | This README |
 | An agent needing schemas and operations | [OKF knowledge bundle](https://grokmcp.org/docs/okf/index.md) (also via `discover_self` and local `/docs/okf/`) |
+| Public “smarter defaults” recipes | [docs/public-intelligence/](docs/public-intelligence/) |
 | Changing UniGrok itself | [CONTRIBUTING.md](CONTRIBUTING.md) |
 
-There is **no** separate GitHub Wiki product surface. Prefer these three paths
-over any Wiki tab so public install and agent knowledge stay one source of truth.
+**Source of truth:** this repo’s `docs/okf/` + the site OKF.  
+**GitHub Wiki (optional):** human-friendly **mirror only**, generated from OKF
+(see [docs/wiki-okf-mirror.md](docs/wiki-okf-mirror.md)). Do not hand-edit the
+wiki as product docs. Empty or stale wiki is not an outage — use OKF.
 
 ## 9. Next steps
 

@@ -299,22 +299,22 @@ def test_disposable_scratchpad_cleanup_is_consistent():
     assert "Never remove task worktrees after landing" not in skill
 
 
-def test_public_docs_surfaces_exclude_github_wiki_as_product():
-    """Public knowledge is README + OKF; GitHub Wiki is not a second tree."""
+def test_public_docs_surfaces_wiki_is_okf_mirror_only():
+    """Public knowledge source is README + OKF; wiki may mirror, never hand-edit."""
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     contributing = (ROOT / "CONTRIBUTING.md").read_text(encoding="utf-8")
-    freeze = (ROOT / "docs" / "design" / "public-vs-insider-surfaces.md").read_text(
-        encoding="utf-8"
-    )
+    wiki_policy = (ROOT / "docs" / "wiki-okf-mirror.md").read_text(encoding="utf-8")
 
     assert "## 8. Where docs live" in readme
     assert "https://grokmcp.org/docs/okf/index.md" in readme
-    assert "There is **no** separate GitHub Wiki product surface" in readme
-    assert "GitHub Wiki is not a product surface" in contributing
-    assert "Do not hand-edit it as source of" in contributing
-    assert "auto-publish full OKF into `.wiki.git`" in contributing
-    assert "GitHub Wiki as second docs tree" in freeze
-    assert "Forbidden** — public knowledge is README + OKF only" in freeze
+    assert "mirror only" in readme.lower()
+    assert "mirror only" in contributing.lower()
+    assert "do not hand-edit" in contributing.lower().replace("**", "")
+    assert "publish_okf_wiki_mirror" in contributing
+    normalized_policy = " ".join(wiki_policy.lower().replace("**", "").split())
+    assert "never source of truth" in normalized_policy
+    assert "do not hand-edit" in normalized_policy
+    assert "rsync --delete" in wiki_policy
 
 
 def test_agent_guidance_preserves_workspace_and_credential_boundaries():

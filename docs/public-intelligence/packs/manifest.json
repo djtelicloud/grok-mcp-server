@@ -27,6 +27,31 @@
         "Session or task-RAG database dumps",
         "Contributor workspace memory rows"
       ]
+    },
+    {
+      "pack_id": "install-and-any-project",
+      "version": "v0",
+      "title": "Install one-liner and any-project agents",
+      "summary": "Docker/uv install path, close-the-clone, discover_self first load, optional using-unigrok habit without full .agents tree.",
+      "audience": "public",
+      "body_path": "docs/public-intelligence/packs/v0-install-and-any-project.md",
+      "source_gym": "Public onboarding UX review (first MCP load, wiki, npx, foreign projects).",
+      "promoted_from": [
+        "README.md",
+        "docs/wiki-okf-mirror.md"
+      ],
+      "scrub": {
+        "secrets": true,
+        "private_paths": true,
+        "raw_memory": true,
+        "unreviewed_logs": true
+      },
+      "never_includes": [
+        "API keys or OAuth secrets",
+        "Private unigrok-intelligence playbooks",
+        "Session or task-RAG database dumps",
+        "Contributor workspace memory rows"
+      ]
     }
   ]
 }
