@@ -1,8 +1,8 @@
 # Codex Active Work
 
-Last updated: 2026-07-14
+Last updated: 2026-07-15
 Owner: Codex
-Status: Maintainer sweep complete; Stage 1 live generation and training remain blocked
+Status: Maintainer repair locally landed; protected PR merge pending; Stage 1 live generation and training remain blocked
 
 This is the project-scoped handoff for new Codex chats. Verify drift-prone Git,
 CI, runtime, DNS, cloud, and benchmark state live before acting. Never record
@@ -50,12 +50,19 @@ credentials, OAuth codes, tokens, or private keys here.
 
 ## Latest maintainer sweep
 
-- Local `main` and `origin/main` are synchronized at
-  `5e5d921a0bc6f102df4469f4ce9cc7a37b2bde7e`.
-- The landing receipt printed `LANDED TO MAIN` after 1,564 tests. Main CI and
-  CodeQL are green at that exact commit.
-- The landed repair prevents release-hygiene tests from scanning ignored local
-  IDE worktree metadata. The pre-existing untracked `scratch_swarm/` remains
-  untouched.
-- Open draft PRs #64 and #73-#76 remain review-required. PR #73, #75, and #76
-  have current unresolved review feedback; no external thread was changed.
+- Local `main`, the contributor runtime source marker, and the pushed task
+  branch are at the PR #127 repair series. Protected `origin/main` remains at
+  its pre-merge head until the review gates pass.
+- Draft PR #127 contains the minimal CodeQL and public OKF-link repair. Its full
+  suite, generated-OKF check, Ruff, Docker, site, attribution, and CodeQL checks
+  are green. Do not bypass its draft, Code Owner, Codex Approval, or
+  protected-merge gates.
+- PR #125 has two current unresolved review threads and a stale generated OKF
+  failure. PR #126 has two current unresolved UI review threads while CI is
+  green. Draft PRs #121 and #124 have no unresolved threads; hosted review
+  smoke runs associated with #121 failed in the read-only review transport.
+  No external thread was resolved or replied to.
+- Issue #65 is the only open issue. Its latest comment reports a bounded live
+  Stage 1 run, while this handoff and the issue body retain the exact-head
+  authorization gate. Treat any further live generation or training as blocked
+  until the authority state is reconciled explicitly.
