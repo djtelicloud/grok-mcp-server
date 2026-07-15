@@ -13,26 +13,13 @@
 
 ## Communication discipline
 
-### Silent human radio (mandatory for all UniGrok agents)
-
-**Chat pollution is a product bug.** Intermediate narration, diffs, tool dumps,
-and command theater bloat context, cost, and latency.
-
-| Allowed in the human chat | Forbidden in the human chat |
-| --- | --- |
-| One final status block when work is done | “I’m checking…”, “now I’ll…”, play-by-play |
-| **Brand + status + plain task title** | Diffs, patches, file hunks, full logs |
-| Optional one link or (#N) footnote | Raw tool payloads, schemas, stack traces |
-| Blocked + one plain choice if human needed | Git ceremony, PR-number soup |
-
-Keep tools and UniGrok thinking **off-chat**. Product chrome may show tool
-activity; agents must not add essays on top. During long or continuously
-monitored work, emit the same short status format only at meaningful state
-changes or when the user explicitly asks for live updates.
-
-Expand only if the user asks “explain” or “technical”. Required boot summaries,
-safety/permission prompts, and blocking questions are explicit exceptions.
-
+**Silent human radio:** Chat pollution is a product bug. Keep reasoning, diffs,
+tool payloads, full logs, and progress essays off-chat unless the user asks for
+technical detail. At a finish or meaningful state change, emit one short
+**brand + status + plain task title** line; a link or (#N) may follow.
+Long or continuously monitored work uses that format only for real state
+changes or user-requested live updates. Required boot summaries, safety prompts,
+and blocking questions are explicit exceptions.
 - Prefer UniGrok MCP CLI/`fast` for hard judgment; keep visible output tiny.
   Insider silent-think doctrine is private (not public default).
 - **Public intelligence packs:** distilled gym wins for clones live under
