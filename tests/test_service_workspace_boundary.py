@@ -240,6 +240,64 @@ async def test_stable_discover_self_has_no_forge_connect_recipes(monkeypatch):
         assert token.lower() not in lowered, f"stable discover leaked {token!r}"
     assert "http://localhost:4765/mcp" in prose
     assert "plan critique" in lowered or "implementation plan" in lowered
+    assert result.data["service_mode"] == "stable"
+    assert result.data["request_context"]["surface"] == "stable_core"
+    assert result.data["bootstrap"]["can_mutate_workspace"] is False
+    assert result.data["bootstrap"]["can_use_swarm"] is False
+    # Structured surface names are fine; never coach a second product port in prose.
+    assert "4766" not in prose
+
+
+@pytest.mark.asyncio
+async def test_discover_self_bootstrap_warns_without_client_id(monkeypatch):
+    monkeypatch.setenv("UNIGROK_SERVICE_MODE", "stable")
+    monkeypatch.delenv("WORKSPACE_ROOT", raising=False)
+    monkeypatch.setattr(
+        "src.tools.system.grok_cli_plane_status",
+        lambda timeout_sec=5.0: {
+            "state": "ready",
+            "ready": True,
+            "binary": True,
+            "auth": "oauth",
+            "setup_command": "unused",
+        },
+    )
+    result = await grok_mcp_discover_self()
+    assert result.data["request_context"]["client_id_present"] is False
+    warning_ids = {w["id"] for w in result.data["bootstrap"]["warnings"]}
+    assert "missing_client_id" in warning_ids
+    assert result.data["bootstrap"]["status"] in {"WARN", "ERR"}
+
+
+@pytest.mark.asyncio
+async def test_discover_self_bootstrap_ok_with_client_id(monkeypatch):
+    from src.identity import _ACTIVE_CLIENT_ID
+
+    monkeypatch.setenv("UNIGROK_SERVICE_MODE", "stable")
+    monkeypatch.delenv("WORKSPACE_ROOT", raising=False)
+    monkeypatch.setenv("XAI_API_KEY", "test-key-for-discover")
+    monkeypatch.setattr(
+        "src.tools.system.grok_cli_plane_status",
+        lambda timeout_sec=5.0: {
+            "state": "ready",
+            "ready": True,
+            "binary": True,
+            "auth": "oauth",
+            "setup_command": "unused",
+        },
+    )
+    token = _ACTIVE_CLIENT_ID.set("claude-code")
+    try:
+        result = await grok_mcp_discover_self()
+    finally:
+        _ACTIVE_CLIENT_ID.reset(token)
+
+    assert result.data["request_context"]["client_id_present"] is True
+    assert result.data["request_context"]["client_id_normalized"] == "claude-code"
+    warning_ids = {w["id"] for w in result.data["bootstrap"]["warnings"]}
+    assert "missing_client_id" not in warning_ids
+    if result.data["bootstrap"]["can_chat"]:
+        assert result.data["bootstrap"]["status"] in {"OK", "WARN"}
 
 
 @pytest.mark.asyncio
