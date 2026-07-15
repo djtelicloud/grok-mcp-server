@@ -18,7 +18,7 @@ dependencies = [
     # 1.28 private registry adapter. Review that adapter before widening this.
     "mcp[cli]>=1.28.1,<1.29",
     "httpx>=0.28.1",
-    "google-auth[requests]>=2.40,<3",
+    "google-auth[requests]>=2.56.0,<3",
     "cryptography>=49,<50",
     "python-dotenv>=1.2.2",
     "pydantic>=2.9.0",
