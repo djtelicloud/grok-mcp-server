@@ -2,9 +2,10 @@
 
 Last updated: 2026-07-15
 Owner: Codex
-Status: GitHub and security are clean. The remote MCP and Control Center are
-live in `us-central1` with east-region rollback assets. Stage 1 live generation
-and training remain blocked.
+Status: GitHub and security are clean. Brand-specific rehydrate next steps are
+Live. The remote MCP and Control Center remain live in `us-central1` with
+east-region rollback assets. Stage 1 live generation and training remain
+blocked.
 
 This is the project-scoped handoff for new Codex chats. Verify drift-prone Git,
 CI, runtime, DNS, cloud, and benchmark state live before acting. Never record
@@ -52,22 +53,26 @@ credentials, OAuth codes, tokens, or private keys here.
 
 ## Latest maintainer sweep
 
-- PR #163 merged the reviewed PR #162 policy work plus Codex repairs for generic
-  rehydrate, Gemini cleanup timing, Claude root cleanup, and release-hygiene
-  coverage. `scripts/land` certified exact content head
-  `7f5a51005e713fdbe8e59849d88fc6bf303cff65` after 2,023 tests; protected
-  merge commit `e10dd73c12d84f0a37bda6ebd9435f55e45ce398` is synchronized locally
-  and remotely.
+- Brand-specific rehydrate next steps landed through PR #173. Codex repaired
+  the workspace-resource per-document bound while preserving the 24,000
+  character total clamp, accepted one valid review cleanup, and
+  `scripts/land` certified exact content head
+  `b6d58b44a27bb75bdac1e0e7ea003d057cefba11` after 2,037 tests. Protected
+  merge commit `d277bf3b6948be1421943258e49a6554d36d9de5` is synchronized
+  locally and remotely.
 - Exact-main CI and all three CodeQL analyzers passed. The checked GitHub state
-  has zero open PRs, issues, discussions, code-scanning alerts, Dependabot
-  alerts, secret-scanning alerts, vulnerability alerts, or draft advisories;
-  the remote has only `main`.
-- Codex removed its finished integration scratchpad and branch. Preserve the
-  active detached Codex thread worktree and Grok's `grok/fix-162-ready`
-  worktree; neither is ahead of `main`.
-- Stable `:4765` and contributor `:4766` are ready, and the runtime marker is
-  tree-equivalent to `main`. PR #163 changed no server, container, dependency,
-  MCP UI, or Control Center source, so no Cloud Run rebuild was required.
+  has zero open PRs, code-scanning alerts, Dependabot alerts, secret-scanning
+  alerts, or draft advisories.
+- Codex pruned five finished or superseded Grok scratchpads and their stale
+  branches after proving no agent process used them and their outcomes were
+  merged or covered by passing release-hygiene tests.
+- Preserve the active detached Codex thread worktree, the active
+  `agents/hydrate-data-function` worktree, the active
+  `claude/hydrate-c23d9f` worktree, and the primary `main` checkout.
+- Stable `:4765` and contributor `:4766` are ready. The contributor runtime
+  marker is `b6d58b44a27bb75bdac1e0e7ea003d057cefba11` and matches the
+  current main tree. The final commit changed only a test assertion, so no
+  additional runtime restart was needed.
 - Remote MCP is live at 100% on ready `us-central1` revision
   `unigrok-remote-mcp-7c7c30e`, image digest
   `sha256:a377d3c89cea616360cabe5cf162f5ba187fffd25a8541004cd13d32f5b03f81`.
