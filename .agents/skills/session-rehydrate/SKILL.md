@@ -51,6 +51,7 @@ Read (skim) when available:
 
 - `.agents/AGENTS.md` — multi-agent git, MCP endpoint, credentials boundary
 - Root `AGENTS.md` if present
+- Root `CLAUDE.md` if present
 
 ### 2. Continuity (private brain)
 
@@ -81,7 +82,10 @@ From product root:
 
 Note: visible main, worktrees, stable/forge readiness.
 Primary shared checkout should stay on **clean `main`**. Implementation uses
-**agent-prefixed worktrees** only.
+**agent-prefixed worktrees** only — under `<repo>/.worktrees/…` or
+`/tmp/unigrok-…` (or provider homes like `~/.gemini/…/worktrees`,
+`~/.codex/worktrees`). Never Documents sibling clutter. Many leftover trees =
+hygiene debt; remove **yours** before starting more.
 
 ### 4. Runtime (optional quick)
 
@@ -129,6 +133,8 @@ Then wait for the user task — or continue if they already gave one.
 Before leaving a session that produced decisions:
 
 1. Update private `active-work-latest.md` when continuity changed
-2. Put exact head + “ready for Codex land?” on the PR
+2. Put exact head + “ready for supervisor?” on the PR
 3. Leave primary checkout on clean `main`
 4. Hive receipts (if any) under private `harvest/index-diff-hive/`
+5. If this task is done (Live, abandoned, or new task assigned): remove **your
+   own** finished worktree and prune. Do not leave disposable scratchpads.
