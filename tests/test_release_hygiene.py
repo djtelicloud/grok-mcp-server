@@ -205,6 +205,23 @@ def test_session_rehydrate_skills_use_project_qualified_continuity():
     assert "Root `CLAUDE.md` if present" in claude_skill
 
 
+def test_agent_statuses_lead_with_plain_task_titles() -> None:
+    shared_rules = (ROOT / ".agents" / "AGENTS.md").read_text(encoding="utf-8")
+    agent_skill = (
+        ROOT / ".agents" / "skills" / "session-rehydrate" / "SKILL.md"
+    ).read_text(encoding="utf-8")
+    claude_skill = (
+        ROOT / ".claude" / "skills" / "session-rehydrate" / "SKILL.md"
+    ).read_text(encoding="utf-8")
+    gemini_rules = (ROOT / ".gemini" / "GEMINI.md").read_text(encoding="utf-8")
+
+    assert "Task titles, not ticket numbers" in shared_rules
+    assert "never the lead" in shared_rules
+    for guidance in (agent_skill, claude_skill, gemini_rules):
+        assert "plain task title" in guidance
+        assert "Never lead with PR" in guidance
+
+
 def test_disposable_scratchpad_cleanup_is_consistent():
     """Own finished scratchpads may be removed; peer/main deletion stays forbidden."""
     shared = (ROOT / ".agents" / "AGENTS.md").read_text(encoding="utf-8")

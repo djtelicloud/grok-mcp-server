@@ -38,11 +38,35 @@ Dyslexia-hostile jargon in answers is a product failure.
 | Clean up / too many folders | Remove finished scratchpads | Own worktree remove; supervisor may prune orphans | **Cleaned** / **Left X (why)** |
 | Fix CI / make it green | Repair your PR checks | Fix and re-verify | **Green** / **Still red** (+ one plain cause) |
 
+### Task titles, not ticket numbers
+
+A draft request to the coordinator **is** a finished (or ready) **task packet**.
+The **task title** is what humans hear. Internal ticket numbers are optional
+footnotes for links — never the lead.
+
+**Template (every agent):**
+
+```text
+[Brand]: [Live | Ready for supervisor | Not ready | Blocked] — [plain English task title].
+[Optional one outcome line.]
+[Optional link; number only as (#N) at the end if needed.]
+```
+
+**Bad:** “Promoting PR #164. Yours is #165.”
+
+**Good:** “Codex: Live — refreshed maintainer handoff.”
+
+**Good:** “Grok: Ready for supervisor — public intelligence pack v0.”
+
+Write machine titles so the **human half is readable** (e.g. “public intelligence
+pack v0”), not only `feat(docs): …` jargon when speaking to the sponsor.
+
 ### Forbidden in user-facing answers (unless user says “git” or “technical”)
 
 Do **not** lecture about: branch, worktree, rebase, fast-forward, origin, land,
-merge, force-push, SHA, trailers, remotes, cherry-pick. Internally use them;
-externally use **Ready / Not ready / Live / Not live / Blocked / Who (brand)**.
+merge, force-push, SHA, trailers, remotes, or cherry-pick. Do **not** lead with
+PR numbers. Internally use them; externally use **Ready / Not ready / Live /
+Not live / Blocked / Who (brand)** plus the **task title**.
 
 ### Brand identity
 

@@ -46,6 +46,7 @@ def test_manifest_and_bodies_exist_and_match_schema_shape() -> None:
         for marker in banned_markers:
             assert marker not in text
         assert "Ready for supervisor" in text or "Live" in text
+        assert "Task titles, not numbers" in text
 
 
 def test_readme_states_promote_not_auto_sync() -> None:
