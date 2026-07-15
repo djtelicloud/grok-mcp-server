@@ -172,9 +172,10 @@ def main(argv: Optional[list[str]] = None) -> int:
             "sub": f"service:{service}",
         }
         print(json.dumps(claims_metadata, sort_keys=True), file=sys.stderr)
-    sys.stdout.write(token)
+    output = token.encode("ascii")
     if sys.stdout.isatty():
-        sys.stdout.write("\n")
+        output += b"\n"
+    os.write(sys.stdout.fileno(), output)
     return 0
 
 

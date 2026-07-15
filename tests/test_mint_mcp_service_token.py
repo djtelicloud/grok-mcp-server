@@ -116,7 +116,7 @@ def test_mint_rejects_disallowed_service_and_scope() -> None:
         )
 
 
-def test_cli_prints_token_only(capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
+def test_cli_prints_token_only(capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("UNIGROK_MCP_TOKEN_SECRET", "t" * 40)
     monkeypatch.setenv("UNIGROK_OAUTH_ISSUER", "https://control.grokmcp.org")
     monkeypatch.setenv("UNIGROK_MCP_RESOURCE_URL", "https://mcp.grokmcp.org/mcp")
@@ -124,13 +124,13 @@ def test_cli_prints_token_only(capsys: pytest.CaptureFixture[str], monkeypatch: 
     import scripts.mint_mcp_service_token as mod
 
     assert mod.main([]) == 0
-    out = capsys.readouterr().out
+    out = capfd.readouterr().out
     assert out.startswith(TOKEN_PREFIX)
     assert "\n" not in out
 
 
 def test_cli_print_claims_uses_independent_non_secret_metadata(
-    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     secret = "do-not-log-this-signing-key" * 2
     monkeypatch.setenv("UNIGROK_MCP_TOKEN_SECRET", secret)
@@ -146,7 +146,7 @@ def test_cli_print_claims_uses_independent_non_secret_metadata(
         lambda **_: f"{TOKEN_PREFIX}opaque-non-json-token",
     )
     assert mod.main(["--print-claims"]) == 0
-    captured = capsys.readouterr()
+    captured = capfd.readouterr()
     assert captured.out.startswith(TOKEN_PREFIX)
     assert json.loads(captured.err) == {
         "exp": 1_700_000_120,
@@ -158,7 +158,7 @@ def test_cli_print_claims_uses_independent_non_secret_metadata(
 
 
 def test_cli_cursor_cloud_env(
-    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     secret = "cursor-cloud-signing-key-value-ok" * 2
     monkeypatch.setenv("UNIGROK_MCP_TOKEN_SECRET", secret)
@@ -171,7 +171,7 @@ def test_cli_cursor_cloud_env(
     import scripts.mint_mcp_service_token as mod
 
     assert mod.main(["--print-claims"]) == 0
-    captured = capsys.readouterr()
+    captured = capfd.readouterr()
     meta = json.loads(captured.err)
     assert meta["sub"] == "service:cursor-cloud"
     assert "unigrok:invoke" in meta["scope"]
