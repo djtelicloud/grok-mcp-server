@@ -29,6 +29,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Optional, List, Dict, Any, Literal, Callable, Awaitable
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field as PydanticField
+from .hydration import HydrationContext, HydrationResult, get_hydration_service
 from .routing import (
     ROUTE_CANDIDATES,
     choose_model_candidate,
@@ -736,44 +737,52 @@ def _match_caller_budget(caller: str, budgets: Dict[str, float]) -> Optional[tup
     )
 
 
-from .hydration import HydrationContext, HydrationResult, get_hydration_service
-
 class CallerCostHook:
-    name = "caller_cost"
     scope = "process_day"
+
+    def __init__(self, principals: tuple[str, ...]):
+        self.principals = principals
+        fingerprint = hashlib.sha256("\0".join(principals).encode()).hexdigest()[:12]
+        self.name = f"caller_cost:{fingerprint}"
 
     async def hydrate(self, store: Any, ctx: HydrationContext) -> HydrationResult:
         now = time.time()
-        for principal in _caller_budgets():
-            try:
-                spent = float(await store.get_caller_cost_today(principal))
-                _CALLER_SPEND_CACHE[principal] = (spent, now)
-            except Exception as exc:
-                logging.getLogger("GrokMCP").warning(f"Caller budget hydration failed for {principal}: {exc}")
-                raise  # Fail open
+        hydrated = {
+            principal: (float(await store.get_caller_cost_today(principal)), now)
+            for principal in self.principals
+        }
+        _CALLER_SPEND_CACHE.update(hydrated)
         return HydrationResult()
 
+
 async def enforce_caller_budget(store_param: Any, caller: Optional[str]) -> None:
-    """Check the caller against UNIGROK_CALLER_BUDGETS; raise if exceeded.
-    
-    Tolerates store unavailability (fails open so traffic isn't blocked by
-    temporary read failures). Uses a short local TTL cache to avoid hitting
-    SQLite on every single chat turn when limits are enabled. Returns safely
-    if no budget is configured or the caller has no limits."""
+    """Pre-execution per-caller daily budget gate.
+
+    No-op unless UNIGROK_CALLER_BUDGETS is set AND the caller matches an
+    entry (unset env returns before any parsing — zero hot-path cost by
+    default). Spend is today's telemetry cost across every caller matching
+    the entry's substring (the entry IS the shared pot), read via one
+    created_at-indexed query and cached ~60s per entry. At/over budget raises
+    CallerBudgetExceeded; a failing store read degrades OPEN — a broken
+    telemetry table must not block traffic.
+    """
     if not caller or not os.environ.get("UNIGROK_CALLER_BUDGETS", "").strip():
         return
-    match = _match_caller_budget(caller, _caller_budgets())
+    budgets = _caller_budgets()
+    match = _match_caller_budget(caller, budgets)
     if match is None:
         return
     entry, limit_usd = match
     active_store = store_param if store_param is not None else store
     if active_store is None:
         return
-        
+
+    principals = tuple(sorted(budgets))
+    hook = CallerCostHook(principals)
     service = get_hydration_service(active_store)
-    service.register(CallerCostHook())
-    await service.hydrate_hook("caller_cost")
-    
+    service.register(hook)
+    await service.hydrate_hook(hook.name)
+
     now = time.time()
     cached = _CALLER_SPEND_CACHE.get(entry)
     if cached is not None and (now - cached[1]) < _CALLER_SPEND_TTL_SEC:
@@ -9431,28 +9440,6 @@ class RoutingDecision:
     coding_signal: float = 0.0
     confidence: float = 0.0
     at: float = field(default_factory=time.time)
-class RoutingCalibrationHook:
-    name = "routing_calibration"
-    scope = "process_lifetime"
-    
-    def __init__(self, advisor: Any):
-        self.advisor = advisor
-
-    async def hydrate(self, store: Any, ctx: HydrationContext) -> HydrationResult:
-        try:
-            calib = await store.get_routing_calibration(
-                max_age_hours=_calibration_ttl_hours()
-            )
-            self.advisor._calibration = calib
-            self.advisor._calibration_fetched_at = time.time()
-        except Exception as exc:
-            logging.getLogger("GrokMCP").warning(
-                f"Routing calibration refresh failed: {exc}"
-            )
-            self.advisor._calibration = self.advisor._calibration or []
-            self.advisor._calibration_fetched_at = time.time()
-            raise  # Fail open
-        return HydrationResult()
 
 
 class RoutingAdvisor:
@@ -9571,12 +9558,19 @@ class RoutingAdvisor:
             return self._calibration or []
         if self._calibration is not None and (time.time() - self._calibration_fetched_at) < self._ttl:
             return self._calibration
-        
-        service = get_hydration_service(store)
-        service.register(RoutingCalibrationHook(self))
-        await service.hydrate_hook("routing_calibration")
-        
-        return self._calibration or []
+        async with self._lock:
+            if self._calibration is not None and (time.time() - self._calibration_fetched_at) < self._ttl:
+                return self._calibration
+            try:
+                self._calibration = await store.get_routing_calibration(
+                    max_age_hours=_calibration_ttl_hours()
+                )
+            except Exception as exc:
+                logging.getLogger("GrokMCP").warning(
+                    f"Routing calibration refresh failed: {exc}"
+                )
+                self._calibration = self._calibration or []
+            self._calibration_fetched_at = time.time()
         return self._calibration
 
     @classmethod

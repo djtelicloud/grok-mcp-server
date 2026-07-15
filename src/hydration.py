@@ -1,9 +1,8 @@
-"""Hydration Service for broader application telemetry recovery.
+"""Read-only process hydration for bounded in-memory runtime state.
 
-This module provides an orchestration seam to manage hydration hooks over
-the SessionStoreProtocol. It separates runtime telemetry process hydration
-(floors for in-process budgets, gates, caches) from intelligence session
-rehydration (a git/disk skill).
+Hydration hooks recover in-process counters and caches from the configured
+``SessionStoreProtocol``. This is intentionally separate from agent session
+rehydration, whose continuity remains in Git and disk-backed skills.
 """
 
 from __future__ import annotations
@@ -13,130 +12,179 @@ import logging
 import threading
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Dict, Optional, Protocol, Set
+from typing import Any, Dict, Literal, Optional, Protocol, Set, Tuple
+from weakref import WeakKeyDictionary
 
 from .storage import SessionStoreProtocol
 
 _LOGGER = logging.getLogger("GrokMCP.Hydration")
 
-@dataclass
+HydrationScope = Literal["process_day", "process_lifetime", "session"]
+_VALID_SCOPES = frozenset(("process_day", "process_lifetime", "session"))
+
+
+@dataclass(frozen=True)
 class HydrationContext:
     session_id: Optional[str] = None
 
+
+@dataclass(frozen=True)
 class HydrationResult:
-    pass
+    detail: str = ""
+
 
 class HydrationHook(Protocol):
     name: str
-    scope: str  # "process_day" | "process_lifetime" | "session"
+    scope: HydrationScope
 
-    async def hydrate(self, store: SessionStoreProtocol, ctx: HydrationContext) -> HydrationResult:
-        ...
+    async def hydrate(
+        self, store: SessionStoreProtocol, ctx: HydrationContext
+    ) -> HydrationResult: ...
+
 
 class HydrationService:
+    """Coordinate idempotent hooks for one concrete store instance.
+
+    Hook execution happens outside locks. A shared in-flight future prevents
+    concurrent first-use requests from running the same hook twice. Failed or
+    cancelled hydration is never marked complete, so a later request retries.
+    """
+
     def __init__(self, store: SessionStoreProtocol):
         self.store = store
         self._hooks: Dict[str, HydrationHook] = {}
-        self._lock = threading.Lock()
-        
-        # State tracking for idempotency
-        self._process_day_hydrated: Dict[str, str] = {}  # hook_name -> iso_date
-        self._process_lifetime_hydrated: Set[str] = set()  # hook_name
-        self._session_hydrated: Dict[str, Set[str]] = {}  # session_id -> set of hook_names
+        self._hooks_lock = threading.Lock()
+        self._state_lock = asyncio.Lock()
+        self._completed: Set[Tuple[str, str]] = set()
+        self._in_flight: Dict[Tuple[str, str], asyncio.Future[bool]] = {}
 
     def register(self, hook: HydrationHook) -> None:
-        with self._lock:
+        if not hook.name:
+            raise ValueError("hydration hook name must be non-empty")
+        if hook.scope not in _VALID_SCOPES:
+            raise ValueError(f"unsupported hydration scope: {hook.scope!r}")
+        with self._hooks_lock:
             self._hooks[hook.name] = hook
 
-    async def hydrate_hook(self, hook_name: str, ctx: Optional[HydrationContext] = None) -> None:
-        """Hydrate a specific hook by name, subject to its scope idempotency."""
-        hook = self._hooks.get(hook_name)
-        if not hook:
-            return
+    @staticmethod
+    def _scope_token(
+        hook: HydrationHook, ctx: HydrationContext
+    ) -> Optional[str]:
+        if hook.scope == "process_day":
+            return datetime.now().date().isoformat()
+        if hook.scope == "process_lifetime":
+            return "process"
+        return ctx.session_id
 
-        ctx = ctx or HydrationContext()
-        today = datetime.now().date().isoformat()
-        
-        with self._lock:
-            if hook.scope == "process_day":
-                if self._process_day_hydrated.get(hook.name) == today:
-                    return
-            elif hook.scope == "process_lifetime":
-                if hook.name in self._process_lifetime_hydrated:
-                    return
-            elif hook.scope == "session":
-                if not ctx.session_id:
-                    _LOGGER.warning(f"Hook {hook.name} requires session_id but none provided.")
-                    return
-                if hook.name in self._session_hydrated.get(ctx.session_id, set()):
-                    return
+    async def hydrate_hook(
+        self, hook_name: str, ctx: Optional[HydrationContext] = None
+    ) -> bool:
+        """Hydrate one hook, returning whether its scope is hydrated."""
+        with self._hooks_lock:
+            hook = self._hooks.get(hook_name)
+        if hook is None:
+            return False
 
-        # Execute hydrate outside lock to avoid blocking other operations
+        active_ctx = ctx or HydrationContext()
+        scope_token = self._scope_token(hook, active_ctx)
+        if scope_token is None:
+            _LOGGER.warning("Hydration hook %s requires a session id", hook.name)
+            return False
+
+        key = (hook.name, scope_token)
+        owner = False
+        async with self._state_lock:
+            if key in self._completed:
+                return True
+            future = self._in_flight.get(key)
+            if future is None:
+                future = asyncio.get_running_loop().create_future()
+                self._in_flight[key] = future
+                owner = True
+
+        if not owner:
+            return await asyncio.shield(future)
+
+        succeeded = False
         try:
-            await hook.hydrate(self.store, ctx)
+            await hook.hydrate(self.store, active_ctx)
+            succeeded = True
+            return True
+        except asyncio.CancelledError:
+            raise
         except Exception as exc:
-            _LOGGER.warning(f"Hydration failed for hook {hook.name}: {exc}")
-            return  # Fail open, do not mark as hydrated so it can retry
+            _LOGGER.warning("Hydration failed for hook %s: %s", hook.name, exc)
+            return False
+        finally:
+            async with self._state_lock:
+                if succeeded:
+                    self._completed.add(key)
+                completed_future = self._in_flight.pop(key, None)
+                if completed_future is not None and not completed_future.done():
+                    completed_future.set_result(succeeded)
 
-        # Mark as hydrated upon success
-        with self._lock:
-            if hook.scope == "process_day":
-                self._process_day_hydrated[hook.name] = today
-            elif hook.scope == "process_lifetime":
-                self._process_lifetime_hydrated.add(hook.name)
-            elif hook.scope == "session":
-                if ctx.session_id:
-                    if ctx.session_id not in self._session_hydrated:
-                        self._session_hydrated[ctx.session_id] = set()
-                    self._session_hydrated[ctx.session_id].add(hook.name)
+    def _hook_names_for_scope(self, scope: HydrationScope) -> list[str]:
+        with self._hooks_lock:
+            return [
+                hook.name for hook in self._hooks.values() if hook.scope == scope
+            ]
 
     async def hydrate_process_day(self) -> None:
-        """Hydrate all process_day scoped hooks."""
-        hooks_to_run = []
-        with self._lock:
-            for hook in self._hooks.values():
-                if hook.scope == "process_day":
-                    hooks_to_run.append(hook.name)
-                    
-        # Parallelize independent hooks
-        if hooks_to_run:
-            tasks = [self.hydrate_hook(name) for name in hooks_to_run]
-            await asyncio.gather(*tasks, return_exceptions=True)
+        names = self._hook_names_for_scope("process_day")
+        if names:
+            await asyncio.gather(
+                *(self.hydrate_hook(name) for name in names),
+                return_exceptions=True,
+            )
 
     async def hydrate_process_lifetime(self) -> None:
-        """Hydrate all process_lifetime scoped hooks."""
-        hooks_to_run = []
-        with self._lock:
-            for hook in self._hooks.values():
-                if hook.scope == "process_lifetime":
-                    hooks_to_run.append(hook.name)
-                    
-        if hooks_to_run:
-            tasks = [self.hydrate_hook(name) for name in hooks_to_run]
-            await asyncio.gather(*tasks, return_exceptions=True)
+        names = self._hook_names_for_scope("process_lifetime")
+        if names:
+            await asyncio.gather(
+                *(self.hydrate_hook(name) for name in names),
+                return_exceptions=True,
+            )
 
     async def hydrate_session(self, session_id: str) -> None:
-        """Hydrate all session scoped hooks for a given session_id."""
-        hooks_to_run = []
-        ctx = HydrationContext(session_id=session_id)
-        with self._lock:
-            for hook in self._hooks.values():
-                if hook.scope == "session":
-                    hooks_to_run.append(hook.name)
-                    
-        if hooks_to_run:
-            tasks = [self.hydrate_hook(name, ctx) for name in hooks_to_run]
-            await asyncio.gather(*tasks, return_exceptions=True)
+        names = self._hook_names_for_scope("session")
+        if names:
+            ctx = HydrationContext(session_id=session_id)
+            await asyncio.gather(
+                *(self.hydrate_hook(name, ctx) for name in names),
+                return_exceptions=True,
+            )
 
-_SERVICE: Optional[HydrationService] = None
+
+_SERVICES_LOCK = threading.Lock()
+_SERVICES: WeakKeyDictionary[Any, HydrationService] = WeakKeyDictionary()
+_FALLBACK_SERVICES: Dict[int, Tuple[Any, HydrationService]] = {}
+
 
 def get_hydration_service(store: SessionStoreProtocol) -> HydrationService:
-    global _SERVICE
-    if _SERVICE is None:
-        _SERVICE = HydrationService(store)
-    return _SERVICE
+    """Return the service bound to exactly this store instance."""
+    with _SERVICES_LOCK:
+        try:
+            service = _SERVICES.get(store)
+        except TypeError:
+            entry = _FALLBACK_SERVICES.get(id(store))
+            if entry is not None and entry[0] is store:
+                return entry[1]
+            service = HydrationService(store)
+            _FALLBACK_SERVICES[id(store)] = (store, service)
+            return service
+        if service is None:
+            service = HydrationService(store)
+            _SERVICES[store] = service
+        return service
+
+
+def reset_hydration_services() -> None:
+    """Reset the process registry (tests and controlled service teardown)."""
+    with _SERVICES_LOCK:
+        _SERVICES.clear()
+        _FALLBACK_SERVICES.clear()
+
 
 def reset_hydration_service() -> None:
-    """Reset the global hydration service (for tests)."""
-    global _SERVICE
-    _SERVICE = None
+    """Backward-compatible singular alias."""
+    reset_hydration_services()

@@ -430,10 +430,10 @@ The system can be deployed in a lightweight `python:3.11-slim` container, mounti
 UniGrok explicitly separates two fundamentally different concepts of "rehydration":
 
 ### 9.1 Runtime Telemetry Process Hydration (`src/hydration.py`)
-Responsible for recovering in-process accumulators, daily budgets, cost gates, and calibration caches after a process restart without re-arming exhausted budgets or losing metrics. 
+Responsible for recovering bounded in-process accumulators, daily budgets, and cost gates after a process restart without re-arming exhausted budgets or losing metrics.
 - **Owner**: MCP server process (`HydrationService` over `SessionStoreProtocol`).
-- **Source of Truth**: The public consumer SQLite (`grok_sessions.db`).
-- **Mechanism**: Formalized `HydrationHook` classes scoped by `process_day`, `process_lifetime`, or `session`. These hooks are strictly observational, non-mutating, and fail-open.
+- **Source of Truth**: The configured `SessionStoreProtocol`; the reference implementation currently persists it in SQLite (`grok_sessions.db`).
+- **Mechanism**: Formalized `HydrationHook` classes scoped by `process_day`, `process_lifetime`, or `session`. Hooks read durable state and update only bounded in-memory process state; failed reads remain fail-open and retryable.
 - **Pattern**: Lazy, first-need (e.g. caller cost hydrates only on the first request for that caller; semantic budget hydrates on the first sampled evaluation).
 
 ### 9.2 Intelligence Session Rehydrate

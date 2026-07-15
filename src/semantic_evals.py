@@ -32,6 +32,12 @@ from typing import Any, Dict, List, Optional, Set
 
 from pydantic import BaseModel, Field as PydanticField
 
+from .hydration import (
+    HydrationContext,
+    HydrationResult,
+    get_hydration_service,
+    reset_hydration_services,
+)
 from .utils import (
     _bounded_redacted,
     _env_timeout,
@@ -183,18 +189,15 @@ def _settle_budget(reservation: float, actual_cost: float) -> None:
         _STATS["judge_cost_usd_today"] += max(0.0, float(actual_cost or 0.0))
 
 
-from .hydration import HydrationContext, HydrationResult, get_hydration_service
-
 class SemanticJudgeBudgetHook:
     name = "semantic_judge_budget"
     scope = "process_day"
 
     async def hydrate(self, store: Any, ctx: HydrationContext) -> HydrationResult:
-        try:
-            durable = max(0.0, float(await store.get_semantic_judge_cost_today() or 0.0))
-        except Exception as exc:
-            logging.getLogger(_LOGGER).warning(f"Semantic eval budget hydration failed: {exc}")
-            raise  # Raise so HydrationService knows it failed and doesn't mark as hydrated
+        durable = max(
+            0.0,
+            float(await store.get_semantic_judge_cost_today() or 0.0),
+        )
 
         with _STATS_LOCK:
             _roll_budget_day_locked()
@@ -202,6 +205,7 @@ class SemanticJudgeBudgetHook:
             if durable > _STATS["judge_cost_usd_today"]:
                 _STATS["judge_cost_usd_today"] = durable
         return HydrationResult()
+
 
 async def _hydrate_budget_from_store(store: Any) -> None:
     """Once per process-day, floor the in-process spend accumulator at the
@@ -255,9 +259,7 @@ def reset_semantic_evals_state() -> None:
     _TESTING_OVERRIDE = False
     _JUDGE_SEMAPHORE = None
     _PENDING.clear()
-    
-    from .hydration import reset_hydration_service
-    reset_hydration_service()
+    reset_hydration_services()
 
 
 # ─── Judge schema + prompts ──────────────────────────────────────────────────
