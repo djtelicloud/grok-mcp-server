@@ -33,7 +33,12 @@ allowed. Values have this form:
 
 Allowed model sources are:
 
-- `runtime-receipt`: a runtime receipt reported the model identifier;
+- `runtime-receipt`: a runtime receipt reported the model identifier. This
+  source **requires** a bounded `evidence=<value>` field (for example the
+  receipt digest, `evidence=receipt-sha256:…`); the checker rejects a
+  `runtime-receipt` trailer that omits it. When you have no bounded receipt to
+  cite, use `provider-session` (the provider-owned session reported the model)
+  instead;
 - `provider-session`: the provider-owned session reported the model;
 - `user-reported`: a human or contributor supplied the label without a
   machine-verifiable receipt;
