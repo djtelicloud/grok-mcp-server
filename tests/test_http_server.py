@@ -332,7 +332,11 @@ def test_oauth_introspection_enforces_surface_and_tool_scopes(monkeypatch):
         "unigrok:connect unigrok:invoke",
         "unigrok:connect unigrok:invoke unigrok:review",
     ]
-    assert 'scope="unigrok:connect unigrok:review"' in review.headers["WWW-Authenticate"]
+    assert review.headers["WWW-Authenticate"] == (
+        'Bearer resource_metadata="https://mcp.grokmcp.org/'
+        '.well-known/oauth-protected-resource/mcp", '
+        'scope="unigrok:connect unigrok:review"'
+    )
 
 
 def test_oauth_introspection_allows_valid_status_token(monkeypatch):
