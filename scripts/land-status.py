@@ -13,6 +13,15 @@ from urllib.request import urlopen
 from land import LandError, common_git_dir, git, main_worktree, worktrees
 
 
+def tree_id(repo: Path, revision: str) -> str | None:
+    """Resolve a commit tree without letting a stale marker break status."""
+
+    try:
+        return git(repo, "rev-parse", "--verify", f"{revision}^{{tree}}")
+    except LandError:
+        return None
+
+
 def main() -> int:
     repo = Path(git(Path.cwd(), "rev-parse", "--show-toplevel"))
     primary = main_worktree(repo)
@@ -23,7 +32,12 @@ def main() -> int:
         runtime_head = marker.read_text(encoding="utf-8").strip()
     except OSError:
         runtime_head = "unknown"
-    relation = "matches main" if runtime_head == main_head else "differs or not yet recorded"
+    if runtime_head == main_head:
+        relation = "matches main"
+    elif tree_id(primary, runtime_head) == tree_id(primary, main_head):
+        relation = "matches main tree"
+    else:
+        relation = "differs or not yet recorded"
     print(f"Contributor runtime source marker: {runtime_head} ({relation})")
     print("Worktrees:")
     for item in worktrees(repo):
