@@ -64,9 +64,9 @@ pack v0”), not only `feat(docs): …` jargon when speaking to the sponsor.
 ### Forbidden in user-facing answers (unless user says “git” or “technical”)
 
 Do **not** lecture about: branch, worktree, rebase, fast-forward, origin, land,
-merge, force-push, SHA, trailers, remotes, cherry-pick, or lead with PR numbers.
-Internally use them; externally use **Ready / Not ready / Live / Not live /
-Blocked / Who (brand)** plus the **task title**.
+merge, force-push, SHA, trailers, remotes, or cherry-pick. Do **not** lead with
+PR numbers. Internally use them; externally use **Ready / Not ready / Live /
+Not live / Blocked / Who (brand)** plus the **task title**.
 
 ### Brand identity
 
