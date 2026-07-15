@@ -46,7 +46,6 @@ so these rules load.
 Read (skim) when available:
 
 - `.agents/AGENTS.md` — multi-agent git, MCP endpoint, credentials boundary
-- Root `CLAUDE.md` if present — Claude MCP names, branch rules, and attribution
 - Root `AGENTS.md` if present
 
 ### 2. Continuity (private brain)
@@ -78,7 +77,10 @@ From product root:
 
 Note: visible main, worktrees, stable/forge readiness.
 Primary shared checkout should stay on **clean `main`**. Implementation uses
-**agent-prefixed worktrees** only.
+**agent-prefixed worktrees** only — and only under
+`<repo>/.worktrees/…` or `/tmp/unigrok-…`, never sibling clutter under Documents.
+If `land-status` shows many worktrees, treat that as **hygiene debt**: remove
+**your own** finished trees before starting more work.
 
 ### 4. Runtime (optional quick)
 
@@ -129,3 +131,7 @@ Before leaving a session that produced decisions:
 2. Put exact head + “ready for Codex land?” on the PR
 3. Leave primary checkout on clean `main`
 4. Hive receipts (if any) under private `harvest/index-diff-hive/`
+5. If this task is done (landed, accepted, abandoned, or user assigned a
+   **new** task): **remove your own worktree** from
+   `.worktrees/…` or `/tmp/unigrok-…` and run `git worktree prune`. Do not
+   leave disposable scratchpads on the user’s disk.

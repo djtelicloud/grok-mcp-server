@@ -94,11 +94,13 @@ Capability names are surface-specific. Treat the connected server's live
 
 ## 4. Multi-Agent Git Coordination Rules
 
-Multiple IDE agents can collaborate on this project concurrently. Follow these rules to prevent merge conflicts and branch switching issues:
+Multiple IDE agents can collaborate on this project concurrently. Follow these rules to prevent merge conflicts, branch switching, and **disk clutter**:
 1. **Never Branch-Switch `main`**: Keep the repository's shared primary checkout on `main`.
-2. **Worktrees for Parallel Tasks**: Always create a separate git worktree and work on an agent-prefixed branch (e.g., `gemini/task-name`, `claude/task-name`).
-3. **Codex Owns Final Integration**: The Codex/project-admin role may run through Codex Desktop, CLI, GitHub Copilot, or another authorized Codex surface. Contributor agents commit and test in their task worktrees, may push only their own agent-prefixed branch and open or update its draft PR, then hand off the exact SHA and verification evidence. They do not push shared `main`, land, merge, release, deploy, or delete worktrees unless explicitly acting in the integration role.
-4. **Mandatory Landing Gate**: Codex reviews the handoff and runs `./scripts/land`. Do not claim integrated completion until it prints `LANDED TO MAIN: <sha>`.
-5. **Visible Main Is the Product**: Local `main` integration is mandatory. Contributor agents own publication only for their task branch and draft PR; Codex/project-admin owns protected-main mutation, final PR disposition, release, deployment, and synchronization under the user's standing authorization.
-6. **Protect Open IDEs**: Never remove task worktrees after landing or overwrite a dirty tracked `main`; another IDE may still be using them.
-7. **Commit-Anchored Memory**: Use the `unigrok-workspace-memory` skill to recall evidence using the agent worktree's own full HEAD. Codex records a concise outcome after landing; do not write Git Notes directly.
+2. **Worktrees Are Scratchpads**: One agent-prefixed branch + one **contained** worktree per task only. Preferred path: `<repo>/.worktrees/<agent>/<task-slug>/` or `/tmp/unigrok-<agent>-<task>/`. **Never** create sibling product clones under `Documents/agentixai/grok-*` next to the real repo.
+3. **Lifecycle**: start → work in that tree only → push PR → when landed/accepted or a **new** task is assigned → **delete your own finished worktree** (`git worktree remove` + prune) → create a **new** tree for the next task. Do not hoard finished trees.
+4. **Codex Owns Final Integration**: Contributor agents do not push shared `main`, land, merge, release, or deploy. They **must** remove **their own** finished worktrees. Codex/project-admin may also prune orphans.
+5. **Mandatory Landing Gate**: Codex reviews the handoff and runs `./scripts/land`. Do not claim integrated completion until it prints `LANDED TO MAIN: <sha>`.
+6. **Visible Main Is the Product**: Local `main` integration is mandatory for integrated product state.
+7. **Protect Peers And Main**: Never remove **another** agent’s live worktree or overwrite a dirty tracked `main`. Your own finished scratchpad is not sacred—remove it.
+8. **Cursor Cloud**: GitHub-only workers need no laptop UniGrok tunnel/env; optional Grok is hosted twin only.
+9. **Commit-Anchored Memory**: Use the `unigrok-workspace-memory` skill with the agent worktree’s own full HEAD. Codex records a landed outcome; do not write Git Notes directly.
