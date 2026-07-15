@@ -16,5 +16,5 @@ def test_public_mcp_transport_security_includes_public_hostname() -> None:
     settings = public_mcp_transport_security(
         public_mcp_url="https://mcp.grokmcp.org/mcp",
     )
-    assert "mcp.grokmcp.org" in settings.allowed_hosts
-    assert "https://mcp.grokmcp.org" in settings.allowed_origins
+    assert settings.allowed_hosts[-1] == "mcp.grokmcp.org"
+    assert settings.allowed_origins[-1] == "https://mcp.grokmcp.org"

@@ -2406,11 +2406,11 @@ def _log_cli_plane_availability():
         logger.info(f"local CLI plane: ready ({cli_path}; verified grok.com OAuth).")
     elif status["binary"]:
         logger.warning(
-            "local CLI plane: %s (%s). Authenticate the global service with `%s`; "
-            "API-plane service remains available.",
+            "local CLI plane: %s (%s). Use grok_mcp_discover_self or the "
+            "Control Center for the bounded authentication action; API-plane "
+            "service remains available.",
             status["state"],
             status["auth"],
-            status["setup_command"],
         )
     else:
         logger.warning(

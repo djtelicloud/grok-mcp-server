@@ -18,6 +18,7 @@ from src.http_server import (
     StaticAssetCacheMiddleware,
     _ACTIVE_MODE_DIAL,
     _derive_http_caller,
+    _log_cli_plane_availability,
     _message_content_size,
     _resolve_bind_host,
     _resolve_bind_port,
@@ -1177,6 +1178,30 @@ def test_resolve_bind_port_explicit_argument_wins(monkeypatch):
     monkeypatch.setenv("PORT", "$PORT")
 
     assert _resolve_bind_port(9090) == 9090
+
+
+def test_cli_plane_warning_never_logs_setup_command(monkeypatch, caplog):
+    marker = "do-not-log-credential-adjacent-command"
+    monkeypatch.setattr(
+        "src.http_server.PathResolver.get_grok_cli_path",
+        lambda: "/usr/local/bin/grok",
+    )
+    monkeypatch.setattr(
+        "src.http_server.grok_cli_plane_status",
+        lambda **_: {
+            "state": "auth_required",
+            "ready": False,
+            "binary": True,
+            "auth": "missing",
+            "setup_command": marker,
+        },
+    )
+
+    with caplog.at_level("WARNING", logger="GrokMCP"):
+        _log_cli_plane_availability()
+
+    assert "grok_mcp_discover_self" in caplog.text
+    assert marker not in caplog.text
 
 
 def test_run_http_server_rejects_exposed_without_auth(monkeypatch):

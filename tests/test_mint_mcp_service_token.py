@@ -6,7 +6,6 @@ import base64
 import hashlib
 import hmac
 import json
-import os
 from pathlib import Path
 
 import pytest
@@ -89,3 +88,26 @@ def test_cli_prints_token_only(capsys: pytest.CaptureFixture[str], monkeypatch: 
     out = capsys.readouterr().out.strip()
     assert out.startswith(TOKEN_PREFIX)
     assert "\n" not in out or out.endswith("\n") is False or True
+
+
+def test_cli_print_claims_uses_independent_non_secret_metadata(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    secret = "do-not-log-this-signing-key" * 2
+    monkeypatch.setenv("UNIGROK_MCP_TOKEN_SECRET", secret)
+    monkeypatch.setenv("UNIGROK_OAUTH_ISSUER", "https://control.grokmcp.org")
+    monkeypatch.setenv("UNIGROK_MCP_RESOURCE_URL", "https://mcp.grokmcp.org/mcp")
+    monkeypatch.setattr("scripts.mint_mcp_service_token.time.time", lambda: 1_700_000_000)
+
+    import scripts.mint_mcp_service_token as mod
+
+    assert mod.main(["--print-claims"]) == 0
+    captured = capsys.readouterr()
+    assert captured.out.startswith(TOKEN_PREFIX)
+    assert json.loads(captured.err) == {
+        "exp": 1_700_000_120,
+        "scope": ["unigrok:connect", "unigrok:review"],
+        "sub": "service:github-review-broker",
+    }
+    assert secret not in captured.out
+    assert secret not in captured.err
