@@ -169,6 +169,12 @@ def test_mcp_ui_static_files_are_served(monkeypatch):
     assert "renderPlaneRepair" in script.text
     assert "clearPlaneModelLists" in script.text
     assert "loadPlaneModelCatalog(false)" in script.text
+    # Operational unavailable sources must not be styled as static fallback catalogs.
+    fallback_set = script.text.split("FALLBACK_CATALOG_SOURCES")[1].split("];")[0]
+    assert '"cloudrun-disabled"' not in fallback_set
+    assert '"skipped"' not in fallback_set
+    # Plane selector must warm dual-plane catalog, not only /v1/models.
+    assert "if (!state.modelCatalog && !state.modelCatalogLoading)" in script.text
     assert 'headers: { "X-Client-ID": "cursor" }' in script.text
     assert "Cursor is the first-class host IDE" in script.text
     assert 'id="cliCatalogTrust"' in index.text
