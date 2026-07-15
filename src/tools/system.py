@@ -1261,6 +1261,8 @@ async def grok_mcp_discover_self(include_models: bool = False) -> SystemResult:
         if model_catalog is not None:
             manifest["model_catalog"] = model_catalog
 
+        canonical_endpoint = bootstrap["surfaces"]["canonical_mcp"]
+        ui_endpoint = bootstrap["surfaces"]["ui"]
         if contributor:
             boundary_extra = (
                 "- Contributor mode may attach the UniGrok checkout and enable insider-only "
@@ -1281,7 +1283,7 @@ async def grok_mcp_discover_self(include_models: bool = False) -> SystemResult:
             )
             dial_extra = (
                 "- Optional phoneword ports, when enabled, are aliases of this same Core service "
-                "(not a second UniGrok to install). Prefer the canonical 4765 endpoint.\n"
+                f"(not a second UniGrok to install). Prefer the connected endpoint `{canonical_endpoint}`.\n"
             )
 
         client_label = _markdown_inline_label(
@@ -1312,9 +1314,9 @@ async def grok_mcp_discover_self(include_models: bool = False) -> SystemResult:
             f"Workspace attached: `{'yes' if workspace_attached else 'no'}`.\n"
             f"{boundary_extra}\n"
             "## Public product path\n"
-            "- Canonical endpoint: `http://localhost:4765/mcp` (`4765` spells GROK).\n"
+            f"- Connected MCP endpoint: `{canonical_endpoint}`. The default Core port is `4765` (GROK).\n"
             "- Health: `GET /healthz`. Readiness: `GET /readyz`. Optional local Core UI: "
-            "`http://localhost:4765/ui/` (trusted machine-owner test/control surface with an "
+            f"`{ui_endpoint}` (trusted machine-owner test/control surface with an "
             "agent playground that can invoke providers and spend metered credits; not GitHub-gated).\n"
             f"{dial_extra}"
             "- An explicit `agent.mode` always overrides a dialed-port default.\n\n"
