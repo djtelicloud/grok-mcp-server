@@ -459,8 +459,9 @@ Args:
         `"fast"` forces a single toolless
         completion; `"reasoning"` pins the planning model; `"thinking"`
         runs the agent loop plus a schema-enforced reflection review
-        (slowest, most expensive); `"research"` pins the planning route,
-        enables multi-agent fan-out, and requests inline citations.
+        (slowest, most expensive); `"research"` pins the research route
+        (xAI's server-side multi-agent model — the fan-out is delegated to
+        xAI, not orchestrated locally) and requests inline citations.
     model: Optional Grok model id. Leave unset (or pass the virtual
         `unigrok-agent`) to let routing choose.
     plane: Starting credential plane. `auto` follows server policy; `cli`
