@@ -234,6 +234,7 @@ const state = {
   metricsSnapshot: null,
   modelCatalog: null,
   modelCatalogLoading: false,
+  modelCatalogGeneration: 0,
   credentialPlanes: null,
 };
 
@@ -1163,12 +1164,18 @@ async function fetchRuntimeStatus() {
     if (data.credential_planes) {
       const priorSignature = credentialPlaneCatalogSignature(state.credentialPlanes);
       const nextSignature = credentialPlaneCatalogSignature(data.credential_planes);
-      if (state.modelCatalog && priorSignature !== nextSignature) {
-        // Catalog availability/source is credential-dependent. Force the next
-        // Planes render to discover a fresh snapshot after Recheck changes it.
-        state.modelCatalog = null;
-      }
       state.credentialPlanes = data.credential_planes;
+      if (priorSignature !== nextSignature) {
+        // Catalog availability/source is credential-dependent. Invalidate any
+        // cached or in-flight snapshot and remove stale plane/model choices.
+        state.modelCatalog = null;
+        state.modelCatalogGeneration += 1;
+        clearPlaneModelLists("Credentials changed. Refreshing model catalog…");
+        clearModelOptions("auto route");
+        if (state.activeTab === "tab-models") {
+          void loadPlaneModelCatalog(true);
+        }
+      }
     }
     $("runtimeChip").innerText = `runtime: ${data.runtime || "unknown"}`;
     $("transportChip").innerText = `transport: ${data.transport || "unknown"}`;
@@ -1262,15 +1269,8 @@ async function loadModelsList() {
     if (!res.ok) throw new Error();
     const data = await res.json();
     state.models = data.data || [];
-
-    const select = $("modelInput");
-    select.innerHTML = '<option value="">auto (Recommended)</option>';
-    state.models.forEach((m) => {
-      const opt = document.createElement("option");
-      opt.value = m.id;
-      opt.innerText = m.id;
-      select.appendChild(opt);
-    });
+    // /v1/models is API-compatible and intentionally does not own the plane-
+    // aware selector. grok_mcp_discover_self is the only source for that UI.
   } catch (err) {
     console.error("Failed to load models list: ", err);
   }
@@ -1312,6 +1312,16 @@ function syncModelOptions() {
     if (group.children.length) select.appendChild(group);
   }
   select.value = seen.has(previous) ? previous : "";
+}
+
+function clearModelOptions(label = "auto route") {
+  const select = $("modelInput");
+  if (!select) return;
+  select.replaceChildren();
+  const automatic = document.createElement("option");
+  automatic.value = "";
+  automatic.innerText = label;
+  select.appendChild(automatic);
 }
 
 function updatePlaneControls() {
@@ -1600,6 +1610,8 @@ async function loadPlaneModelCatalog(force = true) {
   }
   if (state.modelCatalogLoading) return;
 
+  const generation = state.modelCatalogGeneration;
+
   const refreshButton = $("refreshModelsBtn");
   if (refreshButton) refreshButton.disabled = true;
   state.modelCatalogLoading = true;
@@ -1612,8 +1624,12 @@ async function loadPlaneModelCatalog(force = true) {
     const catalog = payload?.data?.model_catalog;
     const contract = payload?.data?.credential_planes || state.credentialPlanes;
     if (!catalog) throw new Error("Discovery response did not include a model catalog.");
+    if (generation !== state.modelCatalogGeneration) return;
     renderPlaneModelCatalog(catalog, contract);
   } catch (err) {
+    if (generation !== state.modelCatalogGeneration) return;
+    state.modelCatalog = null;
+    clearModelOptions("auto route");
     if ($("modelsStatus")) {
       $("modelsStatus").innerText = `Model catalog unavailable: ${err.message}`;
     }
@@ -1633,6 +1649,11 @@ async function loadPlaneModelCatalog(force = true) {
   } finally {
     state.modelCatalogLoading = false;
     if (refreshButton) refreshButton.disabled = false;
+    if (generation !== state.modelCatalogGeneration && !state.modelCatalog) {
+      // A credential recheck invalidated this in-flight response. Start one
+      // fresh request after releasing the single-flight guard.
+      void loadPlaneModelCatalog(false);
+    }
   }
 }
 

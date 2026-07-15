@@ -356,6 +356,49 @@ def test_discover_bootstrap_surfaces_follow_connected_port(monkeypatch):
         "runtimez": "http://localhost:9090/runtimez",
         "ui": "http://localhost:9090/ui/",
     }
+    assert any(
+        "http://localhost:9090/mcp" in step
+        for step in bootstrap["first_connect_checklist"]
+    )
+
+
+def test_discover_bootstrap_swarm_policy_matches_runtime_parser(monkeypatch):
+    from src.tools.system import _build_discover_bootstrap
+
+    monkeypatch.setenv("UNIGROK_RUNTIME", "local")
+    credentials = {
+        "service_usable": True,
+        "degraded": False,
+        "api": {"available": True},
+        "cli": {"available": True},
+        "notices": [],
+    }
+
+    for configured, expected, usable in (
+        ("active", "active", True),
+        ("dry_run", "dry_run", True),
+        ("on", "off", False),
+        ("true", "off", False),
+    ):
+        monkeypatch.setenv("UNIGROK_SWARM", configured)
+        bootstrap = _build_discover_bootstrap(
+            contributor=True,
+            workspace_attached=True,
+            credential_planes=credentials,
+            request_context={"client_id_present": True, "host_port": 4766},
+        )
+        assert bootstrap["swarm_policy"] == expected
+        assert bootstrap["can_use_swarm"] is usable
+
+
+@pytest.mark.asyncio
+async def test_discover_manifest_endpoint_follows_connected_port(monkeypatch):
+    monkeypatch.setattr("src.http_server.get_active_host_port", lambda: 9090)
+
+    result = await grok_mcp_discover_self()
+
+    assert result.data["canonical_endpoint"] == "http://localhost:9090/mcp"
+    assert result.data["bootstrap"]["surfaces"]["canonical_mcp"] == result.data["canonical_endpoint"]
 
 
 def test_discover_bootstrap_disables_workspace_mutation_in_cloudrun(monkeypatch):
