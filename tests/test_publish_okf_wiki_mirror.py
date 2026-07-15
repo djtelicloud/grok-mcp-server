@@ -15,10 +15,17 @@ def test_build_mirror_prunes_stale_pages_and_covers_manifest(tmp_path: Path) -> 
     out.mkdir()
     stale = out / "removed-source.md"
     stale.write_text("stale", encoding="utf-8")
+    stale_data = out / "removed-source.json"
+    stale_data.write_text("{}", encoding="utf-8")
+    stale_dir = out / "removed-section"
+    stale_dir.mkdir()
+    (stale_dir / "page.md").write_text("stale", encoding="utf-8")
 
     written = mirror.build_mirror(out)
 
     assert not stale.exists()
+    assert not stale_data.exists()
+    assert not stale_dir.exists()
     assert out / "Home.md" in written
     assert out / "_Sidebar.md" in written
     manifest = json.loads(mirror.OKF_MANIFEST.read_text(encoding="utf-8"))
@@ -30,12 +37,13 @@ def test_build_mirror_prunes_stale_pages_and_covers_manifest(tmp_path: Path) -> 
     listed_packs = [mirror.ROOT / pack["body_path"] for pack in pack_manifest["packs"]]
     for pack in listed_packs:
         assert (out / f"{mirror._slug(pack.name)}.md").is_file(), pack.name
-    generated_pack_names = {
-        path.name for path in written if path.stem.startswith("v0-")
-    }
-    assert generated_pack_names == {
-        f"{mirror._slug(pack.name)}.md" for pack in listed_packs
-    }
+    written_names = {path.name for path in written}
+    expected_pack_names = {f"{mirror._slug(pack.name)}.md" for pack in listed_packs}
+    unlisted_pack_names = {
+        f"{mirror._slug(pack.name)}.md" for pack in mirror.PACKS.glob("v*.md")
+    } - expected_pack_names
+    assert expected_pack_names <= written_names
+    assert written_names.isdisjoint(unlisted_pack_names)
 
     schema_page = out / "gno-envelope-v1.schema.json.md"
     schema_text = schema_page.read_text(encoding="utf-8")
@@ -54,6 +62,13 @@ def test_reserved_wiki_slugs_are_rejected(name: str) -> None:
 def test_output_directory_must_stay_outside_repository() -> None:
     with pytest.raises(ValueError, match="outside the repository"):
         mirror.build_mirror(mirror.ROOT / "wiki-output")
+
+
+def test_git_checkout_is_never_used_as_replaceable_staging(tmp_path: Path) -> None:
+    out = tmp_path / "wiki-checkout"
+    (out / ".git").mkdir(parents=True)
+    with pytest.raises(ValueError, match="staging, not a Git checkout"):
+        mirror.build_mirror(out)
 
 
 def test_invalid_json_error_names_the_artifact(tmp_path: Path) -> None:

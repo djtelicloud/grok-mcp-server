@@ -15,6 +15,7 @@ import argparse
 import json
 import re
 import shlex
+import shutil
 from pathlib import Path
 
 from jsonschema import Draft202012Validator
@@ -142,8 +143,13 @@ def build_mirror(out: Path) -> list[Path]:
         raise ValueError("--out-dir must be outside the repository")
 
     out.mkdir(parents=True, exist_ok=True)
-    for old in out.glob("*.md"):
-        old.unlink()
+    if (out / ".git").exists():
+        raise ValueError("--out-dir must be staging, not a Git checkout")
+    for old in out.iterdir():
+        if old.is_symlink() or old.is_file():
+            old.unlink()
+        elif old.is_dir():
+            shutil.rmtree(old)
 
     index_path, okf_files = _manifest_files()
     pack_files = _pack_files()
