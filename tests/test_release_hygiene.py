@@ -212,6 +212,13 @@ def test_disposable_scratchpad_cleanup_is_consistent():
         encoding="utf-8"
     )
     root_agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
+    gemini = (ROOT / ".gemini" / "GEMINI.md").read_text(encoding="utf-8")
+    agent_rehydrate = (
+        ROOT / ".agents" / "skills" / "session-rehydrate" / "SKILL.md"
+    ).read_text(encoding="utf-8")
+    claude_rehydrate = (
+        ROOT / ".claude" / "skills" / "session-rehydrate" / "SKILL.md"
+    ).read_text(encoding="utf-8")
 
     for text in (shared, skill, root_agents):
         normalized = " ".join(text.split())
@@ -226,6 +233,11 @@ def test_disposable_scratchpad_cleanup_is_consistent():
     assert "primary main" in shared or "primary main checkout" in shared
     assert "Cursor Automations" in shared
     assert "Single-agent only" in shared
+    assert "After Live, abandonment, or a new task" in gemini
+    assert "After Ready for supervisor" not in gemini
+    assert "Ready / Not ready / Live / Not live / Blocked" in gemini
+    for rehydrate in (agent_rehydrate, claude_rehydrate):
+        assert "If this task is done (Live, abandoned, or new task assigned)" in rehydrate
     # Old absolute ban must not remain as a hard stop without the exception.
     assert "or delete worktrees unless they are explicitly acting" not in shared
     assert "Never remove task worktrees after landing" not in skill
