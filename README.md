@@ -57,6 +57,10 @@ how UniGrok runs on your machine — not as “you are a Docker developer.”
 
 ## 3. Run the gateway
 
+> [!WARNING]
+> UniGrok is not published on PyPI.
+> `pip install mcp-grok` installs an unrelated project; use this GitHub checkout.
+
 ```bash
 git clone https://github.com/djtelicloud/grok-mcp-server.git
 cd grok-mcp-server
