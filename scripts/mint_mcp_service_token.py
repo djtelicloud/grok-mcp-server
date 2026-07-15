@@ -15,7 +15,7 @@ Environment (required):
 
 Optional:
   UNIGROK_SERVICE_NAME      — github-review-broker | cursor-cloud
-  UNIGROK_SERVICE_SCOPE     — review (broker) | invoke (cursor-cloud)
+  UNIGROK_SERVICE_SCOPE     — unigrok:review (broker) | unigrok:invoke (cursor-cloud)
   UNIGROK_TOKEN_TTL_SECONDS — default per service (max 600)
 
 Prints the bearer token to stdout only (no logs of the secret).
@@ -56,7 +56,8 @@ SERVICE_SPECS: dict[str, dict[str, Any]] = {
     },
     # Cursor Cloud / headless IDE agents: invoke + status (discover/status tools).
     "cursor-cloud": {
-        "scopes": frozenset({"unigrok:invoke", "unigrok:status"}),
+        # Status is granted only inside the fixed cursor-cloud bundle below.
+        "scopes": frozenset({"unigrok:invoke"}),
         "default_scope": "unigrok:invoke",
         "default_ttl": 600,
         "max_ttl": 600,
@@ -88,6 +89,29 @@ def sign_cookie_payload(payload: Mapping[str, Any], secret: str) -> str:
     return f"{body}.{_b64url(signature)}"
 
 
+def _service_token_parameters(
+    service: str,
+    scope: Optional[str],
+    ttl_seconds: Optional[int],
+) -> tuple[str, int, list[str]]:
+    """Validate a service request and return its exact scope/TTL bundle."""
+    if service not in SERVICE_SPECS:
+        raise ValueError(f"service not allowed: {service}")
+    spec = SERVICE_SPECS[service]
+    primary = (scope or spec["default_scope"]).strip()
+    if primary not in spec["scopes"]:
+        raise ValueError(f"scope not allowed for service {service}: {primary}")
+    ttl = int(ttl_seconds if ttl_seconds is not None else spec["default_ttl"])
+    max_ttl = int(spec["max_ttl"])
+    if not (1 <= ttl <= min(max_ttl, MAX_TTL)):
+        raise ValueError(f"ttl_seconds must be 1..{min(max_ttl, MAX_TTL)} for {service}")
+    if service == "cursor-cloud":
+        granted = ["unigrok:connect", "unigrok:invoke", "unigrok:status"]
+    else:
+        granted = ["unigrok:connect", primary]
+    return primary, ttl, granted
+
+
 def mint_service_access_token(
     *,
     secret: str,
@@ -99,27 +123,12 @@ def mint_service_access_token(
     now: Optional[int] = None,
     jti: Optional[str] = None,
 ) -> str:
-    if service not in SERVICE_SPECS:
-        raise ValueError(f"service not allowed: {service}")
-    spec = SERVICE_SPECS[service]
-    primary = (scope or spec["default_scope"]).strip()
-    if primary not in spec["scopes"]:
-        raise ValueError(f"scope not allowed for service {service}: {primary}")
+    _primary, ttl, granted = _service_token_parameters(service, scope, ttl_seconds)
     if not issuer.startswith("https://") or issuer.endswith("/"):
         raise ValueError("issuer must be an https origin without trailing slash")
     if not resource.startswith("https://") or not resource.endswith("/mcp"):
         raise ValueError("resource must be https://…/mcp")
-    ttl = int(ttl_seconds if ttl_seconds is not None else spec["default_ttl"])
-    max_ttl = int(spec["max_ttl"])
-    if not (1 <= ttl <= min(max_ttl, MAX_TTL)):
-        raise ValueError(f"ttl_seconds must be 1..{min(max_ttl, MAX_TTL)} for {service}")
     iat = int(now if now is not None else time.time())
-    # Always grant connect + capability. cursor-cloud is a fixed package so
-    # discover/status + agent work without a second mint.
-    if service == "cursor-cloud":
-        granted = ["unigrok:connect", "unigrok:invoke", "unigrok:status"]
-    else:
-        granted = ["unigrok:connect", primary]
     claims = {
         "aud": resource,
         "exp": iat + ttl,
@@ -155,6 +164,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         raise SystemExit("UNIGROK_TOKEN_TTL_SECONDS must be an integer") from exc
 
     issued_at = int(time.time())
+    _primary, resolved_ttl, granted = _service_token_parameters(service, scope, ttl)
     token = mint_service_access_token(
         secret=secret,
         issuer=issuer,
@@ -165,14 +175,10 @@ def main(argv: Optional[list[str]] = None) -> int:
         now=issued_at,
     )
     if args.print_claims:
-        body = token[len(TOKEN_PREFIX) :].split(".", 1)[0]
-        pad = "=" * (-len(body) % 4)
-        # Decode only for operator metadata after we minted it; never log secret.
-        claims = json.loads(base64.urlsafe_b64decode(body + pad))
         claims_metadata = {
-            "exp": claims["exp"],
-            "scope": claims["scope"],
-            "sub": claims["sub"],
+            "exp": issued_at + resolved_ttl,
+            "scope": granted,
+            "sub": f"service:{service}",
         }
         print(json.dumps(claims_metadata, sort_keys=True), file=sys.stderr)
     sys.stdout.write(token)

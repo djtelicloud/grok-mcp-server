@@ -106,6 +106,14 @@ def test_mint_rejects_disallowed_service_and_scope() -> None:
             service="cursor-cloud",
             scope="unigrok:review",
         )
+    with pytest.raises(ValueError, match="scope not allowed"):
+        mint_service_access_token(
+            secret=secret,
+            issuer="https://control.grokmcp.org",
+            resource="https://mcp.grokmcp.org/mcp",
+            service="cursor-cloud",
+            scope="unigrok:status",
+        )
 
 
 def test_cli_prints_token_only(capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
@@ -116,9 +124,9 @@ def test_cli_prints_token_only(capsys: pytest.CaptureFixture[str], monkeypatch: 
     import scripts.mint_mcp_service_token as mod
 
     assert mod.main([]) == 0
-    out = capsys.readouterr().out.strip()
+    out = capsys.readouterr().out
     assert out.startswith(TOKEN_PREFIX)
-    assert "\n" not in out or out.endswith("\n") is False or True
+    assert "\n" not in out
 
 
 def test_cli_print_claims_uses_independent_non_secret_metadata(
@@ -132,6 +140,11 @@ def test_cli_print_claims_uses_independent_non_secret_metadata(
 
     import scripts.mint_mcp_service_token as mod
 
+    monkeypatch.setattr(
+        mod,
+        "mint_service_access_token",
+        lambda **_: f"{TOKEN_PREFIX}opaque-non-json-token",
+    )
     assert mod.main(["--print-claims"]) == 0
     captured = capsys.readouterr()
     assert captured.out.startswith(TOKEN_PREFIX)

@@ -202,7 +202,8 @@ export const MCP_SERVICE_SPECS = Object.freeze({
     ttlSeconds: 120,
   },
   "cursor-cloud": {
-    scopes: Object.freeze(["unigrok:invoke", "unigrok:status"] as const),
+    // Status is granted only inside the fixed cursor-cloud bundle below.
+    scopes: Object.freeze(["unigrok:invoke"] as const),
     ttlSeconds: TOKEN_TTL_SECONDS,
   },
 } as const);
@@ -295,6 +296,7 @@ function isAccessClaims(value: unknown, config: McpOAuthConfig, now: number): va
     if (record.sub === "service:github-review-broker") {
       return (
         Array.isArray(record.scope) &&
+        record.scope.length === 2 &&
         record.scope.includes("unigrok:connect") &&
         record.scope.includes("unigrok:review") &&
         record.scope.every((scope) => scope === "unigrok:connect" || scope === "unigrok:review")
@@ -303,8 +305,10 @@ function isAccessClaims(value: unknown, config: McpOAuthConfig, now: number): va
     if (record.sub === "service:cursor-cloud") {
       return (
         Array.isArray(record.scope) &&
+        record.scope.length === 3 &&
         record.scope.includes("unigrok:connect") &&
         record.scope.includes("unigrok:invoke") &&
+        record.scope.includes("unigrok:status") &&
         record.scope.every(
           (scope) =>
             scope === "unigrok:connect" ||

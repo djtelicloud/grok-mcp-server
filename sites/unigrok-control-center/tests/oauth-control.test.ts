@@ -14,13 +14,15 @@ import {
 } from "../app/lib/landing-receipt";
 import {
   createAuthorizationCode,
+  createServiceAccessToken,
   exchangeAuthorizationCode,
+  McpOAuthError,
   normalizeScopes,
   readAccessToken,
   registerOAuthClient,
   type McpOAuthConfig,
 } from "../app/lib/mcp-oauth";
-import { sha256Base64Url } from "../app/lib/signed-cookie";
+import { sha256Base64Url, signCookiePayload } from "../app/lib/signed-cookie";
 
 const oauth: McpOAuthConfig = {
   issuer: "https://control.grokmcp.org",
@@ -62,6 +64,43 @@ test("dynamic OAuth client, PKCE code, and scoped token round trip", async () =>
   await assert.rejects(() => exchangeAuthorizationCode(oauth, { ...input, verifier: "x".repeat(64) }, 1_800_000_001_000));
   assert.equal(await readAccessToken(oauth, first.access_token, 1_800_000_800_000), null);
   assert.throws(() => normalizeScopes("unigrok:review repository:write"));
+});
+
+test("cursor-cloud service tokens require the exact fixed scope bundle", async () => {
+  const now = 1_800_000_000_000;
+  const token = await createServiceAccessToken(
+    oauth,
+    "cursor-cloud",
+    "unigrok:invoke",
+    now,
+  );
+  const claims = await readAccessToken(oauth, token, now + 1_000);
+  assert.equal(claims?.sub, "service:cursor-cloud");
+  assert.deepEqual(claims?.scope, [
+    "unigrok:connect",
+    "unigrok:invoke",
+    "unigrok:status",
+  ]);
+  await assert.rejects(
+    () => createServiceAccessToken(oauth, "cursor-cloud", "unigrok:status", now),
+    (error: unknown) =>
+      error instanceof McpOAuthError && error.oauthCode === "invalid_scope",
+  );
+
+  const iat = Math.floor(now / 1_000);
+  const missingStatus = {
+    aud: oauth.resource,
+    exp: iat + 600,
+    iat,
+    iss: oauth.issuer,
+    jti: "missing-status-scope-test",
+    kind: "service",
+    scope: ["unigrok:connect", "unigrok:invoke"],
+    sub: "service:cursor-cloud",
+    v: 1,
+  };
+  const malformed = `ugtoken.${await signCookiePayload(missingStatus, oauth.secret)}`;
+  assert.equal(await readAccessToken(oauth, malformed, now + 1_000), null);
 });
 
 test("authorization requires same-origin explicit consent before issuing a code", async () => {
