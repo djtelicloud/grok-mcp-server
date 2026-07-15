@@ -142,15 +142,29 @@ test("introspection exposes claims only for a valid bearer with the required sco
     ));
     const wrongScope = await introspect("unigrok:invoke");
     assert.equal(wrongScope.status, 200);
+    assert.equal(wrongScope.headers.get("cache-control"), "no-store");
     assert.deepEqual(await wrongScope.json(), { active: false });
 
     const allowed = await introspect("unigrok:review");
     assert.equal(allowed.status, 200);
     assert.equal(allowed.headers.get("cache-control"), "no-store");
     const claims = await allowed.json() as Record<string, unknown>;
+    assert.deepEqual(Object.keys(claims).sort(), [
+      "active",
+      "aud",
+      "client_id",
+      "exp",
+      "iat",
+      "iss",
+      "scope",
+      "sub",
+      "token_type",
+    ]);
     assert.equal(claims.active, true);
     assert.equal(claims.aud, oauth.resource);
     assert.equal(claims.client_id, "service:github-review-broker");
+    assert.ok(typeof claims.exp === "number" && Number.isInteger(claims.exp));
+    assert.ok(typeof claims.iat === "number" && Number.isInteger(claims.iat));
     assert.equal(claims.iss, oauth.issuer);
     assert.equal(claims.scope, "unigrok:connect unigrok:review");
     assert.equal(claims.sub, "service:github-review-broker");
