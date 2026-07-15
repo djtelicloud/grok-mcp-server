@@ -11089,6 +11089,14 @@ def _routing_failure_evidence(exc: Exception) -> Dict[str, Any]:
     return evidence
 
 
+def _api_only_capability_requested(
+    *, mode: str, thinking_mode: bool, features: Dict[str, Any]
+) -> bool:
+    """Return whether the request needs an API-native execution capability."""
+
+    return bool(thinking_mode or mode == "research" or features.get("has_image"))
+
+
 async def _select_routing_model(
     *,
     prompt: str,
@@ -11108,8 +11116,10 @@ async def _select_routing_model(
         input_messages=input_messages,
         enable_agentic=enable_agentic,
     )
-    api_only_exact_pin = bool(
-        thinking_mode or mode == "research" or features.get("has_image")
+    api_only_exact_pin = _api_only_capability_requested(
+        mode=mode,
+        thinking_mode=thinking_mode,
+        features=features,
     )
 
     if requested_model:
@@ -11428,10 +11438,10 @@ async def orchestrate(
         input_messages=input_messages,
         enable_agentic=enable_agentic,
     )
-    cli_selection_compatible = not (
-        thinking_mode
-        or mode == "research"
-        or bool(selection_features.get("has_image"))
+    cli_selection_compatible = not _api_only_capability_requested(
+        mode=mode,
+        thinking_mode=thinking_mode,
+        features=selection_features,
     )
 
     async def _select_for_plane(
