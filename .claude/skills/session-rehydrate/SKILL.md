@@ -22,11 +22,15 @@ Do this for the whole session after rehydrate:
    unless the user asked for a live play-by-play.
 3. **No fake progress essays.** “I’m checking X… now Y…” is noise. Use tools;
    then speak.
-4. **UniGrok second opinions:** when calling MCP `agent` for hard product
+4. **Human language only to the user:** Ready / Not ready / Live / Not live /
+   Blocked / Who (**brand first**). Do not dump git jargon unless they asked
+   for git. “Done / pushed?” means **Ready for supervisor**, not a git lecture.
+   Full map: `.agents/AGENTS.md` → Human language.
+5. **UniGrok second opinions:** when calling MCP `agent` for hard product
    claims, prefer **CLI** + `mode=fast` for index-diff hive polls; keep
    **visible emit tiny**. Insider silent-think doctrine lives in private
    `../unigrok-intelligence/playbooks/silent-think-harness.md` (not public default).
-5. **Exceptions:** user asks “explain as you go”, safety/permission prompts,
+6. **Exceptions:** user asks “explain as you go”, safety/permission prompts,
    or a blocking question that needs a human.
 
 This is **session law** when this skill or `.agents/AGENTS.md` is loaded — not
@@ -46,8 +50,8 @@ so these rules load.
 Read (skim) when available:
 
 - `.agents/AGENTS.md` — multi-agent git, MCP endpoint, credentials boundary
-- Root `CLAUDE.md` if present — Claude MCP names, branch rules, and attribution
 - Root `AGENTS.md` if present
+- Root `CLAUDE.md` if present
 
 ### 2. Continuity (private brain)
 
@@ -78,7 +82,10 @@ From product root:
 
 Note: visible main, worktrees, stable/forge readiness.
 Primary shared checkout should stay on **clean `main`**. Implementation uses
-**agent-prefixed worktrees** only.
+**agent-prefixed worktrees** only — under `<repo>/.worktrees/…` or
+`/tmp/unigrok-…` (or provider homes like `~/.gemini/…/worktrees`,
+`~/.codex/worktrees`). Never Documents sibling clutter. Many leftover trees =
+hygiene debt; remove **yours** before starting more.
 
 ### 4. Runtime (optional quick)
 
@@ -126,6 +133,8 @@ Then wait for the user task — or continue if they already gave one.
 Before leaving a session that produced decisions:
 
 1. Update private `active-work-latest.md` when continuity changed
-2. Put exact head + “ready for Codex land?” on the PR
+2. Put exact head + “ready for supervisor?” on the PR
 3. Leave primary checkout on clean `main`
 4. Hive receipts (if any) under private `harvest/index-diff-hive/`
+5. If this task is done (Live, abandoned, or new task assigned): remove **your
+   own** finished worktree and prune. Do not leave disposable scratchpads.

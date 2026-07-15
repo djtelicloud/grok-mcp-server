@@ -205,6 +205,50 @@ def test_session_rehydrate_skills_use_project_qualified_continuity():
     assert "Root `CLAUDE.md` if present" in claude_skill
 
 
+def test_disposable_scratchpad_cleanup_is_consistent():
+    """Own finished scratchpads may be removed; peer/main deletion stays forbidden."""
+    shared = (ROOT / ".agents" / "AGENTS.md").read_text(encoding="utf-8")
+    skill = (ROOT / ".agents" / "skills" / "uni-grok-mcp" / "SKILL.md").read_text(
+        encoding="utf-8"
+    )
+    root_agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
+    gemini = (ROOT / ".gemini" / "GEMINI.md").read_text(encoding="utf-8")
+    agent_rehydrate = (
+        ROOT / ".agents" / "skills" / "session-rehydrate" / "SKILL.md"
+    ).read_text(encoding="utf-8")
+    claude_rehydrate = (
+        ROOT / ".claude" / "skills" / "session-rehydrate" / "SKILL.md"
+    ).read_text(encoding="utf-8")
+    claude_root = (ROOT / "CLAUDE.md").read_text(encoding="utf-8")
+
+    for text in (shared, skill, root_agents):
+        normalized = " ".join(text.split())
+        assert "finished disposable scratchpad" in normalized
+        # Each guidance surface must protect primary main (not only shared).
+        assert (
+            "primary main checkout" in normalized
+            or "Never delete another agent" in normalized
+            or "never delete peers" in normalized
+        ), "expected primary-main / peer protection"
+    assert "Never delete another agent" in shared or "Never remove peers" in shared
+    assert "primary main" in shared or "primary main checkout" in shared
+    assert "Cursor Automations" in shared
+    assert "Single-agent only" in shared
+    assert "After Live, abandonment, or a new task" in gemini
+    assert "After Ready for supervisor" not in gemini
+    assert "Ready / Not ready / Live / Not live / Blocked" in gemini
+    for rehydrate in (agent_rehydrate, claude_rehydrate):
+        assert "If this task is done (Live, abandoned, or new task assigned)" in rehydrate
+    assert "own finished disposable scratchpad" in " ".join(claude_root.split())
+    assert "Never remove peer worktrees or the primary main checkout" in " ".join(
+        claude_root.split()
+    )
+    assert "or remove worktrees. A" not in claude_root
+    # Old absolute ban must not remain as a hard stop without the exception.
+    assert "or delete worktrees unless they are explicitly acting" not in shared
+    assert "Never remove task worktrees after landing" not in skill
+
+
 def test_public_docs_surfaces_exclude_github_wiki_as_product():
     """Public knowledge is README + OKF; GitHub Wiki is not a second tree."""
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
