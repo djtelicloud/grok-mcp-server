@@ -32,6 +32,12 @@ from typing import Any, Dict, List, Optional, Set
 
 from pydantic import BaseModel, Field as PydanticField
 
+from .hydration import (
+    HydrationContext,
+    HydrationResult,
+    get_hydration_service,
+    reset_hydration_services,
+)
 from .utils import (
     _bounded_redacted,
     _env_timeout,
@@ -183,26 +189,33 @@ def _settle_budget(reservation: float, actual_cost: float) -> None:
         _STATS["judge_cost_usd_today"] += max(0.0, float(actual_cost or 0.0))
 
 
+class SemanticJudgeBudgetHook:
+    name = "semantic_judge_budget"
+    scope = "process_day"
+
+    async def hydrate(self, store: Any, ctx: HydrationContext) -> HydrationResult:
+        durable = max(
+            0.0,
+            float(await store.get_semantic_judge_cost_today() or 0.0),
+        )
+
+        with _STATS_LOCK:
+            _roll_budget_day_locked()
+            _STATS["budget_hydrated_day"] = datetime.now().date().isoformat()
+            if durable > _STATS["judge_cost_usd_today"]:
+                _STATS["judge_cost_usd_today"] = durable
+        return HydrationResult()
+
+
 async def _hydrate_budget_from_store(store: Any) -> None:
     """Once per process-day, floor the in-process spend accumulator at the
     durable telemetry record (summed semantic.judge_cost_usd) so a restart
     cannot silently re-arm an exhausted budget. A failed store read fails
     open — un-hydrated, the in-process accounting still bounds spend within
     this process — and retries on the next sampled call."""
-    today = datetime.now().date().isoformat()
-    with _STATS_LOCK:
-        if _STATS["budget_hydrated_day"] == today:
-            return
-    try:
-        durable = max(0.0, float(await store.get_semantic_judge_cost_today() or 0.0))
-    except Exception as exc:
-        logging.getLogger(_LOGGER).warning(f"Semantic eval budget hydration failed: {exc}")
-        return
-    with _STATS_LOCK:
-        _roll_budget_day_locked()
-        _STATS["budget_hydrated_day"] = today
-        if durable > _STATS["judge_cost_usd_today"]:
-            _STATS["judge_cost_usd_today"] = durable
+    service = get_hydration_service(store)
+    service.register(SemanticJudgeBudgetHook())
+    await service.hydrate_hook("semantic_judge_budget")
 
 
 def _record_scores(scores: Dict[str, int], overall: float) -> None:
@@ -246,6 +259,7 @@ def reset_semantic_evals_state() -> None:
     _TESTING_OVERRIDE = False
     _JUDGE_SEMAPHORE = None
     _PENDING.clear()
+    reset_hydration_services()
 
 
 # ─── Judge schema + prompts ──────────────────────────────────────────────────

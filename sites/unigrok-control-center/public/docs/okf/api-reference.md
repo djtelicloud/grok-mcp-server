@@ -511,6 +511,62 @@ host. Production Cloud Run serves ``mcp.grokmcp.org`` (and similar), so
 authenticated /mcp traffic must allow the public hostname from
 ``UNIGROK_PUBLIC_MCP_URL`` or the optional override.
 
+## hydration.py {#hydration}
+
+### Class: `HydrationService` {#hydration-hydrationservice}
+
+```python
+class HydrationService
+```
+
+**Keywords:** hydration, service
+
+Coordinate idempotent hooks for one concrete store instance.
+
+Hook execution happens outside locks. A shared in-flight future prevents
+concurrent first-use requests from running the same hook twice. Failed or
+cancelled hydration is never marked complete, so a later request retries.
+
+### Method: `HydrationService.hydrate_hook` {#hydration-hydrationservice-hydrate_hook}
+
+```python
+async def HydrationService.hydrate_hook(self, hook_name: str, ctx: Optional[HydrationContext]=None) -> bool
+```
+
+**Keywords:** hydration, service, hydrate, hook
+
+Hydrate one hook, returning whether its scope is hydrated.
+
+### Function: `get_hydration_service` {#hydration-get_hydration_service}
+
+```python
+def get_hydration_service(store: SessionStoreProtocol) -> HydrationService
+```
+
+**Keywords:** get, hydration, service
+
+Return the service bound to exactly this store instance.
+
+### Function: `reset_hydration_services` {#hydration-reset_hydration_services}
+
+```python
+def reset_hydration_services() -> None
+```
+
+**Keywords:** reset, hydration, services
+
+Reset the process registry (tests and controlled service teardown).
+
+### Function: `reset_hydration_service` {#hydration-reset_hydration_service}
+
+```python
+def reset_hydration_service() -> None
+```
+
+**Keywords:** reset, hydration, service
+
+Backward-compatible singular alias.
+
 ## identity.py {#identity}
 
 ### Function: `scoped_session` {#identity-scoped_session}

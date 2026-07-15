@@ -37,8 +37,8 @@ Select modular tools based on the nature of the request:
 > [!IMPORTANT]
 > **Glossary: Do not conflate "Hydrate" concepts**
 > - **Session Rehydrate**: Booting intelligence from git/disk across chats.
-> - **Process / Telemetry Hydration**: In-process runtime accumulators surviving server restarts (`src/hydration.py`).
-> - **Hydration Lanes / Scratchpads**: Disposable worktrees used for isolation/continuity (`.worktrees/`).
+> - **Process / Telemetry Hydration**: Recovering bounded in-memory runtime state from the configured durable store after restart (`src/hydration.py`).
+> - **Hydration Lanes / Scratchpads**: Disposable Git worktrees used for contributor isolation.
 > Never mix these up; they are three completely separate boundaries.
 
 ## 4b. Session rehydrate — brand next steps (Gemini / Antigravity)

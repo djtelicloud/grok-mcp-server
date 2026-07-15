@@ -18,9 +18,9 @@ UniGrok is built for zero-trust swarm environments, providing rich operational t
 
 > [!IMPORTANT]
 > **Glossary: Process Hydration vs Intelligence Rehydrate**
-> - **Process / Telemetry Hydration**: When the server restarts, metrics (like caller budgets and semantic evaluator spend) are "hydrated" (recovered) from the durable `grok_sessions.db` to ensure honest limits and observability.
+> - **Process / Telemetry Hydration**: After a server restart, bounded caller-budget and semantic-evaluator spend state is recovered from the configured durable session store. The reference implementation uses `grok_sessions.db`.
 > - **Session Rehydrate**: The act of an agent reading git/disk to recover task intelligence.
-> - **Hydration Lanes**: Disposable `.worktrees/` used for isolation.
+> - **Hydration Lanes**: Disposable Git worktrees used for contributor isolation.
 > Only **Process Hydration** relates to UniGrok telemetry.
 
 ### 1. MCP Status Tool (`grok_mcp_status`)
