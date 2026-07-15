@@ -202,12 +202,12 @@
             <div class="panel-header">
               <div>
                 <h2>Models &amp; Credential Planes</h2>
-                <p class="panel-desc">Live provider catalogs kept separate so a model name never hides how the request is authenticated or billed.</p>
+                <p class="panel-desc">UniGrok’s two <strong>Grok</strong> credential planes (subscription CLI vs metered API). Host IDEs such as <strong>Cursor</strong> may offer other models outside UniGrok — those stay on the IDE side; this tab only shows what UniGrok can pin and bill.</p>
               </div>
               <button id="refreshModelsBtn" type="button" class="small-btn-glow">Refresh catalogs</button>
             </div>
 
-            <div id="modelsStatus" class="metrics-status">Loading model catalogs through MCP discovery…</div>
+            <div id="modelsStatus" class="metrics-status">Open this tab or press Refresh to load live catalogs…</div>
 
             <section class="routing-policy-card" aria-label="Current plane routing policy">
               <div>
@@ -231,12 +231,14 @@
                   </div>
                   <span id="cliModelPlaneState" class="state-chip">Checking</span>
                 </div>
+                <p id="cliCatalogTrust" class="catalog-trust-banner hidden" role="status"></p>
                 <p id="cliModelEconomics" class="plane-economics">Subscription activity is tracked locally; provider quota and cost are not exposed.</p>
+                <div id="cliPlaneRepair" class="plane-repair hidden"></div>
                 <dl class="plane-facts">
                   <div><dt>Catalog</dt><dd id="cliModelSource">—</dd></div>
                   <div><dt>Default</dt><dd id="cliDefaultModel">—</dd></div>
                 </dl>
-                <div id="cliModelList" class="model-card-list"><span class="empty-cell">Loading CLI models…</span></div>
+                <div id="cliModelList" class="model-card-list"><span class="empty-cell">Catalog not loaded yet.</span></div>
               </section>
 
               <section id="apiModelPlane" class="model-plane-card api-plane">
@@ -247,17 +249,20 @@
                   </div>
                   <span id="apiModelPlaneState" class="state-chip">Checking</span>
                 </div>
+                <p id="apiCatalogTrust" class="catalog-trust-banner hidden" role="status"></p>
                 <p id="apiModelEconomics" class="plane-economics">Exact response cost is tracked locally when the provider returns it.</p>
+                <div id="apiPlaneRepair" class="plane-repair hidden"></div>
                 <dl class="plane-facts">
                   <div><dt>Catalog</dt><dd id="apiModelSource">—</dd></div>
+                  <div><dt>Default</dt><dd id="apiDefaultModel">Agent auto-routes</dd></div>
                   <div><dt>Billing</dt><dd>Per API usage</dd></div>
                 </dl>
-                <div id="apiModelList" class="model-card-list"><span class="empty-cell">Loading API models…</span></div>
+                <div id="apiModelList" class="model-card-list"><span class="empty-cell">Catalog not loaded yet.</span></div>
               </section>
             </div>
 
             <div id="sharedModelsNote" class="coverage-note hidden"></div>
-            <div class="coverage-note">Grok Build is the coding-agent product. <code>grok-build-0.1</code> is its exact metered API model slug; the current CLI catalog advertises different selectable model IDs.</div>
+            <div class="coverage-note">Grok Build is the coding-agent product. <code>grok-build-0.1</code> is its exact metered API model slug; the current CLI catalog advertises different selectable model IDs. Cursor (and other multi-model IDEs) may list non-Grok models for native chat — those are not UniGrok planes.</div>
             <div id="modelCatalogWarnings" class="model-warning-list hidden" aria-live="polite"></div>
           </div>
 
@@ -446,12 +451,13 @@ docker compose up --build -d</code></pre>
             <section class="connect-panel" aria-label="IDE connect snippets">
               <div class="panel-header compact">
                 <h3>Connect your IDE</h3>
-                <span class="panel-header-hint">Never put XAI_API_KEY in IDE MCP settings</span>
+                <span class="panel-header-hint">Cursor is first-class · Never put XAI_API_KEY in IDE MCP settings</span>
               </div>
               <p class="connect-endpoint">Endpoint <code id="mcpEndpointDisplay">http://localhost:4765/mcp</code></p>
+              <p class="connect-partner-note">Preferred host IDE: <strong>Cursor</strong> (xAI family). UniGrok still serves Claude Code, VS Code/Copilot, Codex, and Gemini the same way — one gateway, stable <code>X-Client-ID</code> per client. Non-Grok models inside Cursor stay Cursor-native; use UniGrok MCP for shared Grok planes, cost truth, and <code>@grok</code>.</p>
               <div class="connect-snippet-block">
                 <div class="connect-snippet-header">
-                  <span class="section-kicker">Generic MCP JSON</span>
+                  <span class="section-kicker">Cursor MCP JSON (first-class)</span>
                   <button id="copyMcpJsonBtn" type="button" class="small-btn-glow">Copy</button>
                 </div>
                 <pre class="connect-snippet" tabindex="0"><code id="mcpJsonSnippet">{ }</code></pre>
