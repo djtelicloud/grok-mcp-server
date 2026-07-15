@@ -22,11 +22,15 @@ Do this for the whole session after rehydrate:
    unless the user asked for a live play-by-play.
 3. **No fake progress essays.** “I’m checking X… now Y…” is noise. Use tools;
    then speak.
-4. **UniGrok second opinions:** when calling MCP `agent` for hard product
+4. **Human language only to the user:** Ready / Not ready / Live / Not live /
+   Blocked / Who (**brand first**). Do not dump git jargon unless they asked
+   for git. “Done / pushed?” means **Ready for supervisor**, not a git lecture.
+   Full map: `.agents/AGENTS.md` → Human language.
+5. **UniGrok second opinions:** when calling MCP `agent` for hard product
    claims, prefer **CLI** + `mode=fast` for index-diff hive polls; keep
    **visible emit tiny**. Insider silent-think doctrine lives in private
    `../unigrok-intelligence/playbooks/silent-think-harness.md` (not public default).
-5. **Exceptions:** user asks “explain as you go”, safety/permission prompts,
+6. **Exceptions:** user asks “explain as you go”, safety/permission prompts,
    or a blocking question that needs a human.
 
 This is **session law** when this skill or `.agents/AGENTS.md` is loaded — not
