@@ -59,6 +59,28 @@ def test_mint_service_access_token_shape_and_claims() -> None:
     assert signed == sign_cookie_payload(claims, secret)
 
 
+def test_mint_cursor_cloud_token_grants_invoke_and_status() -> None:
+    secret = "s" * 48
+    token = mint_service_access_token(
+        secret=secret,
+        issuer="https://control.grokmcp.org",
+        resource="https://mcp.grokmcp.org/mcp",
+        service="cursor-cloud",
+        now=1_700_000_000,
+        jti="cursor-jti-fixed-value-24bxx",
+    )
+    body = token[len(TOKEN_PREFIX) :].split(".", 1)[0]
+    pad = "=" * (-len(body) % 4)
+    claims = json.loads(base64.urlsafe_b64decode(body + pad))
+    assert claims["sub"] == "service:cursor-cloud"
+    assert claims["scope"] == [
+        "unigrok:connect",
+        "unigrok:invoke",
+        "unigrok:status",
+    ]
+    assert claims["exp"] - claims["iat"] == 600
+
+
 def test_mint_rejects_disallowed_service_and_scope() -> None:
     secret = "s" * 48
     with pytest.raises(ValueError, match="service not allowed"):
@@ -73,7 +95,16 @@ def test_mint_rejects_disallowed_service_and_scope() -> None:
             secret=secret,
             issuer="https://control.grokmcp.org",
             resource="https://mcp.grokmcp.org/mcp",
+            service="github-review-broker",
             scope="unigrok:invoke",
+        )
+    with pytest.raises(ValueError, match="scope not allowed"):
+        mint_service_access_token(
+            secret=secret,
+            issuer="https://control.grokmcp.org",
+            resource="https://mcp.grokmcp.org/mcp",
+            service="cursor-cloud",
+            scope="unigrok:review",
         )
 
 
@@ -111,3 +142,24 @@ def test_cli_print_claims_uses_independent_non_secret_metadata(
     }
     assert secret not in captured.out
     assert secret not in captured.err
+
+
+def test_cli_cursor_cloud_env(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    secret = "cursor-cloud-signing-key-value-ok" * 2
+    monkeypatch.setenv("UNIGROK_MCP_TOKEN_SECRET", secret)
+    monkeypatch.setenv("UNIGROK_SERVICE_NAME", "cursor-cloud")
+    monkeypatch.setenv("UNIGROK_SERVICE_SCOPE", "unigrok:invoke")
+    monkeypatch.setenv("UNIGROK_OAUTH_ISSUER", "https://control.grokmcp.org")
+    monkeypatch.setenv("UNIGROK_MCP_RESOURCE_URL", "https://mcp.grokmcp.org/mcp")
+    monkeypatch.setattr("scripts.mint_mcp_service_token.time.time", lambda: 1_700_000_000)
+
+    import scripts.mint_mcp_service_token as mod
+
+    assert mod.main(["--print-claims"]) == 0
+    captured = capsys.readouterr()
+    meta = json.loads(captured.err)
+    assert meta["sub"] == "service:cursor-cloud"
+    assert "unigrok:invoke" in meta["scope"]
+    assert secret not in captured.out
