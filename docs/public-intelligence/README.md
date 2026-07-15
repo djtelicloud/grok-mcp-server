@@ -37,9 +37,8 @@ manifest, and open a product PR. Never force-push private history public.
 | Path | Role |
 | --- | --- |
 | `public-intelligence-pack.schema.json` | Pack shape + scrub rules fields |
-| `packs/manifest.json` | List of published packs |
+| `packs/manifest.json` | List of published packs and their machine metadata |
 | `packs/v0-*.md` | Human-readable pack bodies |
-| `packs/v0-*.json` | Machine metadata for the same pack |
 
 ## Related
 
