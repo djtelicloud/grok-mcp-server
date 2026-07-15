@@ -124,7 +124,9 @@ gateway token.
 product surface. Use Cursor (or any MCP client) as the place you type; use
 UniGrok as the shared Grok gateway with dual-plane cost truth.
 
-Put config in `~/.cursor/mcp.json` (user-global) or project `.cursor/mcp.json`:
+Put config in `~/.cursor/mcp.json` (user-global) or project `.cursor/mcp.json`
+(not the repo-root `.mcp.json`, which is the VS Code / Copilot path and uses
+`vscode` / `vscode-forge` labels):
 
 ```json
 {
@@ -134,6 +136,10 @@ Put config in `~/.cursor/mcp.json` (user-global) or project `.cursor/mcp.json`:
       "name": "UniGrok MCP Gateway",
       "description": "Shared Grok agent with live Control Center, cost tracking, OKF + WebMCP self-discovery",
       "headers": { "X-Client-ID": "cursor" }
+    },
+    "unigrok-forge": {
+      "url": "http://localhost:4766/mcp",
+      "headers": { "X-Client-ID": "cursor-forge" }
     }
   }
 }
@@ -141,6 +147,15 @@ Put config in `~/.cursor/mcp.json` (user-global) or project `.cursor/mcp.json`:
 
 Cursor auto-detects HTTP servers from the `url` field. After saving, enable
 the server under Settings → MCP; the `agent` tool appears in Composer/chat.
+Confirm Control Center / telemetry shows caller label `cursor` or
+`cursor-forge` (for example `http:anon|cursor`) — never bare `http:anon` and
+never `vscode` from a Cursor session. Bare `http:anon` means the
+`X-Client-ID` header was omitted. Repo-root `.mcp.json` staying on
+`vscode` / `vscode-forge` is intentional for VS Code; Cursor must keep its
+own `cursor` / `cursor-forge` labels in `~/.cursor/mcp.json` or
+`.cursor/mcp.json`. Repo rule
+[`.cursor/rules/cursor-automations-single-pass.mdc`](../.cursor/rules/cursor-automations-single-pass.mdc)
+encodes PR Approver / Security Reviewer / Bugbot Autofix single-pass discipline.
 
 ### Cursor multi-model vs UniGrok planes
 

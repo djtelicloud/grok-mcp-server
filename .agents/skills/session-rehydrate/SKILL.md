@@ -11,6 +11,13 @@ description: >-
 New Grok/Claude/Codex sessions do **not** inherit prior chat transcripts.
 Intelligence is rehydrated from **git + disk**, not model memory.
 
+> [!IMPORTANT]
+> **Glossary: Do not conflate "Hydrate" concepts**
+> - **Session Rehydrate**: Booting intelligence from git/disk across chats (this skill).
+> - **Process / Telemetry Hydration**: Recovering bounded in-memory runtime state from the configured durable store after restart (`src/hydration.py`).
+> - **Hydration Lanes / Scratchpads**: Disposable Git worktrees used for contributor isolation.
+> Never mix these up; they are three completely separate boundaries.
+
 ## Communication discipline (same experience every session)
 
 Do this for the whole session after rehydrate:

@@ -422,3 +422,28 @@ The server runs on macOS via a lightweight helper script (`grok-mcp-helper.sh`) 
 
 ### 8.2 Production Container Setup
 The system can be deployed in a lightweight `python:3.11-slim` container, mounting the local workspace to process files over standard input/output (`stdio`) streams.
+
+---
+
+## 9. Glossary: The Three "Hydrate" Concepts
+
+UniGrok keeps three similarly named concepts separate:
+
+### 9.1 Runtime Telemetry Process Hydration (`src/hydration.py`)
+Responsible for recovering bounded in-process accumulators, daily budgets, and cost gates after a process restart without re-arming exhausted budgets or losing metrics.
+- **Owner**: MCP server process (`HydrationService` over `SessionStoreProtocol`).
+- **Source of Truth**: The configured `SessionStoreProtocol`; the reference implementation currently persists it in SQLite (`grok_sessions.db`).
+- **Mechanism**: Formalized `HydrationHook` classes scoped by `process_day`, `process_lifetime`, or `session`. Hooks read durable state and update only bounded in-memory process state; failed reads remain fail-open and retryable.
+- **Pattern**: Lazy, first-need (e.g. caller cost hydrates only on the first request for that caller; semantic budget hydrates on the first sampled evaluation).
+
+### 9.2 Intelligence Session Rehydrate
+Responsible for recovering agent product context across chat sessions (e.g., brand guidelines, land gates, task continuity, next steps).
+- **Owner**: `session-rehydrate` skill / public rehydrate packs.
+- **Source of Truth**: Git + disk (`.agents/`, private continuity files).
+- **Mechanism**: A prompt-driven skill behavior; never folded into the public SQLite telemetry store.
+
+### 9.3 Hydration Lanes / Scratchpads
+Disposable Git worktrees used to isolate contributor changes without dirtying shared `main`.
+- **Owner**: The contributor or integration lane that created the worktree.
+- **Source of Truth**: Git commits and the reviewed pull request, not the scratchpad directory itself.
+- **Mechanism**: Preserve active or unique worktrees; remove only finished, merged, clean scratchpads after verifying no agent still owns them.

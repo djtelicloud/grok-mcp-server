@@ -85,7 +85,7 @@ Not live / Blocked / Who (brand)** plus the **task title**.
 
 ## Grok MCP Integration Rules
 - **Shared MCP Endpoint**: The host-facing shared service endpoint is `http://localhost:4765/mcp` (Streamable HTTP). Port `8080` is container-internal only. Start it with `docker compose up --build -d` from the primary checkout unless the user explicitly asks for stdio mode.
-- **Per-Agent Identity**: Every IDE/agent config should send `X-Client-ID` with a stable value such as `codex`, `claude-code`, `vscode`, or `antigravity`. This attributes telemetry and keeps sessions separate.
+- **Per-Agent Identity**: Every IDE/agent config should send `X-Client-ID` with a stable value such as `cursor`, `cursor-forge`, `codex`, `claude-code`, `vscode`, `vscode-forge`, or `antigravity`. This attributes telemetry and keeps sessions separate. Cursor uses `~/.cursor/mcp.json` or project `.cursor/mcp.json` (`cursor` / `cursor-forge`); repo-root `.mcp.json` (`vscode` / `vscode-forge`) is the VS Code path — do not copy those labels into Cursor sessions.
 - **Credentials Boundary**: The xAI API key belongs to the running server/container environment (`XAI_API_KEY`), not to each IDE client. Do not ask the user to paste the xAI key into IDE MCP configs. If `UNIGROK_API_KEYS` is configured, IDE clients additionally need `Authorization: Bearer <client-token>`.
 - **Grok Mentions**: Whenever the user mentions "@grok", "grok", or explicitly asks to query Grok, call the shared UniGrok MCP `agent` tool when it is available rather than answering directly using your own model weights or context.
 - **Code Peer Reviews**: Whenever the user asks to peer review code, audit architectural files, or perform quality checks in this repository, invoke the shared UniGrok MCP `agent` tool for Grok's direct feedback when the MCP service is available.
@@ -110,6 +110,12 @@ Not live / Blocked / Who (brand)** plus the **task title**.
 
 ## Cursor Automations (PR Approver / Security Reviewer / Bugbot)
 
+Cursor-native always-on mirror for agents that load `.cursor/rules`:
+[`.cursor/rules/cursor-automations-single-pass.mdc`](../.cursor/rules/cursor-automations-single-pass.mdc).
+Keep that file’s automation-role bullets aligned with this section. Interactive
+Composer is not bound by the automation paths below; the mirror is for
+Automations / Bugbot roles only.
+
 These rules apply to Cursor Automations and Bugbot Autofix on this repo:
 
 - **Single-agent only.** Do not spawn parallel subagents, “review modules,” or repeated fan-out batches. One serial pass per run.
@@ -119,3 +125,4 @@ These rules apply to Cursor Automations and Bugbot Autofix on this repo:
 - **Approver path:** wait for Cursor Bugbot to finish; require green required checks; approve only low-risk diffs with no unresolved medium/high Bugbot findings; otherwise comment blockers and stop.
 - **Security Reviewer path:** inspect the PR diff + existing review threads once; report only actionable unresolved security findings; exit cleanly. Never attempt multi-module orchestration.
 - **Bugbot Autofix path:** apply the minimal doc/code fix for the cited finding on the existing PR branch; commit and push that branch only.
+- **Autofix fidelity:** one cited finding → one minimal fix → one push on the given PR head. Do not reopen review modules, spawn peers, or “also fix” adjacent nits. If another Autofix / Approver / Security run is already active for this head, exit.

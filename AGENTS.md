@@ -154,6 +154,7 @@ Process IP and harvest live in private `djtelicloud/unigrok-intelligence`. See [
 **UI:** Control Center test bench at `http://localhost:4765/ui/`; core product path remains MCP at `http://localhost:4765/mcp`.
 
 **Cursor Automations:** PR Approver, Security Reviewer, and Bugbot Autofix must follow
-`.agents/AGENTS.md` section **Cursor Automations** — single-agent serial pass, one
+`.agents/AGENTS.md` section **Cursor Automations** (Cursor-native mirror:
+`.cursor/rules/cursor-automations-single-pass.mdc`) — single-agent serial pass, one
 action per PR head SHA, no parallel subagent fan-out, no bot-echo retriggers. Security
 Reviewer must not launch “all review modules in parallel.”
