@@ -1,5 +1,25 @@
 # Workspace Rules
 
+## Session rehydrate (new chats)
+
+- **Start inside this product checkout** (or an agent worktree), not `$HOME`.
+  Home sessions miss these rules and feel “dumber.”
+- On first message after IDE reset, or when the user says **rehydrate** /
+  **boot** / **where were we**, follow
+  [`.agents/skills/session-rehydrate/SKILL.md`](skills/session-rehydrate/SKILL.md).
+- Continuity lives in git/disk: private
+  `unigrok-intelligence/codex/continuity/active-work-latest.md` (if present),
+  open PR notes, and `./scripts/land-status` — not chat memory.
+
+## Communication discipline
+
+- **Silent process, loud finish:** use tools and plan without narrating every
+  step. Deliver one concise end-state answer (tables, decisions, links, blockers).
+- Do not stream progress essays (“now I’ll check…”) unless the user asked for
+  a live play-by-play.
+- Prefer UniGrok MCP CLI/`fast` for cheap index-diff hive emits; keep visible
+  output tiny. Insider silent-think doctrine is private (not public default).
+
 ## Grok MCP Integration Rules
 - **Shared MCP Endpoint**: The host-facing shared service endpoint is `http://localhost:4765/mcp` (Streamable HTTP). Port `8080` is container-internal only. Start it with `docker compose up --build -d` from the primary checkout unless the user explicitly asks for stdio mode.
 - **Per-Agent Identity**: Every IDE/agent config should send `X-Client-ID` with a stable value such as `codex`, `claude-code`, `vscode`, or `antigravity`. This attributes telemetry and keeps sessions separate.
