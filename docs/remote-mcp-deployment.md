@@ -50,6 +50,19 @@ missing token, wrong scope, revoked member, valid member, and stale PR head
 before shifting traffic. The custom hostname must traverse the existing global
 load balancer with Cloud CDN disabled and Cloud Armor rate rules enabled.
 
+For regional recovery, deploy the same resolved digest and runtime contract to
+an equivalent Cloud Run service in each region. Give each service its own
+regional serverless NEG and attach only verified, functionally equivalent
+regions to the global backend. A load balancer with multiple serverless NEGs
+routes by proximity, so never attach regions running different reviewed
+digests. A bounded manual failover is: stage and verify the replacement region,
+attach its NEG, wait for the backend update to report the new NEG and for public
+probes to remain healthy, remove the impaired region's NEG, and re-run the
+public health, readiness, metadata, and unauthenticated challenge probes.
+Reattach the prior NEG immediately if any contract fails. Keep the detached
+service intact until the replacement has remained healthy; deleting it is not
+part of a failover.
+
 Keep the previous revision at zero traffic. Roll back by moving 100% traffic to
 that known digest; do not rebuild old source. Disabling the service or removing
 the `mcp.grokmcp.org` host rule fails closed without affecting the public site,
