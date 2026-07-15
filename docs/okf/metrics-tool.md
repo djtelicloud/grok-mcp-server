@@ -16,6 +16,13 @@ UniGrok is built for zero-trust swarm environments, providing rich operational t
 
 ## Telemetry Observability
 
+> [!IMPORTANT]
+> **Glossary: Process Hydration vs Intelligence Rehydrate**
+> - **Process / Telemetry Hydration**: When the server restarts, metrics (like caller budgets and semantic evaluator spend) are "hydrated" (recovered) from the durable `grok_sessions.db` to ensure honest limits and observability.
+> - **Session Rehydrate**: The act of an agent reading git/disk to recover task intelligence.
+> - **Hydration Lanes**: Disposable `.worktrees/` used for isolation.
+> Only **Process Hydration** relates to UniGrok telemetry.
+
 ### 1. MCP Status Tool (`grok_mcp_status`)
 Query gateway metrics through the MCP tool on any surface where live
 `tools/list` exposes it:

@@ -422,3 +422,27 @@ The server runs on macOS via a lightweight helper script (`grok-mcp-helper.sh`) 
 
 ### 8.2 Production Container Setup
 The system can be deployed in a lightweight `python:3.11-slim` container, mounting the local workspace to process files over standard input/output (`stdio`) streams.
+
+---
+
+## 9. Glossary: The Three "Hydrate" Concepts
+
+UniGrok explicitly separates three fundamentally different concepts of "hydration" which must never be conflated:
+
+### 9.1 Runtime Telemetry Process Hydration
+Responsible for recovering in-process accumulators, daily budgets, cost gates, and calibration caches after a process restart.
+- **Owner**: MCP server process (`src/hydration.py` over `SessionStoreProtocol`).
+- **Source of Truth**: The public consumer SQLite (`grok_sessions.db`).
+- **Mechanism**: Formalized `HydrationHook` classes (`process_day`, `process_lifetime`). Lazy, first-need (observational, non-mutating, fail-open).
+
+### 9.2 Intelligence Session Rehydrate
+Responsible for recovering agent product context across chat sessions (e.g., brand guidelines, land gates, task continuity, next steps).
+- **Owner**: `session-rehydrate` skill / public rehydrate packs.
+- **Source of Truth**: Git + disk (`.agents/`, private continuity files).
+- **Mechanism**: A prompt-driven skill behavior; never folded into the public SQLite telemetry store.
+
+### 9.3 Hydration Lanes / Scratchpads
+Disposable worktrees used exclusively for isolating parallel agents or persisting intermediate state across sessions without dirtying `main`.
+- **Owner**: Agent orchestration scripts (e.g., Codex continuity).
+- **Source of Truth**: `.worktrees/` directory on disk.
+- **Mechanism**: Git worktrees used purely for git isolation.

@@ -34,6 +34,13 @@ Select modular tools based on the nature of the request:
 * **Scratchpad cleanup**: After Live, abandonment, or a new task, remove **your own** finished worktree. Never delete peers' live trees or dirty main.
 * **Sponsor status**: Use Ready / Not ready / Live / Not live / Blocked and lead with the agent brand plus a plain task title. Never lead with PR numbers. Keep diffs, tool dumps, progress essays, and Git terminology internal unless the sponsor asks for technical detail.
 
+> [!IMPORTANT]
+> **Glossary: Do not conflate "Hydrate" concepts**
+> - **Session Rehydrate**: Booting intelligence from git/disk across chats.
+> - **Process / Telemetry Hydration**: In-process runtime accumulators surviving server restarts (`src/hydration.py`).
+> - **Hydration Lanes / Scratchpads**: Disposable worktrees used for isolation/continuity (`.worktrees/`).
+> Never mix these up; they are three completely separate boundaries.
+
 ## 4b. Session rehydrate — brand next steps (Gemini / Antigravity)
 
 On **rehydrate** / **boot** / first message after IDE reset, follow
