@@ -34,7 +34,7 @@
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "6.0.2",
     "@vitejs/plugin-rsc": "0.5.26",
-    "eslint": "9.39.4",
+    "eslint": "10.7.0",
     "eslint-config-next": "16.2.10",
     "react-server-dom-webpack": "19.2.6",
     "tailwindcss": "4.2.1",
