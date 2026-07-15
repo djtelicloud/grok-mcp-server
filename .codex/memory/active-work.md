@@ -66,9 +66,9 @@ credentials, OAuth codes, tokens, or private keys here.
   code-scanning alerts, Dependabot alerts, secret-scanning alerts, or draft
   advisories.
 - Five finished or superseded Grok scratchpads, one empty Antigravity
-  scratchpad, both completed data-function scratchpads, and both completed
-  Claude hydration scratchpads were removed only after clean, process-free,
-  and integrated-state checks.
+  scratchpad, the first and rehydrated `agents/hydrate-data-function`
+  scratchpads, and `claude/hydrate-c23d9f` plus `claude/hydrate-0597fe` were
+  removed only after clean, process-free, and integrated-state checks.
 - Provider IDEs may automatically rehydrate a clean scratchpad after cleanup.
   A clean zero-ahead worktree is not an orphan while any live process uses it.
   Before supervisor removal, re-check process ownership, dirty state, unique
