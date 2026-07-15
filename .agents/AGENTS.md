@@ -7,6 +7,7 @@
 - **Grok Mentions**: Whenever the user mentions "@grok", "grok", or explicitly asks to query Grok, call the shared UniGrok MCP `agent` tool when it is available rather than answering directly using your own model weights or context.
 - **Code Peer Reviews**: Whenever the user asks to peer review code, audit architectural files, or perform quality checks in this repository, invoke the shared UniGrok MCP `agent` tool for Grok's direct feedback when the MCP service is available.
 - **Operational Source of Truth**: For installation snippets and IDE-specific config, use `docs/ide-setup.md`. For browser-based manual testing, open `http://localhost:4765/ui/`.
+- **Multi-Step Implementation Plans**: When asked for a multi-step Implementation Plan, obtain a UniGrok second opinion (using agent mode `thinking` or `reasoning`) and improve the plan before showing it. Only do this if the user explicitly asks for this habit; do not silently spend metered API credits without request.
 
 ## Multi-Agent Git Coordination
 - **PR-First Contribution Record**: Every change to `origin/main` goes through a pull request. After local verification, an authorized IDE agent may push only its own agent-prefixed task branch and open or update a draft pull request. If that agent lacks GitHub credentials, it hands Codex the exact commit so an authorized Codex session can publish the same branch and draft PR. A commit-only handoff is pre-PR evidence, not a substitute for the PR.
