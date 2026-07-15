@@ -24,6 +24,10 @@ def test_manifest_and_bodies_exist_and_match_schema_shape() -> None:
     assert manifest["schema"] == "../public-intelligence-pack.schema.json"
     packs = manifest["packs"]
     assert packs, "at least one public pack required"
+    banned_markers = ("XAI_API_KEY", "unigrok-intelligence/codex")
+    public_metadata = json.dumps(manifest, sort_keys=True)
+    for marker in banned_markers:
+        assert marker not in public_metadata
     for pack in packs:
         validator.validate(pack)
         assert pack["scrub"]["secrets"] is True
@@ -39,8 +43,8 @@ def test_manifest_and_bodies_exist_and_match_schema_shape() -> None:
         assert body.is_file(), pack["body_path"]
         text = body.read_text(encoding="utf-8")
         # Hard ban on private repo name dumps and secret placeholders.
-        assert "XAI_API_KEY" not in text
-        assert "unigrok-intelligence/codex" not in text
+        for marker in banned_markers:
+            assert marker not in text
         assert "Ready for supervisor" in text or "Live" in text
 
 
