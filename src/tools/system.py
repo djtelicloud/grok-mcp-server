@@ -45,7 +45,7 @@ from ..utils import (
 from xai_sdk.chat import user
 from xai_sdk.tools import code_execution, web_search as xai_web_search, x_search as xai_x_search
 
-from ..identity import scoped_session
+from ..identity import get_active_client_id, principal_kind, scoped_session
 
 logger = logging.getLogger("GrokMCP")
 
@@ -941,6 +941,218 @@ def load_okf_manifest() -> dict[str, Any]:
     return manifest
 
 
+def _swarm_policy() -> str:
+    """Return the process Swarm policy: off | dry_run | active."""
+    from ..swarm.config import swarm_mode
+
+    return swarm_mode()
+
+
+def _markdown_inline_label(value: Any) -> str:
+    """Escape untrusted labels for single-line Markdown inline code spans.
+
+    Client ids come from the untrusted ``X-Client-ID`` header. Strip backticks
+    and collapse control/whitespace so discover prose cannot break fencing or
+    inject misleading multi-line content.
+    """
+    text = str(value if value is not None else "")
+    text = text.replace("`", "").replace("\r", " ").replace("\n", " ")
+    text = " ".join(text.split())
+    return text or "(missing)"
+
+
+def _resolve_notice_action(
+    notice: dict[str, Any],
+    *,
+    api: dict[str, Any],
+    cli: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Resolve a credential notice to a full bounded action object.
+
+    Notices often carry only ``action_id``; the executable action lives on the
+    plane view (``credential_planes.api.action`` / ``cli.action``).
+    """
+    direct = notice.get("action")
+    if isinstance(direct, dict):
+        return direct
+
+    action_id = notice.get("action_id")
+    plane = str(notice.get("plane") or "").upper()
+    candidates: list[dict[str, Any]] = []
+    if plane == "API" and isinstance(api.get("action"), dict):
+        candidates.append(api["action"])
+    elif plane == "CLI" and isinstance(cli.get("action"), dict):
+        candidates.append(cli["action"])
+    else:
+        for view in (api, cli):
+            if isinstance(view.get("action"), dict):
+                candidates.append(view["action"])
+
+    if action_id:
+        for candidate in candidates:
+            if candidate.get("id") == action_id:
+                return candidate
+    if candidates:
+        return candidates[0]
+    return None
+
+
+def _build_discover_request_context(*, contributor: bool) -> dict[str, Any]:
+    """Assemble request-scoped onboarding identity without secrets."""
+    # Late imports avoid cycles: http_server registers these tools at import time.
+    from ..http_server import (
+        get_active_host_port,
+        get_active_mode_dial,
+        mode_dials_enabled,
+    )
+
+    client_id = get_active_client_id()
+    host_port = get_active_host_port()
+    dial = get_active_mode_dial()
+    dials_on = mode_dials_enabled()
+
+    if contributor:
+        surface = "contributor_forge"
+    elif dial is not None:
+        surface = "mode_dial"
+    else:
+        surface = "stable_core"
+
+    return {
+        "client_id_present": bool(client_id),
+        "client_id_normalized": client_id,
+        "principal_kind": principal_kind(),
+        "host_port": host_port,
+        "surface": surface,
+        "dial": (
+            {"port": dial[0], "default_mode": dial[1]}
+            if dial is not None
+            else None
+        ),
+        "mode_dials_enabled": dials_on,
+    }
+
+
+def _build_discover_bootstrap(
+    *,
+    contributor: bool,
+    workspace_attached: bool,
+    credential_planes: dict[str, Any],
+    request_context: dict[str, Any],
+) -> dict[str, Any]:
+    """GenFunc-style continuity gates for onboarding (no project assimilation)."""
+    warnings: list[dict[str, Any]] = []
+    next_actions: list[dict[str, Any]] = []
+
+    service_usable = bool(credential_planes.get("service_usable"))
+    degraded = bool(credential_planes.get("degraded"))
+    api = credential_planes.get("api") if isinstance(credential_planes.get("api"), dict) else {}
+    cli = credential_planes.get("cli") if isinstance(credential_planes.get("cli"), dict) else {}
+    swarm_policy = _swarm_policy()
+    cloudrun = is_cloudrun_runtime()
+
+    can_chat = service_usable
+    can_spend_api = bool(api.get("available"))
+    can_mutate_workspace = bool(contributor and workspace_attached and not cloudrun)
+    can_use_swarm = bool(
+        contributor and not cloudrun and swarm_policy in ("dry_run", "active")
+    )
+
+    if not request_context.get("client_id_present"):
+        warnings.append(
+            {
+                "id": "missing_client_id",
+                "severity": "warn",
+                "message": (
+                    "X-Client-ID is absent. Set a stable IDE label "
+                    "(for example claude-code, vscode, codex, cursor, antigravity) "
+                    "for session separation and telemetry. It is not authentication."
+                ),
+            }
+        )
+
+    for notice in credential_planes.get("notices") or []:
+        if not isinstance(notice, dict):
+            continue
+        notice_id = notice.get("id") or "credential_notice"
+        severity = "error" if notice.get("blocking") else "warn"
+        warnings.append(
+            {
+                "id": str(notice_id),
+                "severity": severity,
+                "plane": notice.get("plane"),
+                "message": notice.get("message") or "Credential plane notice.",
+            }
+        )
+        action = _resolve_notice_action(notice, api=api, cli=cli)
+        if action or notice.get("action_id"):
+            next_actions.append(
+                {
+                    "id": (action or {}).get("id") or notice.get("action_id") or notice_id,
+                    "prompt_user": bool(notice.get("prompt_user", True)),
+                    "action": action,
+                }
+            )
+
+    if degraded and service_usable:
+        warnings.append(
+            {
+                "id": "credential_plane_degraded",
+                "severity": "warn",
+                "message": "Service is usable but one credential plane is degraded.",
+            }
+        )
+
+    if not can_chat:
+        status = "ERR"
+    elif warnings:
+        status = "WARN"
+    else:
+        status = "OK"
+
+    connected_port = request_context.get("host_port")
+    surface_port = (
+        connected_port
+        if isinstance(connected_port, int) and not isinstance(connected_port, bool)
+        else 4765
+    )
+    local_surface = f"http://localhost:{surface_port}"
+
+    return {
+        "schema_version": 1,
+        "status": status,
+        "can_chat": can_chat,
+        "can_spend_api": can_spend_api,
+        "can_mutate_workspace": can_mutate_workspace,
+        "can_use_swarm": can_use_swarm,
+        "swarm_policy": swarm_policy if contributor else "off",
+        "warnings": warnings,
+        "next_actions": next_actions,
+        "caller_config_audit": "not_available_on_service",
+        "caller_config_audit_hint": (
+            "Stable UniGrok cannot read global IDE MCP files or the caller's project. "
+            "With user permission, the IDE agent should audit local configs "
+            "(user MCP JSON, project .mcp.json, skills) and report only; never rewrite "
+            "global settings without explicit consent. Never print secret values."
+        ),
+        "surfaces": {
+            "canonical_mcp": f"{local_surface}/mcp",
+            "healthz": f"{local_surface}/healthz",
+            "readyz": f"{local_surface}/readyz",
+            "runtimez": f"{local_surface}/runtimez",
+            "ui": f"{local_surface}/ui/",
+        },
+        "first_connect_checklist": [
+            "Call grok_mcp_discover_self and read data.bootstrap + data.request_context.",
+            "Prompt once per credential_planes notice id; never ask for XAI_API_KEY in chat.",
+            "Confirm X-Client-ID is set for this IDE (data.request_context.client_id_present).",
+            f"With permission, audit local IDE MCP configs for {local_surface}/mcp and no keys in JSON.",
+            "Optional: one cheap agent(mode=fast) or grok_mcp_status after planes are ready.",
+            "Public installs: do not invent a second product port, Swarm, or land workflow.",
+        ],
+    }
+
+
 async def grok_mcp_discover_self(include_models: bool = False) -> SystemResult:
     """Exposes OKF bundle information, WebMCP manifests, and tool schemas for zero-configuration agent onboarding."""
     async with GrokInvocationContext("utility", logger, append_signature=False) as ctx:
@@ -950,6 +1162,7 @@ async def grok_mcp_discover_self(include_models: bool = False) -> SystemResult:
 
         workspace = PathResolver.get_workspace_root()
         contributor = PathResolver.contributor_mode()
+        workspace_attached = workspace is not None
         try:
             cli_plane = await run_blocking(
                 grok_cli_plane_status,
@@ -965,6 +1178,13 @@ async def grok_mcp_discover_self(include_models: bool = False) -> SystemResult:
                 "setup_command": CLI_AUTH_SETUP_COMMAND,
             }
         credential_planes = credential_plane_contract(cli_plane)
+        request_context = _build_discover_request_context(contributor=contributor)
+        bootstrap = _build_discover_bootstrap(
+            contributor=contributor,
+            workspace_attached=workspace_attached,
+            credential_planes=credential_planes,
+            request_context=request_context,
+        )
         okf_manifest = load_okf_manifest()
         model_catalog = None
         if include_models:
@@ -1009,20 +1229,25 @@ async def grok_mcp_discover_self(include_models: bool = False) -> SystemResult:
             }
         manifest = {
             "okf_version": "0.1",
+            "schema_version": 2,
             "name": "uni-grok-mcp",
             "service_mode": "contributor" if contributor else "stable",
             "requires_project_files": False,
-            "canonical_endpoint": "http://localhost:4765/mcp",
+            "canonical_endpoint": bootstrap["surfaces"]["canonical_mcp"],
             "mode_dials": {
                 "optional": True,
+                "enabled": bool(request_context.get("mode_dials_enabled")),
                 "ports": {str(port): mode for port, mode in MODE_DIAL_PORTS.items()},
                 "precedence": "explicit mode > dialed port > auto",
+                "request_dial": request_context.get("dial"),
             },
             "workspace": {
-                "attached": workspace is not None,
+                "attached": workspace_attached,
                 "context_transport": "workspace_context",
                 "automatic_project_discovery": False,
             },
+            "request_context": request_context,
+            "bootstrap": bootstrap,
             "credential_planes": credential_planes,
             "contributor_features": {
                 "enabled": contributor,
@@ -1036,6 +1261,8 @@ async def grok_mcp_discover_self(include_models: bool = False) -> SystemResult:
         if model_catalog is not None:
             manifest["model_catalog"] = model_catalog
 
+        canonical_endpoint = bootstrap["surfaces"]["canonical_mcp"]
+        ui_endpoint = bootstrap["surfaces"]["ui"]
         if contributor:
             boundary_extra = (
                 "- Contributor mode may attach the UniGrok checkout and enable insider-only "
@@ -1056,23 +1283,40 @@ async def grok_mcp_discover_self(include_models: bool = False) -> SystemResult:
             )
             dial_extra = (
                 "- Optional phoneword ports, when enabled, are aliases of this same Core service "
-                "(not a second UniGrok to install). Prefer the canonical 4765 endpoint.\n"
+                f"(not a second UniGrok to install). Prefer the connected endpoint `{canonical_endpoint}`.\n"
             )
+
+        client_label = _markdown_inline_label(
+            request_context.get("client_id_normalized")
+        )
+        surface = _markdown_inline_label(request_context.get("surface") or "stable_core")
+        bootstrap_status = _markdown_inline_label(bootstrap.get("status") or "WARN")
 
         doc_text = (
             "# UniGrok MCP Discovery & Self-Description\n\n"
             "Zero-configuration onboarding for IDE agents. The primary product chat path is the "
             "UniGrok `agent` tool over MCP. The trusted-loopback UI is an optional test and control "
             "surface, not the primary daily chat path.\n\n"
+            "## Bootstrap (first connect)\n"
+            f"- Status: `{bootstrap_status}`. Surface: `{surface}`. "
+            f"Client label: `{client_label}`.\n"
+            f"- Gates: can_chat=`{bootstrap.get('can_chat')}`, "
+            f"can_spend_api=`{bootstrap.get('can_spend_api')}`, "
+            f"can_mutate_workspace=`{bootstrap.get('can_mutate_workspace')}`, "
+            f"can_use_swarm=`{bootstrap.get('can_use_swarm')}`.\n"
+            "- Read structured `data.bootstrap` and `data.request_context` for machine-usable gates.\n"
+            "- This service does **not** read global IDE settings or the caller's project files. "
+            "With user permission, audit those locally (report only; never rewrite without consent; "
+            "never print secret values).\n\n"
             "## Service and Project Boundary\n"
             "- UniGrok is a standalone MCP service; the caller's project needs no UniGrok namespace files.\n"
             f"- Service mode: `{'contributor' if contributor else 'stable'}`. "
-            f"Workspace attached: `{'yes' if workspace is not None else 'no'}`.\n"
+            f"Workspace attached: `{'yes' if workspace_attached else 'no'}`.\n"
             f"{boundary_extra}\n"
             "## Public product path\n"
-            "- Canonical endpoint: `http://localhost:4765/mcp` (`4765` spells GROK).\n"
+            f"- Connected MCP endpoint: `{canonical_endpoint}`. The default Core port is `4765` (GROK).\n"
             "- Health: `GET /healthz`. Readiness: `GET /readyz`. Optional local Core UI: "
-            "`http://localhost:4765/ui/` (trusted machine-owner test/control surface with an "
+            f"`{ui_endpoint}` (trusted machine-owner test/control surface with an "
             "agent playground that can invoke providers and spend metered credits; not GitHub-gated).\n"
             f"{dial_extra}"
             "- An explicit `agent.mode` always overrides a dialed-port default.\n\n"

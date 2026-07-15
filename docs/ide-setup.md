@@ -117,9 +117,14 @@ OAuth-protected remote clients obtain a scoped access token through the
 published RFC 9728 metadata; they do not reuse an xAI key or a local static
 gateway token.
 
-## Cursor (`.cursor/mcp.json` in project root, or `~/.cursor/mcp.json`)
+## Cursor (first-class host IDE)
 
-With Cursor joining the xAI family, it's the natural first-class Grok IDE.
+**Cursor is UniGrok’s preferred host IDE** (xAI family). SuperGrok CLI remains a
+**credential plane** (subscription auth for Grok models), not the long-term IDE
+product surface. Use Cursor (or any MCP client) as the place you type; use
+UniGrok as the shared Grok gateway with dual-plane cost truth.
+
+Put config in `~/.cursor/mcp.json` (user-global) or project `.cursor/mcp.json`:
 
 ```json
 {
@@ -136,6 +141,21 @@ With Cursor joining the xAI family, it's the natural first-class Grok IDE.
 
 Cursor auto-detects HTTP servers from the `url` field. After saving, enable
 the server under Settings → MCP; the `agent` tool appears in Composer/chat.
+
+### Cursor multi-model vs UniGrok planes
+
+Cursor may list **non-Grok** models for native chat (Claude, GPT, etc.). Those
+paths are **Cursor-native billing and routing** — they are not UniGrok planes
+and will not appear on Control Center → **Planes**.
+
+| Path | Who bills / routes | Where you see models |
+|------|--------------------|----------------------|
+| Cursor native multi-model | Cursor / that provider | Cursor model picker |
+| UniGrok MCP `agent` | UniGrok CLI sub and/or xAI API key | Control Center **Planes** + MCP |
+
+Use UniGrok when you want shared Grok across every IDE, server-side keys,
+CLI-first policy, exact API cost, and `@grok` peer review. Use Cursor’s own
+picker when you intentionally want a non-Grok host model.
 
 ## Claude Code (CLI)
 

@@ -1320,6 +1320,77 @@ pre {
 .model-plane-card.cli-plane { border-top: 3px solid var(--teal); }
 .model-plane-card.api-plane { border-top: 3px solid var(--orange); }
 
+.catalog-trust-banner {
+  margin-top: 10px;
+  border: 1px dashed rgba(255, 180, 60, 0.55);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  background: rgba(255, 160, 40, 0.08);
+  color: var(--orange);
+  font-size: 11px;
+  line-height: 1.45;
+  font-weight: 600;
+}
+
+.plane-repair {
+  margin-top: 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.plane-repair strong {
+  display: block;
+  color: var(--orange);
+  font-size: 12px;
+}
+
+.plane-repair p {
+  margin: 6px 0 8px;
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.plane-repair-command {
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: rgba(0, 0, 0, 0.35);
+  color: var(--cyan);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.state-chip.fallback {
+  border-color: rgba(255, 160, 40, 0.45);
+  color: var(--orange);
+}
+
+.provider-model-card.fallback-catalog {
+  border-style: dashed;
+  opacity: 0.92;
+}
+
+.model-badge.fallback {
+  border-color: rgba(255, 160, 40, 0.45);
+  color: var(--orange);
+}
+
+.connect-partner-note {
+  margin: 0 0 12px;
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.connect-partner-note code {
+  font-size: 11px;
+}
+
 .model-plane-header {
   display: flex;
   align-items: flex-start;

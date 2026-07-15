@@ -70,6 +70,38 @@ Default endpoint: `http://localhost:4765/mcp`
 Every IDE config should send a stable `X-Client-ID` (for example `vscode`) so
 session namespaces and telemetry remain separated by client.
 
+## First-connect diagnostics (server + local)
+
+On first connect in a session, call `grok_mcp_discover_self` and read
+`data.bootstrap` + `data.request_context` before inventing setup steps.
+
+**Server (always available via MCP):**
+
+1. Call `grok_mcp_discover_self`.
+2. Honor `data.bootstrap.status` (`OK` / `WARN` / `ERR`) and gates
+   (`can_chat`, `can_spend_api`, `can_mutate_workspace`, `can_use_swarm`).
+3. Read `data.request_context`: surface (`stable_core` / `contributor_forge` /
+   `mode_dial`), `client_id_present`, optional Host port / mode dial.
+4. Prompt once per `credential_planes` notice id; follow
+   `data.bootstrap.next_actions` when present.
+5. Optional: `include_models: true` when model routing matters.
+
+**Local IDE audit (only with user permission; report only):**
+
+UniGrok cannot read global IDE settings over HTTP. With consent, use local tools
+to check and **report** (never rewrite without explicit permission; never print
+secret values):
+
+- User MCP configs point daily chat at `http://localhost:4765/mcp`.
+- Stable `X-Client-ID` per IDE (for VS Code: `vscode`).
+- No `XAI_API_KEY` (or other secrets) embedded in MCP JSON.
+- Project `.mcp.json` (if any) is dual HTTP for UniGrok worktrees, never
+  broken `unigrok-stdio` with `${PLUGIN_ROOT}`.
+- Optional `using-unigrok` skill present; do not copy contributor `.agents`
+  trees into foreign apps.
+
+Then one cheap verification: `agent` with `mode=fast` or `grok_mcp_status`.
+
 ## Safety and credential boundary
 
 - Never ask users to paste `XAI_API_KEY` into IDE MCP config; credentials live

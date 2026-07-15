@@ -77,6 +77,8 @@ not invented subscription cost or remaining provider quota.
 
 ## Safe onboarding behavior
 
+- On first connect in a session, call `grok_mcp_discover_self` and read
+  `data.bootstrap` + `data.request_context` before inventing setup steps.
 - Treat `credential_planes` notices from status or an agent result as the
   source of truth. Ask before device authentication, installation, or secret
   configuration.
@@ -89,6 +91,37 @@ not invented subscription cost or remaining provider quota.
   the user; do not require them to understand planes, MCP transport, or JSON-RPC.
 - Public product path is `http://localhost:4765/mcp` only. Do not invent a
   second port, Forge, Swarm, or land workflow for ordinary end-user installs.
+
+## First-connect diagnostics (server + local)
+
+**Server (always available via MCP):**
+
+1. Call `grok_mcp_discover_self`.
+2. Honor `data.bootstrap.status` (`OK` / `WARN` / `ERR`) and gates
+   (`can_chat`, `can_spend_api`, `can_mutate_workspace`, `can_use_swarm`).
+3. Read `data.request_context`: surface (`stable_core` / `contributor_forge` /
+   `mode_dial`), `client_id_present`, optional Host port / mode dial.
+4. Prompt once per `credential_planes` notice id; follow
+   `data.bootstrap.next_actions` when present.
+5. Optional: `include_models: true` when model routing matters.
+
+**Local IDE audit (only with user permission; report only):**
+
+UniGrok cannot read global IDE settings over HTTP. With consent, use local tools
+to check and **report** (never rewrite without explicit permission; never print
+secret values):
+
+- User MCP configs point daily chat at `http://localhost:4765/mcp`.
+- Stable `X-Client-ID` per IDE (claude-code, vscode, codex, cursor, antigravity).
+- No `XAI_API_KEY` (or other secrets) embedded in MCP JSON.
+- Project `.mcp.json` (if any) is dual HTTP for UniGrok worktrees, never
+  broken `unigrok-stdio` with `${PLUGIN_ROOT}`.
+- Optional `using-unigrok` skill present; do not copy contributor `.agents`
+  trees into foreign apps.
+- Unique leverage: which planes are ready, whether Forge tools appear only when
+  intentionally connected to the contributor surface, mode dials if enabled.
+
+Then one cheap verification: `agent` with `mode=fast` or `grok_mcp_status`.
 
 ## Endpoint
 

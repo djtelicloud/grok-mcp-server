@@ -106,6 +106,27 @@ def get_active_principal() -> Optional[str]:
     return _ACTIVE_PRINCIPAL.get()
 
 
+def get_active_client_id() -> Optional[str]:
+    """Return the untrusted X-Client-ID label bound for this request, if any."""
+    return _ACTIVE_CLIENT_ID.get()
+
+
+def principal_kind(principal: Optional[str] = None) -> str:
+    """Classify the security principal without exposing raw identifiers."""
+    value = principal if principal is not None else get_active_principal()
+    if not value:
+        return "none"
+    if value.startswith("oauth:"):
+        return "oauth"
+    if value.startswith("http:key-"):
+        return "api_key"
+    if value == "http:anon":
+        return "anon"
+    if value.startswith("stdio:"):
+        return "stdio"
+    return "other"
+
+
 def resolve_request_caller(caller: Optional[str]) -> Optional[str]:
     """Resolve attribution without letting HTTP metadata replace principal.
 

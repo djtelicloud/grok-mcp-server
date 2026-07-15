@@ -233,7 +233,16 @@ const state = {
   metricsPeriod: "today",
   metricsSnapshot: null,
   modelCatalog: null,
+  modelCatalogLoading: false,
+  modelCatalogGeneration: 0,
+  credentialPlanes: null,
 };
+
+// Only static/fallback model lists — not operational unavailable/skipped sources.
+const FALLBACK_CATALOG_SOURCES = new Set([
+  "cli-fallback",
+  "xai_api_fallback",
+]);
 
 // --- DOM Selector Helper ---
 const $ = (id) => document.getElementById(id);
@@ -324,7 +333,8 @@ function switchTab(tabId) {
       loadWebMcpManifest();
       checkWebMcpBridge();
     } else if (tabId === "tab-models") {
-      loadPlaneModelCatalog();
+      // Lazy-load expensive dual-plane discovery only when Planes is opened.
+      loadPlaneModelCatalog(false);
     } else if (tabId === "tab-metrics") {
       fetchLiveMetrics();
     }
@@ -949,11 +959,13 @@ function resolveMcpEndpoint() {
 }
 
 function genericMcpJson(endpoint) {
+  // Cursor is the first-class host IDE for UniGrok (xAI family). Other IDEs
+  // swap X-Client-ID (claude-code, vscode, codex, antigravity) the same way.
   return JSON.stringify({
     mcpServers: {
       unigrok: {
         url: endpoint,
-        headers: { "X-Client-ID": "ide" },
+        headers: { "X-Client-ID": "cursor" },
       },
     },
   }, null, 2);
@@ -963,9 +975,10 @@ function agentSetupPrompt(endpoint) {
   return [
     "Configure UniGrok MCP for this machine:",
     `- Streamable HTTP URL: ${endpoint}`,
-    "- Send a stable X-Client-ID header for this IDE (e.g. cursor, claude-code, vscode, codex)",
+    "- Preferred host IDE: Cursor (X-Client-ID: cursor). Also supported: claude-code, vscode, codex, antigravity",
     "- Never put XAI_API_KEY in IDE MCP settings; credentials stay in UniGrok's server .env",
-    "- After connecting, call tools/list and grok_mcp_discover_self",
+    "- Cursor may offer non-Grok models natively; UniGrok MCP is for shared Grok planes, cost truth, and @grok",
+    "- After connecting, call tools/list and grok_mcp_discover_self (read data.bootstrap when present)",
     "- Prefer the UniGrok agent tool when I say @grok or want a second opinion",
     "- When I ask for a multi-step Implementation Plan, get a UniGrok second opinion",
     "  (agent mode thinking or reasoning) and improve the plan before showing it —",
@@ -1123,11 +1136,47 @@ function renderSurfaceModeBadge(data) {
   }
 }
 
+function credentialPlaneCatalogSignature(contract) {
+  const plane = (name) => {
+    const view = contract?.[name] || {};
+    return {
+      available: Boolean(view.available),
+      state: String(view.state || ""),
+      auth: String(view.auth || ""),
+      binary: Boolean(view.binary),
+    };
+  };
+  return JSON.stringify({
+    policy: String(contract?.policy || ""),
+    effectivePlane: String(contract?.effective_plane || ""),
+    serviceUsable: Boolean(contract?.service_usable),
+    degraded: Boolean(contract?.degraded),
+    api: plane("api"),
+    cli: plane("cli"),
+  });
+}
+
 async function fetchRuntimeStatus() {
   try {
     const res = await fetch("/runtimez");
     if (!res.ok) throw new Error();
     const data = await res.json();
+    if (data.credential_planes) {
+      const priorSignature = credentialPlaneCatalogSignature(state.credentialPlanes);
+      const nextSignature = credentialPlaneCatalogSignature(data.credential_planes);
+      state.credentialPlanes = data.credential_planes;
+      if (priorSignature !== nextSignature) {
+        // Catalog availability/source is credential-dependent. Invalidate any
+        // cached or in-flight snapshot and remove stale plane/model choices.
+        state.modelCatalog = null;
+        state.modelCatalogGeneration += 1;
+        clearPlaneModelLists("Credentials changed. Refreshing model catalog…");
+        clearModelOptions("auto route");
+        if (state.activeTab === "tab-models") {
+          void loadPlaneModelCatalog(true);
+        }
+      }
+    }
     $("runtimeChip").innerText = `runtime: ${data.runtime || "unknown"}`;
     $("transportChip").innerText = `transport: ${data.transport || "unknown"}`;
     renderSurfaceModeBadge(data);
@@ -1220,15 +1269,8 @@ async function loadModelsList() {
     if (!res.ok) throw new Error();
     const data = await res.json();
     state.models = data.data || [];
-
-    const select = $("modelInput");
-    select.innerHTML = '<option value="">auto (Recommended)</option>';
-    state.models.forEach((m) => {
-      const opt = document.createElement("option");
-      opt.value = m.id;
-      opt.innerText = m.id;
-      select.appendChild(opt);
-    });
+    // /v1/models is API-compatible and intentionally does not own the plane-
+    // aware selector. grok_mcp_discover_self is the only source for that UI.
   } catch (err) {
     console.error("Failed to load models list: ", err);
   }
@@ -1272,6 +1314,16 @@ function syncModelOptions() {
   select.value = seen.has(previous) ? previous : "";
 }
 
+function clearModelOptions(label = "auto route") {
+  const select = $("modelInput");
+  if (!select) return;
+  select.replaceChildren();
+  const automatic = document.createElement("option");
+  automatic.value = "";
+  automatic.innerText = label;
+  select.appendChild(automatic);
+}
+
 function updatePlaneControls() {
   const plane = $("planeInput")?.value || "auto";
   const hint = $("planeHint");
@@ -1289,42 +1341,143 @@ function updatePlaneControls() {
     hint.innerText = "Subscription first · cross-plane fallback may incur API charges";
     hint.classList.add("metered");
   }
-  syncModelOptions();
+  // Console plane pins filter from the dual-plane catalog. Startup only warms
+  // /v1/models (API). Load plane catalogs when the user changes plane before
+  // visiting Planes, so CLI pins are not API-only slugs with same_plane.
+  if (!state.modelCatalog && !state.modelCatalogLoading) {
+    loadPlaneModelCatalog(false);
+  } else {
+    syncModelOptions();
+  }
 }
 
 function readableCatalogSource(source) {
   const labels = {
     grok_cli: "Live Grok CLI",
-    "cli-fallback": "Fallback list",
+    "cli-fallback": "Fallback list (not live)",
     "cloudrun-disabled": "Unavailable in Cloud Run",
     xai_api: "Live xAI API",
-    xai_api_fallback: "Fallback list",
+    xai_api_fallback: "Fallback list (not live)",
     skipped: "Not queried",
   };
   return labels[source] || String(source || "Unknown").replaceAll("_", " ");
 }
 
-function renderPlaneModels(planeName, plane, sharedIds) {
+function isFallbackCatalogSource(source) {
+  const key = String(source || "");
+  return FALLBACK_CATALOG_SOURCES.has(key) || key.includes("fallback");
+}
+
+function planePinSnippet(planeName, modelId) {
+  const plane = planeName === "CLI" ? "cli" : "api";
+  return [
+    `model=${modelId}`,
+    `plane=${plane}`,
+    "fallback_policy=same_plane",
+    `# UniGrok agent pin — ${planeName} credential plane only`,
+  ].join("\n");
+}
+
+function clearPlaneModelLists(message) {
+  for (const prefix of ["cli", "api"]) {
+    const list = $(`${prefix}ModelList`);
+    if (!list) continue;
+    list.replaceChildren();
+    const empty = document.createElement("span");
+    empty.className = "empty-cell";
+    empty.innerText = message;
+    list.appendChild(empty);
+  }
+}
+
+function renderPlaneRepair(prefix, planeKey, contract) {
+  const host = $(`${prefix}PlaneRepair`);
+  if (!host) return;
+  host.replaceChildren();
+  host.classList.add("hidden");
+  if (!contract) return;
+
+  const plane = planeKey === "CLI" ? contract.cli : contract.api;
+  const notices = (contract.notices || []).filter(
+    (notice) => notice && String(notice.plane || "").toUpperCase() === planeKey,
+  );
+  const notice = notices.find((item) => item.prompt_user) || notices[0];
+  const action = (plane && plane.action) || (notice && notice.action) || null;
+  const needsRepair = plane && plane.available === false;
+  if (!needsRepair && !notice) return;
+
+  host.classList.remove("hidden");
+  const title = document.createElement("strong");
+  title.innerText = notice?.blocking
+    ? `${planeKey} plane blocked`
+    : `${planeKey} plane needs attention`;
+  const message = document.createElement("p");
+  message.innerText = notice?.message
+    || (planeKey === "CLI"
+      ? "CLI subscription plane is not ready. Device-login on the gateway host, then refresh."
+      : "API plane is not ready. Configure XAI_API_KEY in the UniGrok server .env (never in IDE MCP JSON).");
+  host.append(title, message);
+
+  const command = typeof action?.command === "string" ? action.command : "";
+  if (command) {
+    const pre = document.createElement("pre");
+    pre.className = "plane-repair-command";
+    pre.textContent = command;
+    const copyBtn = document.createElement("button");
+    copyBtn.type = "button";
+    copyBtn.className = "small-btn-glow";
+    copyBtn.innerText = "Copy repair command";
+    copyBtn.addEventListener("click", () => copyTextToClipboard(command, copyBtn));
+    host.append(pre, copyBtn);
+  }
+}
+
+function renderCatalogTrustBanner(prefix, plane) {
+  const banner = $(`${prefix}CatalogTrust`);
+  if (!banner) return;
+  const source = plane?.source;
+  if (isFallbackCatalogSource(source) || (plane?.credential_available && !plane?.catalog_available)) {
+    banner.classList.remove("hidden");
+    banner.innerText = "Not live — static fallback catalog. Do not treat pins as verified on this plane until source is Live.";
+    return;
+  }
+  banner.classList.add("hidden");
+  banner.innerText = "";
+}
+
+function renderPlaneModels(planeName, plane, sharedIds, contract) {
   const prefix = planeName === "CLI" ? "cli" : "api";
   const stateChip = $(`${prefix}ModelPlaneState`);
   const source = $(`${prefix}ModelSource`);
   const economics = $(`${prefix}ModelEconomics`);
   const list = $(`${prefix}ModelList`);
   const models = Array.isArray(plane?.models) ? plane.models : [];
+  const fallback = isFallbackCatalogSource(plane?.source)
+    || (plane?.credential_available && !plane?.catalog_available);
 
   const planeState = plane?.available
     ? "Ready"
-    : plane?.credential_available && !plane?.catalog_available
+    : fallback
       ? "Catalog fallback"
       : String(plane?.credential_state || "Unavailable").replaceAll("_", " ");
-  stateChip.innerText = planeState;
-  stateChip.className = `state-chip ${plane?.available ? "ready" : ""}`;
-  source.innerText = readableCatalogSource(plane?.source);
-  economics.innerText = plane?.economics || "Usage terms unavailable.";
-  if (prefix === "cli") {
+  if (stateChip) {
+    stateChip.innerText = planeState;
+    stateChip.className = `state-chip ${plane?.available ? "ready" : ""} ${fallback ? "fallback" : ""}`;
+  }
+  if (source) source.innerText = readableCatalogSource(plane?.source);
+  if (economics) economics.innerText = plane?.economics || "Usage terms unavailable.";
+  if (prefix === "cli" && $("cliDefaultModel")) {
     $("cliDefaultModel").innerText = plane?.default_model || "Not reported";
   }
+  if (prefix === "api" && $("apiDefaultModel")) {
+    $("apiDefaultModel").innerText = plane?.default_model
+      || "No single default — agent auto-routes (planning/coding aliases)";
+  }
 
+  renderCatalogTrustBanner(prefix, plane);
+  renderPlaneRepair(prefix, planeName, contract);
+
+  if (!list) return;
   list.replaceChildren();
   if (!models.length) {
     const empty = document.createElement("span");
@@ -1337,7 +1490,7 @@ function renderPlaneModels(planeName, plane, sharedIds) {
   for (const model of models) {
     const id = String(model?.id || "unknown");
     const card = document.createElement("article");
-    card.className = "provider-model-card";
+    card.className = `provider-model-card${fallback ? " fallback-catalog" : ""}`;
 
     const identity = document.createElement("div");
     const name = document.createElement("strong");
@@ -1350,6 +1503,13 @@ function renderPlaneModels(planeName, plane, sharedIds) {
     planeBadge.className = `model-badge ${prefix}`;
     planeBadge.innerText = planeName === "CLI" ? "CLI subscription" : "API metered";
     badges.appendChild(planeBadge);
+
+    if (fallback) {
+      const fallbackBadge = document.createElement("span");
+      fallbackBadge.className = "model-badge fallback";
+      fallbackBadge.innerText = "Fallback";
+      badges.appendChild(fallbackBadge);
+    }
 
     if (model?.default || id === plane?.default_model) {
       const defaultBadge = document.createElement("span");
@@ -1375,67 +1535,125 @@ function renderPlaneModels(planeName, plane, sharedIds) {
     copyButton.type = "button";
     copyButton.className = "small-btn model-copy-btn";
     copyButton.innerText = "Copy pin";
-    copyButton.setAttribute("aria-label", `Copy ${id} model pin`);
-    copyButton.addEventListener("click", () => copyTextToClipboard(id, copyButton));
+    copyButton.setAttribute("aria-label", `Copy ${planeName} plane pin for ${id}`);
+    copyButton.title = "Copies plane-qualified pin (model + plane + same_plane)";
+    const pin = planePinSnippet(planeName, id);
+    copyButton.addEventListener("click", () => copyTextToClipboard(pin, copyButton));
 
     card.append(identity, copyButton);
     list.appendChild(card);
   }
 }
 
-function renderPlaneModelCatalog(catalog) {
+function renderPlaneModelCatalog(catalog, contract = null) {
   const routing = catalog?.routing || {};
   const planes = catalog?.planes || {};
   const sharedIds = new Set(catalog?.shared_model_ids || []);
+  const planesContract = contract || state.credentialPlanes;
   state.modelCatalog = catalog;
+  if (contract) state.credentialPlanes = contract;
   syncModelOptions();
 
-  $("modelsRoutingPolicy").innerText = String(routing.policy || "unknown").replaceAll("_", " ");
-  $("modelsPreferredPlane").innerText = `Preferred: ${routing.preferred_plane || "none"}`;
-  $("modelsEffectivePlane").innerText = `Effective now: ${routing.effective_plane || "none"}`;
-  $("modelsRoutingRule").innerText = routing.rule || "Model and credential-plane selection are separate routing decisions.";
+  if ($("modelsRoutingPolicy")) {
+    $("modelsRoutingPolicy").innerText = String(routing.policy || "unknown").replaceAll("_", " ");
+  }
+  if ($("modelsPreferredPlane")) {
+    $("modelsPreferredPlane").innerText = `Preferred: ${routing.preferred_plane || "none"}`;
+  }
+  if ($("modelsEffectivePlane")) {
+    $("modelsEffectivePlane").innerText = `Effective now: ${routing.effective_plane || "none"}`;
+  }
+  if ($("modelsRoutingRule")) {
+    $("modelsRoutingRule").innerText = routing.rule
+      || "Model and credential-plane selection are separate routing decisions. Host IDEs (Cursor, etc.) may list non-Grok models natively — those are outside UniGrok.";
+  }
 
-  renderPlaneModels("CLI", planes.CLI || {}, sharedIds);
-  renderPlaneModels("API", planes.API || {}, sharedIds);
+  renderPlaneModels("CLI", planes.CLI || {}, sharedIds, planesContract);
+  renderPlaneModels("API", planes.API || {}, sharedIds, planesContract);
 
   const total = (planes.CLI?.models?.length || 0) + (planes.API?.models?.length || 0);
   const generated = catalog?.generated_at ? new Date(catalog.generated_at).toLocaleString() : "just now";
-  $("modelsStatus").innerText = `${total} plane-specific model entr${total === 1 ? "y" : "ies"} • refreshed ${generated}`;
+  if ($("modelsStatus")) {
+    $("modelsStatus").innerText = `${total} plane-specific model entr${total === 1 ? "y" : "ies"} • refreshed ${generated}`;
+  }
 
   const sharedNote = $("sharedModelsNote");
-  if (sharedIds.size) {
-    sharedNote.classList.remove("hidden");
-    sharedNote.innerText = `${[...sharedIds].join(", ")} ${sharedIds.size === 1 ? "exists" : "exist"} on both planes. These are shown twice intentionally because authentication, availability, and usage accounting differ.`;
-  } else {
-    sharedNote.classList.add("hidden");
-    sharedNote.innerText = "";
+  if (sharedNote) {
+    if (sharedIds.size) {
+      sharedNote.classList.remove("hidden");
+      sharedNote.innerText = `${[...sharedIds].join(", ")} ${sharedIds.size === 1 ? "exists" : "exist"} on both UniGrok planes. Shown twice intentionally — authentication, availability, and usage accounting differ. Copy pin is plane-qualified.`;
+    } else {
+      sharedNote.classList.add("hidden");
+      sharedNote.innerText = "";
+    }
   }
 
   const warningList = $("modelCatalogWarnings");
-  warningList.replaceChildren();
-  const warnings = Array.isArray(catalog?.warnings) ? catalog.warnings : [];
-  warningList.classList.toggle("hidden", warnings.length === 0);
-  for (const warning of warnings) {
-    const item = document.createElement("p");
-    item.innerText = warning;
-    warningList.appendChild(item);
+  if (warningList) {
+    warningList.replaceChildren();
+    const warnings = Array.isArray(catalog?.warnings) ? catalog.warnings : [];
+    warningList.classList.toggle("hidden", warnings.length === 0);
+    for (const warning of warnings) {
+      const item = document.createElement("p");
+      item.innerText = warning;
+      warningList.appendChild(item);
+    }
   }
 }
 
-async function loadPlaneModelCatalog() {
+async function loadPlaneModelCatalog(force = true) {
+  // Cache successful catalogs until the user forces refresh or opens Planes
+  // after a prior failure.
+  if (!force && state.modelCatalog && !state.modelCatalogLoading) {
+    renderPlaneModelCatalog(state.modelCatalog, state.credentialPlanes);
+    return;
+  }
+  if (state.modelCatalogLoading) return;
+
+  const generation = state.modelCatalogGeneration;
+
   const refreshButton = $("refreshModelsBtn");
   if (refreshButton) refreshButton.disabled = true;
-  $("modelsStatus").innerText = "Refreshing live CLI and API catalogs through MCP discovery…";
+  state.modelCatalogLoading = true;
+  if ($("modelsStatus")) {
+    $("modelsStatus").innerText = "Refreshing live CLI and API catalogs through MCP discovery…";
+  }
   try {
     const res = await fetchMcpCall("grok_mcp_discover_self", { include_models: true });
     const payload = extractToolPayload(res);
     const catalog = payload?.data?.model_catalog;
+    const contract = payload?.data?.credential_planes || state.credentialPlanes;
     if (!catalog) throw new Error("Discovery response did not include a model catalog.");
-    renderPlaneModelCatalog(catalog);
+    if (generation !== state.modelCatalogGeneration) return;
+    renderPlaneModelCatalog(catalog, contract);
   } catch (err) {
-    $("modelsStatus").innerText = `Model catalog unavailable: ${err.message}`;
+    if (generation !== state.modelCatalogGeneration) return;
+    state.modelCatalog = null;
+    clearModelOptions("auto route");
+    if ($("modelsStatus")) {
+      $("modelsStatus").innerText = `Model catalog unavailable: ${err.message}`;
+    }
+    clearPlaneModelLists(`Failed to load catalog: ${err.message}`);
+    for (const prefix of ["cli", "api"]) {
+      const chip = $(`${prefix}ModelPlaneState`);
+      if (chip) {
+        chip.innerText = "Error";
+        chip.className = "state-chip";
+      }
+      const banner = $(`${prefix}CatalogTrust`);
+      if (banner) {
+        banner.classList.remove("hidden");
+        banner.innerText = "Catalog request failed. Fix MCP connectivity or credentials, then Refresh.";
+      }
+    }
   } finally {
+    state.modelCatalogLoading = false;
     if (refreshButton) refreshButton.disabled = false;
+    if (generation !== state.modelCatalogGeneration && !state.modelCatalog) {
+      // A credential recheck invalidated this in-flight response. Start one
+      // fresh request after releasing the single-flight guard.
+      void loadPlaneModelCatalog(false);
+    }
   }
 }
 
@@ -2362,7 +2580,7 @@ function init() {
   setupCredentialActions();
   setupMetricsControls();
 
-  $("refreshModelsBtn").addEventListener("click", loadPlaneModelCatalog);
+  $("refreshModelsBtn")?.addEventListener("click", () => loadPlaneModelCatalog(true));
 
   // Onboarding actions
   $("copyDiscoverBtn").addEventListener("click", runDiscoverSelfOnboarding);
@@ -2416,10 +2634,14 @@ function init() {
   setTimeout(async () => {
     const ready = await runStartupCheck();
     const runtime = await fetchRuntimeStatus();
+    if (runtime?.credential_planes) {
+      state.credentialPlanes = runtime.credential_planes;
+    }
     renderSetupStatus(runtime, ready, gatewayReadiness.detail);
     switchTab("tab-onboarding");
+    // Keep OpenAI-compat model list warm for any residual consumers; dual-plane
+    // Planes catalog is lazy-loaded only when the Planes tab opens.
     await loadModelsList();
-    await loadPlaneModelCatalog();
     await fetchMcpListTools();
     await fetchLiveMetrics();
     // WebMCP browser registration is optional/experimental; skip on Core glass.

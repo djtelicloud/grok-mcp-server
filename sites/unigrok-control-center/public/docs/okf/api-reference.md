@@ -244,6 +244,36 @@ Test helper: clear the process-local cache after swapping fixture files.
 
 ## http_server.py {#http_server}
 
+### Function: `mode_dials_enabled` {#http_server-mode_dials_enabled}
+
+```python
+def mode_dials_enabled() -> bool
+```
+
+**Keywords:** mode, dials, enabled
+
+Public alias for whether phoneword mode-dial ports are enabled.
+
+### Function: `get_active_mode_dial` {#http_server-get_active_mode_dial}
+
+```python
+def get_active_mode_dial() -> Optional[tuple[int, str]]
+```
+
+**Keywords:** get, active, mode, dial
+
+Return the phoneword mode dial bound for this HTTP request, if any.
+
+### Function: `get_active_host_port` {#http_server-get_active_host_port}
+
+```python
+def get_active_host_port() -> Optional[int]
+```
+
+**Keywords:** get, active, host, port
+
+Return the Host header port for this HTTP request, when parseable.
+
 ### Class: `ModeDialContextMiddleware` {#http_server-modedialcontextmiddleware}
 
 ```python
@@ -538,6 +568,26 @@ def set_active_principal(principal: Optional[str])
 **Keywords:** set, active, principal
 
 Bind the authenticated security principal for the current request.
+
+### Function: `get_active_client_id` {#identity-get_active_client_id}
+
+```python
+def get_active_client_id() -> Optional[str]
+```
+
+**Keywords:** get, active, client, id
+
+Return the untrusted X-Client-ID label bound for this request, if any.
+
+### Function: `principal_kind` {#identity-principal_kind}
+
+```python
+def principal_kind(principal: Optional[str]=None) -> str
+```
+
+**Keywords:** principal, kind
+
+Classify the security principal without exposing raw identifiers.
 
 ### Function: `resolve_request_caller` {#identity-resolve_request_caller}
 

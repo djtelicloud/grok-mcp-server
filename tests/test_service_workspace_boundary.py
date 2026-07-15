@@ -240,6 +240,241 @@ async def test_stable_discover_self_has_no_forge_connect_recipes(monkeypatch):
         assert token.lower() not in lowered, f"stable discover leaked {token!r}"
     assert "http://localhost:4765/mcp" in prose
     assert "plan critique" in lowered or "implementation plan" in lowered
+    assert result.data["service_mode"] == "stable"
+    assert result.data["request_context"]["surface"] == "stable_core"
+    assert result.data["bootstrap"]["can_mutate_workspace"] is False
+    assert result.data["bootstrap"]["can_use_swarm"] is False
+    # Structured surface names are fine; never coach a second product port in prose.
+    assert "4766" not in prose
+
+
+@pytest.mark.asyncio
+async def test_discover_self_bootstrap_warns_without_client_id(monkeypatch):
+    monkeypatch.setenv("UNIGROK_SERVICE_MODE", "stable")
+    monkeypatch.delenv("WORKSPACE_ROOT", raising=False)
+    monkeypatch.setattr(
+        "src.tools.system.grok_cli_plane_status",
+        lambda timeout_sec=5.0: {
+            "state": "ready",
+            "ready": True,
+            "binary": True,
+            "auth": "oauth",
+            "setup_command": "unused",
+        },
+    )
+    result = await grok_mcp_discover_self()
+    assert result.data["request_context"]["client_id_present"] is False
+    warning_ids = {w["id"] for w in result.data["bootstrap"]["warnings"]}
+    assert "missing_client_id" in warning_ids
+    assert result.data["bootstrap"]["status"] in {"WARN", "ERR"}
+
+
+@pytest.mark.asyncio
+async def test_discover_self_bootstrap_ok_with_client_id(monkeypatch):
+    from src.identity import _ACTIVE_CLIENT_ID
+
+    monkeypatch.setenv("UNIGROK_SERVICE_MODE", "stable")
+    monkeypatch.delenv("WORKSPACE_ROOT", raising=False)
+    monkeypatch.setenv("XAI_API_KEY", "test-key-for-discover")
+    monkeypatch.setattr(
+        "src.tools.system.grok_cli_plane_status",
+        lambda timeout_sec=5.0: {
+            "state": "ready",
+            "ready": True,
+            "binary": True,
+            "auth": "oauth",
+            "setup_command": "unused",
+        },
+    )
+    token = _ACTIVE_CLIENT_ID.set("claude-code")
+    try:
+        result = await grok_mcp_discover_self()
+    finally:
+        _ACTIVE_CLIENT_ID.reset(token)
+
+    assert result.data["request_context"]["client_id_present"] is True
+    assert result.data["request_context"]["client_id_normalized"] == "claude-code"
+    warning_ids = {w["id"] for w in result.data["bootstrap"]["warnings"]}
+    assert "missing_client_id" not in warning_ids
+    if result.data["bootstrap"]["can_chat"]:
+        assert result.data["bootstrap"]["status"] in {"OK", "WARN"}
+
+
+def test_markdown_inline_label_strips_backticks_and_control():
+    from src.tools.system import _markdown_inline_label
+
+    assert _markdown_inline_label("evil`break") == "evilbreak"
+    assert _markdown_inline_label("a\nb\rc") == "a b c"
+    assert _markdown_inline_label(None) == "(missing)"
+    assert _markdown_inline_label("  ok  ") == "ok"
+
+
+def test_resolve_notice_action_fills_from_plane_views():
+    from src.tools.system import _resolve_notice_action
+
+    api_action = {"id": "configure_xai_api_key", "kind": "configure_secret"}
+    cli_action = {"id": "authenticate_grok_cli", "kind": "authenticate_cli"}
+    api = {"action": api_action}
+    cli = {"action": cli_action}
+
+    resolved_api = _resolve_notice_action(
+        {"plane": "API", "action_id": "configure_xai_api_key"},
+        api=api,
+        cli=cli,
+    )
+    assert resolved_api == api_action
+
+    resolved_cli = _resolve_notice_action(
+        {"plane": "CLI", "action_id": "authenticate_grok_cli"},
+        api=api,
+        cli=cli,
+    )
+    assert resolved_cli == cli_action
+
+
+def test_discover_bootstrap_surfaces_follow_connected_port(monkeypatch):
+    from src.tools.system import _build_discover_bootstrap
+
+    monkeypatch.setenv("UNIGROK_RUNTIME", "local")
+    bootstrap = _build_discover_bootstrap(
+        contributor=False,
+        workspace_attached=False,
+        credential_planes={
+            "service_usable": True,
+            "degraded": False,
+            "api": {"available": True},
+            "cli": {"available": True},
+            "notices": [],
+        },
+        request_context={"client_id_present": True, "host_port": 9090},
+    )
+
+    assert bootstrap["surfaces"] == {
+        "canonical_mcp": "http://localhost:9090/mcp",
+        "healthz": "http://localhost:9090/healthz",
+        "readyz": "http://localhost:9090/readyz",
+        "runtimez": "http://localhost:9090/runtimez",
+        "ui": "http://localhost:9090/ui/",
+    }
+    assert any(
+        "http://localhost:9090/mcp" in step
+        for step in bootstrap["first_connect_checklist"]
+    )
+
+
+def test_discover_bootstrap_swarm_policy_matches_runtime_parser(monkeypatch):
+    from src.tools.system import _build_discover_bootstrap
+
+    monkeypatch.setenv("UNIGROK_RUNTIME", "local")
+    credentials = {
+        "service_usable": True,
+        "degraded": False,
+        "api": {"available": True},
+        "cli": {"available": True},
+        "notices": [],
+    }
+
+    for configured, expected, usable in (
+        ("active", "active", True),
+        ("dry_run", "dry_run", True),
+        ("on", "off", False),
+        ("true", "off", False),
+    ):
+        monkeypatch.setenv("UNIGROK_SWARM", configured)
+        bootstrap = _build_discover_bootstrap(
+            contributor=True,
+            workspace_attached=True,
+            credential_planes=credentials,
+            request_context={"client_id_present": True, "host_port": 4766},
+        )
+        assert bootstrap["swarm_policy"] == expected
+        assert bootstrap["can_use_swarm"] is usable
+
+
+@pytest.mark.asyncio
+async def test_discover_manifest_endpoint_follows_connected_port(monkeypatch):
+    monkeypatch.setattr("src.http_server.get_active_host_port", lambda: 9090)
+
+    result = await grok_mcp_discover_self()
+
+    assert result.data["canonical_endpoint"] == "http://localhost:9090/mcp"
+    assert result.data["bootstrap"]["surfaces"]["canonical_mcp"] == result.data["canonical_endpoint"]
+    assert "`http://localhost:9090/mcp`" in result.response
+    assert "`http://localhost:9090/ui/`" in result.response
+
+
+def test_discover_bootstrap_disables_workspace_mutation_in_cloudrun(monkeypatch):
+    from src.tools.system import _build_discover_bootstrap
+
+    monkeypatch.setenv("UNIGROK_RUNTIME", "cloudrun")
+    monkeypatch.setenv("UNIGROK_SWARM", "active")
+    bootstrap = _build_discover_bootstrap(
+        contributor=True,
+        workspace_attached=True,
+        credential_planes={
+            "service_usable": True,
+            "degraded": False,
+            "api": {"available": True},
+            "cli": {"available": False},
+            "notices": [],
+        },
+        request_context={"client_id_present": True, "host_port": None},
+    )
+
+    assert bootstrap["can_mutate_workspace"] is False
+    assert bootstrap["can_use_swarm"] is False
+
+
+@pytest.mark.asyncio
+async def test_discover_self_bootstrap_next_actions_include_plane_actions(monkeypatch):
+    monkeypatch.setenv("UNIGROK_SERVICE_MODE", "stable")
+    monkeypatch.delenv("WORKSPACE_ROOT", raising=False)
+    monkeypatch.delenv("XAI_API_KEY", raising=False)
+    monkeypatch.setattr(
+        "src.tools.system.grok_cli_plane_status",
+        lambda timeout_sec=5.0: {
+            "state": "needs_auth",
+            "ready": False,
+            "binary": True,
+            "auth": "unauthenticated",
+            "setup_command": "docker exec … grok login --device-auth",
+        },
+    )
+    result = await grok_mcp_discover_self()
+    next_actions = result.data["bootstrap"]["next_actions"]
+    assert next_actions, "expected credential repair next_actions"
+    for item in next_actions:
+        assert item.get("action") is not None, f"null action for {item.get('id')}"
+        assert item["action"].get("id")
+        assert item["action"].get("instructions") or item["action"].get("command")
+
+
+@pytest.mark.asyncio
+async def test_discover_self_markdown_escapes_hostile_client_id(monkeypatch):
+    from src.identity import _ACTIVE_CLIENT_ID
+
+    monkeypatch.setenv("UNIGROK_SERVICE_MODE", "stable")
+    monkeypatch.delenv("WORKSPACE_ROOT", raising=False)
+    monkeypatch.setenv("XAI_API_KEY", "test-key-for-discover")
+    monkeypatch.setattr(
+        "src.tools.system.grok_cli_plane_status",
+        lambda timeout_sec=5.0: {
+            "state": "ready",
+            "ready": True,
+            "binary": True,
+            "auth": "oauth",
+            "setup_command": "unused",
+        },
+    )
+    token = _ACTIVE_CLIENT_ID.set("evil`break\ninject")
+    try:
+        result = await grok_mcp_discover_self()
+    finally:
+        _ACTIVE_CLIENT_ID.reset(token)
+
+    prose = (result.response or "") + "\n" + (result.text or "")
+    assert "evil`break" not in prose
+    assert "Client label: `evilbreak inject`" in prose
 
 
 @pytest.mark.asyncio
