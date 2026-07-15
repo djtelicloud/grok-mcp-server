@@ -92,6 +92,13 @@ Capability names are surface-specific. Treat the connected server's live
 
 ---
 
+## 3b. Human language to the sponsor
+
+- User-facing: **Ready for supervisor** / **Not ready** / **Live** / **Not live** / **Blocked** / **Who (brand)**.
+- Do not lecture git (push/branch/worktree/land/merge) unless the user asks for git.
+- “Done / pushed?” → readiness for supervisor, not a git tutorial.
+- See `.agents/AGENTS.md` section **Human language**.
+
 ## 4. Multi-Agent Git Coordination Rules
 
 Multiple IDE agents can collaborate on this project concurrently. Follow these rules to prevent merge conflicts and branch switching issues:
