@@ -1311,6 +1311,57 @@ async def grok_mcp_discover_self(include_models: bool = False) -> SystemResult:
         surface = _markdown_inline_label(request_context.get("surface") or "stable_core")
         bootstrap_status = _markdown_inline_label(bootstrap.get("status") or "WARN")
 
+        # Stronger client prose when contributor workflows are gated off.
+        stable_client = (
+            not contributor
+            and not bootstrap.get("can_mutate_workspace")
+            and not bootstrap.get("can_use_swarm")
+        )
+        if stable_client:
+            contributor_gate_extra = (
+                "- **Contributor workflows disabled** on this surface "
+                "(`can_mutate_workspace=false`, `can_use_swarm=false`): do not invent land, "
+                "Forge, Swarm, dual-runtime, or product session-rehydrate for ordinary installs.\n"
+                "- Status language for the user's own apps: Done / Blocked / plain English — not "
+                "multi-agent \"Ready for supervisor\" unless they are shipping UniGrok itself.\n"
+                "- Prefer the `using-unigrok` skill and the connected Core endpoint only.\n"
+            )
+            # Prefer concrete next actions for pure clients.
+            pure_client_actions = [
+                {
+                    "id": "stable_client_use_agent",
+                    "prompt_user": False,
+                    "action": {
+                        "id": "stable_client_use_agent",
+                        "summary": (
+                            "Use the UniGrok `agent` tool on this Core endpoint only; "
+                            "do not invent a second port or land workflow."
+                        ),
+                    },
+                },
+                {
+                    "id": "stable_client_status_language",
+                    "prompt_user": False,
+                    "action": {
+                        "id": "stable_client_status_language",
+                        "summary": (
+                            "For foreign apps, report Done/Blocked/plain English — not "
+                            "Ready-for-supervisor land radio."
+                        ),
+                    },
+                },
+            ]
+            existing_ids = {
+                item.get("id")
+                for item in bootstrap.get("next_actions") or []
+                if isinstance(item, dict)
+            }
+            for item in pure_client_actions:
+                if item["id"] not in existing_ids:
+                    bootstrap.setdefault("next_actions", []).append(item)
+        else:
+            contributor_gate_extra = ""
+
         doc_text = (
             "# UniGrok MCP Discovery & Self-Description\n\n"
             "Zero-configuration onboarding for IDE agents. The primary product chat path is the "
@@ -1323,6 +1374,7 @@ async def grok_mcp_discover_self(include_models: bool = False) -> SystemResult:
             f"can_spend_api=`{bootstrap.get('can_spend_api')}`, "
             f"can_mutate_workspace=`{bootstrap.get('can_mutate_workspace')}`, "
             f"can_use_swarm=`{bootstrap.get('can_use_swarm')}`.\n"
+            f"{contributor_gate_extra}"
             "- Read structured `data.bootstrap` and `data.request_context` for machine-usable gates.\n"
             "- This service does **not** read global IDE settings or the caller's project files. "
             "With user permission, audit those locally (report only; never rewrite without consent; "
