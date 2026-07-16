@@ -65,7 +65,8 @@ services:
         -u NPM_TOKEN -u PYPI_API_TOKEN
         -u GOOGLE_APPLICATION_CREDENTIALS -u UNIGROK_API_KEYS
         -u UNIGROK_MCP_TOKEN_SECRET -u UNIGROK_CLIENT_TOKEN
-        -u MCP_TOKEN_SECRET -u SSH_AUTH_SOCK -u DOCKER_AUTH_CONFIG
+        -u UNIGROK_API_KEY_RECORDS -u MCP_TOKEN_SECRET
+        -u SSH_AUTH_SOCK -u DOCKER_AUTH_CONFIG
         grok login --device-auth
     volumes:
       - grok-mcp-cli-auth:/home/appuser/.grok

@@ -464,6 +464,15 @@ def test_ci_validates_the_provisioned_project_site():
     assert "site-template:" not in workflow
 
 
+def test_ci_docker_smoke_uses_stable_static_identity_records():
+    workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'UNIGROK_API_KEY_RECORDS={"ci-client":"ci-client-key"}' in workflow
+    assert "-e UNIGROK_API_KEYS=" not in workflow
+
+
 def test_readme_describes_bound_site_and_live_authorization_truthfully():
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     normalized = " ".join(readme.split())

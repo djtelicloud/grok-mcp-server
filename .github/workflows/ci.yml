@@ -223,7 +223,7 @@ jobs:
         run: |
           docker run -d --name grok-mcp-ci \
             -e XAI_API_KEY=dummy-ci-key \
-            -e UNIGROK_API_KEYS=ci-client-key \
+            -e 'UNIGROK_API_KEY_RECORDS={"ci-client":"ci-client-key"}' \
             -p 4765:8080 \
             grok-mcp:ci
           for _ in $(seq 1 30); do

@@ -47,6 +47,18 @@ async def cstore(tmp_path):
     await s.close()
 
 
+def _set_static_keys(monkeypatch, raw: str) -> None:
+    records = {
+        f"key-{index}": secret
+        for index, secret in enumerate(
+            (part.strip() for part in raw.split(",") if part.strip()), start=1
+        )
+    }
+    monkeypatch.delenv("UNIGROK_API_KEYS", raising=False)
+    monkeypatch.delenv("UNIGROK_API_KEY_LEGACY_IDS", raising=False)
+    monkeypatch.setenv("UNIGROK_API_KEY_RECORDS", json.dumps(records))
+
+
 def _ctx_with_client_info(name="claude-code", version="1.2.3"):
     """A minimal FastMCP-Context-shaped object: ctx.session.client_params is
     the InitializeRequestParams whose clientInfo carries name/version."""
@@ -553,21 +565,63 @@ class TestHttpCallerDerivation:
         assert _derive_http_caller(scope) == "http:anon|codex-cli"
 
     def test_auth_key_alias_when_no_header(self, monkeypatch):
-        monkeypatch.setenv("UNIGROK_API_KEYS", "sekret-key")
+        _set_static_keys(monkeypatch, "sekret-key")
         scope = {"type": "http", "headers": [(b"authorization", b"Bearer sekret-key")]}
-        assert _derive_http_caller(scope) == "http:key-1"
+        assert _derive_http_caller(scope) == "http:key:key-1"
 
     def test_auth_key_alias_tracks_configured_key_order(self, monkeypatch):
-        monkeypatch.setenv("UNIGROK_API_KEYS", "first-key,second-key")
+        _set_static_keys(monkeypatch, "first-key,second-key")
         scope = {"type": "http", "headers": [(b"authorization", b"Bearer second-key")]}
-        assert _derive_http_caller(scope) == "http:key-2"
+        assert _derive_http_caller(scope) == "http:key:key-2"
+
+    def test_stable_key_id_survives_reorder_rotation_and_removal(self, monkeypatch):
+        monkeypatch.delenv("UNIGROK_API_KEYS", raising=False)
+        monkeypatch.setenv(
+            "UNIGROK_API_KEY_RECORDS",
+            json.dumps({"owner": "owner-secret-v1", "reviewer": "reviewer-secret"}),
+        )
+        reviewer = {
+            "type": "http",
+            "headers": [(b"authorization", b"Bearer reviewer-secret")],
+        }
+        assert _derive_http_principal(reviewer) == "http:key:reviewer"
+
+        monkeypatch.setenv(
+            "UNIGROK_API_KEY_RECORDS",
+            json.dumps({"reviewer": "reviewer-secret", "owner": "owner-secret-v2"}),
+        )
+        assert _derive_http_principal(reviewer) == "http:key:reviewer"
+        rotated_owner = {
+            "type": "http",
+            "headers": [(b"authorization", b"Bearer owner-secret-v2")],
+        }
+        assert _derive_http_principal(rotated_owner) == "http:key:owner"
+
+        monkeypatch.setenv(
+            "UNIGROK_API_KEY_RECORDS", json.dumps({"reviewer": "reviewer-secret"})
+        )
+        assert _derive_http_principal(reviewer) == "http:key:reviewer"
+        assert _derive_http_principal(rotated_owner) == "http:anon"
+
+    def test_explicit_legacy_index_mapping_is_stable_across_reorder(self, monkeypatch):
+        monkeypatch.delenv("UNIGROK_API_KEY_RECORDS", raising=False)
+        monkeypatch.setenv("UNIGROK_API_KEYS", "owner-secret,reviewer-secret")
+        monkeypatch.setenv("UNIGROK_API_KEY_LEGACY_IDS", "owner,reviewer")
+        reviewer = {
+            "headers": [(b"authorization", b"Bearer reviewer-secret")]
+        }
+        assert _derive_http_principal(reviewer) == "http:key:reviewer"
+
+        monkeypatch.setenv("UNIGROK_API_KEYS", "reviewer-secret,owner-secret")
+        monkeypatch.setenv("UNIGROK_API_KEY_LEGACY_IDS", "reviewer,owner")
+        assert _derive_http_principal(reviewer) == "http:key:reviewer"
 
     def test_anonymous_fallback(self, monkeypatch):
         monkeypatch.delenv("UNIGROK_API_KEYS", raising=False)
         assert _derive_http_caller({"type": "http", "headers": []}) == "http:anon"
 
     def test_principal_ignores_self_asserted_identity_headers(self, monkeypatch):
-        monkeypatch.setenv("UNIGROK_API_KEYS", "first-key,second-key")
+        _set_static_keys(monkeypatch, "first-key,second-key")
         scope = {
             "type": "http",
             "headers": [
@@ -576,8 +630,8 @@ class TestHttpCallerDerivation:
                 (b"x-caller", b"victim-user"),
             ],
         }
-        assert _derive_http_principal(scope) == "http:key-2"
-        assert _derive_http_caller(scope) == "http:key-2|victim-ide"
+        assert _derive_http_principal(scope) == "http:key:key-2"
+        assert _derive_http_caller(scope) == "http:key:key-2|victim-ide"
 
     def test_oauth_subject_is_principal_even_with_spoofed_headers(self):
         scope = {
@@ -586,13 +640,23 @@ class TestHttpCallerDerivation:
                 (b"x-client-id", b"victim-ide"),
                 (b"x-caller", b"victim-user"),
             ],
-            "unigrok.oauth": {"sub": "github:42"},
+            "unigrok.oauth": {
+                "sub": "github:42",
+                "iss": "https://auth.grokmcp.org",
+            },
         }
-        assert _derive_http_principal(scope) == "oauth:github:42"
-        assert _derive_http_caller(scope) == "oauth:github:42|victim-ide"
+        principal = "oauth:https%3A%2F%2Fauth.grokmcp.org:github%3A42"
+        assert _derive_http_principal(scope) == principal
+        assert _derive_http_caller(scope) == f"{principal}|victim-ide"
+
+    def test_same_oauth_subject_under_two_issuers_has_distinct_principals(self):
+        first = {"headers": [], "unigrok.oauth": {"sub": "42", "iss": "https://a.example"}}
+        second = {"headers": [], "unigrok.oauth": {"sub": "42", "iss": "https://b.example"}}
+
+        assert _derive_http_principal(first) != _derive_http_principal(second)
 
     def test_client_label_cannot_poison_another_principals_budget_key(self, monkeypatch):
-        monkeypatch.setenv("UNIGROK_API_KEYS", "first-key")
+        _set_static_keys(monkeypatch, "first-key")
         scope = {
             "type": "http",
             "headers": [
@@ -601,7 +665,7 @@ class TestHttpCallerDerivation:
             ],
         }
         caller = _derive_http_caller(scope)
-        assert caller == "http:key-1|http%3Akey-2"
+        assert caller == "http:key:key-1|http%3Akey-2"
         assert "http:key-2" not in caller
 
     @pytest.mark.asyncio
@@ -662,13 +726,13 @@ class TestGatewayCallerPropagation:
 
     def test_auth_key_alias_propagates_without_header(self, monkeypatch):
         monkeypatch.delenv("UNIGROK_RUNTIME", raising=False)
-        monkeypatch.setenv("UNIGROK_API_KEYS", "sekret-key")
+        _set_static_keys(monkeypatch, "sekret-key")
         monkeypatch.delenv("UNIGROK_ALLOW_UNAUTHENTICATED", raising=False)
 
         caller = self._run_request(
             monkeypatch, {"Authorization": "Bearer sekret-key"}
         )
-        assert caller == "http:key-1"
+        assert caller == "http:key:key-1"
 
     def test_anonymous_request_reads_http_anon(self, monkeypatch):
         monkeypatch.delenv("UNIGROK_RUNTIME", raising=False)
@@ -924,7 +988,7 @@ class TestMetricsSegmentation:
 
 class TestClientIdDerivation:
     def test_x_client_id_wins_over_x_caller_and_key(self, monkeypatch):
-        monkeypatch.setenv("UNIGROK_API_KEYS", "sekret-key")
+        _set_static_keys(monkeypatch, "sekret-key")
         scope = {
             "type": "http",
             "headers": [
@@ -933,7 +997,7 @@ class TestClientIdDerivation:
                 (b"authorization", b"Bearer sekret-key"),
             ],
         }
-        assert _derive_http_caller(scope) == "http:key-1|vscode"
+        assert _derive_http_caller(scope) == "http:key:key-1|vscode"
 
     def test_scoped_session_prefixes_only_with_client_bound(self):
         import src.http_server as http_module
@@ -1024,7 +1088,7 @@ class TestClientIdSessionScoping:
 
     def test_static_keys_isolate_same_client_and_session(self, monkeypatch):
         monkeypatch.delenv("UNIGROK_RUNTIME", raising=False)
-        monkeypatch.setenv("UNIGROK_API_KEYS", "first-key,second-key")
+        _set_static_keys(monkeypatch, "first-key,second-key")
         first = self._run_request(
             monkeypatch,
             {"Authorization": "Bearer first-key", "X-Client-ID": "vscode"},
@@ -1033,6 +1097,6 @@ class TestClientIdSessionScoping:
             monkeypatch,
             {"Authorization": "Bearer second-key", "X-Client-ID": "vscode"},
         )
-        assert first == "http%3Akey-1:vscode:main"
-        assert second == "http%3Akey-2:vscode:main"
+        assert first == "http%3Akey%3Akey-1:vscode:main"
+        assert second == "http%3Akey%3Akey-2:vscode:main"
         assert first != second

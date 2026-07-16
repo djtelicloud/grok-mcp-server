@@ -36,7 +36,8 @@ _ACTIVE_SESSION_ID: contextvars.ContextVar[Optional[str]] = contextvars.ContextV
 def scoped_session(session: Optional[str]) -> Optional[str]:
     """Namespace a session by authenticated principal and client label.
 
-    HTTP middleware always binds a principal (OAuth subject, static-key alias,
+    HTTP middleware always binds a principal (issuer-bound OAuth identity,
+    stable static-key ID,
     or the loopback anonymous principal). ``X-Client-ID`` remains an untrusted
     subordinate label that separates one principal's IDEs; it never provides
     the security boundary by itself. Non-HTTP callers preserve the historical
@@ -118,7 +119,7 @@ def principal_kind(principal: Optional[str] = None) -> str:
         return "none"
     if value.startswith("oauth:"):
         return "oauth"
-    if value.startswith("http:key-"):
+    if value.startswith(("http:key:", "http:key-")):
         return "api_key"
     if value == "http:anon":
         return "anon"

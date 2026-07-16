@@ -22,11 +22,11 @@ Deploy the repository `Dockerfile` to a dedicated Cloud Run service and set:
 | `UNIGROK_OAUTH_INTROSPECTION_URL` | `https://control.grokmcp.org/oauth/introspect` |
 | `UNIGROK_OAUTH_SCOPES` | `unigrok:connect,unigrok:invoke,unigrok:review,unigrok:chat,unigrok:status` |
 | `UNIGROK_ALLOWED_ORIGINS` | Exact reviewed browser origins only; omit when no browser client is approved |
-| `UNIGROK_CALLER_BUDGETS` | JSON daily cost caps keyed by authenticated OAuth subject |
+| `UNIGROK_CALLER_BUDGETS` | JSON daily cost caps keyed by the full issuer-bound OAuth principal published by runtime attribution |
 | `UNIGROK_STATE_DIR` | `/tmp/uni-grok` unless a durable store is deliberately attached |
 
 Inject `XAI_API_KEY` from a version-pinned Secret Manager resource. Do not set
-`UNIGROK_API_KEYS` on the production OAuth service; a static bearer must not
+`UNIGROK_API_KEY_RECORDS` or legacy `UNIGROK_API_KEYS` on the production OAuth service; a static bearer must not
 become a hidden bypass around membership revocation. The service account needs
 only access to that xAI secret and the normal logging/metrics permissions.
 

@@ -88,7 +88,7 @@ UniGrok needs at least one model credential at the global service:
   models and features; or
 - configure both for the broadest coverage.
 
-If you configure `UNIGROK_API_KEYS` to protect the gateway beyond its default
+If you configure stable `UNIGROK_API_KEY_RECORDS` to protect the gateway beyond its default
 loopback-only deployment, use one of those gateway client tokens in each client
 configuration. An xAI API key is deliberately not accepted as a gateway client
 token.
@@ -432,7 +432,7 @@ unnecessary and can discard unrelated Docker-managed data.
 
 By default Docker Compose publishes UniGrok only to `127.0.0.1`, so it is for
 IDE clients on the same machine. Before deliberately exposing it beyond
-loopback, configure `UNIGROK_API_KEYS` and add an `Authorization: Bearer`
+loopback, configure `UNIGROK_API_KEY_RECORDS` and add an `Authorization: Bearer`
 gateway token to each client configuration. Keep the upstream `XAI_API_KEY`
 server-side. See `SECURITY.md` before changing the bind or port publication.
 
