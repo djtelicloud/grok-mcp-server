@@ -3889,7 +3889,7 @@ Snapshot of timed-thread pressure (consumed by grok_mcp_status).
 ### Function: `run_blocking` {#utils-run_blocking}
 
 ```python
-async def run_blocking(fn: Callable, *args, timeout: Optional[float]=None, **kwargs)
+async def run_blocking(fn: Callable, *args, timeout: Optional[float]=None, cancel_event: Optional[threading.Event]=None, **kwargs)
 ```
 
 **Keywords:** run, blocking
@@ -3902,6 +3902,11 @@ with the shared pool eight stuck calls would permanently occupy every
 worker and deadlock all SDK bridging in the server. The dedicated threads
 are capped (UNIGROK_MAX_TIMED_THREADS, default 64): at capacity the call
 fails fast with RuntimeError instead of spawning yet another thread.
+
+Optional ``cancel_event`` is set when the awaiter times out or is
+cancelled so cooperative callables (API ``chat.stream``) can stop
+consuming the metered upstream instead of running to completion after
+the client disconnects.
 
 ### Function: `communicate_with_timeout` {#utils-communicate_with_timeout}
 
