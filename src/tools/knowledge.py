@@ -12,7 +12,7 @@ from typing import Any, Dict, Optional
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import ToolAnnotations
 
-from ..identity import caller_from_mcp_context
+from ..identity import caller_from_mcp_context, scoped_session
 from ..jobs import get_job_manager
 from ..utils import (
     _normalize_fact_scope,
@@ -128,6 +128,10 @@ async def distill_session(session: str, ctx: Optional[Context] = None) -> Dict[s
     name = str(session or "").strip()
     if not name:
         return {"error": "Input Validation Error: session must not be empty."}
+    # Match agent/chat: namespace by principal + X-Client-ID so short names
+    # resolve to the caller's stored history and foreign fully-qualified
+    # session ids cannot be distilled across client labels.
+    name = scoped_session(name) or name
     # ctx is FastMCP-injected (hidden from the tool schema): the clientInfo
     # name identifies which agent submitted the job on the persisted row —
     # same attribution as submit_research_job.
