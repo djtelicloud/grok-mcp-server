@@ -212,7 +212,11 @@ async def test_provider_usage_accepts_sdk_management_alias(monkeypatch):
             captured.update(url=url, headers=headers, json=json)
             return FakeResponse()
 
-    monkeypatch.setattr("src.metrics.httpx.AsyncClient", lambda **kwargs: FakeClient())
+    def capture_client(**kwargs):
+        captured["client_kwargs"] = kwargs
+        return FakeClient()
+
+    monkeypatch.setattr("src.metrics.httpx.AsyncClient", capture_client)
     monkeypatch.delenv("XAI_MANAGEMENT_API_KEY", raising=False)
     monkeypatch.setenv("XAI_MANAGEMENT_KEY", "sdk-management-test-key")
     monkeypatch.setenv("UNIGROK_XAI_TEAM_ID", "team-test")
@@ -224,6 +228,8 @@ async def test_provider_usage_accepts_sdk_management_alias(monkeypatch):
     assert captured["headers"] == {
         "Authorization": "Bearer sdk-management-test-key"
     }
+    assert captured["client_kwargs"]["trust_env"] is False
+    assert captured["client_kwargs"]["follow_redirects"] is False
 
 
 @pytest.mark.asyncio

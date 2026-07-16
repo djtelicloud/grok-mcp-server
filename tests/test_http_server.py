@@ -1901,6 +1901,52 @@ async def test_post_xai_chat_502_bad_gateway_on_errors(monkeypatch):
     assert body_json["error"]["message"].startswith("Upstream returned invalid JSON.")
 
 
+def test_credential_bearing_httpx_clients_disable_proxy_env():
+    """Bearer-carrying httpx clients must not inherit HTTPS_PROXY/HTTP_PROXY.
+
+    Matches the subordinate-provider contract in src/providers/base.py
+    (trust_env=False, follow_redirects=False).
+    """
+    import ast
+
+    root = Path(__file__).resolve().parents[1]
+    sources = [
+        root / "src" / "http_server.py",
+        root / "src" / "metrics.py",
+        root / "src" / "providers" / "base.py",
+    ]
+    found = 0
+    for path in sources:
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            is_async_client = (
+                isinstance(func, ast.Attribute)
+                and func.attr == "AsyncClient"
+                and isinstance(func.value, ast.Name)
+                and func.value.id == "httpx"
+            )
+            if not is_async_client:
+                continue
+            found += 1
+            keywords = {
+                kw.arg: kw.value
+                for kw in node.keywords
+                if kw.arg is not None
+            }
+            trust = keywords.get("trust_env")
+            redirects = keywords.get("follow_redirects")
+            assert isinstance(trust, ast.Constant) and trust.value is False, (
+                f"{path.name}:{node.lineno} AsyncClient missing trust_env=False"
+            )
+            assert isinstance(redirects, ast.Constant) and redirects.value is False, (
+                f"{path.name}:{node.lineno} AsyncClient missing follow_redirects=False"
+            )
+    assert found >= 5, f"expected ≥5 credential-bearing AsyncClient sites, found {found}"
+
+
 def test_xai_chat_completions_url_defaults_and_rejects_unsafe_overrides(monkeypatch):
     from src.http_server import XAI_BASE_URL, _xai_chat_completions_url
 

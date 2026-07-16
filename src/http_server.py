@@ -248,7 +248,11 @@ async def _introspect_oauth_token(token: str, required_scope: str) -> Optional[D
     if not url or not token or len(token) > 8_192:
         return None
     try:
-        async with httpx.AsyncClient(timeout=5.0, follow_redirects=False) as client:
+        async with httpx.AsyncClient(
+            timeout=5.0,
+            follow_redirects=False,
+            trust_env=False,
+        ) as client:
             response = await client.post(
                 url,
                 headers={
@@ -1870,7 +1874,11 @@ async def post_xai_chat(payload: Dict[str, Any]) -> Response:
             code="service_unavailable",
         )
     try:
-        async with httpx.AsyncClient(timeout=120.0) as client:
+        async with httpx.AsyncClient(
+            timeout=120.0,
+            follow_redirects=False,
+            trust_env=False,
+        ) as client:
             response = await client.post(url, json=_xai_payload(payload), headers=_xai_headers())
         if response.status_code >= 400:
             return _json_error(
@@ -1915,7 +1923,11 @@ async def stream_xai_chat(payload: Dict[str, Any]) -> AsyncIterator[bytes]:
         pool=10.0,
     )
     try:
-        async with httpx.AsyncClient(timeout=stream_timeout) as client:
+        async with httpx.AsyncClient(
+            timeout=stream_timeout,
+            follow_redirects=False,
+            trust_env=False,
+        ) as client:
             async with client.stream("POST", url, json=_xai_payload(payload), headers=_xai_headers()) as response:
                 if response.status_code >= 400:
                     await response.aread()
