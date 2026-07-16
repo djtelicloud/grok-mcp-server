@@ -3323,7 +3323,7 @@ Returns:
 ### Function: `get_research_job` {#tools-research-get_research_job}
 
 ```python
-async def get_research_job(job_id: str) -> Dict[str, Any]
+async def get_research_job(job_id: str, ctx: Optional[Context]=None) -> Dict[str, Any]
 ```
 
 **Keywords:** get, research, job
@@ -3336,18 +3336,24 @@ queued/running job whose `updated_at` is older than
 UNIGROK_JOB_TIMEOUT_SEC, meaning the task that owned it did not survive a
 server restart and the job will never finish on its own.
 
+When the request has a bound caller identity, only that caller's jobs are
+visible (foreign ids look like `not_found`).
+
 Args:
     job_id: ID returned by `submit_research_job`.
 
 ### Function: `list_research_jobs` {#tools-research-list_research_jobs}
 
 ```python
-async def list_research_jobs(limit: int=20) -> Dict[str, Any]
+async def list_research_jobs(limit: int=20, ctx: Optional[Context]=None) -> Dict[str, Any]
 ```
 
 **Keywords:** list, research, jobs
 
 List the most recent deferred research jobs, newest first.
+
+When the request has a bound caller identity, the list is scoped to that
+caller. Unbound local callers keep the historical open listing.
 
 Args:
     limit: Maximum number of jobs to return (clamped to 1-100, default 20).
