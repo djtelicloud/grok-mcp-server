@@ -1112,7 +1112,7 @@ async def test_v16_upgrades_to_v17_and_backfills_exact_terminal_artifact(tmp_pat
     store = GrokSessionStore(db_path)
     after = (await store.list_provider_attempts())[0]
     async with store._conn.execute("PRAGMA user_version;") as cursor:
-        assert (await cursor.fetchone())[0] == 17
+        assert (await cursor.fetchone())[0] == 18
     assert worker_episode_document(after) == expected_document
     assert after["harvest_document_digest"] == expected_digest
     assert after["harvest_episode_id"] == expected_episode_id

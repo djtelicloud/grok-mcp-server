@@ -16,7 +16,13 @@ import uuid
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
-from .identity import get_active_caller, normalize_caller, scoped_session
+from .identity import (
+    get_active_caller,
+    get_active_principal,
+    normalize_caller,
+    normalize_principal,
+    scoped_session,
+)
 from .utils import (
     AGENTIC_TOOLS_SCHEMA,
     _DISTILL_SYS_PROMPT,
@@ -36,6 +42,16 @@ from .utils import (
 )
 
 logger = logging.getLogger("GrokMCP.Jobs")
+
+
+def resolve_job_owner(caller: Optional[str] = None) -> Optional[str]:
+    """Return the durable job owner for the current request.
+
+    Authenticated HTTP always uses the server-bound stable principal. Caller
+    labels remain attribution-only and cannot replace that owner. Unbound
+    local/stdio callers retain their historical explicit-label behavior.
+    """
+    return get_active_principal() or normalize_caller(caller) or get_active_caller()
 
 
 def _job_timeout_sec() -> float:
@@ -104,12 +120,12 @@ class JobManager:
     ) -> Dict[str, Any]:
         """Create a job row and launch its background defer task.
 
-        caller (the submitting agent's identity) is persisted on the row —
-        explicit param first, else whatever the transport bound to the
-        current async context; None stays None."""
+        The server-bound authenticated principal is persisted when present;
+        otherwise the explicit local/stdio caller label is used, followed by
+        the transport's reporting identity. None stays None."""
         job_id = uuid.uuid4().hex
         resolved = (model or "").strip() or await resolve_model("planning")
-        caller = normalize_caller(caller) or get_active_caller()
+        caller = resolve_job_owner(caller)
         await self._store.create_job(job_id, prompt=prompt, model=resolved, caller=caller)
         task = asyncio.create_task(self._run_job(job_id, prompt, resolved, agent_count))
         self._tasks[job_id] = task
@@ -186,9 +202,8 @@ class JobManager:
         defer-slot semaphore as research jobs — a distill run pins one timed
         thread for the parse call.
 
-        caller attribution matches submit(): explicit param first, else
-        whatever the transport bound to the current async context (the
-        gateway's X-Caller / MCP clientInfo); None stays None.
+        Owner attribution matches submit(): a bound authenticated principal
+        wins; unbound local/stdio keeps its explicit/reporting caller label.
         """
         session_name = str(session or "").strip()
         if not session_name:
@@ -198,7 +213,7 @@ class JobManager:
         session_name = scoped_session(session_name) or session_name
         job_id = uuid.uuid4().hex
         model = await resolve_model("coding")
-        caller = normalize_caller(caller) or get_active_caller()
+        caller = resolve_job_owner(caller)
         await self._store.create_job(
             job_id,
             prompt=f"[distill] session:{session_name}",
@@ -323,12 +338,32 @@ class JobManager:
             view["error"] = row.get("result")
         return view
 
-    async def get(self, job_id: str) -> Optional[Dict[str, Any]]:
-        row = await self._store.get_job(job_id)
-        return self.describe(row) if row else None
+    @staticmethod
+    def _caller_may_view(
+        row_caller: Optional[str], requester: Optional[str]
+    ) -> bool:
+        """When an owner identity is bound, only that owner's rows are visible.
+        Unbound requesters keep the historical open local view."""
+        req = normalize_principal(requester)
+        if not req:
+            return True
+        return normalize_principal(row_caller) == req
 
-    async def list(self, limit: int = 20) -> List[Dict[str, Any]]:
-        rows = await self._store.list_jobs(limit)
+    async def get(
+        self, job_id: str, caller: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
+        row = await self._store.get_job(job_id)
+        if row is None:
+            return None
+        if not self._caller_may_view(row.get("caller"), caller):
+            return None
+        return self.describe(row)
+
+    async def list(
+        self, limit: int = 20, caller: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        requester = normalize_principal(caller)
+        rows = await self._store.list_jobs(limit, caller=requester)
         return [self.describe(row) for row in rows]
 
     async def wait(self, job_id: str) -> None:

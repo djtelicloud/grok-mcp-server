@@ -127,6 +127,7 @@ class TestJobsStore:
             async with s._conn.execute("SELECT name FROM sqlite_master WHERE type='index';") as cursor:
                 indexes = {r[0] for r in await cursor.fetchall()}
                 assert "idx_jobs_created_at" in indexes
+                assert "idx_jobs_caller_created_at_id" in indexes
 
             await s.create_job("job-a", prompt="research quantum stuff", model="grok-4.3")
             row = await s.get_job("job-a")
@@ -145,6 +146,26 @@ class TestJobsStore:
             jobs = await s.list_jobs(limit=1)
             assert len(jobs) == 1
             assert await s.get_job("missing") is None
+        finally:
+            await s.close()
+
+    @pytest.mark.asyncio
+    async def test_long_principals_do_not_collide_at_caller_limit(self, tmp_path):
+        """Stable owners compare in full, not by the old 80-char caller prefix."""
+        s = GrokSessionStore(db_path=tmp_path / "jobs-long-owner.db")
+        prefix = "oauth:https%3A%2F%2Fcontrol.grokmcp.org:" + ("x" * 90)
+        owner_a = prefix + "-a"
+        owner_b = prefix + "-b"
+        try:
+            await s.create_job("job-owner-a", "a", "m", caller=owner_a)
+            await s.create_job("job-owner-b", "b", "m", caller=owner_b)
+            assert (await s.get_job("job-owner-a"))["caller"] == owner_a
+            assert (await s.get_job("job-owner-b"))["caller"] == owner_b
+            assert [row["id"] for row in await s.list_jobs(caller=owner_a)] == [
+                "job-owner-a"
+            ]
+            manager = JobManager(job_store=s)
+            assert await manager.get("job-owner-b", caller=owner_a) is None
         finally:
             await s.close()
 
@@ -183,6 +204,38 @@ class TestJobManager:
             assert chat.defer_timeout is not None
             assert chat.defer_timeout.total_seconds() == pytest.approx(_job_timeout_sec())
         finally:
+            await s.close()
+
+    @pytest.mark.asyncio
+    async def test_submit_persists_stable_principal_over_caller_label(self, tmp_path):
+        """Authenticated HTTP ownership is never replaced by clientInfo."""
+        from src.identity import (
+            reset_active_caller,
+            reset_active_principal,
+            set_active_caller,
+            set_active_principal,
+        )
+
+        s = GrokSessionStore(db_path=tmp_path / "jm_owner.db")
+        manager = JobManager(job_store=s)
+        client = _FakeJobClient(
+            _FakeDeferChat(response=SimpleNamespace(content="ok", cost_usd=None))
+        )
+        principal_token = set_active_principal(
+            "oauth:https%3A%2F%2Fcontrol.grokmcp.org:stable-subject"
+        )
+        caller_token = set_active_caller("principal|spoofable-client-label")
+        try:
+            with patch("src.jobs.get_xai_client", return_value=client):
+                submitted = await manager.submit("owned job", caller="spoofable-client-label")
+                await manager.wait(submitted["job_id"])
+            row = await s.get_job(submitted["job_id"])
+            assert row["caller"] == (
+                "oauth:https%3A%2F%2Fcontrol.grokmcp.org:stable-subject"
+            )
+        finally:
+            reset_active_caller(caller_token)
+            reset_active_principal(principal_token)
             await s.close()
 
     @pytest.mark.asyncio
@@ -360,6 +413,157 @@ class TestResearchTools:
         res = await list_research_jobs(limit=5)
         assert res["count"] == 1
         assert res["jobs"][0]["job_id"] == "j-x"
+
+    @pytest.mark.asyncio
+    async def test_get_research_job_hides_foreign_principal(self, monkeypatch):
+        from types import SimpleNamespace
+
+        from src.identity import (
+            reset_active_principal,
+            set_active_principal,
+        )
+
+        manager = get_job_manager()
+        monkeypatch.setattr(
+            manager._store,
+            "get_job",
+            AsyncMock(
+                return_value={
+                    "id": "j-peer",
+                    "status": "done",
+                    "model": "m",
+                    "created_at": "t",
+                    "updated_at": "t",
+                    "result": "secret-peer-answer",
+                    "cost": 0.1,
+                    "caller": "oauth:https%3A%2F%2Fcontrol.grokmcp.org:principal-a",
+                }
+            ),
+        )
+        ctx = SimpleNamespace(
+            session=SimpleNamespace(
+                client_params=SimpleNamespace(
+                    clientInfo=SimpleNamespace(name="principal-a-spoof")
+                )
+            )
+        )
+        token = set_active_principal(
+            "oauth:https%3A%2F%2Fcontrol.grokmcp.org:principal-b"
+        )
+        try:
+            res = await get_research_job("j-peer", ctx=ctx)
+        finally:
+            reset_active_principal(token)
+        assert res["status"] == "not_found"
+        assert "secret-peer-answer" not in str(res)
+
+    @pytest.mark.asyncio
+    async def test_unbound_local_clientinfo_keeps_open_view(self, monkeypatch):
+        """Untrusted clientInfo does not invent an authorization boundary."""
+        manager = get_job_manager()
+        monkeypatch.setattr(
+            manager._store,
+            "get_job",
+            AsyncMock(
+                return_value={
+                    "id": "j-local",
+                    "status": "done",
+                    "model": "m",
+                    "created_at": "t",
+                    "updated_at": "t",
+                    "result": "trusted-local-result",
+                    "cost": 0.0,
+                    "caller": "other-local-client",
+                }
+            ),
+        )
+        ctx = SimpleNamespace(
+            session=SimpleNamespace(
+                client_params=SimpleNamespace(
+                    clientInfo=SimpleNamespace(name="local-client")
+                )
+            )
+        )
+        res = await get_research_job("j-local", ctx=ctx)
+        assert res["status"] == "done"
+        assert res["result"] == "trusted-local-result"
+
+    @pytest.mark.asyncio
+    async def test_list_research_jobs_scopes_to_bound_caller(self, monkeypatch):
+        manager = get_job_manager()
+        list_mock = AsyncMock(
+            return_value=[
+                {
+                    "id": "j-mine",
+                    "status": "done",
+                    "model": "m",
+                    "created_at": "t",
+                    "updated_at": "t",
+                    "result": "ok",
+                    "cost": 0.0,
+                    "caller": "oauth:https%3A%2F%2Fcontrol.grokmcp.org:stable-subject",
+                }
+            ]
+        )
+        monkeypatch.setattr(manager._store, "list_jobs", list_mock)
+        from src.identity import (
+            reset_active_caller,
+            reset_active_principal,
+            set_active_caller,
+            set_active_principal,
+        )
+
+        token = set_active_caller("claude-code")
+        principal_token = set_active_principal(
+            "oauth:https%3A%2F%2Fcontrol.grokmcp.org:stable-subject"
+        )
+        ctx = SimpleNamespace(
+            session=SimpleNamespace(
+                client_params=SimpleNamespace(
+                    clientInfo=SimpleNamespace(name="spoofed-other-principal")
+                )
+            )
+        )
+        try:
+            res = await list_research_jobs(limit=5, ctx=ctx)
+        finally:
+            reset_active_principal(principal_token)
+            reset_active_caller(token)
+        assert res["count"] == 1
+        assert res["jobs"][0]["job_id"] == "j-mine"
+        list_mock.assert_awaited_once_with(
+            5,
+            caller="oauth:https%3A%2F%2Fcontrol.grokmcp.org:stable-subject",
+        )
+
+    @pytest.mark.asyncio
+    async def test_get_own_job_visible_to_matching_caller(self, monkeypatch):
+        manager = get_job_manager()
+        monkeypatch.setattr(
+            manager._store,
+            "get_job",
+            AsyncMock(
+                return_value={
+                    "id": "j-mine",
+                    "status": "done",
+                    "model": "m",
+                    "created_at": "t",
+                    "updated_at": "t",
+                    "result": "my-answer",
+                    "cost": 0.2,
+                    "caller": "claude-code",
+                }
+            ),
+        )
+        from src.utils import reset_active_caller, set_active_caller
+
+        token = set_active_caller("claude-code")
+        try:
+            res = await get_research_job("j-mine")
+        finally:
+            reset_active_caller(token)
+        assert res["status"] == "done"
+        assert res["result"] == "my-answer"
 
     @pytest.mark.asyncio
     async def test_research_tools_registered_with_annotations(self):
@@ -548,6 +752,33 @@ class TestResourcesAndPrompts:
         contents = list(await mcp.read_resource("grok://jobs/definitely-missing"))
         payload = json.loads(contents[0].content)
         assert payload["status"] == "not_found"
+
+    @pytest.mark.asyncio
+    async def test_job_resource_hides_foreign_principal(self):
+        from src.identity import reset_active_principal, set_active_principal
+        from src.server import mcp
+        from src.utils import store
+
+        job_id = "phase5-resource-foreign-owner"
+        await store.create_job(
+            job_id,
+            prompt="private research",
+            model="grok-test",
+            caller="oauth:https%3A%2F%2Fcontrol.grokmcp.org:principal-a",
+        )
+        await store.update_job(
+            job_id, status="done", result="principal-a-private-result", cost=0.1
+        )
+        token = set_active_principal(
+            "oauth:https%3A%2F%2Fcontrol.grokmcp.org:principal-b"
+        )
+        try:
+            contents = list(await mcp.read_resource(f"grok://jobs/{job_id}"))
+        finally:
+            reset_active_principal(token)
+        payload = json.loads(contents[0].content)
+        assert payload["status"] == "not_found"
+        assert "principal-a-private-result" not in contents[0].content
 
     @pytest.mark.asyncio
     async def test_prompts_registered_and_render(self):
