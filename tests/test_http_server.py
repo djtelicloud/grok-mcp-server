@@ -1853,6 +1853,7 @@ def test_credential_bearing_httpx_clients_disable_proxy_env():
     sources = (
         root / "src" / "http_server.py",
         root / "src" / "metrics.py",
+        root / "src" / "providers" / "base.py",
     )
     found = 0
     for path in sources:
@@ -1883,4 +1884,4 @@ def test_credential_bearing_httpx_clients_disable_proxy_env():
             assert isinstance(redirects, ast.Constant) and redirects.value is False, (
                 f"{path.name}:{node.lineno} AsyncClient missing follow_redirects=False"
             )
-    assert found >= 4, f"expected ≥4 credential-bearing AsyncClient sites, found {found}"
+    assert found >= 5, f"expected ≥5 credential-bearing AsyncClient sites, found {found}"
