@@ -134,9 +134,10 @@ def test_management_key_alone_never_satisfies_inference_readiness(monkeypatch):
     from src import utils
 
     monkeypatch.delenv("XAI_API_KEY", raising=False)
+    monkeypatch.delenv("UNIGROK_PRINCIPAL_XAI_KEYS_JSON", raising=False)
     monkeypatch.setenv("XAI_MANAGEMENT_API_KEY", "xai-management-only")
     monkeypatch.setattr(utils, "XAI_API_KEY", "")
-    monkeypatch.setattr(utils, "_client", None)
+    utils._clients.clear()
 
     assert utils.xai_api_key_configured() is False
     contract = build_credential_plane_contract(
@@ -149,7 +150,7 @@ def test_management_key_alone_never_satisfies_inference_readiness(monkeypatch):
         },
     )
     assert contract["service_usable"] is False
-    with pytest.raises(ValueError, match="XAI_API_KEY is not configured"):
+    with pytest.raises(ValueError, match="No effective xAI API key is configured"):
         utils.get_xai_client()
 
 
@@ -163,10 +164,11 @@ def test_inference_key_alone_never_satisfies_management_readiness(monkeypatch):
             created.update(kwargs)
 
     monkeypatch.setenv("XAI_API_KEY", "xai-inference-only")
+    monkeypatch.delenv("UNIGROK_PRINCIPAL_XAI_KEYS_JSON", raising=False)
     monkeypatch.delenv("XAI_MANAGEMENT_API_KEY", raising=False)
     monkeypatch.delenv("XAI_MANAGEMENT_KEY", raising=False)
     monkeypatch.setattr(utils, "XAI_API_KEY", "xai-inference-only")
-    monkeypatch.setattr(utils, "_client", None)
+    utils._clients.clear()
     monkeypatch.setattr("xai_sdk.Client", FakeClient)
 
     assert utils.xai_api_key_configured() is True
@@ -561,6 +563,40 @@ async def test_api_only_request_blocks_with_secure_key_action(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_api_only_request_blocks_unmapped_principal_when_service_has_other_key(
+    monkeypatch,
+):
+    from src import utils
+    from src.identity import reset_active_principal, set_active_principal
+
+    monkeypatch.delenv("XAI_API_KEY", raising=False)
+    monkeypatch.setattr(utils, "XAI_API_KEY", "")
+    monkeypatch.setenv(
+        "UNIGROK_PRINCIPAL_XAI_KEYS_JSON",
+        '{"oauth:https%3A%2F%2Fcontrol.grokmcp.org:github%3A42":"xai-other"}',
+    )
+    monkeypatch.setattr(utils, "grok_cli_plane_status", lambda **_: READY_CLI)
+    monkeypatch.setattr(
+        utils, "get_dynamic_context", AsyncMock(return_value=("", False, None))
+    )
+    token = set_active_principal(
+        "oauth:https%3A%2F%2Fcontrol.grokmcp.org:github%3A99"
+    )
+    try:
+        assert utils.credential_plane_contract(READY_CLI)["api"]["available"] is True
+        layer = await utils.run_agent_turn(
+            prompt="Research current evidence", mode="research"
+        )
+    finally:
+        reset_active_principal(token)
+
+    assert layer.finish_reason == "error"
+    assert layer.route == "credential-setup"
+    assert layer.credentials["api"]["available"] is False
+    assert "authenticated principal" in layer.generation
+
+
+@pytest.mark.asyncio
 async def test_cross_plane_policy_allows_unready_cli_start_to_reach_supervisor(
     monkeypatch,
 ):
@@ -572,7 +608,9 @@ async def test_cross_plane_policy_allows_unready_cli_start_to_reach_supervisor(
         "api": {"available": True},
         "notices": [],
     }
-    monkeypatch.setattr(utils, "credential_plane_contract", lambda *_: credentials)
+    monkeypatch.setattr(
+        utils, "request_credential_plane_contract", lambda *_: credentials
+    )
     monkeypatch.setattr(utils, "grok_cli_plane_status", lambda **_: {})
     monkeypatch.setattr(
         utils, "get_dynamic_context", AsyncMock(return_value=("", False, None))
@@ -607,7 +645,9 @@ async def test_cross_plane_policy_allows_unready_api_start_to_reach_supervisor(
         "api": {"available": False},
         "notices": [],
     }
-    monkeypatch.setattr(utils, "credential_plane_contract", lambda *_: credentials)
+    monkeypatch.setattr(
+        utils, "request_credential_plane_contract", lambda *_: credentials
+    )
     monkeypatch.setattr(utils, "grok_cli_plane_status", lambda **_: {})
     monkeypatch.setattr(
         utils, "get_dynamic_context", AsyncMock(return_value=("", False, None))
@@ -649,7 +689,9 @@ async def test_run_agent_turn_crosses_cli_preflight_for_api_only_research(
         "api": {"available": True},
         "notices": [],
     }
-    monkeypatch.setattr(utils, "credential_plane_contract", lambda *_: credentials)
+    monkeypatch.setattr(
+        utils, "request_credential_plane_contract", lambda *_: credentials
+    )
     monkeypatch.setattr(utils, "grok_cli_plane_status", lambda **_: cli_status)
     monkeypatch.setattr(
         utils, "get_dynamic_context", AsyncMock(return_value=("", False, None))
@@ -690,7 +732,9 @@ async def test_strict_cli_api_only_preflight_keeps_grok_authority(monkeypatch):
         "api": {"available": True},
         "notices": [],
     }
-    monkeypatch.setattr(utils, "credential_plane_contract", lambda *_: credentials)
+    monkeypatch.setattr(
+        utils, "request_credential_plane_contract", lambda *_: credentials
+    )
     monkeypatch.setattr(utils, "grok_cli_plane_status", lambda **_: READY_CLI)
     monkeypatch.setattr(
         utils, "get_dynamic_context", AsyncMock(return_value=("", False, None))
@@ -772,7 +816,7 @@ async def test_preflight_failures_persist_grok_session_and_telemetry(
     )
     monkeypatch.setattr(utils, "store", test_store)
     monkeypatch.setattr(
-        utils, "credential_plane_contract", lambda *_: credentials
+        utils, "request_credential_plane_contract", lambda *_: credentials
     )
     monkeypatch.setattr(utils, "grok_cli_plane_status", lambda **_: READY_CLI)
     monkeypatch.setattr(

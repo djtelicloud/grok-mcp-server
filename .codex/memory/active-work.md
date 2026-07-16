@@ -29,13 +29,19 @@ credentials, OAuth codes, tokens, or private keys here.
   keys use the same canonical principal form. Exact-head CI, CodeQL, Codex
   Approval, Supervisor Approval, Security Reviewer, Cursor Approval, and
   Bugbot passed; the local suite passed 2,195 tests.
+- PR #338 is merged. Deferred research-job submission, tool reads, listing,
+  and `grok://jobs/{id}` now use the full server-bound authenticated principal
+  as the hosted ownership boundary; client labels remain attribution-only,
+  foreign and legacy-unowned rows are denied, and trusted unbound local/stdio
+  callers keep their historical open view. Exact-head CI, CodeQL, Codex Approval,
+  Supervisor Approval, Security Reviewer, Cursor Approval, and Bugbot passed;
+  the local suite passed 2,202 tests.
 - Stable `:4765` and contributor `:4766` are healthy and ready on the current
   image with read-only root filesystems.
 - Remote MCP is Live at 100% in both regions on image digest
-  `sha256:07d44433af44977ca10129def08b543a94dd07734dfd97b9e941a2c3a0bd5c70`:
-  `us-central1` revision `unigrok-remote-mcp-00015-hgv` and `us-east1`
-  revision `unigrok-remote-mcp-00019-g6m`. Both hosted caller-budget entries
-  were migrated atomically with the image rollout.
+  `sha256:ef73149f032b2f86ac7d3e1a46dd294a90074edd1ab54d9f39fa7153762faab7`:
+  `us-central1` revision `unigrok-remote-mcp-00016-7d2` and `us-east1`
+  revision `unigrok-remote-mcp-00020-vjp`.
 - Public health, readiness, OAuth protected-resource metadata, and protected
   `/runtimez`, `/metrics`, and `/mcp` rejection probes pass. No error logs were
   found on the new Cloud Run revisions after rollout.
@@ -45,8 +51,8 @@ credentials, OAuth codes, tokens, or private keys here.
 - Stable identity prerequisites are Live, but principal-storage publication
   remains blocked on its owner-scoped schema/migration, legacy-row quarantine,
   and cross-principal regression contract.
-- Caller-scoped research jobs and other ready security packets remain queued;
-  rebase and integrate only after exact-head review and conflict checks.
+- Other ready security packets remain queued; rebase and integrate only after
+  exact-head review and conflict checks.
 - Provider-broker, stateful MCP sampling, Swarm, and shared multi-principal
   surfaces remain fail-closed until their recorded activation gates are met.
 - Do not promote ready feature/product PRs merely because checks are green;
@@ -55,8 +61,9 @@ credentials, OAuth codes, tokens, or private keys here.
 ## Scratchpad safety
 
 - Codex removed the finished land-gate, distill-scope, compaction-fence,
-  installed-startup, subprocess-security, and prior handoff worktrees only
-  after proving each clean and merged or patch-equivalent to `main`.
+  installed-startup, subprocess-security, research-job integration, and prior
+  handoff worktrees only after proving each clean and merged or patch-equivalent
+  to `main`.
 - Codex removed the mount-free `grok-mcp-ci-local` verification container after
   the production local runtimes were healthy.
 - Preserve the locked protected `main`, active Codex/Cursor/Claude/Grok

@@ -933,6 +933,20 @@ then whole records are admitted while they fit beside the query and the
 
 ## jobs.py {#jobs}
 
+### Function: `resolve_job_owner` {#jobs-resolve_job_owner}
+
+```python
+def resolve_job_owner(caller: Optional[str]=None) -> Optional[str]
+```
+
+**Keywords:** resolve, job, owner
+
+Return the durable job owner for the current request.
+
+Authenticated HTTP always uses the server-bound stable principal. Caller
+labels remain attribution-only and cannot replace that owner. Unbound
+local/stdio callers retain their historical explicit-label behavior.
+
 ### Class: `JobManager` {#jobs-jobmanager}
 
 ```python
@@ -965,9 +979,9 @@ async def JobManager.submit(self, prompt: str, model: Optional[str]=None, agent_
 
 Create a job row and launch its background defer task.
 
-caller (the submitting agent's identity) is persisted on the row —
-explicit param first, else whatever the transport bound to the
-current async context; None stays None.
+The server-bound authenticated principal is persisted when present;
+otherwise the explicit local/stdio caller label is used, followed by
+the transport's reporting identity. None stays None.
 
 ### Method: `JobManager.submit_distill` {#jobs-jobmanager-submit_distill}
 
@@ -987,9 +1001,8 @@ source='session:<name>'). Rides the same jobs-table lifecycle and
 defer-slot semaphore as research jobs — a distill run pins one timed
 thread for the parse call.
 
-caller attribution matches submit(): explicit param first, else
-whatever the transport bound to the current async context (the
-gateway's X-Caller / MCP clientInfo); None stays None.
+Owner attribution matches submit(): a bound authenticated principal
+wins; unbound local/stdio keeps its explicit/reporting caller label.
 
 ### Method: `JobManager.describe` {#jobs-jobmanager-describe}
 
@@ -1126,6 +1139,122 @@ async def fetch_provider_api_usage() -> Dict[str, Any]
 **Keywords:** fetch, provider, api, usage
 
 Optionally fetch today's team-wide API spend from xAI Management API.
+
+## principal_xai.py {#principal_xai}
+
+### Class: `PrincipalXAIConfigurationError` {#principal_xai-principalxaiconfigurationerror}
+
+```python
+class PrincipalXAIConfigurationError
+```
+
+**Keywords:** principal, xai, configuration, error
+
+Secret-safe principal-key configuration failure.
+
+### Function: `default_xai_api_key` {#principal_xai-default_xai_api_key}
+
+```python
+def default_xai_api_key(environ: Mapping[str, str] | None=None) -> str
+```
+
+**Keywords:** default, xai, api, key
+
+Owner / service default key (Live cloud twin path).
+
+### Function: `load_principal_xai_key_table` {#principal_xai-load_principal_xai_key_table}
+
+```python
+def load_principal_xai_key_table(environ: Mapping[str, str] | None=None) -> Dict[str, str]
+```
+
+**Keywords:** load, principal, xai, key, table
+
+Load optional principal → key map (never log values).
+
+### Function: `principal_xai_secret_values` {#principal_xai-principal_xai_secret_values}
+
+```python
+def principal_xai_secret_values(environ: Mapping[str, str] | None=None) -> tuple[str, ...]
+```
+
+**Keywords:** principal, xai, secret, values
+
+Extract bounded map values for redaction and credential-alias denial.
+
+This deliberately does not validate principal keys: provider secrets must
+remain protected even when the surrounding configuration fails closed.
+
+### Function: `resolve_xai_api_key` {#principal_xai-resolve_xai_api_key}
+
+```python
+def resolve_xai_api_key(*, principal: Optional[str]=None, environ: Mapping[str, str] | None=None) -> Tuple[str, str]
+```
+
+**Keywords:** resolve, xai, api, key
+
+Return ``(key, source)`` where source is ``owner_default`` or ``principal``.
+
+Principal overrides apply only for authenticated OAuth principals. Anonymous
+loopback and static API-key principals keep the owner default (static keys
+already *are* a principal form of auth for the gateway, not per-human BYOK).
+
+### Function: `xai_api_service_configured` {#principal_xai-xai_api_service_configured}
+
+```python
+def xai_api_service_configured(environ: Mapping[str, str] | None=None) -> bool
+```
+
+**Keywords:** xai, api, service, configured
+
+Return service-wide API-plane availability without request variance.
+
+Invalid configured maps fail closed. A valid owner key or at least one
+valid principal entry means the service has an API credential path, even
+when the current request principal does not personally have one.
+
+### Function: `inference_client_cache_id` {#principal_xai-inference_client_cache_id}
+
+```python
+def inference_client_cache_id(*, principal: Optional[str]=None, environ: Mapping[str, str] | None=None) -> str
+```
+
+**Keywords:** inference, client, cache, id
+
+Non-secret cache id for the active inference credential path.
+
+Uses principal identity + resolution source only. Credential generation is
+tracked separately with a random process-local token and is never exposed.
+
+### Function: `resolve_inference_credential` {#principal_xai-resolve_inference_credential}
+
+```python
+def resolve_inference_credential(*, principal: Optional[str]=None, environ: Mapping[str, str] | None=None) -> Tuple[str, str, str, str]
+```
+
+**Keywords:** resolve, inference, credential
+
+Resolve one atomic key/source/cache-slot/rotation-generation tuple.
+
+### Function: `active_xai_credential_source` {#principal_xai-active_xai_credential_source}
+
+```python
+def active_xai_credential_source(*, principal: Optional[str]=None, environ: Mapping[str, str] | None=None) -> str
+```
+
+**Keywords:** active, xai, credential, source
+
+Return a secret-safe source label for execution receipts.
+
+### Function: `principal_xai_status` {#principal_xai-principal_xai_status}
+
+```python
+def principal_xai_status(*, principal: Optional[str]=None, environ: Mapping[str, str] | None=None) -> Dict[str, Any]
+```
+
+**Keywords:** principal, xai, status
+
+Secret-safe status for diagnostics (never includes key material).
 
 ## provider_harvest.py {#provider_harvest}
 
@@ -2605,14 +2734,18 @@ the .oracle attribute so status can show how far preflight got.
 ### Function: `module_name_for` {#swarm-preflight-module_name_for}
 
 ```python
-def module_name_for(target_rel: str) -> str
+def module_name_for(target_rel: str, workspace_root: Path | None=None) -> str
 ```
 
 **Keywords:** module, name, for
 
-Dotted module name for a workspace-relative path, tolerating the
-src/ layout. Non-standard layouts fail the provenance probe loudly
-rather than guessing.
+Dotted module name for a workspace-relative path.
+
+A conventional ``src/`` layout puts import packages below that directory,
+while some repositories make ``src`` the import package itself.  Preserve
+the prefix when the sandbox copy proves the latter via ``src/__init__.py``.
+Non-standard layouts still fail the provenance probe loudly rather than
+guessing.
 
 ### Function: `noise_floor_pct` {#swarm-preflight-noise_floor_pct}
 
@@ -3323,7 +3456,7 @@ Returns:
 ### Function: `get_research_job` {#tools-research-get_research_job}
 
 ```python
-async def get_research_job(job_id: str) -> Dict[str, Any]
+async def get_research_job(job_id: str, ctx: Optional[Context]=None) -> Dict[str, Any]
 ```
 
 **Keywords:** get, research, job
@@ -3336,18 +3469,24 @@ queued/running job whose `updated_at` is older than
 UNIGROK_JOB_TIMEOUT_SEC, meaning the task that owned it did not survive a
 server restart and the job will never finish on its own.
 
+When the request has a bound authenticated principal, only that principal's
+jobs are visible (foreign ids look like `not_found`).
+
 Args:
     job_id: ID returned by `submit_research_job`.
 
 ### Function: `list_research_jobs` {#tools-research-list_research_jobs}
 
 ```python
-async def list_research_jobs(limit: int=20) -> Dict[str, Any]
+async def list_research_jobs(limit: int=20, ctx: Optional[Context]=None) -> Dict[str, Any]
 ```
 
 **Keywords:** list, research, jobs
 
 List the most recent deferred research jobs, newest first.
+
+When the request has a bound authenticated principal, the list is scoped to
+that principal. Unbound local callers keep the historical open listing.
 
 Args:
     limit: Maximum number of jobs to return (clamped to 1-100, default 20).
@@ -3932,6 +4071,21 @@ def credential_plane_contract(cli_status: Optional[Dict[str, Any]]=None) -> Dict
 
 Return the shared non-secret plane health and action contract.
 
+### Function: `request_credential_plane_contract` {#utils-request_credential_plane_contract}
+
+```python
+def request_credential_plane_contract(cli_status: Optional[Dict[str, Any]]=None) -> Dict[str, Any]
+```
+
+**Keywords:** request, credential, plane, contract
+
+Return credential availability for the active request principal.
+
+Service diagnostics intentionally use :func:`credential_plane_contract`,
+where any valid principal mapping makes the API plane service-available.
+Execution preflight must instead require the current caller's effective
+key so an unmapped OAuth principal cannot pass on another insider's key.
+
 ### Function: `get_runtime_stats` {#utils-get_runtime_stats}
 
 ```python
@@ -3958,6 +4112,9 @@ with the shared pool eight stuck calls would permanently occupy every
 worker and deadlock all SDK bridging in the server. The dedicated threads
 are capped (UNIGROK_MAX_TIMED_THREADS, default 64): at capacity the call
 fails fast with RuntimeError instead of spawning yet another thread.
+
+Copy caller contextvars into the worker so bound principals, callers, and
+request ids remain available to credential factories and telemetry.
 
 ### Function: `communicate_with_timeout` {#utils-communicate_with_timeout}
 
@@ -4051,6 +4208,16 @@ Guarantee a bound request id for the duration of one agent call.
 Respects an inherited id (gateway traceparent, an outer agent call);
 otherwise generates a fresh one and RESETS it on exit so two sequential
 calls in the same task never share a correlation id.
+
+### Function: `xai_api_key_configured` {#utils-xai_api_key_configured}
+
+```python
+def xai_api_key_configured() -> bool
+```
+
+**Keywords:** xai, api, key, configured
+
+True when the active principal has a usable xAI key (owner or override).
 
 ### Function: `prefer_cli_for_route` {#utils-prefer_cli_for_route}
 
@@ -4184,7 +4351,10 @@ def get_xai_inference_client()
 
 **Keywords:** get, xai, inference, client
 
-Return the cached inference-only xAI SDK client.
+Return a cached inference-only xAI SDK client for the active key.
+
+Owner default is ``XAI_API_KEY``. Optional OAuth principal overrides come
+from ``UNIGROK_PRINCIPAL_XAI_KEYS_JSON`` (see ``src.principal_xai``).
 
 The installed SDK reads ``XAI_MANAGEMENT_KEY`` whenever its management
 argument is falsey.  Pass a fixed, non-provider isolation canary instead of
@@ -4273,7 +4443,7 @@ burn retries — retrying an auth failure only delays the real error.
 ### Function: `check_circuit_breaker` {#utils-check_circuit_breaker}
 
 ```python
-def check_circuit_breaker(model: str)
+def check_circuit_breaker(model: str, *, credential_scope: Optional[str]=None)
 ```
 
 **Keywords:** check, circuit, breaker
@@ -4287,17 +4457,17 @@ re-opens it via record_xai_failure.
 ### Function: `record_xai_failure` {#utils-record_xai_failure}
 
 ```python
-def record_xai_failure(model: str)
+def record_xai_failure(model: str, *, credential_scope: Optional[str]=None, error: Optional[BaseException]=None)
 ```
 
 **Keywords:** record, xai, failure
 
-Count a failed xAI call; open the breaker at the consecutive threshold.
+Count a provider failure, excluding local credential configuration.
 
 ### Function: `record_xai_success` {#utils-record_xai_success}
 
 ```python
-def record_xai_success(model: str)
+def record_xai_success(model: str, *, credential_scope: Optional[str]=None)
 ```
 
 **Keywords:** record, xai, success
@@ -5012,7 +5182,7 @@ unchanged so explicit model slugs keep working everywhere.
 ### Method: `ModelResolver.catalog_snapshot` {#utils-modelresolver-catalog_snapshot}
 
 ```python
-async def ModelResolver.catalog_snapshot(self) -> tuple[List[str], str, bool]
+async def ModelResolver.catalog_snapshot(self, credential_scope: Optional[str]=None) -> tuple[List[str], str, bool]
 ```
 
 **Keywords:** model, resolver, catalog, snapshot
