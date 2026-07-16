@@ -229,7 +229,9 @@ async def _launch_code_swarm(
     task_id = uuid.uuid4().hex
     seed = int(hashlib.sha256(task_id.encode()).hexdigest()[:8], 16)
     workspace = PathResolver.get_workspace_root()
-    target_rel = str(target.relative_to(workspace.resolve()))
+    # Durable task paths are platform-neutral. Preflight, coverage receipts,
+    # and any later Linux runner must not inherit Windows backslashes.
+    target_rel = target.relative_to(workspace.resolve()).as_posix()
 
     await store.create_swarm_task(
         task_id,
