@@ -2974,6 +2974,26 @@ async def raw_get_session_history(session: str) -> str
 
 Get local chat history for a session — lets agent recall prior context.
 
+## tools/consistency.py {#tools-consistency}
+
+### Function: `architecture_consistency_sweep` {#tools-consistency-architecture_consistency_sweep}
+
+```python
+async def architecture_consistency_sweep(target_paths: List[str], rules_paths: List[str], ctx: Optional[Context]=None) -> Dict[str, Any]
+```
+
+**Keywords:** architecture, consistency, sweep
+
+Perform a wide-pass consistency sweep across target code and rule documents.
+
+This tool reads the provided files, runs a deep reasoning pass using Grok,
+and returns a scored consistency report indicating where the codebase has
+drifted from the authoritative claims in the rules_paths.
+
+Args:
+    target_paths: A list of paths to target source files to audit.
+    rules_paths: A list of paths to authoritative documents (e.g. docs/ide-setup.md).
+
 ## tools/faq.py {#tools-faq}
 
 ### Function: `lookup_unigrok_faq` {#tools-faq-lookup_unigrok_faq}
@@ -3384,6 +3404,24 @@ List recent swarm tasks newest-first as a JSON array (id, effective
 status incl. staleness override, target, focus node, generations run,
 spend). The Playground's task picker consumes this — read-only, no gate:
 on a service that never ran a swarm it simply returns [].
+
+### Function: `plan_swarm_campaign` {#tools-swarm-plan_swarm_campaign}
+
+```python
+async def plan_swarm_campaign(target_paths: List[str], test_roots: List[str]=['tests'], max_targets: int=5) -> Dict[str, Any]
+```
+
+**Keywords:** plan, swarm, campaign
+
+Perform a wide-pass analysis to find swarmable hotspot functions.
+
+Deterministically maps files/functions to available tests and categorizes
+them into a campaign plan without executing any code.
+
+Args:
+    target_paths: Workspace-relative paths to files or directories to scan.
+    test_roots: Workspace-relative paths where tests live (default: ["tests"]).
+    max_targets: Maximum number of swarm-ready targets to rank and return.
 
 ## tools/system.py {#tools-system}
 
