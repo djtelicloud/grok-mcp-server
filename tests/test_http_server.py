@@ -2056,6 +2056,8 @@ def test_xai_chat_completions_url_defaults_and_rejects_unsafe_overrides(monkeypa
 
     monkeypatch.setenv("XAI_API_BASE_URL", "https://api.x.ai/v1")
     assert _xai_chat_completions_url() == "https://api.x.ai/v1/chat/completions"
+    monkeypatch.setenv("XAI_API_BASE_URL", "https://api.x.ai:443/v1")
+    assert _xai_chat_completions_url() == "https://api.x.ai:443/v1/chat/completions"
 
     for unsafe in (
         "http://api.x.ai/v1",
@@ -2069,6 +2071,14 @@ def test_xai_chat_completions_url_defaults_and_rejects_unsafe_overrides(monkeypa
 
     monkeypatch.setenv(
         "UNIGROK_ALLOWED_XAI_API_ORIGINS", "https://trusted-proxy.example"
+    )
+    monkeypatch.setenv("XAI_API_BASE_URL", "https://trusted-proxy.example/v1")
+    assert (
+        _xai_chat_completions_url()
+        == "https://trusted-proxy.example/v1/chat/completions"
+    )
+    monkeypatch.setenv(
+        "UNIGROK_ALLOWED_XAI_API_ORIGINS", "https://trusted-proxy.example:443"
     )
     monkeypatch.setenv("XAI_API_BASE_URL", "https://trusted-proxy.example/v1")
     assert (

@@ -1871,7 +1871,11 @@ def _xai_chat_completions_url() -> Optional[str]:
     if base is None:
         return None
     parsed = urlsplit(base)
-    origin = f"{parsed.scheme.lower()}://{parsed.netloc.lower()}"
+    host = str(parsed.hostname or "").lower().rstrip(".")
+    authority = f"[{host}]" if ":" in host else host
+    if parsed.port not in (None, 443):
+        authority = f"{authority}:{parsed.port}"
+    origin = f"https://{authority}"
     allowed_origins = {"https://api.x.ai"}
     for item in os.environ.get("UNIGROK_ALLOWED_XAI_API_ORIGINS", "").split(","):
         validated = _validated_https_url(item.strip())
@@ -1880,9 +1884,13 @@ def _xai_chat_completions_url() -> Optional[str]:
         candidate = urlsplit(validated)
         if candidate.path not in ("", "/"):
             continue
-        allowed_origins.add(
-            f"{candidate.scheme.lower()}://{candidate.netloc.lower()}"
+        candidate_host = str(candidate.hostname or "").lower().rstrip(".")
+        candidate_authority = (
+            f"[{candidate_host}]" if ":" in candidate_host else candidate_host
         )
+        if candidate.port not in (None, 443):
+            candidate_authority = f"{candidate_authority}:{candidate.port}"
+        allowed_origins.add(f"https://{candidate_authority}")
     if origin not in allowed_origins:
         return None
     return f"{base.rstrip('/')}/chat/completions"
