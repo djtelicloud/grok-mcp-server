@@ -3,11 +3,8 @@
 
 import asyncio
 import pytest
-import sqlite3
-import json
-from pathlib import Path
 from src.utils import GrokSessionStore, load_history, append_and_save_history
-from src.tools.system import grok_mcp_status, db_vacuum
+from src.tools.system import db_vacuum
 
 @pytest.fixture
 async def store(tmp_path):

@@ -1,5 +1,4 @@
 import asyncio
-import os
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
@@ -526,6 +525,5 @@ async def test_list_models_lightweight(monkeypatch):
             }
         ),
     )
-    from src.tools.system import list_models
     res = await list_models()
     assert res == ["grok-4.5", "grok-4.3"]
