@@ -2,6 +2,12 @@
 
 Welcome, Gemini Agent! You are operating inside the local environment of the **Grok-MCP** codebase. Follow these project-specific directives on every execution:
 
+## 0. Talk to humans first
+
+**Short plain answers.** Brand + Ready/Live/Blocked + plain task title.
+No diffs, logs, or git lectures unless the human asked. Canonical law:
+[`.agents/AGENTS.md`](../.agents/AGENTS.md) → **Talk to humans first**.
+
 ## 1. Database Operations & Concurrency
 * **Async-Native Drive**: Always interact with `GrokSessionStore` via the `aiosqlite` async connection.
 * **Lock Protection**: Use the asynchronous lock (`asyncio.Lock`) for database writes to prevent database locking issues.

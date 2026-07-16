@@ -727,7 +727,8 @@ class TestWorkspaceResource:
         text = contents[0].content
 
         assert "# UniGrok Workspace" in text
-        # Real .agents/AGENTS.md content is embedded.
+        # Real .agents/AGENTS.md content is embedded (banner + coordination).
+        assert "Talk to humans first" in text
         assert "Multi-Agent Git Coordination" in text
         # .gemini/GEMINI.md exists in this repo and is embedded too.
         assert "## Gemini Agent Notes (.gemini/GEMINI.md)" in text

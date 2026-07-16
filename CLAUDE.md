@@ -1,5 +1,14 @@
 # CLAUDE.md
 
+## Talk to humans first
+
+**Short plain answers only** unless the human asked for technical detail.
+Brand + Ready/Live/Blocked + plain task title. No diffs, tool dumps, or git
+lectures in chat. Full law: [.agents/AGENTS.md](.agents/AGENTS.md) →
+**Talk to humans first** / **Human language**.
+
+---
+
 Guidance for Claude Code working in **uni-grok-mcp**. Shared multi-agent rules
 (git coordination, endpoint, credentials boundary) live in
 [.agents/AGENTS.md](.agents/AGENTS.md) — this file adds Claude-Code-specific
