@@ -4622,6 +4622,16 @@ async def GrokSessionStore.list_facts(self, limit: int=20, scope: Optional[str]=
 
 Most recent facts first (the grok://knowledge resource view).
 
+### Method: `GrokSessionStore.save_message_pair` {#utils-groksessionstore-save_message_pair}
+
+```python
+async def GrokSessionStore.save_message_pair(self, session_name: str, prompt: str, reply: str, metadata: Optional[dict]=None) -> None
+```
+
+**Keywords:** grok, session, store, save, message, pair
+
+Atomically persist one complete user/assistant turn.
+
 ### Method: `GrokSessionStore.replace_messages` {#utils-groksessionstore-replace_messages}
 
 ```python
@@ -4635,6 +4645,30 @@ Atomically replace a session's message history in one transaction.
 Replaces the old delete-then-reinsert save_history flow: a crash mid-way
 can no longer leave a session with partially rewritten history. The
 session row itself (cli_session_id/api_thread_id/model) is preserved.
+
+### Method: `GrokSessionStore.message_snapshot` {#utils-groksessionstore-message_snapshot}
+
+```python
+async def GrokSessionStore.message_snapshot(self, session_name: str) -> tuple[int, int]
+```
+
+**Keywords:** grok, session, store, message, snapshot
+
+Return the durable message high-water mark and row count.
+
+### Method: `GrokSessionStore.replace_messages_if_snapshot` {#utils-groksessionstore-replace_messages_if_snapshot}
+
+```python
+async def GrokSessionStore.replace_messages_if_snapshot(self, session_name: str, messages: List[Dict[str, Any]], expected_max_id: int, expected_count: int) -> bool
+```
+
+**Keywords:** grok, session, store, replace, messages, if, snapshot
+
+Replace only the exact message snapshot that was summarized.
+
+The snapshot comparison and replacement share one write transaction,
+so a concurrent append either commits first and makes this return
+``False``, or waits until the compacted history is committed.
 
 ### Method: `GrokSessionStore.create_job` {#utils-groksessionstore-create_job}
 
