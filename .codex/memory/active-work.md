@@ -24,7 +24,7 @@ credentials, OAuth codes, tokens, or private keys here.
   Approval, Security Reviewer, and Bugbot passed; the local suite passed 2,173
   tests.
 - PR #335 is merged. Static bearer identities now use stable explicit IDs,
-  legacy index-based keys fail closed without an exact migration map, OAuth
+  legacy index-based keys fail-closed without an exact migration map, OAuth
   principals are issuer-bound and audience-checked, and hosted caller-budget
   keys use the same canonical principal form. Exact-head CI, CodeQL, Codex
   Approval, Supervisor Approval, Security Reviewer, Cursor Approval, and
