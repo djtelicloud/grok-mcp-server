@@ -2101,8 +2101,8 @@ def get_xai_inference_client():
             "No effective xAI API key is configured for the active principal."
         )
 
-    # Include a process-keyed credential generation so a rotated key never
-    # reuses the prior SDK client. Older generations remain alive until normal
+    # Include a random process-local credential generation so a rotated key
+    # never reuses the prior SDK client. Older generations remain alive until normal
     # service shutdown, avoiding a close-vs-in-flight race during local tests
     # or unusual in-process environment replacement. Production Secret Manager
     # env rotation deploys a new Cloud Run revision/process.
@@ -2174,6 +2174,13 @@ def close_xai_inference_client():
             except Exception:
                 pass
         _clients.clear()
+        from src.principal_xai import (
+            _CREDENTIAL_GENERATIONS,
+            _CREDENTIAL_GENERATIONS_LOCK,
+        )
+
+        with _CREDENTIAL_GENERATIONS_LOCK:
+            _CREDENTIAL_GENERATIONS.clear()
 
 
 def close_xai_management_client():

@@ -87,8 +87,8 @@ Rules:
 - Missing map entry → **owner default**.
 - A configured map that is malformed, oversized, duplicated, or contains an
   invalid entry fails closed instead of silently shifting spend to the owner.
-- Key rotation creates a new process-keyed client generation instead of reusing
-  the stale client. Rotate Secret Manager values through a new Cloud Run
+- Key rotation creates a new random process-local client generation instead of
+  reusing the stale client. Rotate Secret Manager values through a new Cloud Run
   revision so retired clients close with the old process. Execution receipts
   report only `owner_default` or `principal`, never a key.
 - Never put raw keys in IDE MCP JSON or public clone workflows.

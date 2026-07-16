@@ -9,12 +9,11 @@ Cloud twin law (sponsor Approved):
 
 from __future__ import annotations
 
-import hashlib
-import hmac
 import json
 import os
 import re
 import secrets
+import threading
 from typing import Any, Dict, Mapping, Optional, Tuple
 
 from src.identity import get_active_principal, principal_kind
@@ -23,7 +22,8 @@ _PLACEHOLDER = "your_xai_api_key_here"
 _PRINCIPAL_KEYS_ENV = "UNIGROK_PRINCIPAL_XAI_KEYS_JSON"
 _MAX_PRINCIPAL_KEY_MAP_BYTES = 65_536
 _MAX_PRINCIPAL_KEY_MAP_ENTRIES = 256
-_CACHE_GENERATION_KEY = secrets.token_bytes(32)
+_CREDENTIAL_GENERATIONS: Dict[str, Tuple[str, str]] = {}
+_CREDENTIAL_GENERATIONS_LOCK = threading.Lock()
 
 
 class PrincipalXAIConfigurationError(ValueError):
@@ -145,7 +145,7 @@ def inference_client_cache_id(
     """Non-secret cache id for the active inference credential path.
 
     Uses principal identity + resolution source only. Credential generation is
-    tracked separately with a process-keyed HMAC and is never exposed.
+    tracked separately with a random process-local token and is never exposed.
     """
     _key, _source, cache_id, _generation = resolve_inference_credential(
         principal=principal,
@@ -165,20 +165,22 @@ def _inference_client_cache_slot(
     return f"principal:{active or 'unknown'}"
 
 
-def _credential_generation(key: str) -> str:
-    """Return a process-local rotation token that is safe to keep in memory.
+def _credential_generation(cache_slot: str, key: str) -> str:
+    """Return a random process-local token for the current slot/key pair.
 
-    A keyed HMAC avoids a reusable hash of credential material. The value is
-    internal only and changes across service processes.
+    The token is never derived from credential material. A bounded registry
+    retains only the current key per cache slot so equality can detect runtime
+    replacement without creating a reusable secret fingerprint.
     """
-
     if not key:
         return "missing"
-    return hmac.new(
-        _CACHE_GENERATION_KEY,
-        key.encode("utf-8"),
-        hashlib.sha256,
-    ).hexdigest()
+    with _CREDENTIAL_GENERATIONS_LOCK:
+        current = _CREDENTIAL_GENERATIONS.get(cache_slot)
+        if current is not None and secrets.compare_digest(current[0], key):
+            return current[1]
+        generation = secrets.token_hex(16)
+        _CREDENTIAL_GENERATIONS[cache_slot] = (key, generation)
+        return generation
 
 
 def resolve_inference_credential(
@@ -190,11 +192,16 @@ def resolve_inference_credential(
 
     active = principal if principal is not None else get_active_principal()
     key, source = resolve_xai_api_key(principal=active, environ=environ)
+    cache_slot = _inference_client_cache_slot(
+        active=active,
+        key=key,
+        source=source,
+    )
     return (
         key,
         source,
-        _inference_client_cache_slot(active=active, key=key, source=source),
-        _credential_generation(key),
+        cache_slot,
+        _credential_generation(cache_slot, key),
     )
 
 

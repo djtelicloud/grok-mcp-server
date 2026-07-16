@@ -1183,7 +1183,7 @@ def inference_client_cache_id(*, principal: Optional[str]=None, environ: Mapping
 Non-secret cache id for the active inference credential path.
 
 Uses principal identity + resolution source only. Credential generation is
-tracked separately with a process-keyed HMAC and is never exposed.
+tracked separately with a random process-local token and is never exposed.
 
 ### Function: `resolve_inference_credential` {#principal_xai-resolve_inference_credential}
 
