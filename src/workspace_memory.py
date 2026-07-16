@@ -232,18 +232,24 @@ def _write_git_note(repo: Path, row: Dict[str, Any]) -> None:
 
 
 async def sync_pending_notes(store: Any, *, limit: int = 20) -> Dict[str, Any]:
+    repo = _repo()
+    repo_id = repository_id(repo)
     if not _note_write_enabled():
         return {
             "synced": 0,
             "failed": 0,
-            "pending": await store.count_unsynced_workspace_evidence(),
+            "pending": await store.count_unsynced_workspace_evidence(repo_id=repo_id),
             "reason": "git_write_disabled",
         }
-    repo = _repo()
-    rows = await store.list_unsynced_workspace_evidence(limit=limit, max_attempts=5)
+    rows = await store.list_unsynced_workspace_evidence(
+        limit=limit, max_attempts=5, repo_id=repo_id
+    )
     synced = 0
     failed = 0
     for row in rows:
+        if str(row.get("repo_id") or "") != repo_id:
+            # Defense in depth: never mirror or mark foreign-repo rows.
+            continue
         try:
             await run_blocking(_write_git_note, repo, row, timeout=20.0)
             await store.mark_workspace_evidence_synced(row["evidence_id"], NOTE_REF)
@@ -255,7 +261,7 @@ async def sync_pending_notes(store: Any, *, limit: int = 20) -> Dict[str, Any]:
     return {
         "synced": synced,
         "failed": failed,
-        "pending": await store.count_unsynced_workspace_evidence(),
+        "pending": await store.count_unsynced_workspace_evidence(repo_id=repo_id),
     }
 
 
@@ -586,10 +592,11 @@ async def explain_workspace_evidence(
     target = str(evidence_id or "").strip()
     if not ID_RE.fullmatch(target):
         raise WorkspaceMemoryError("invalid evidence id")
-    row = await store.get_workspace_evidence(target)
+    repo = _repo()
+    repo_id = repository_id(repo)
+    row = await store.get_workspace_evidence(target, repo_id=repo_id)
     if row is None:
         raise WorkspaceMemoryError("workspace evidence not found")
-    repo = _repo()
     head = _validate_sha(repo, head_sha)
     applicability = await run_blocking(_git_applicability, repo, row, head, timeout=20.0)
     return {
@@ -606,13 +613,14 @@ async def workspace_memory_status(store: Any) -> Dict[str, Any]:
     repo = _repo()
     head = _git(repo, "rev-parse", "HEAD")
     note_head = _git(repo, "rev-parse", NOTE_REF, check=False)
+    repo_id = repository_id(repo)
     return {
         "mode": workspace_memory_mode(),
         "automatic_injection": False,
-        "repo_id": repository_id(repo),
+        "repo_id": repo_id,
         "visible_head": head,
-        "evidence_count": await store.count_workspace_evidence(),
-        "note_pending": await store.count_unsynced_workspace_evidence(),
+        "evidence_count": await store.count_workspace_evidence(repo_id=repo_id),
+        "note_pending": await store.count_unsynced_workspace_evidence(repo_id=repo_id),
         "note_ref": NOTE_REF,
         "note_ref_head": note_head or None,
         "git_write_enabled": _note_write_enabled(),

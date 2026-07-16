@@ -6121,13 +6121,20 @@ class GrokSessionStore:
         return row_id
 
     @_with_read_retry_async
-    async def get_workspace_evidence(self, evidence_id: str) -> Optional[Dict[str, Any]]:
+    async def get_workspace_evidence(
+        self, evidence_id: str, repo_id: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
         await self._ensure_initialized()
+        if repo_id is not None:
+            query = (
+                "SELECT * FROM workspace_evidence WHERE evidence_id = ? AND repo_id = ?"
+            )
+            params: tuple = (str(evidence_id or ""), str(repo_id or ""))
+        else:
+            query = "SELECT * FROM workspace_evidence WHERE evidence_id = ?"
+            params = (str(evidence_id or ""),)
         async with self._read_conn() as conn:
-            async with conn.execute(
-                "SELECT * FROM workspace_evidence WHERE evidence_id = ?",
-                (str(evidence_id or ""),),
-            ) as cursor:
+            async with conn.execute(query, params) as cursor:
                 row = await cursor.fetchone()
         return self._decode_workspace_evidence_row(row) if row else None
 
@@ -6148,11 +6155,17 @@ class GrokSessionStore:
 
     @_with_read_retry_async
     async def list_unsynced_workspace_evidence(
-        self, limit: int = 50, max_attempts: Optional[int] = None
+        self,
+        limit: int = 50,
+        max_attempts: Optional[int] = None,
+        repo_id: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         await self._ensure_initialized()
         query = "SELECT * FROM workspace_evidence WHERE note_synced_at IS NULL"
         params: List[Any] = []
+        if repo_id is not None:
+            query += " AND repo_id = ?"
+            params.append(str(repo_id or ""))
         if max_attempts is not None:
             query += " AND sync_attempts < ?"
             params.append(int(max_attempts))
@@ -6202,20 +6215,37 @@ class GrokSessionStore:
             await self._on_write_completed()
 
     @_with_read_retry_async
-    async def count_workspace_evidence(self) -> int:
+    async def count_workspace_evidence(self, repo_id: Optional[str] = None) -> int:
         await self._ensure_initialized()
+        if repo_id is not None:
+            query = "SELECT COUNT(*) FROM workspace_evidence WHERE repo_id = ?"
+            params: tuple = (str(repo_id or ""),)
+        else:
+            query = "SELECT COUNT(*) FROM workspace_evidence"
+            params = ()
         async with self._read_conn() as conn:
-            async with conn.execute("SELECT COUNT(*) FROM workspace_evidence") as cursor:
+            async with conn.execute(query, params) as cursor:
                 row = await cursor.fetchone()
         return self._safe_db_int(row[0] if row else 0)
 
     @_with_read_retry_async
-    async def count_unsynced_workspace_evidence(self) -> int:
+    async def count_unsynced_workspace_evidence(
+        self, repo_id: Optional[str] = None
+    ) -> int:
         await self._ensure_initialized()
-        async with self._read_conn() as conn:
-            async with conn.execute(
+        if repo_id is not None:
+            query = (
+                "SELECT COUNT(*) FROM workspace_evidence "
+                "WHERE note_synced_at IS NULL AND repo_id = ?"
+            )
+            params: tuple = (str(repo_id or ""),)
+        else:
+            query = (
                 "SELECT COUNT(*) FROM workspace_evidence WHERE note_synced_at IS NULL"
-            ) as cursor:
+            )
+            params = ()
+        async with self._read_conn() as conn:
+            async with conn.execute(query, params) as cursor:
                 row = await cursor.fetchone()
         return self._safe_db_int(row[0] if row else 0)
 
