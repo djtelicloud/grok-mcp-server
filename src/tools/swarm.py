@@ -29,6 +29,7 @@ from typing import Any, Dict, List, Literal, Optional
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
+from ..identity import get_active_caller, normalize_caller
 from ..swarm import config as swarm_config
 from ..swarm.analytics import analyze_python_source, analyze_python_source_full
 from ..swarm.ast_utils import (
@@ -101,6 +102,19 @@ def _paste_gate() -> Optional[str]:
     if not PathResolver.contributor_mode():
         return "Verified paste search is available only in the local contributor Forge."
     return None
+
+
+def _swarm_requester() -> Optional[str]:
+    """Bound caller for swarm get/list/cancel; None keeps the open local view."""
+    return normalize_caller(get_active_caller())
+
+
+def _caller_may_view(row_caller: Optional[str], requester: Optional[str]) -> bool:
+    """When a requester identity is bound, only that caller's rows are visible."""
+    req = normalize_caller(requester)
+    if not req:
+        return True
+    return normalize_caller(row_caller) == req
 
 
 def _resolve_target(target_path: str) -> Path:
@@ -406,7 +420,7 @@ async def get_swarm_status(task_id: str, view: Literal["text", "json"] = "text")
     SQLite rows the text view reads."""
     async with GrokInvocationContext("utility", logger, append_signature=False) as ctx:
         task = await store.get_swarm_task(task_id)
-        if not task:
+        if not task or not _caller_may_view(task.get("caller"), _swarm_requester()):
             if view == "json":
                 return json.dumps({"error": f"no swarm task {task_id}"}, separators=(",", ":"))
             return ctx.format_output(f"no swarm task `{task_id}`.")
@@ -486,7 +500,7 @@ async def apply_swarm_winner(candidate_id: str) -> str:
         if candidate is None:
             return ctx.format_output(f"no candidate `{candidate_id}`.")
         task = await store.get_swarm_task(candidate["task_id"])
-        if not task:
+        if not task or not _caller_may_view(task.get("caller"), _swarm_requester()):
             return ctx.format_output("owning swarm task not found.")
         if (task.get("input_kind") or "workspace") == "paste":
             return ctx.format_output(
@@ -545,10 +559,13 @@ async def apply_swarm_winner(candidate_id: str) -> str:
 
 
 async def cancel_swarm(task_id: str) -> str:
-    """Cooperatively cancel a running swarm; the partial Pareto front is kept."""
+    """Cooperatively cancel a running swarm; the partial Pareto front is kept.
+
+    When the request has a bound caller identity, only that caller's tasks may
+    be cancelled (foreign ids look like missing)."""
     async with GrokInvocationContext("utility", logger, append_signature=False) as ctx:
         task = await store.get_swarm_task(task_id)
-        if not task:
+        if not task or not _caller_may_view(task.get("caller"), _swarm_requester()):
             return ctx.format_output(f"no swarm task `{task_id}`.")
         _get_runner().cancel(task_id)
         return ctx.format_output(
@@ -561,9 +578,15 @@ async def list_swarm_tasks(limit: int = 10) -> str:
     """List recent swarm tasks newest-first as a JSON array (id, effective
     status incl. staleness override, target, focus node, generations run,
     spend). The Playground's task picker consumes this — read-only, no gate:
-    on a service that never ran a swarm it simply returns []."""
+    on a service that never ran a swarm it simply returns [].
+
+    When the request has a bound caller identity, the list is scoped to that
+    caller. Unbound local callers keep the historical open listing."""
     async with GrokInvocationContext("utility", logger, append_signature=False) as ctx:  # noqa: F841
-        rows = await store.list_swarm_tasks(limit=max(1, min(int(limit or 10), 50)))
+        rows = await store.list_swarm_tasks(
+            limit=max(1, min(int(limit or 10), 50)),
+            caller=_swarm_requester(),
+        )
         items = [
             {
                 "task_id": row["id"],
@@ -1046,7 +1069,7 @@ async def export_swarm_narrow_pr(task_id: str) -> Dict[str, Any]:
     human/supervisor review packet.
     """
     task = await store.get_swarm_task(task_id)
-    if not task:
+    if not task or not _caller_may_view(task.get("caller"), _swarm_requester()):
         return {
             "format": "unigrok-swarm-narrow-pr-v1",
             "task_id": task_id,

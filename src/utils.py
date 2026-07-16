@@ -6829,14 +6829,25 @@ class GrokSessionStore:
                 return dict(row) if row else None
 
     @_with_read_retry_async
-    async def list_swarm_tasks(self, limit: int = 20) -> List[Dict[str, Any]]:
+    async def list_swarm_tasks(
+        self, limit: int = 20, caller: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """Newest swarm tasks first. When ``caller`` is set, LIMIT applies to
+        that caller's rows only (same contract as list_jobs)."""
         await self._ensure_initialized()
         bounded = max(1, min(int(limit or 20), 100))
+        requester = normalize_caller(caller)
+        if requester:
+            sql = (
+                "SELECT * FROM swarm_tasks WHERE caller = ? "
+                "ORDER BY created_at DESC, id DESC LIMIT ?"
+            )
+            params: tuple = (requester, bounded)
+        else:
+            sql = "SELECT * FROM swarm_tasks ORDER BY created_at DESC, id DESC LIMIT ?"
+            params = (bounded,)
         async with self._read_conn() as conn:
-            async with conn.execute(
-                "SELECT * FROM swarm_tasks ORDER BY created_at DESC, id DESC LIMIT ?",
-                (bounded,),
-            ) as cursor:
+            async with conn.execute(sql, params) as cursor:
                 rows = await cursor.fetchall()
                 return [dict(row) for row in rows]
 
