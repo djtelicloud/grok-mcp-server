@@ -12,13 +12,13 @@ makes Codex a queue bottleneck even when Cursor already has cloud **Bugbot**,
 
 ## Roles (who does what)
 
-| Actor | Low-risk green (docs, rules, smoke, pure tests) | Medium/high (billing, auth, planes, hydration budgets, credentials, land scripts, release) |
+| Actor | Low/medium green (docs, rules, runtime, routing, auth, tests, dependencies) | High (credentials, land scripts, branch protection, release/deploy, public MCP final-answer path) |
 | --- | --- | --- |
 | Contributor agents | Draft PR → undraft when Ready | Same; never invent land authority |
 | Cursor Bugbot | Findings on head | Findings on head |
 | Cursor Security Reviewer | One security pass | One security pass; block on issues |
-| Cursor PR Approver | Approve when green + low-risk | **Block** for human/Codex (comment once) |
-| Cursor merger (cloud) | **May merge** when Codex busy and protection allows | **Never** |
+| Cursor PR Approver | Approve when green + low/medium risk | **Block** for human/Codex (comment once) |
+| Cursor merger (cloud) | **May merge** when Codex is busy/out of credits and protection allows | **Never** |
 | Codex / project-admin | Optional when free | **Default:** exact-head review, Approval dispatch, `scripts/land`, merge, release/deploy |
 | Grok | Advisory second opinion only | Advisory only — does not authorize merge |
 
@@ -47,10 +47,10 @@ Ready undrafted PR
   → Bugbot (pass / findings)
   → Security Reviewer (once)
   → CI green (required suite)
-  → Approver: low? approve : block for Codex
+  → Approver: low/medium? approve : block for Codex
   → Land owner:
-       low + Codex busy → Cursor merger (if protection allows)
-       medium/high or Codex free for culture → Codex (Approval + land)
+       low/medium + Codex busy or out of credits → Cursor merger (if protection allows)
+       high → Codex (Approval + land)
   → Live main
 ```
 
@@ -61,33 +61,37 @@ Ready undrafted PR
 **`Codex Approval`**; strict updates; 1 approving review + CODEOWNERS
 (`@djtelicloud`).
 
-**Gap:** Cursor Approver approval does **not** satisfy the `Codex Approval`
-**status check**. Cursor can review; it cannot replace that check without a
-protection/workflow change.
+**Failover target:** replace the globally required `Codex Approval` context with
+the risk-aware `Supervisor Approval` context. Low and medium packets can pass
+that status after Cursor Bugbot, Security Reviewer, Approver, and required CI
+are green. High-risk packets still require an exact-head `Codex Approval`.
 
-### Recommended options (pick one; apply outside this doc PR)
+### Applied policy
 
 | Option | Change | Effect |
 | --- | --- | --- |
-| **A. Label-gated** (preferred) | Keep `Codex Approval` required for unlabeled/medium/high. For PRs labeled `risk:low` only, make `Codex Approval` optional **or** auto-dispatch owner workflow after green CI + Cursor approve | Unbottles docs queue |
-| **B. Dual status** | Add optional `Cursor Approval` context for low-risk; keep Codex for everything else | Clearer bots; more wiring |
-| **C. Status quo + process** | No protection change; Cursor only reviews; human/Codex lands all | Simplest; bottleneck remains |
+The `Supervisor Approval` workflow is required for every PR. It grants the
+authorized Cursor failover path to declared low/medium packets only when the
+exact head has green required CI plus Bugbot, Security Reviewer, and Approver
+evidence. It delegates no high-risk authority.
 
 **Do not** remove all required reviews or disable CODEOWNERS.  
-**Do not** grant Cursor merger medium/high by default.
+**Do not** grant Cursor merger high-risk authority. Medium is explicitly part of
+the authorized outage failover path, with the stronger exact-head gates above.
 
 ### Workflow note
 
-`.github/workflows/codex-approval.yml` is owner-dispatched and binds the exact
-head. Any automation that auto-dispatches for `risk:low` must re-run on every
-new commit (stale approval is invalid).
+`.github/workflows/codex-approval.yml` remains owner-dispatched and binds the
+exact head for high-risk work. `Supervisor Approval` re-evaluates on PR changes
+and completed checks so a provider outage does not strand green low/medium work
+and no approval survives a new commit.
 
 ## Operator checklist
 
 1. Contributor: undraft, CI green, risk label/body, exact HEAD.  
 2. Cursor: Bugbot → Security → Approver (one action per head).  
-3. If low-risk and Codex busy: merger merges when protection allows.  
-4. If medium/high or Approver blocked: Codex Approval + land.  
+3. If low/medium and Codex is busy/out of credits: merger uses Supervisor Approval.
+4. If high-risk or Approver blocked: Codex Approval + land.
 5. Owner removes finished scratchpad after Live.
 
 ## Non-goals
