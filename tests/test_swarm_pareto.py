@@ -54,6 +54,9 @@ class TestDomination:
 
 
 class TestNonDominatedSort:
+    def test_empty_points(self):
+        assert fast_non_dominated_sort([]) == []
+
     def test_matches_brute_force_on_random_fixtures(self):
         rng = random.Random(7)
         for _ in range(50):
