@@ -5738,7 +5738,13 @@ class TestCliPlaneV2:
         with utils._isolated_grok_cli_runtime() as (cwd, env):
             isolated_root = cwd.parent
             assert list(cwd.iterdir()) == []
-            assert env["GROK_AUTH_PATH"] == str(source_auth)
+            isolated_auth = Path(env["GROK_AUTH_PATH"])
+            assert isolated_auth != source_auth
+            assert isolated_auth.parent == isolated_root
+            assert isolated_auth.read_text(encoding="utf-8") == source_auth.read_text(
+                encoding="utf-8"
+            )
+            assert isolated_auth.stat().st_mode & 0o777 == 0o600
             assert list(Path(env["GROK_HOME"]).iterdir()) == []
             assert not (Path(env["HOME"]) / ".grok" / "auth.json").exists()
             assert not (Path(env["HOME"]) / ".grok" / "settings.json").exists()

@@ -247,11 +247,11 @@ def _isolated_grok_cli_runtime():
     """Yield an empty CLI workspace and minimal OAuth-only environment.
 
     Grok discovers project instructions, MCP servers, plugins, and permissions
-    independently of its built-in ``--tools`` allowlist.  Internal transformer
-    calls therefore run outside both the contributor workspace and the user's
-    normal CLI home. ``GROK_AUTH_PATH`` deliberately points at the durable
-    OAuth document so the CLI's native refresh and sibling-token coordination
-    remain authoritative; ``GROK_HOME`` stays temporary and config-free.
+    independently of its built-in ``--tools`` allowlist.  Isolated calls run
+    outside both the contributor workspace and the service's normal CLI home.
+    A private temporary copy of the OAuth document is supplied so the child
+    never receives a path to the durable auth volume; refresh cannot mutate
+    shared credentials. ``GROK_HOME`` stays temporary and config-free.
     """
     source_auth = Path.home() / ".grok" / "auth.json"
     if not source_auth.is_file():
@@ -280,6 +280,10 @@ def _isolated_grok_cli_runtime():
         ):
             directory.mkdir(mode=0o700, parents=True, exist_ok=True)
 
+        isolated_auth = root / "auth.json"
+        shutil.copyfile(source_auth, isolated_auth)
+        isolated_auth.chmod(0o600)
+
         inherited = grok_cli_oauth_env()
         allowed_env = {
             "PATH",
@@ -306,7 +310,7 @@ def _isolated_grok_cli_runtime():
                 "PWD": str(work),
                 "TMPDIR": str(tmp_dir),
                 "GROK_HOME": str(grok_home),
-                "GROK_AUTH_PATH": str(source_auth),
+                "GROK_AUTH_PATH": str(isolated_auth),
                 "XDG_CONFIG_HOME": str(xdg_config),
                 "XDG_DATA_HOME": str(xdg_data),
                 "XDG_CACHE_HOME": str(xdg_cache),
@@ -10647,7 +10651,8 @@ async def _call_plane(
         # use a self-contained prompt instead of mixing caller history with a
         # possibly unrelated native CLI transcript.
         use_native_cli_session = bool(
-            session
+            not cli_isolated
+            and session
             and store
             and not input_messages
             and cli_native_session_ids_enabled()
@@ -12876,8 +12881,9 @@ async def run_agent_turn(
     internal generation workflows; cli_allowed_tools can additionally set the
     CLI's exact built-in tool allowlist (an empty string disables all tools).
     cli_isolated additionally removes inherited project/task context and runs
-    with an OAuth-only temporary home, empty workspace, disabled memory,
-    subagents, web search, and interactive prompts. Public calls keep defaults.
+    with a private OAuth copy, temporary home, empty workspace, disabled
+    memory, subagents, web search, and interactive prompts. Public transports
+    must always request this isolated contract.
     """
     turn_start = time.time()
     caller = resolve_request_caller(caller)

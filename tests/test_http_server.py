@@ -871,6 +871,11 @@ def test_agent_chat_completion_uses_shared_harness(monkeypatch):
     body = res.json()
     assert body["choices"][0]["message"]["content"] == "agent answer"
     mock_run.assert_awaited_once()
+    kwargs = mock_run.await_args.kwargs
+    assert kwargs["cli_no_plan"] is True
+    assert kwargs["cli_verbatim"] is True
+    assert kwargs["cli_allowed_tools"] == ""
+    assert kwargs["cli_isolated"] is True
 
 
 def test_http_rejects_oversized_body_with_request_id(monkeypatch):

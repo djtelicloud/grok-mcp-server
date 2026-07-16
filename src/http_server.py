@@ -1705,6 +1705,13 @@ def _agent_turn_kwargs(payload: Dict[str, Any]) -> Dict[str, Any]:
         "mode": "reasoning" if mode == "reasoning" else "auto",
         "thinking_mode": mode == "thinking" or bool(payload.get("thinking_mode")),
         "enable_agentic": mode != "fast",
+        # The HTTP compatibility surface is an untrusted principal boundary.
+        # Subscription CLI execution must never inherit the service checkout,
+        # durable CLI home, native session memory, or built-in tools.
+        "cli_no_plan": True,
+        "cli_verbatim": True,
+        "cli_allowed_tools": "",
+        "cli_isolated": True,
     }
 
 
@@ -2157,6 +2164,13 @@ async def public_agent(
         "enable_agentic": resolved_mode != "fast",
         "plane": plane,
         "fallback_policy": fallback_policy,
+        # Public MCP is workspace-neutral even on a Forge/local deployment.
+        # Explicitly force the CLI adapter into its empty-workspace,
+        # temporary-home, tool-free contract.
+        "cli_no_plan": True,
+        "cli_verbatim": True,
+        "cli_allowed_tools": "",
+        "cli_isolated": True,
     }
     if is_research:
         kwargs["agent_count"] = _research_agent_count()
@@ -2210,7 +2224,7 @@ async def review_pull_request(
     diff: str,
     ci_summary: str = "",
     review_comments: str = "",
-    plane: Literal["auto", "cli", "api"] = "auto",
+    plane: Literal["api"] = "api",
 ) -> PullRequestReviewResult:
     """Review one GitHub pull request without mutating GitHub or local Git.
 
@@ -2240,9 +2254,12 @@ async def review_pull_request(
         session=f"github-review:{repository}:{pull_number}",
         workspace_context=evidence,
         workspace_label=f"GitHub PR {repository}#{pull_number}",
-        mode="reasoning",
-        plane=plane,
-        fallback_policy="same_plane" if plane != "auto" else "cross_plane",
+        # Review-only credentials authorize one tool-free API completion.
+        # They never inherit AgentLoop tools, native CLI tools, or cross-plane
+        # recovery from untrusted PR evidence.
+        mode="fast",
+        plane="api",
+        fallback_policy="same_plane",
     )
     return PullRequestReviewResult(
         repository=repository,
@@ -2366,7 +2383,7 @@ def create_public_mcp() -> FastMCP:
             readOnlyHint=True,
             destructiveHint=False,
             openWorldHint=False,
-            idempotentHint=True,
+            idempotentHint=False,
         ),
         meta=review_meta,
         structured_output=True,

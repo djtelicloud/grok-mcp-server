@@ -486,7 +486,7 @@ Read-only Grok review rendered by the ChatGPT/GitHub integration.
 ### Function: `review_pull_request` {#http_server-review_pull_request}
 
 ```python
-async def review_pull_request(repository: str, pull_number: int, title: str, diff: str, ci_summary: str='', review_comments: str='', plane: Literal['auto', 'cli', 'api']='auto') -> PullRequestReviewResult
+async def review_pull_request(repository: str, pull_number: int, title: str, diff: str, ci_summary: str='', review_comments: str='', plane: Literal['api']='api') -> PullRequestReviewResult
 ```
 
 **Keywords:** review, pull, request
@@ -5199,8 +5199,9 @@ cli_no_plan/cli_verbatim are narrow headless controls for deterministic
 internal generation workflows; cli_allowed_tools can additionally set the
 CLI's exact built-in tool allowlist (an empty string disables all tools).
 cli_isolated additionally removes inherited project/task context and runs
-with an OAuth-only temporary home, empty workspace, disabled memory,
-subagents, web search, and interactive prompts. Public calls keep defaults.
+with a private OAuth copy, temporary home, empty workspace, disabled
+memory, subagents, web search, and interactive prompts. Public transports
+must always request this isolated contract.
 
 ## workspace_memory.py {#workspace_memory}
 
