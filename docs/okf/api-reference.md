@@ -3453,6 +3453,9 @@ async def grok_mcp_status(view: Literal['text', 'json']='text') -> str
 
 Inspect health and usage; ``view=json`` returns stable structured metrics.
 
+Bound HTTP/MCP principals get a redacted readiness view only — cross-caller
+telemetry, spend, breakers, and operator snapshots stay local/unbound.
+
 ### Function: `list_chat_sessions` {#tools-system-list_chat_sessions}
 
 ```python
