@@ -252,7 +252,12 @@ def test_cursor_approval_must_match_the_current_head():
     assert has_exact_cursor_approval(reviews, "new")
 
 
-def test_bugbot_neutral_and_missing_security_check_can_pass():
+def test_cursor_approval_tolerates_missing_review_author():
+    reviews = [{"user": None, "state": "APPROVED", "commit_id": "current"}]
+    assert not has_exact_cursor_approval(reviews, "current")
+
+
+def test_bugbot_neutral_and_missing_security_check_stays_pending():
     raw = {
         "build (3.11)": "success",
         "build (3.12)": "success",
@@ -262,7 +267,7 @@ def test_bugbot_neutral_and_missing_security_check_can_pass():
         "docker": "success",
         "Cursor Bugbot": "neutral",
     }
-    checks = augment_cursor_evidence(raw, reviews=[])
+    checks = augment_cursor_evidence(raw)
     decision = decide_gate(
         declared="low",
         inferred="low",
@@ -270,11 +275,12 @@ def test_bugbot_neutral_and_missing_security_check_can_pass():
         statuses={"Cursor Approval": "success"},
     )
     assert checks["Cursor Bugbot"] == "success"
-    assert checks["Cursor Security Agent: Security Reviewer"] == "success"
-    assert decision.state == "success"
+    assert "Cursor Security Agent: Security Reviewer" not in checks
+    assert decision.state == "pending"
+    assert "Security Reviewer" in decision.description
 
 
-def test_security_reviewer_changes_requested_blocks_gate():
+def test_named_security_check_success_can_pass():
     raw = {
         "build (3.11)": "success",
         "build (3.12)": "success",
@@ -283,19 +289,36 @@ def test_security_reviewer_changes_requested_blocks_gate():
         "evals-offline": "success",
         "docker": "success",
         "Cursor Bugbot": "success",
+        "Cursor Security Agent: Security Reviewer": "success",
     }
-    reviews = [
-        {
-            "state": "CHANGES_REQUESTED",
-            "body": "<!-- CURSOR_AUTOMATION_ID: f12530a3-7ff4-11f1-ba66-0e7d0216e441 | RUN_ID: x -->\nblock",
-        }
-    ]
-    checks = augment_cursor_evidence(raw, reviews=reviews)
+    checks = augment_cursor_evidence(raw)
     decision = decide_gate(
         declared="low",
         inferred="low",
         checks=checks,
         statuses={"Cursor Approval": "success"},
     )
+    assert checks["Cursor Security Agent: Security Reviewer"] == "success"
+    assert decision.state == "success"
+
+
+def test_named_security_check_failure_blocks_gate():
+    raw = {
+        "build (3.11)": "success",
+        "build (3.12)": "success",
+        "Project Site": "success",
+        "Control Cloud Run Image": "success",
+        "evals-offline": "success",
+        "docker": "success",
+        "Cursor Bugbot": "success",
+        "Cursor Security Agent: Security Reviewer": "failure",
+    }
+    checks = augment_cursor_evidence(raw)
+    decision = decide_gate(
+        declared="low",
+        inferred="low",
+        checks=checks,
+        statuses={"Cursor Approval": "success"},
+    )
+    assert checks["Cursor Security Agent: Security Reviewer"] == "failure"
     assert decision.state == "failure"
-    assert "Security Reviewer" in decision.description
