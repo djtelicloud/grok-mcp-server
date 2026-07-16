@@ -1730,16 +1730,26 @@ def test_agent_stream_emits_progress_event_chunks(monkeypatch):
     assert all(chunk["object"] == "chat.completion.chunk" for chunk in chunks)
     assert all(len(chunk["choices"]) == 1 and "delta" in chunk["choices"][0] for chunk in chunks)
 
-    events = [chunk["unigrok"]["event"] for chunk in chunks if "unigrok" in chunk]
+    events = [
+        chunk["unigrok"]["event"]
+        for chunk in chunks
+        if "unigrok" in chunk and "event" in chunk["unigrok"]
+    ]
     assert [event["type"] for event in events] == ["depth", "tool_start", "tool_end"]
     # Progress chunks carry an empty delta so standard OpenAI clients skip them.
     for chunk in chunks:
-        if "unigrok" in chunk:
+        if "unigrok" in chunk and "event" in chunk["unigrok"]:
             assert chunk["choices"][0]["delta"] == {}
 
     contents = [chunk["choices"][0]["delta"].get("content") for chunk in chunks]
     assert "agentic answer" in "".join(text for text in contents if text)
-    assert chunks[-1]["choices"][0]["finish_reason"] == "stop"
+    finish = chunks[-1]
+    assert finish["choices"][0]["finish_reason"] == "stop"
+    assert finish["unigrok"]["plane"] == "API"
+    assert "route" in finish["unigrok"]
+    assert "cost_usd" in finish["unigrok"]
+    assert "request_id" in finish["unigrok"]
+    assert "event" not in finish["unigrok"]
 
 
 def test_agent_stream_real_deltas_replace_final_block(monkeypatch):
@@ -1772,6 +1782,51 @@ def test_agent_stream_real_deltas_replace_final_block(monkeypatch):
     ]
     assert contents == ["Hello ", "world"]
     assert chunks[-1]["choices"][0]["finish_reason"] == "stop"
+    assert chunks[-1]["unigrok"]["finish_reason"] == "final_answer"
+
+
+def test_agent_stream_finish_chunk_carries_unigrok_identity(monkeypatch):
+    """Final SSE chunk mirrors the non-stream unigrok identity envelope."""
+    monkeypatch.delenv("UNIGROK_RUNTIME", raising=False)
+    monkeypatch.delenv("UNIGROK_API_KEYS", raising=False)
+
+    async def fake_run_agent_turn(**kwargs):
+        return MetaLayer(
+            generation="done",
+            finish_reason="final_answer",
+            plane="CLI",
+            route="fast",
+            profile="p",
+            policy_mode="cli_first",
+            cost_usd=0.42,
+            latency=1.5,
+            context_id="ctx-1",
+            request_id="rid-stream-1",
+        )
+
+    monkeypatch.setattr("src.http_server.run_agent_turn", fake_run_agent_turn)
+
+    with TestClient(create_app()) as client:
+        with client.stream(
+            "POST",
+            "/v1/chat/completions",
+            json={"model": "unigrok-agent", "stream": True, "messages": [{"role": "user", "content": "hi"}]},
+        ) as res:
+            body = "".join(res.iter_text())
+
+    finish = _sse_chunks(body)[-1]
+    assert finish["choices"][0]["finish_reason"] == "stop"
+    assert finish["unigrok"] == {
+        "plane": "CLI",
+        "route": "fast",
+        "profile": "p",
+        "policy_mode": "cli_first",
+        "finish_reason": "final_answer",
+        "cost_usd": 0.42,
+        "latency": 1.5,
+        "context_id": "ctx-1",
+        "request_id": "rid-stream-1",
+    }
 
 
 def test_agent_stream_fallback_recovery_replaces_partial_deltas(monkeypatch):

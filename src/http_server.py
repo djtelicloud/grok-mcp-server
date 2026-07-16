@@ -1715,6 +1715,21 @@ def _agent_turn_kwargs(payload: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _layer_unigrok_identity(layer: MetaLayer) -> Dict[str, Any]:
+    """Plane/route/cost identity shared by JSON and SSE agent responses."""
+    return {
+        "plane": layer.plane,
+        "route": layer.route,
+        "profile": layer.profile,
+        "policy_mode": layer.policy_mode,
+        "finish_reason": layer.finish_reason,
+        "cost_usd": layer.cost_usd,
+        "latency": layer.latency,
+        "context_id": layer.context_id,
+        "request_id": layer.request_id,
+    }
+
+
 def _layer_to_chat_completion(layer: MetaLayer, model: str) -> Dict[str, Any]:
     created = int(time.time())
     content = layer.generation or ""
@@ -1736,17 +1751,7 @@ def _layer_to_chat_completion(layer: MetaLayer, model: str) -> Dict[str, Any]:
             "completion_tokens": 0,
             "total_tokens": total_tokens,
         },
-        "unigrok": {
-            "plane": layer.plane,
-            "route": layer.route,
-            "profile": layer.profile,
-            "policy_mode": layer.policy_mode,
-            "finish_reason": layer.finish_reason,
-            "cost_usd": layer.cost_usd,
-            "latency": layer.latency,
-            "context_id": layer.context_id,
-            "request_id": layer.request_id,
-        },
+        "unigrok": _layer_unigrok_identity(layer),
     }
 
 
@@ -1775,7 +1780,12 @@ async def _stream_agent(payload: Dict[str, Any], model: str) -> AsyncIterator[by
     response_id = f"chatcmpl-{uuid.uuid4().hex}"
     created = int(time.time())
 
-    def _chunk(delta: Dict[str, Any], finish_reason: Optional[str] = None, event: Optional[Dict[str, Any]] = None) -> bytes:
+    def _chunk(
+        delta: Dict[str, Any],
+        finish_reason: Optional[str] = None,
+        event: Optional[Dict[str, Any]] = None,
+        identity: Optional[Dict[str, Any]] = None,
+    ) -> bytes:
         chunk: Dict[str, Any] = {
             "id": response_id,
             "object": "chat.completion.chunk",
@@ -1785,6 +1795,9 @@ async def _stream_agent(payload: Dict[str, Any], model: str) -> AsyncIterator[by
         }
         if event is not None:
             chunk["unigrok"] = {"event": event}
+        elif identity is not None:
+            # Final finish chunk: same identity envelope as non-stream JSON.
+            chunk["unigrok"] = identity
         return _sse(chunk)
 
     yield _chunk({"role": "assistant"})
@@ -1838,7 +1851,11 @@ async def _stream_agent(payload: Dict[str, Any], model: str) -> AsyncIterator[by
                 remainder = content
             for idx in range(0, len(remainder), 1200):
                 yield _chunk({"content": remainder[idx : idx + 1200]})
-        yield _chunk({}, finish_reason=_openai_finish_reason(layer))
+        yield _chunk(
+            {},
+            finish_reason=_openai_finish_reason(layer),
+            identity=_layer_unigrok_identity(layer),
+        )
         yield b"data: [DONE]\n\n"
     except Exception:
         yield _sse({"error": {"message": _request_error_message("Agent request failed."), "type": "server_error"}})
