@@ -61,7 +61,7 @@ mcp = FastMCP(
 )
 
 # Import modular tools for registration and public import exports (for backward compatibility / tests)
-from .tools.chats import (
+from .tools.chats import (  # noqa: F401
     agent,
     chat,
     grok_agent,
@@ -75,13 +75,13 @@ from .tools.chats import (
     GrokAgentInput,
     GrokReflectionResult,
 )
-from .tools.media import (
+from .tools.media import (  # noqa: F401
     generate_image,
     generate_video,
     extend_video,
     register_media_tools,
 )
-from .tools.system import (
+from .tools.system import (  # noqa: F401
     grok_mcp_status,
     grok_mcp_discover_self,
     list_chat_sessions,
@@ -103,7 +103,7 @@ from .tools.system import (
     register_system_tools,
     db_vacuum,
 )
-from .tools.git import (
+from .tools.git import (  # noqa: F401
     git_status,
     git_diff,
     git_log,
@@ -114,20 +114,20 @@ from .tools.git import (
     git_commit,
     register_git_tools,
 )
-from .tools.research import (
+from .tools.research import (  # noqa: F401
     submit_research_job,
     get_research_job,
     list_research_jobs,
     register_research_tools,
 )
-from .tools.knowledge import (
+from .tools.knowledge import (  # noqa: F401
     remember_fact,
     search_knowledge,
     forget_fact,
     distill_session,
     register_knowledge_tools,
 )
-from .tools.workspace_memory import (
+from .tools.workspace_memory import (  # noqa: F401
     recall_workspace_memory,
     record_landed_outcome,
     explain_workspace_evidence,
