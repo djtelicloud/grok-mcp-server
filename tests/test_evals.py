@@ -613,14 +613,14 @@ class TestRoutingAdvisorCalibration:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _seed_inference_client(utils, monkeypatch, raw, *, api_key: str = "eval-test-key") -> None:
-    """Put a fake client in the fingerprint cache for the active key."""
-    from src.principal_xai import xai_api_key_fingerprint
+    """Put a fake client in the principal/owner cache for the active key path."""
+    from src.principal_xai import inference_client_cache_id
 
     monkeypatch.setenv("XAI_API_KEY", api_key)
     monkeypatch.delenv("UNIGROK_PRINCIPAL_XAI_KEYS_JSON", raising=False)
     monkeypatch.setattr(utils, "XAI_API_KEY", api_key)
     utils._clients.clear()
-    utils._clients[xai_api_key_fingerprint(api_key)] = raw
+    utils._clients[inference_client_cache_id()] = raw
 
 
 class TestEvalRecordingTap:

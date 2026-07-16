@@ -1137,15 +1137,18 @@ Principal overrides apply only for authenticated OAuth principals. Anonymous
 loopback and static API-key principals keep the owner default (static keys
 already *are* a principal form of auth for the gateway, not per-human BYOK).
 
-### Function: `xai_api_key_fingerprint` {#principal_xai-xai_api_key_fingerprint}
+### Function: `inference_client_cache_id` {#principal_xai-inference_client_cache_id}
 
 ```python
-def xai_api_key_fingerprint(key: str) -> str
+def inference_client_cache_id(*, principal: Optional[str]=None, environ: Mapping[str, str] | None=None) -> str
 ```
 
-**Keywords:** xai, api, key, fingerprint
+**Keywords:** inference, client, cache, id
 
-Stable non-secret cache id for a resolved key.
+Non-secret cache id for the active inference credential path.
+
+Uses principal identity + resolution source only — never hashes key material
+(keys are not passwords; we do not treat them as hashable secrets here).
 
 ### Function: `principal_xai_status` {#principal_xai-principal_xai_status}
 

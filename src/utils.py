@@ -2060,12 +2060,12 @@ def get_xai_inference_client():
     client's channel or inference call paths.
     """
 
-    from src.principal_xai import effective_xai_api_key, xai_api_key_fingerprint
+    from src.principal_xai import effective_xai_api_key, inference_client_cache_id
 
     api_key = effective_xai_api_key()
     if not api_key:
         raise ValueError("XAI_API_KEY is not configured in the environment.")
-    cache_id = xai_api_key_fingerprint(api_key)
+    cache_id = inference_client_cache_id()
 
     client = _clients.get(cache_id)
     if client is None:

@@ -9,7 +9,6 @@ Cloud twin law (sponsor Approved):
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import re
@@ -110,12 +109,24 @@ def effective_xai_api_key(
     return key
 
 
-def xai_api_key_fingerprint(key: str) -> str:
-    """Stable non-secret cache id for a resolved key."""
-    material = normalize_xai_api_key(key)
-    if not material:
+def inference_client_cache_id(
+    *,
+    principal: Optional[str] = None,
+    environ: Mapping[str, str] | None = None,
+) -> str:
+    """Non-secret cache id for the active inference credential path.
+
+    Uses principal identity + resolution source only — never hashes key material
+    (keys are not passwords; we do not treat them as hashable secrets here).
+    """
+    active = principal if principal is not None else get_active_principal()
+    key, source = resolve_xai_api_key(principal=active, environ=environ)
+    if not key:
         return "missing"
-    return hashlib.sha256(material.encode("utf-8")).hexdigest()
+    if source == "owner_default":
+        return "owner_default"
+    # Principal-bound path: one cache entry per OAuth principal id.
+    return f"principal:{active or 'unknown'}"
 
 
 def principal_xai_status(
