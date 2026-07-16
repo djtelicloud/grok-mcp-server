@@ -45,8 +45,36 @@ def test_inventory_and_measured_metrics_are_stable():
     assert choose["max_nesting"] == 3
     assert result["imports"] == ["json", "os"]
     assert result["dead_code"]["unused_imports"] == ["js", "os"]
-    assert result["searchability"]["ready"] is False
-    assert "missing_tests" in result["searchability"]["blockers"]
+    # Code-only analyze on parseable code with functions is NOT "blocked":
+    # ready is true and the hard blockers list is empty. The oracle +
+    # measurement a verified/scored search needs are reported as advisory
+    # requirements, never as hard blockers.
+    search = result["searchability"]
+    assert search["ready"] is True
+    assert search["blockers"] == []
+    assert "missing_tests" not in search["blockers"]
+    assert "missing_benchmark" not in search["blockers"]
+    assert search["scored_search_requirements"] == ["missing_tests", "missing_benchmark"]
+
+
+def test_no_functions_is_a_hard_blocker_but_requirements_stay_advisory():
+    # Nothing to search: this is a genuine hard blocker, so ready is False and
+    # "no_functions" appears in blockers. The scored-search requirements are
+    # still reported advisorily and never leak into the hard blockers list.
+    result = analyze_python_source("x = 1\n")
+    search = result["searchability"]
+    assert search["ready"] is False
+    assert search["blockers"] == ["no_functions"]
+    assert search["scored_search_requirements"] == ["missing_tests", "missing_benchmark"]
+    assert "missing_tests" not in search["blockers"]
+
+
+def test_parse_error_reports_requirements_and_is_blocked():
+    result = analyze_python_source("def broken(:\n")
+    search = result["searchability"]
+    assert search["ready"] is False
+    assert search["blockers"] == ["parse_error"]
+    assert search["scored_search_requirements"] == ["missing_tests", "missing_benchmark"]
 
 
 def test_parse_error_and_secret_warning_never_echo_secret():

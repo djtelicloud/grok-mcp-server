@@ -22,6 +22,13 @@ from ..subprocess_security import create_scrubbed_subprocess_exec
 from ..utils import redact_secrets
 
 MAX_SOURCE_BYTES = 256 * 1024
+
+# A verified/scored swarm search genuinely needs a correctness oracle (tests)
+# and a measurement (benchmark). Their absence does NOT make code-only analyze
+# impossible, so they are reported as advisory requirements for the opt-in
+# scored search rather than as hard blockers that would frame the free,
+# code-only analyze path as "blocked".
+SCORED_SEARCH_REQUIREMENTS = ["missing_tests", "missing_benchmark"]
 _CONTROL_NODES = (
     ast.If,
     ast.For,
@@ -225,7 +232,11 @@ def analyze_python_source(source: str) -> Dict[str, Any]:
             },
             "secret_warning": secret_warning,
             "functions": [],
-            "searchability": {"ready": False, "blockers": ["parse_error"]},
+            "searchability": {
+                "ready": False,
+                "blockers": ["parse_error"],
+                "scored_search_requirements": list(SCORED_SEARCH_REQUIREMENTS),
+            },
         }
 
     lines = encoded.splitlines(keepends=True)
@@ -251,7 +262,17 @@ def analyze_python_source(source: str) -> Dict[str, Any]:
             "unreferenced_private_names": _private_dead_names(tree),
         },
         "duplication": _duplication(source),
-        "searchability": {"ready": False, "blockers": [*blockers, "missing_tests", "missing_benchmark"]},
+        "searchability": {
+            # Code-only analyze is a real, useful result. ``ready`` reflects
+            # whether the source is analyzable and pickable as a target — it is
+            # NOT gated on tests/benchmark. Hard ``blockers`` are the things
+            # that actually make analysis or target-picking impossible; the
+            # oracle + measurement a verified search needs are surfaced as
+            # advisory ``scored_search_requirements`` instead.
+            "ready": not blockers,
+            "blockers": blockers,
+            "scored_search_requirements": list(SCORED_SEARCH_REQUIREMENTS),
+        },
         "tooling": {"python_ast": f"{sys.version_info.major}.{sys.version_info.minor}"},
     }
 

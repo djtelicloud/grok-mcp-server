@@ -352,7 +352,13 @@ async def start_paste_swarm(
         (scratch / "test_focus.py").write_text(test_code, encoding="utf-8")
         (scratch / "bench_focus.py").write_text(bench_code, encoding="utf-8")
         analytics["source"] = "paste"
-        analytics["searchability"] = {"ready": True, "blockers": []}
+        # Paste swarm supplies its own test + benchmark, so the scored-search
+        # requirements are satisfied and there are no blockers.
+        analytics["searchability"] = {
+            "ready": True,
+            "blockers": [],
+            "scored_search_requirements": [],
+        }
         budget = swarm_config.swarm_default_budget_usd() if budget_usd is None else float(budget_usd)
         budget = max(0.0, min(budget, swarm_config.swarm_max_budget_usd()))
 
