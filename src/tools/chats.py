@@ -216,6 +216,8 @@ async def chat(
     agent_count: Optional[int] = None,
     enable_agentic: bool = True,
     require_reasoning_level: Optional[Literal["low", "medium", "high"]] = None,
+    plane: Literal["auto", "cli", "api"] = "auto",
+    fallback_policy: Literal["same_plane", "cross_plane"] = "cross_plane",
 ) -> ChatResult:
     """Send a text prompt to a Grok model and return its reply.
 
@@ -231,6 +233,11 @@ async def chat(
         agent_count: 4 or 16. Only valid with `grok-4.20-multi-agent`.
         enable_agentic: If True (default), runs through the ReAct AgentLoop.
         require_reasoning_level: Minimum required Grok reasoning level (low, medium, high).
+        plane: Starting credential plane. `auto` follows server policy; `cli`
+            starts on the SuperGrok subscription; `api` starts on the metered
+            developer API.
+        fallback_policy: `same_plane` forbids crossing the billing boundary;
+            `cross_plane` permits bounded recovery on the other xAI plane.
     """
     session = scoped_session(session)
     validation_error = _validate_agent_count(model, agent_count)
@@ -264,6 +271,8 @@ async def chat(
         context_id=context_id,
         agent_count=agent_count,
         require_reasoning_level=require_reasoning_level,
+        requested_plane=plane,
+        fallback_policy=fallback_policy,
     )
 
     if session and layer.generation:
