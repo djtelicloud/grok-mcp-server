@@ -332,7 +332,8 @@ def test_public_docs_surfaces_wiki_is_okf_mirror_only():
     contributing = (ROOT / "CONTRIBUTING.md").read_text(encoding="utf-8")
     wiki_policy = (ROOT / "docs" / "wiki-okf-mirror.md").read_text(encoding="utf-8")
 
-    assert "## 8. Where docs live" in readme
+    # Public README is vibe-first; section title may change, content must not.
+    assert "Where docs live" in readme
     assert "https://grokmcp.org/docs/okf/index.md" in readme
     assert "mirror only" in readme.lower()
     assert "mirror only" in contributing.lower()

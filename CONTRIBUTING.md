@@ -3,19 +3,29 @@
 Thanks for helping improve UniGrok. Prefer small, verified changes that keep the
 shared Grok MCP gateway reliable.
 
-**Public users** should follow the root [README.md](README.md) only. This file is
-for **insiders**: people developing UniGrok itself (admins and GitHub write+
-collaborators such as Curtis). Product language freeze:
+## Who this file is for
+
+| You are… | Read |
+|---|---|
+| **Vibe coder** (install Grok in your IDE) | **[README.md](README.md) only** — stop here |
+| **Insider** (write+ collaborator building UniGrok) | **This file** |
+
+Insiders develop the product (admins and GitHub write+ collaborators). Product
+language freeze:
 [docs/design/public-vs-insider-surfaces.md](docs/design/public-vs-insider-surfaces.md).
+
+Public README stays vibe-first: install, paste-to-agent, prove it. **Do not**
+push dual-runtime / land / Swarm detail into the public README.
 
 ## Surfaces you must not confuse
 
 | Surface | Port / URL | Who | Purpose |
 |---|---|---|---|
-| **Stable Core** | `http://localhost:4765/mcp` · `/ui/` | Everyone | Public product MCP + machine-owner status UI |
-| **Contributor Forge** | `http://localhost:4766/mcp` (dev compose) | Insiders | UniGrok checkout attach, Swarm, workspace memory |
-| **Cloud control** | `https://control.grokmcp.org` / site `/control` | Insiders (GitHub OAuth) | Repo-facing control; **no** secret proxy, **no** local MCP tunnel |
-| **IDE chat** | Core MCP `agent` | Everyone | **Primary** `@grok` path for public and insiders |
+| **Stable Core** | `http://localhost:4765/mcp` · `/ui/` | Everyone (public product) | Daily MCP + machine-owner status UI |
+| **Contributor Forge** | `http://localhost:4766/mcp` (dev compose) | Insiders only | UniGrok checkout, Swarm, workspace memory |
+| **Cloud control** | `https://control.grokmcp.org` | Insiders (GitHub OAuth) | Repo control; **no** secret proxy; **no** laptop tunnel |
+| **Cloud MCP** | `https://mcp.grokmcp.org/mcp` | Team / cloud agents | Same Docker image, `cloudrun` mode; owner keys default |
+| **IDE chat** | Core MCP `agent` | Everyone | **Primary** `@grok` path |
 
 ### LIVE vs TARGET (do not over-claim)
 
