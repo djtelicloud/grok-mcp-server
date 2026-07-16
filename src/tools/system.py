@@ -38,6 +38,7 @@ from ..utils import (
     get_circuit_breaker_state,
     get_routing_advisor,
     grok_cli_plane_status,
+    grok_cli_oauth_env,
     credential_plane_contract,
     input_limit,
     validate_local_input,
@@ -777,11 +778,14 @@ async def run_local_tests(
         else:
             cmd = [sys.executable, "-m", "pytest", "-q", safe_target]
 
+        # Scrub server-owned secrets (XAI_API_KEY, etc.) so pytest children
+        # cannot echo them back through the MCP tool result.
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             cwd=str(project_root),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            env=grok_cli_oauth_env(),
         )
         try:
             stdout, stderr = await communicate_with_timeout(proc, timeout)
