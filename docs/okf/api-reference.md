@@ -165,6 +165,31 @@ mandatory wherever semantic completion matters.
 
 ## credentials.py {#credentials}
 
+### Function: `is_secret_environment_name` {#credentials-is_secret_environment_name}
+
+```python
+def is_secret_environment_name(name: str) -> bool
+```
+
+**Keywords:** is, secret, environment, name
+
+Return whether an environment name denotes credential-bearing data.
+
+Exact canonical names cover current integrations. Conservative structural
+matching keeps unknown future provider/client secrets out of subprocesses
+by default without treating ordinary names such as TOKENIZERS_PARALLELISM
+as credentials.
+
+### Function: `secret_environment_names` {#credentials-secret_environment_names}
+
+```python
+def secret_environment_names(environ: Mapping[str, str] | None=None) -> tuple[str, ...]
+```
+
+**Keywords:** secret, environment, names
+
+Return every canonical or secret-shaped name present in an env map.
+
 ### Function: `credential_plane_policy` {#credentials-credential_plane_policy}
 
 ```python
@@ -2191,6 +2216,38 @@ as sqlite). Unknown values fail fast with NotImplementedError naming the
 supported set — a typo must not silently fall back to SQLite. db_path is
 backend-specific (the SQLite file path; tests use per-test temp paths).
 
+## subprocess_security.py {#subprocess_security}
+
+### Function: `scrubbed_subprocess_env` {#subprocess_security-scrubbed_subprocess_env}
+
+```python
+def scrubbed_subprocess_env(base: Optional[Mapping[str, str]]=None, *, allow_secret_names: Collection[str]=()) -> dict[str, str]
+```
+
+**Keywords:** scrubbed, subprocess, env
+
+Return a child environment without UniGrok server-owned secrets.
+
+### Function: `create_scrubbed_subprocess_exec` {#subprocess_security-create_scrubbed_subprocess_exec}
+
+```python
+async def create_scrubbed_subprocess_exec(*program_and_args: str, env: Optional[Mapping[str, str]]=None, allow_secret_names: Collection[str]=(), **kwargs: Any) -> asyncio.subprocess.Process
+```
+
+**Keywords:** create, scrubbed, subprocess, exec
+
+Launch an async child without inheriting server-owned secrets.
+
+### Function: `scrubbed_subprocess_run` {#subprocess_security-scrubbed_subprocess_run}
+
+```python
+def scrubbed_subprocess_run(*popenargs: Any, env: Optional[Mapping[str, str]]=None, allow_secret_names: Collection[str]=(), **kwargs: Any) -> subprocess.CompletedProcess[Any]
+```
+
+**Keywords:** scrubbed, subprocess, run
+
+Run a synchronous child without inheriting server-owned secrets.
+
 ## swarm/analytics.py {#swarm-analytics}
 
 ### Function: `analyze_python_source` {#swarm-analytics-analyze_python_source}
@@ -3834,11 +3891,9 @@ def grok_cli_oauth_env(base: Optional[Dict[str, str]]=None) -> Dict[str, str]
 
 Return an OAuth-only environment for a Grok CLI child.
 
-The UniGrok process owns API, management, gateway, and subordinate-provider
-credentials. Removing that exact set from every CLI child keeps the xAI
-credential planes independent and prevents Grok-launched tools from seeing
-unrelated provider secrets. The persisted grok.com OAuth path remains
-available, so the CLI must use that subscription identity or fail closed.
+The persisted grok.com OAuth path remains available, while API, management,
+gateway, and subordinate-provider credentials are removed. The CLI must use
+its subscription identity or fail closed.
 
 ### Function: `grok_cli_plane_status` {#utils-grok_cli_plane_status}
 
@@ -3945,8 +4000,9 @@ entry (unset env returns before any parsing — zero hot-path cost by
 default). Spend is today's telemetry cost across every caller matching
 the entry's substring (the entry IS the shared pot), read via one
 created_at-indexed query and cached ~60s per entry. At/over budget raises
-CallerBudgetExceeded; a failing store read degrades OPEN — a broken
-telemetry table must not block traffic.
+CallerBudgetExceeded. Once a caller matches a configured budget, a failing
+spend-ledger read rejects the request so accounting loss cannot re-arm the
+cap.
 
 ### Function: `new_request_id` {#utils-new_request_id}
 

@@ -46,6 +46,7 @@ from .contracts import (
     is_safe_model_id,
     transport_resource_identity,
 )
+from ..subprocess_security import create_scrubbed_subprocess_exec
 from .errors import (
     ProviderAuthorizationInvariantError,
     ProviderConfigurationError,
@@ -280,13 +281,14 @@ async def _run_bounded_process(
 
     started = time.monotonic()
     try:
-        process = await asyncio.create_subprocess_exec(
+        process = await create_scrubbed_subprocess_exec(
             *argv,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=cwd,
             env=dict(env),
+            allow_secret_names={"CLAUDE_CODE_OAUTH_TOKEN"},
             start_new_session=True,
         )
     except Exception:

@@ -37,9 +37,15 @@ from .routing import (
     extract_routing_features,
     make_routing_receipt,
 )
+from .subprocess_security import (
+    create_scrubbed_subprocess_exec,
+    scrubbed_subprocess_env,
+    scrubbed_subprocess_run,
+)
 from .credentials import (
     CLI_AUTH_SETUP_COMMAND,
     SERVER_OWNED_SECRET_ENV_NAMES,
+    secret_environment_names,
     build_credential_plane_contract,
     credential_plane_policy,
 )
@@ -230,16 +236,12 @@ _CLI_PLANE_STATUS_LOCK = threading.Lock()
 def grok_cli_oauth_env(base: Optional[Dict[str, str]] = None) -> Dict[str, str]:
     """Return an OAuth-only environment for a Grok CLI child.
 
-    The UniGrok process owns API, management, gateway, and subordinate-provider
-    credentials. Removing that exact set from every CLI child keeps the xAI
-    credential planes independent and prevents Grok-launched tools from seeing
-    unrelated provider secrets. The persisted grok.com OAuth path remains
-    available, so the CLI must use that subscription identity or fail closed.
+    The persisted grok.com OAuth path remains available, while API, management,
+    gateway, and subordinate-provider credentials are removed. The CLI must use
+    its subscription identity or fail closed.
     """
-    env = dict(os.environ if base is None else base)
-    for name in SERVER_OWNED_SECRET_ENV_NAMES:
-        env.pop(name, None)
-    return env
+
+    return scrubbed_subprocess_env(base)
 
 
 @contextlib.contextmanager
@@ -394,7 +396,7 @@ def grok_cli_plane_status(
 
     parsed_models: Dict[str, Any] = {"models": [], "default_model": None}
     try:
-        completed = subprocess.run(
+        completed = scrubbed_subprocess_run(
             [PathResolver.get_grok_cli_path(), "models"],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -599,7 +601,7 @@ def _owned_descendant_pids(root_pid: int) -> List[int]:
     """Snapshot descendants without exposing their command lines."""
 
     try:
-        result = subprocess.run(
+        result = scrubbed_subprocess_run(
             ["ps", "-axo", "pid=,ppid="],
             capture_output=True,
             text=True,
@@ -775,8 +777,9 @@ async def enforce_caller_budget(store_param: Any, caller: Optional[str]) -> None
     default). Spend is today's telemetry cost across every caller matching
     the entry's substring (the entry IS the shared pot), read via one
     created_at-indexed query and cached ~60s per entry. At/over budget raises
-    CallerBudgetExceeded; a failing store read degrades OPEN — a broken
-    telemetry table must not block traffic.
+    CallerBudgetExceeded. Once a caller matches a configured budget, a failing
+    spend-ledger read rejects the request so accounting loss cannot re-arm the
+    cap.
     """
     if not caller or not os.environ.get("UNIGROK_CALLER_BUDGETS", "").strip():
         return
@@ -804,9 +807,12 @@ async def enforce_caller_budget(store_param: Any, caller: Optional[str]) -> None
             spent = float(await active_store.get_caller_cost_today(entry))
         except Exception as exc:
             logging.getLogger("GrokMCP").warning(
-                f"Caller budget check unavailable (degrading open): {exc}"
+                "Caller budget check unavailable; rejecting the budgeted request: %s",
+                exc,
             )
-            return
+            raise CallerBudgetExceeded(
+                "daily budget check unavailable; configured cap is fail-closed"
+            ) from None
         _CALLER_SPEND_CACHE[entry] = (spent, now)
     if spent >= limit_usd:
         raise CallerBudgetExceeded(
@@ -1277,6 +1283,22 @@ def load_grok_prompt(prompt_ref: str) -> str:
 
 def redact_secrets(text: str) -> str:
     redacted = str(text or "")
+
+    # Exact-value redaction catches credentials whose format is not covered by
+    # the pattern guard below. Ignore short values to avoid destructive false
+    # positives in ordinary output.
+    exact_values: set[str] = set()
+    for name in secret_environment_names(os.environ):
+        raw_value = os.environ.get(name, "")
+        values = [raw_value.strip()]
+        if name.upper() == "UNIGROK_API_KEYS":
+            values.extend(part.strip() for part in raw_value.split(","))
+        for value in values:
+            if len(value) >= 8:
+                exact_values.add(value)
+    for value in sorted(exact_values, key=len, reverse=True):
+        redacted = redacted.replace(value, "[REDACTED]")
+
     if "xai-" not in redacted and "sk-" not in redacted:
         # This guard must remain a conservative superset of the two
         # case-insensitive regexes below. False positives only cost a regex
@@ -1831,7 +1853,7 @@ async def discover_grok_cli_models(timeout_sec: float = 5.0) -> Dict[str, Any]:
 
     grok_path = PathResolver.get_grok_cli_path()
     try:
-        proc = await asyncio.create_subprocess_exec(
+        proc = await create_scrubbed_subprocess_exec(
             grok_path,
             "models",
             stdout=asyncio.subprocess.PIPE,
@@ -8220,7 +8242,7 @@ async def get_dynamic_context(
     candidate_paths: List[Path] = []
 
     try:
-        proc_sha = await asyncio.create_subprocess_exec(
+        proc_sha = await create_scrubbed_subprocess_exec(
             "git", "rev-parse", "--short=12", "HEAD",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -8233,7 +8255,7 @@ async def get_dynamic_context(
         pass
 
     try:
-        proc_branch = await asyncio.create_subprocess_exec(
+        proc_branch = await create_scrubbed_subprocess_exec(
             "git", "rev-parse", "--abbrev-ref", "HEAD",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -8249,7 +8271,7 @@ async def get_dynamic_context(
 
     # 1. Try Git mode first (extremely fast and high signal)
     try:
-        proc = await asyncio.create_subprocess_exec(
+        proc = await create_scrubbed_subprocess_exec(
             "git", "status", "--porcelain",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -8283,7 +8305,7 @@ async def get_dynamic_context(
                 candidate_paths.append(target_path)
         if not candidate_paths:
             # Fallback: files from the last commit in the branch
-            proc_log = await asyncio.create_subprocess_exec(
+            proc_log = await create_scrubbed_subprocess_exec(
                 "git", "log", "-n", "1", "--name-only", "--oneline",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -10902,7 +10924,7 @@ async def _call_plane(
                     )
 
             with _runtime() as (cli_cwd, cli_env):
-                proc = await asyncio.create_subprocess_exec(
+                proc = await create_scrubbed_subprocess_exec(
                     grok_path, *args,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,

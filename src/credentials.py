@@ -8,6 +8,7 @@ same contract safe to expose through MCP discovery, status, and ``/runtimez``.
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from typing import Any, Dict, Optional
 
 
@@ -22,6 +23,23 @@ UPSTREAM_PROVIDER_SECRET_ENV_NAMES = (
     "GEMINI_API_KEY",
     "GOOGLE_API_KEY",
 )
+AMBIENT_SERVER_SECRET_ENV_NAMES = (
+    "CLAUDE_CODE_OAUTH_TOKEN",
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
+    "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY",
+    "AWS_SESSION_TOKEN",
+    "AZURE_CLIENT_SECRET",
+    "AZURE_OPENAI_API_KEY",
+    "NPM_TOKEN",
+    "PYPI_API_TOKEN",
+    "UNIGROK_MCP_TOKEN_SECRET",
+    "UNIGROK_CLIENT_TOKEN",
+    "MCP_TOKEN_SECRET",
+    "SSH_AUTH_SOCK",
+    "DOCKER_AUTH_CONFIG",
+)
 # These server-owned values must be scrubbed from Grok CLI subprocesses, but
 # they are not upstream provider bearer secrets: one is a credential-file path
 # and the other is the gateway's own client-token allowlist.
@@ -31,8 +49,61 @@ NON_BEARER_SERVER_OWNED_ENV_NAMES = (
 )
 SERVER_OWNED_SECRET_ENV_NAMES = (
     *UPSTREAM_PROVIDER_SECRET_ENV_NAMES,
+    *AMBIENT_SERVER_SECRET_ENV_NAMES,
     *NON_BEARER_SERVER_OWNED_ENV_NAMES,
 )
+
+_SECRET_ENV_EXACT_NAMES = frozenset(
+    {
+        *SERVER_OWNED_SECRET_ENV_NAMES,
+        "DATABASE_URL",
+        "DB_URL",
+        "POSTGRES_URL",
+        "MYSQL_URL",
+        "MONGODB_URI",
+        "REDIS_URL",
+        "SENTRY_DSN",
+    }
+)
+_SECRET_ENV_SEGMENTS = frozenset(
+    {"TOKEN", "SECRET", "PASSWORD", "PASSWD", "COOKIE", "CREDENTIAL"}
+)
+_SECRET_ENV_SUFFIXES = (
+    "_API_KEY",
+    "_PRIVATE_KEY",
+    "_ACCESS_KEY",
+    "_ACCESS_KEY_ID",
+    "_AUTH_SOCK",
+    "_DSN",
+)
+
+
+def is_secret_environment_name(name: str) -> bool:
+    """Return whether an environment name denotes credential-bearing data.
+
+    Exact canonical names cover current integrations. Conservative structural
+    matching keeps unknown future provider/client secrets out of subprocesses
+    by default without treating ordinary names such as TOKENIZERS_PARALLELISM
+    as credentials.
+    """
+
+    normalized = str(name or "").strip().upper()
+    if not normalized:
+        return False
+    if normalized in _SECRET_ENV_EXACT_NAMES or normalized.endswith(
+        _SECRET_ENV_SUFFIXES
+    ):
+        return True
+    return bool(_SECRET_ENV_SEGMENTS.intersection(normalized.split("_")))
+
+
+def secret_environment_names(
+    environ: Mapping[str, str] | None = None,
+) -> tuple[str, ...]:
+    """Return every canonical or secret-shaped name present in an env map."""
+
+    source = os.environ if environ is None else environ
+    return tuple(name for name in source if is_secret_environment_name(name))
 _CLI_AUTH_ENV_UNSETS = " ".join(
     f"-u {name}" for name in SERVER_OWNED_SECRET_ENV_NAMES
 )
