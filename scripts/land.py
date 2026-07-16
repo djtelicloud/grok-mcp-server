@@ -179,10 +179,14 @@ def runtime_action(paths: list[str]) -> str:
     rebuild_names = {"Dockerfile", "docker-compose.yml", "docker-compose.dev.yml", "docker-compose.yaml", "compose.yml", "compose.yaml", "pyproject.toml", "uv.lock"}
     if any(path in rebuild_names or path.startswith("docker/") for path in paths):
         return "rebuild"
-    if any(path == "main.py" or path.startswith("src/") for path in paths):
+    if any(
+        path == "main.py"
+        or path.startswith("src/")
+        or path.startswith("mcp_ui/")
+        or path.startswith("docs/okf/")
+        for path in paths
+    ):
         return "rebuild"
-    if any(path.startswith("mcp_ui/") or path.startswith("docs/okf/") for path in paths):
-        return "smoke"
     return "none"
 
 

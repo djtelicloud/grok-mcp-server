@@ -93,8 +93,8 @@ def test_run_tests_checks_attribution_and_generated_okf_before_pytest(
 
 def test_runtime_action_is_minimal():
     assert land.runtime_action(["README.md", "tests/test_x.py"]) == "none"
-    assert land.runtime_action(["mcp_ui/index.html"]) == "smoke"
-    assert land.runtime_action(["docs/okf/api-reference.md"]) == "smoke"
+    assert land.runtime_action(["mcp_ui/index.html"]) == "rebuild"
+    assert land.runtime_action(["docs/okf/api-reference.md"]) == "rebuild"
     assert land.runtime_action(["src/server.py"]) == "rebuild"
     assert land.runtime_action(["uv.lock"]) == "rebuild"
     assert land.runtime_action(["docker-compose.dev.yml"]) == "rebuild"
