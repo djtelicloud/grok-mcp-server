@@ -5490,7 +5490,10 @@ class TestCliPlaneV2:
             returncode = 0
 
         async def fake_exec(*cmd, **kwargs):
-            captured["cmd"] = list(cmd)
+            argv = list(cmd)
+            captured["cmd"] = argv
+            pf = argv[argv.index("--prompt-file") + 1]
+            captured["prompt"] = Path(pf).read_text(encoding="utf-8")
             return FakeProc()
 
         async def fake_communicate(proc, timeout_sec, input_data=None):
@@ -5512,23 +5515,19 @@ class TestCliPlaneV2:
         )
 
         assert (content, is_cli) == ("structured", True)
-        assert captured["cmd"] == [
-            "/tmp/grok",
-            "--system-prompt-override",
-            "sys",
-            "--effort",
-            "high",
-            "--max-turns",
-            "5",
-            "--json-schema",
-            json_module.dumps(schema, sort_keys=True, separators=(",", ":")),
-            "-p",
-            "hi",
-            "-m",
-            "grok-composer-2.5-fast",
-            "--output-format",
-            "json",
-        ]
+        cmd = captured["cmd"]
+        assert cmd[0] == "/tmp/grok"
+        assert cmd[cmd.index("--system-prompt-override") + 1] == "sys"
+        assert cmd[cmd.index("--effort") + 1] == "high"
+        assert cmd[cmd.index("--max-turns") + 1] == "5"
+        assert cmd[cmd.index("--json-schema") + 1] == json_module.dumps(
+            schema, sort_keys=True, separators=(",", ":")
+        )
+        assert "-p" not in cmd
+        assert "--prompt-file" in cmd
+        assert captured["prompt"] == "hi"
+        assert cmd[cmd.index("-m") + 1] == "grok-composer-2.5-fast"
+        assert cmd[cmd.index("--output-format") + 1] == "json"
 
     @pytest.mark.asyncio
     async def test_cli_streaming_session_exact_argv_includes_max_turns(self, monkeypatch):
@@ -5565,7 +5564,10 @@ class TestCliPlaneV2:
                 return 0
 
         async def fake_exec(*cmd, **kwargs):
-            captured["cmd"] = list(cmd)
+            argv = list(cmd)
+            captured["cmd"] = argv
+            pf = argv[argv.index("--prompt-file") + 1]
+            captured["prompt"] = Path(pf).read_text(encoding="utf-8")
             return FakeProc()
 
         monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
@@ -5587,22 +5589,61 @@ class TestCliPlaneV2:
         )
 
         assert (content, is_cli) == ("ok", True)
-        assert captured["cmd"] == [
-            "/tmp/grok",
-            "--resume",
-            "sid-existing",
-            "--system-prompt-override",
-            "sys",
-            "--max-turns",
-            "2",
-            "-p",
-            "hi",
-            "-m",
-            "grok-composer-2.5-fast",
-            "--output-format",
-            "streaming-json",
-        ]
+        cmd = captured["cmd"]
+        assert cmd[0] == "/tmp/grok"
+        assert cmd[cmd.index("--resume") + 1] == "sid-existing"
+        assert cmd[cmd.index("--system-prompt-override") + 1] == "sys"
+        assert cmd[cmd.index("--max-turns") + 1] == "2"
+        assert "-p" not in cmd
+        assert "--prompt-file" in cmd
+        assert captured["prompt"] == "hi"
+        assert cmd[cmd.index("-m") + 1] == "grok-composer-2.5-fast"
+        assert cmd[cmd.index("--output-format") + 1] == "streaming-json"
         store.save_session.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_cli_user_prompt_stays_out_of_process_argv(self, monkeypatch):
+        """CLI user text must travel via --prompt-file (0600), never -p argv."""
+        import json as json_module
+        import stat
+
+        from src.utils import _call_plane
+
+        monkeypatch.setenv("UNIGROK_RUNTIME", "local")
+        monkeypatch.setattr(
+            PathResolver, "get_grok_cli_path", staticmethod(lambda: "/tmp/grok")
+        )
+        secret = "SENTINEL-CLI-PROMPT-SECRET-9f3a"
+        captured = {}
+
+        class FakeProc:
+            returncode = 0
+
+        async def fake_exec(*cmd, **kwargs):
+            argv = list(cmd)
+            captured["argv"] = argv
+            pf = argv[argv.index("--prompt-file") + 1]
+            captured["mode"] = stat.S_IMODE(Path(pf).stat().st_mode)
+            captured["prompt"] = Path(pf).read_text(encoding="utf-8")
+            return FakeProc()
+
+        async def fake_communicate(proc, timeout_sec, input_data=None):
+            return json_module.dumps({"text": "ok"}).encode(), b""
+
+        monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+        monkeypatch.setattr("src.utils.communicate_with_timeout", fake_communicate)
+
+        content, _, _, is_cli = await _call_plane(
+            "cli-fallback", secret, None, None, "sys"
+        )
+
+        assert (content, is_cli) == ("ok", True)
+        assert "-p" not in captured["argv"]
+        assert "--prompt-file" in captured["argv"]
+        assert secret not in captured["argv"]
+        assert secret not in " ".join(captured["argv"])
+        assert captured["prompt"] == secret
+        assert captured["mode"] == 0o600
 
     def test_cli_check_uses_oauth_only_models_probe_for_plane_health(self, monkeypatch, tmp_path):
         from src import utils
@@ -5961,7 +6002,11 @@ class TestCliPlaneV2:
                 self.returncode = returncode
 
         async def fake_exec(*cmd, **kwargs):
-            captured["cmds"].append(list(cmd))
+            argv = list(cmd)
+            captured["cmds"].append(argv)
+            captured.setdefault("prompts", []).append(
+                Path(argv[argv.index("--prompt-file") + 1]).read_text(encoding="utf-8")
+            )
             return FakeProc(1 if len(captured["cmds"]) == 1 else 0)
 
         payload = json_module.dumps({
@@ -6006,7 +6051,7 @@ class TestCliPlaneV2:
         assert "--resume" not in fresh_cmd
         assert "--fork-session" not in fresh_cmd
         uuid_module.UUID(fresh_cmd[fresh_cmd.index("--session-id") + 1])
-        retry_prompt = fresh_cmd[fresh_cmd.index("-p") + 1]
+        retry_prompt = captured["prompts"][1]
         assert "MISSING-SESSION-MARKER" in retry_prompt
         assert retry_prompt.count("What marker did I give you?") == 1
         assert len(attempts) == len(captured["cmds"]) == 2
@@ -6059,7 +6104,11 @@ class TestCliPlaneV2:
                 self.returncode = returncode
 
         async def fake_exec(*cmd, **kwargs):
-            captured["cmds"].append(list(cmd))
+            argv = list(cmd)
+            captured["cmds"].append(argv)
+            captured.setdefault("prompts", []).append(
+                Path(argv[argv.index("--prompt-file") + 1]).read_text(encoding="utf-8")
+            )
             return FakeProc(1 if len(captured["cmds"]) == 1 else 0)
 
         payload = json_module.dumps({
@@ -6112,7 +6161,7 @@ class TestCliPlaneV2:
         assert "--fork-session" not in fresh_cmd
         uuid_module.UUID(fresh_cmd[fresh_cmd.index("--session-id") + 1])
         assert fresh_cmd[fresh_cmd.index("-m") + 1] == "grok-4.5"
-        retry_prompt = fresh_cmd[fresh_cmd.index("-p") + 1]
+        retry_prompt = captured["prompts"][1]
         assert "MODEL-SWITCH-MARKER" in retry_prompt
         assert retry_prompt.count("What marker did I give you?") == 1
         store.load_messages.assert_awaited_once()
@@ -6141,7 +6190,11 @@ class TestCliPlaneV2:
                 self.returncode = returncode
 
         async def fake_exec(*cmd, **kwargs):
-            captured["cmds"].append(list(cmd))
+            argv = list(cmd)
+            captured["cmds"].append(argv)
+            captured.setdefault("prompts", []).append(
+                Path(argv[argv.index("--prompt-file") + 1]).read_text(encoding="utf-8")
+            )
             calls["count"] += 1
             return FakeProc(1 if calls["count"] == 1 else 0)
 
@@ -6167,14 +6220,13 @@ class TestCliPlaneV2:
         assert len(captured["cmds"]) == 2
         assert captured["cmds"][0][captured["cmds"][0].index("--resume") + 1] == "abc-123"
         assert "--session-id" not in captured["cmds"][0]
-        first_prompt = captured["cmds"][0][captured["cmds"][0].index("-p") + 1]
-        assert first_prompt == "What marker did I give you?"
+        assert captured["prompts"][0] == "What marker did I give you?"
         fork_cmd = captured["cmds"][1]
         assert fork_cmd[fork_cmd.index("--resume") + 1] == "abc-123"
         assert "--fork-session" in fork_cmd
         fork_id = fork_cmd[fork_cmd.index("--session-id") + 1]
         uuid_module.UUID(fork_id)
-        assert fork_cmd[fork_cmd.index("-p") + 1] == "What marker did I give you?"
+        assert captured["prompts"][1] == "What marker did I give you?"
         store.load_messages.assert_not_awaited()
         store.save_session.assert_awaited_once_with(
             "sess",
@@ -6200,7 +6252,11 @@ class TestCliPlaneV2:
                 self.returncode = returncode
 
         async def fake_exec(*cmd, **kwargs):
-            captured["cmds"].append(list(cmd))
+            argv = list(cmd)
+            captured["cmds"].append(argv)
+            captured.setdefault("prompts", []).append(
+                Path(argv[argv.index("--prompt-file") + 1]).read_text(encoding="utf-8")
+            )
             return FakeProc(1 if len(captured["cmds"]) < 3 else 0)
 
         payload = json_module.dumps({
@@ -6233,7 +6289,7 @@ class TestCliPlaneV2:
         assert "--resume" not in fresh_cmd
         assert "--fork-session" not in fresh_cmd
         uuid_module.UUID(fresh_cmd[fresh_cmd.index("--session-id") + 1])
-        retry_prompt = fresh_cmd[fresh_cmd.index("-p") + 1]
+        retry_prompt = captured["prompts"][2]
         assert "# Server Conversation History" in retry_prompt
         assert "STALE-SESSION-MARKER" in retry_prompt
         assert "# Current User Request" in retry_prompt
@@ -6261,7 +6317,11 @@ class TestCliPlaneV2:
             returncode = 0
 
         async def fake_exec(*cmd, **kwargs):
-            captured["cmd"] = list(cmd)
+            argv = list(cmd)
+            captured["cmd"] = argv
+            captured["prompt"] = Path(
+                argv[argv.index("--prompt-file") + 1]
+            ).read_text(encoding="utf-8")
             return FakeProc()
 
         payload = json_module.dumps({"text": "MCP-MARKER"}).encode()
@@ -6290,7 +6350,8 @@ class TestCliPlaneV2:
         cmd = captured["cmd"]
         assert "--session-id" not in cmd
         assert "--resume" not in cmd
-        prompt_arg = cmd[cmd.index("-p") + 1]
+        assert "-p" not in cmd
+        prompt_arg = captured["prompt"]
         assert "Server Conversation History" in prompt_arg
         assert "MCP-MARKER" in prompt_arg
         assert "Current User Request" in prompt_arg
@@ -6310,7 +6371,11 @@ class TestCliPlaneV2:
             returncode = 0
 
         async def fake_exec(*cmd, **kwargs):
-            captured["cmd"] = list(cmd)
+            argv = list(cmd)
+            captured["cmd"] = argv
+            captured["prompt"] = Path(
+                argv[argv.index("--prompt-file") + 1]
+            ).read_text(encoding="utf-8")
             return FakeProc()
 
         async def fake_communicate(proc, timeout_sec, input_data=None):
@@ -6337,7 +6402,8 @@ class TestCliPlaneV2:
         cmd = captured["cmd"]
         assert "--resume" not in cmd
         assert "--session-id" not in cmd
-        prompt_arg = cmd[cmd.index("-p") + 1]
+        assert "-p" not in cmd
+        prompt_arg = captured["prompt"]
         assert "EXPLICIT-MARKER" in prompt_arg
         assert prompt_arg.count("What marker did I give you?") == 1
         store.get_session.assert_not_awaited()
@@ -6360,7 +6426,11 @@ class TestCliPlaneV2:
             returncode = 0
 
         async def fake_exec(*cmd, **kwargs):
-            captured["cmd"] = list(cmd)
+            argv = list(cmd)
+            captured["cmd"] = argv
+            captured["prompt"] = Path(
+                argv[argv.index("--prompt-file") + 1]
+            ).read_text(encoding="utf-8")
             return FakeProc()
 
         payload = json_module.dumps({
@@ -6392,7 +6462,8 @@ class TestCliPlaneV2:
         cmd = captured["cmd"]
         assert cmd[cmd.index("--resume") + 1] == "native-cli-session"
         assert "--session-id" not in cmd
-        prompt_arg = cmd[cmd.index("-p") + 1]
+        assert "-p" not in cmd
+        prompt_arg = captured["prompt"]
         assert prompt_arg == "What marker did I give you?"
         assert "Server Conversation History" not in prompt_arg
         assert "API-MARKER" not in prompt_arg

@@ -955,8 +955,28 @@ def _json_schema_for_cli(schema: Any) -> Optional[str]:
     return json.dumps(schema, sort_keys=True, separators=(",", ":"))
 
 
+@contextlib.contextmanager
+def _cli_prompt_file(prompt: str):
+    """Write the CLI user prompt to a private temp file for ``--prompt-file``.
+
+    Putting the prompt on ``-p`` exposes customer text (and any pasted secrets)
+    to every local process inspector for the lifetime of the Grok CLI child.
+    """
+    fd, path = tempfile.mkstemp(prefix="unigrok-cli-prompt-", suffix=".txt")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(prompt)
+        os.chmod(path, 0o600)
+        yield path
+    finally:
+        try:
+            os.unlink(path)
+        except FileNotFoundError:
+            pass
+
+
 def _build_grok_cli_args(
-    cli_prompt: str,
+    cli_prompt_file: str,
     model_name: str,
     dynamic_sys_prompt: str,
     output_format: str,
@@ -1012,7 +1032,10 @@ def _build_grok_cli_args(
             ]
         )
 
-    args.extend(["-p", cli_prompt, "-m", model_name, "--output-format", output_format])
+    # Prefer --prompt-file over -p so the user payload is not visible in ps(1).
+    args.extend(
+        ["--prompt-file", cli_prompt_file, "-m", model_name, "--output-format", output_format]
+    )
     return args
 
 
@@ -10896,21 +10919,6 @@ async def _call_plane(
             cli_resume_session_id: Optional[str] = None,
         ) -> tuple[str, Optional[str]]:
             output_format = "streaming-json" if on_event is not None else "json"
-            args = _build_grok_cli_args(
-                cli_prompt=current_prompt,
-                model_name=model_name,
-                dynamic_sys_prompt=dynamic_sys_prompt,
-                output_format=output_format,
-                cli_session_id=cli_session_id,
-                cli_resume_session_id=cli_resume_session_id,
-                profile=profile or load_grok_profile(model_name),
-                max_turns=max_turns,
-                json_schema=json_schema,
-                no_plan=cli_no_plan,
-                verbatim=cli_verbatim,
-                allowed_tools=cli_allowed_tools,
-                isolated=cli_isolated,
-            )
 
             @contextlib.contextmanager
             def _runtime():
@@ -10923,58 +10931,75 @@ async def _call_plane(
                         grok_cli_oauth_env(),
                     )
 
-            with _runtime() as (cli_cwd, cli_env):
-                proc = await create_scrubbed_subprocess_exec(
-                    grok_path, *args,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                    cwd=str(cli_cwd),
-                    env=cli_env,
-                    # Grok may launch long-running tool children (pytest,
-                    # builds, subagents). UniGrok owns this isolated process
-                    # group so timeout/cancellation can reap the whole tree.
-                    start_new_session=True,
+            with _cli_prompt_file(current_prompt) as prompt_path:
+                args = _build_grok_cli_args(
+                    cli_prompt_file=prompt_path,
+                    model_name=model_name,
+                    dynamic_sys_prompt=dynamic_sys_prompt,
+                    output_format=output_format,
+                    cli_session_id=cli_session_id,
+                    cli_resume_session_id=cli_resume_session_id,
+                    profile=profile or load_grok_profile(model_name),
+                    max_turns=max_turns,
+                    json_schema=json_schema,
+                    no_plan=cli_no_plan,
+                    verbatim=cli_verbatim,
+                    allowed_tools=cli_allowed_tools,
+                    isolated=cli_isolated,
                 )
-                proc._unigrok_process_group = True
-                # Native coding work can legitimately run for many minutes.  Do
-                # not turn "slow" into a fabricated failure; deployments that
-                # require a wall-clock deadline can opt in explicitly.
-                cli_timeout = _optional_env_timeout("UNIGROK_CLI_TIMEOUT")
-                try:
-                    if on_event is not None:
-                        consume = _consume_cli_stream(proc, on_event)
-                        if cli_timeout is None:
-                            text, returned_id, stderr = await consume
-                        else:
-                            text, returned_id, stderr = await asyncio.wait_for(
-                                consume, timeout=cli_timeout
-                            )
-                    else:
-                        stdout, stderr = await communicate_with_timeout(proc, cli_timeout)
-                        text, returned_id = _parse_cli_json_output(
-                            stdout.decode("utf-8", errors="ignore")
-                        )
-                except asyncio.CancelledError:
-                    await _terminate_and_reap_subprocess(proc)
-                    raise
-                except asyncio.TimeoutError:
-                    await _terminate_and_reap_subprocess(proc)
-                    raise RuntimeError(
-                        f"Grok CLI execution timed out after {cli_timeout:.1f} seconds"
-                    )
 
-                if proc.returncode != 0:
-                    err_msg = stderr.decode("utf-8", errors="ignore").strip()
-                    safe_error = _bounded_redacted(
-                        err_msg or f"process exited with code {proc.returncode}",
-                        500,
+                with _runtime() as (cli_cwd, cli_env):
+                    proc = await create_scrubbed_subprocess_exec(
+                        grok_path, *args,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                        cwd=str(cli_cwd),
+                        env=cli_env,
+                        # Grok may launch long-running tool children (pytest,
+                        # builds, subagents). UniGrok owns this isolated process
+                        # group so timeout/cancellation can reap the whole tree.
+                        start_new_session=True,
                     )
-                    safe_partial = _bounded_redacted(text, 1200)
-                    raise _GrokCLIExecutionError(
-                        f"Grok CLI error: {safe_error}",
-                        partial_output=safe_partial,
-                    )
-                return text, returned_id
+                    proc._unigrok_process_group = True
+                    # Native coding work can legitimately run for many minutes.  Do
+                    # not turn "slow" into a fabricated failure; deployments that
+                    # require a wall-clock deadline can opt in explicitly.
+                    cli_timeout = _optional_env_timeout("UNIGROK_CLI_TIMEOUT")
+                    try:
+                        if on_event is not None:
+                            consume = _consume_cli_stream(proc, on_event)
+                            if cli_timeout is None:
+                                text, returned_id, stderr = await consume
+                            else:
+                                text, returned_id, stderr = await asyncio.wait_for(
+                                    consume, timeout=cli_timeout
+                                )
+                        else:
+                            stdout, stderr = await communicate_with_timeout(proc, cli_timeout)
+                            text, returned_id = _parse_cli_json_output(
+                                stdout.decode("utf-8", errors="ignore")
+                            )
+                    except asyncio.CancelledError:
+                        await _terminate_and_reap_subprocess(proc)
+                        raise
+                    except asyncio.TimeoutError:
+                        await _terminate_and_reap_subprocess(proc)
+                        raise RuntimeError(
+                            f"Grok CLI execution timed out after {cli_timeout:.1f} seconds"
+                        )
+
+                    if proc.returncode != 0:
+                        err_msg = stderr.decode("utf-8", errors="ignore").strip()
+                        safe_error = _bounded_redacted(
+                            err_msg or f"process exited with code {proc.returncode}",
+                            500,
+                        )
+                        safe_partial = _bounded_redacted(text, 1200)
+                        raise _GrokCLIExecutionError(
+                            f"Grok CLI error: {safe_error}",
+                            partial_output=safe_partial,
+                        )
+                    return text, returned_id
 
         async def _invoke_cli(
             current_prompt: str,

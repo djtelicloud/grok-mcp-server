@@ -57,7 +57,7 @@ class TestGenerationPlane:
         from src.utils import _build_grok_cli_args
 
         args = _build_grok_cli_args(
-            "prompt",
+            "/tmp/unigrok-cli-prompt-test.txt",
             "grok-4.5",
             "system",
             "json",

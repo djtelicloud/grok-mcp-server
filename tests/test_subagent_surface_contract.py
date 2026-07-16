@@ -79,7 +79,7 @@ async def test_submit_research_job_rejects_illegal_agent_count() -> None:
 
 def test_isolated_cli_args_always_disable_subagents() -> None:
     isolated = _build_grok_cli_args(
-        cli_prompt="p",
+        cli_prompt_file="/tmp/unigrok-cli-prompt-test.txt",
         model_name="grok-4.5",
         dynamic_sys_prompt="sys",
         output_format="json",
@@ -92,7 +92,7 @@ def test_isolated_cli_args_always_disable_subagents() -> None:
     assert isolated[isolated.index("--permission-mode") + 1] == "dontAsk"
 
     normal = _build_grok_cli_args(
-        cli_prompt="p",
+        cli_prompt_file="/tmp/unigrok-cli-prompt-test.txt",
         model_name="grok-4.5",
         dynamic_sys_prompt="sys",
         output_format="json",
