@@ -319,6 +319,20 @@ Pure ASGI for the same SSE-disconnect reason as GatewayAuthMiddleware.
 Loopback origins and the UNIGROK_ALLOWED_ORIGINS allowlist pass; any other
 browser origin is rejected with 403.
 
+### Class: `HttpRateLimitMiddleware` {#http_server-httpratelimitmiddleware}
+
+```python
+class HttpRateLimitMiddleware
+```
+
+**Keywords:** http, rate, limit, middleware
+
+In-process per-principal QPS throttle for /mcp and /v1.
+
+Fail-open when UNIGROK_HTTP_RATE_LIMIT is unset. Distinct from
+UNIGROK_CALLER_BUDGETS (spend) and circuit breakers (provider errors).
+Pure ASGI — same SSE-disconnect tombstone as GatewayAuthMiddleware.
+
 ### Class: `CallerContextMiddleware` {#http_server-callercontextmiddleware}
 
 ```python
