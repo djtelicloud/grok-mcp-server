@@ -8,9 +8,12 @@ def test_silent_team_check_topic_covers_low_cost_review_pattern() -> None:
     text = (ROOT / "docs" / "okf" / "silent-team-check.md").read_text(
         encoding="utf-8"
     )
+    lowered = text.lower()
 
     assert "Silent Team Check" in text
-    assert "token-efficient" in text
+    assert "low-cost advisory review habit" in text
+    assert "git diff vote" in lowered
+    assert "not" in lowered
     assert "one cheap reviewer" in text
     assert 'agent(mode="fast")' in text
     assert 'agent(mode="reasoning")' in text

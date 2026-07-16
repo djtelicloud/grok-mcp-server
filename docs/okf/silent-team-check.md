@@ -7,16 +7,17 @@ description: "Low-cost advisory habit for pressure-testing non-trivial agent wor
 
 # Silent Team Check
 
-Silent team check is the token-efficient version of a hive-mind vote for this
-repository's day-to-day IDE agents.
+Silent team check is a low-cost advisory review habit for this repository's
+day-to-day IDE agents. It is **not** a git diff vote and it is **not** a local
+hive-mind merge engine.
 
 ## Why this exists
 
 UniGrok's stable HTTP path does not expose a local fan-out, merge, or vote
 engine for ordinary IDE turns. When an agent wants extra pressure-testing, the
-safe default is not to spawn a swarm. The safe default is to ask one cheap
-reviewer first, then escalate only when the first check finds real risk or
-disagreement.
+safe default is not to spawn a swarm and not to pretend a vote happened. The
+safe default is to ask one cheap reviewer first, then escalate only when the
+first check finds real risk or disagreement.
 
 ## Default pattern
 
