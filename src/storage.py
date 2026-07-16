@@ -276,11 +276,25 @@ class SessionStoreProtocol(Protocol):
         content: str,
         metadata: Optional[dict] = None,
     ) -> None: ...
+    async def save_message_pair(
+        self,
+        session_name: str,
+        prompt: str,
+        reply: str,
+        metadata: Optional[dict] = None,
+    ) -> None: ...
     async def replace_messages(
         self, session_name: str, messages: List[Dict[str, Any]]
     ) -> None: ...
     async def load_messages(self, session_name: str) -> List[Dict[str, Any]]: ...
-    async def count_messages(self, session_name: str) -> int: ...
+    async def message_snapshot(self, session_name: str) -> tuple[int, int]: ...
+    async def replace_messages_if_snapshot(
+        self,
+        session_name: str,
+        messages: List[Dict[str, Any]],
+        expected_max_id: int,
+        expected_count: int,
+    ) -> bool: ...
 
     # ── Deferred jobs ────────────────────────────────────────────────────────
     async def create_job(
