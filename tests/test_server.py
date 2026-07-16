@@ -1037,6 +1037,22 @@ async def test_agent_tool_ctx_hidden_from_schema():
 
 
 @pytest.mark.asyncio
+async def test_bound_principal_cannot_read_shared_provider_file_content():
+    from src.identity import reset_active_principal, set_active_principal
+    from src.tools.system import xai_get_file_content
+
+    principal_token = set_active_principal("oauth:service:tenant-a")
+    try:
+        with patch("src.tools.system.get_xai_client") as get_client:
+            with pytest.raises(PermissionError, match="bound HTTP/MCP principals"):
+                await xai_get_file_content("file-owned-by-tenant-b")
+    finally:
+        reset_active_principal(principal_token)
+
+    get_client.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_grok_mcp_restart_container_gating(monkeypatch, tmp_path):
     from src.tools.system import grok_mcp_restart_container
     from src.identity import reset_active_principal, set_active_principal
