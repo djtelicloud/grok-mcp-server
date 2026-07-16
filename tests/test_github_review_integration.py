@@ -1,6 +1,7 @@
 import asyncio
 import importlib.util
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -417,6 +418,20 @@ def test_codex_approval_workflow_is_owner_only_and_exact_head_bound():
     assert "actions/checkout" not in workflow
     assert "XAI_API_KEY" not in workflow
     assert "UNIGROK_MCP_URL" not in workflow
+
+
+def test_write_token_workflows_pin_every_action_to_an_immutable_sha():
+    workflows = ROOT / ".github" / "workflows"
+    for path in sorted(workflows.glob("*.yml")):
+        text = path.read_text(encoding="utf-8")
+        if not re.search(r"^\s+(?:statuses|pull-requests): write\s*$", text, re.MULTILINE):
+            continue
+        for line in text.splitlines():
+            match = re.search(r"\buses:\s*[^\s@]+@([^\s#]+)", line)
+            if match:
+                assert re.fullmatch(r"[0-9a-f]{40}", match.group(1)), (
+                    f"{path.name} has mutable action ref: {line.strip()}"
+                )
 
 
 def test_cloud_governance_contract_marks_target_features_not_live():
