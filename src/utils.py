@@ -2808,7 +2808,7 @@ class GrokSessionStore:
                 """)
                 await self._conn.commit()
             except Exception:
-                await self._conn.rollback()
+                await self._conn.rollback()  # preserve atomicity before surfacing the error
                 raise
 
             # User version migrations
