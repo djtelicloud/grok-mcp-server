@@ -1,7 +1,7 @@
 # First-file package — `fast_non_dominated_sort` (proper rerun)
 
 **Status:** staged · **HOLD** until #476 Live + Forge relaunch + CONTINUE / sponsor go  
-**Branch tip:** `cursor/python-superiority-plans-consolidate` @ `ba2daa2` (#475 draft)  
+**Branch tip:** `cursor/python-superiority-plans-consolidate` @ `002fff8` (#475 draft)  
 **Process:** ORIGINAL → team rewrite → TEAM_FINAL → swarm → SWARM_FINAL  
 **Miss owned:** plans ≠ team rewrites ≠ measured wins
 
