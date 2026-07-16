@@ -549,6 +549,7 @@ class GatewayAuthMiddleware:
 
         body = b""
         if path == "/mcp" and scope.get("method") == "POST":
+            original_receive = receive
             messages = []
             while True:
                 message = await receive()
@@ -556,14 +557,17 @@ class GatewayAuthMiddleware:
                 if message.get("type") != "http.request" or not message.get("more_body"):
                     break
             body = b"".join(message.get("body", b"") for message in messages)
-            replayed = False
+            replay_index = 0
 
             async def replay_receive():
-                nonlocal replayed
-                if replayed:
-                    return {"type": "http.request", "body": b"", "more_body": False}
-                replayed = True
-                return {"type": "http.request", "body": body, "more_body": False}
+                nonlocal replay_index
+                if replay_index < len(messages):
+                    message = messages[replay_index]
+                    replay_index += 1
+                    return message
+                # Stateful Streamable HTTP transports keep receiving after
+                # the request body so they can observe the real disconnect.
+                return await original_receive()
 
             receive = replay_receive
 
