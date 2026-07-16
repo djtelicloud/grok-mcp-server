@@ -70,3 +70,11 @@ def test_redact_secrets_removes_unstructured_exact_value(monkeypatch):
     monkeypatch.setenv("GOOGLE_API_KEY", "plain-provider-secret")
 
     assert redact_secrets("failure: plain-provider-secret") == "failure: [REDACTED]"
+
+
+def test_redact_secrets_removes_individual_gateway_keys(monkeypatch):
+    monkeypatch.setenv(
+        "UNIGROK_API_KEYS", "first-gateway-secret, second-gateway-secret"
+    )
+
+    assert redact_secrets("failure: second-gateway-secret") == "failure: [REDACTED]"

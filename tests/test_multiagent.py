@@ -496,8 +496,13 @@ class TestBudgetEnforcement:
         broken_store = MagicMock()
         broken_store.get_caller_cost_today = AsyncMock(side_effect=RuntimeError("db gone"))
 
-        with pytest.raises(CallerBudgetExceeded, match="budget check failed"):
+        with pytest.raises(CallerBudgetExceeded) as raised:
             await enforce_caller_budget(broken_store, "codex-cli")
+
+        assert str(raised.value) == (
+            "daily budget check unavailable; fail-closed policy is enabled"
+        )
+        assert "db gone" not in str(raised.value)
 
     @pytest.mark.asyncio
     async def test_malformed_budgets_env_ignored(self, cstore, monkeypatch):
