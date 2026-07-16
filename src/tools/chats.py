@@ -8,7 +8,7 @@ from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import ToolAnnotations
 from pydantic import BaseModel, Field
 from ..models.results import ChatResult, AgentResult, ReflectionResult
-from ..identity import caller_from_mcp_context, scoped_session
+from ..identity import caller_from_mcp_context, get_active_principal, scoped_session
 
 from ..utils import (
     store,
@@ -512,6 +512,19 @@ async def stateful_chat(
     Returns:
         ChatResult containing execution metadata and responses.
     """
+    if get_active_principal() is not None:
+        error_msg = (
+            "Stored provider responses are unavailable to bound HTTP/MCP principals."
+        )
+        return ChatResult(
+            response=error_msg,
+            text=error_msg,
+            finish_reason="error",
+            cost_usd=0.0,
+            model=model,
+            route="stateful",
+            plane="API",
+        )
     async with GrokInvocationContext(model, logger, append_signature=True) as ctx:
         chat_params = {"model": model, "store_messages": True}
         if response_id:
@@ -556,6 +569,10 @@ async def retrieve_stateful_response(response_id: str) -> str:
     Args:
         response_id: ID returned by a prior `stateful_chat` call.
     """
+    if get_active_principal() is not None:
+        raise PermissionError(
+            "Stored provider responses are unavailable to bound HTTP/MCP principals."
+        )
     async with GrokInvocationContext("utility", logger, append_signature=False) as ctx:
         def _get_stored():
             client = get_xai_client()
@@ -575,6 +592,10 @@ async def delete_stateful_response(response_id: str) -> str:
     Args:
         response_id: ID of the stored response to remove.
     """
+    if get_active_principal() is not None:
+        raise PermissionError(
+            "Stored provider responses are unavailable to bound HTTP/MCP principals."
+        )
     async with GrokInvocationContext("utility", logger, append_signature=False) as ctx:
         def _delete_stored():
             client = get_xai_client()
