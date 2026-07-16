@@ -2833,7 +2833,7 @@ Returns:
 ### Function: `chat` {#tools-chats-chat}
 
 ```python
-async def chat(prompt: str, session: Optional[str]=None, model: str='grok-build-0.1', system_prompt: Optional[str]=None, agent_count: Optional[int]=None, enable_agentic: bool=True, require_reasoning_level: Optional[Literal['low', 'medium', 'high']]=None) -> ChatResult
+async def chat(prompt: str, session: Optional[str]=None, model: str='grok-build-0.1', system_prompt: Optional[str]=None, agent_count: Optional[int]=None, enable_agentic: bool=True, require_reasoning_level: Optional[Literal['low', 'medium', 'high']]=None, plane: Literal['auto', 'cli', 'api']='auto', fallback_policy: Literal['same_plane', 'cross_plane']='cross_plane') -> ChatResult
 ```
 
 **Keywords:** chat
@@ -2852,6 +2852,11 @@ Args:
     agent_count: 4 or 16. Only valid with `grok-4.20-multi-agent`.
     enable_agentic: If True (default), runs through the ReAct AgentLoop.
     require_reasoning_level: Minimum required Grok reasoning level (low, medium, high).
+    plane: Starting credential plane. `auto` follows server policy; `cli`
+        starts on the SuperGrok subscription; `api` starts on the metered
+        developer API.
+    fallback_policy: `same_plane` forbids crossing the billing boundary;
+        `cross_plane` permits bounded recovery on the other xAI plane.
 
 ### Function: `grok_agent` {#tools-chats-grok_agent}
 
