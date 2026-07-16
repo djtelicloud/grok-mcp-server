@@ -1,4 +1,4 @@
-# `tests/campaigns/gemma_needle_2000_v1/__init__.py` refactor plan (Loop 198)
+# `evals/campaigns/gemma_needle_2000_v1/__init__.py` refactor plan (Loop 200)
 
 Status: **in-tree** — plan only (single-branch accumulate; no per-file PR).
 
@@ -20,6 +20,6 @@ Forge MCP Not connected — plan path.
 | Module | Concern |
 |--------|---------|
 | split module | domain seams |
-| `tests/campaigns/gemma_needle_2000_v1/__init__.py` | facade ≤ 20 LOC |
+| `evals/campaigns/gemma_needle_2000_v1/__init__.py` | facade ≤ 20 LOC |
 
 Move-only. Leave PR #408 alone.
