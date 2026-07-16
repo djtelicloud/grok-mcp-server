@@ -1,6 +1,6 @@
 # Codex Active Work
 
-Last updated: 2026-07-16T18:08:36Z
+Last updated: 2026-07-16T18:13:04Z
 Owner: Codex integration coordinator
 Status: Current critical repairs are merged and Live; the security queue remains active.
 
@@ -49,7 +49,7 @@ credentials, OAuth codes, tokens, or private keys here.
 ## Active queue and safety posture
 
 - Python-superiority campaign PR #475 is held at exact head
-  `ba2daa269956997fe28fe8449099f8eed53a519c`. Its contributor baseline at the
+  `95062577097af7ba06f33a8b1c75074b5744264d`. Its contributor baseline at the
   prior head passed 2,202 tests, but two Forge tasks
   (`f29b306130e945f8a34eaa44b91fcb39` and
   `eca231fdad094aab9e909728f13035df`) failed before candidate generation
@@ -66,6 +66,12 @@ credentials, OAuth codes, tokens, or private keys here.
   Team/hive generation followed by Swarm refinement is allowed, but the harness
   must call the exact original implementation and approval compares original
   only with the final combined candidate; intermediate output is diagnostic.
+  The first staged harness passed 12 target tests and showed 3.48% latency range
+  across 10 isolated runs, but it bypasses normal import provenance, has only a
+  `front0_size` oracle, and conflates latency with memory tracing. Grok may
+  revise only the prep harness/test/doc while execution stays held; Codex must
+  re-review normal import, full oracle, raw samples/noise floor, provenance
+  hashes, and separate latency/memory measurement before CONTINUE.
 - Draft #476 repairs that Forge import-provenance bug. Codex's focused suite
   passed 27 tests and the full suite passed 2,204 tests. Normal Codex must
   independently review and land it, then refresh the Forge runtime before
