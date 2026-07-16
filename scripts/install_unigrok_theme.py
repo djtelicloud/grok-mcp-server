@@ -130,6 +130,18 @@ def _sources(repo: Path) -> list[tuple[Path, str]]:
     ]
 
 
+def _reject_git_home(grok_home: Path) -> int | None:
+    """Refuse paths that look like a Git checkout (user config dir only)."""
+    if (grok_home / ".git").exists():
+        print(
+            "error: --grok-home / GROK_HOME must be a user config directory, "
+            "not a Git checkout",
+            file=sys.stderr,
+        )
+        return 2
+    return None
+
+
 def install(
     *,
     repo: Path,
@@ -138,13 +150,9 @@ def install(
     force: bool,
 ) -> int:
     themes = grok_home / "themes"
-    if (grok_home / ".git").exists():
-        print(
-            "error: --grok-home / GROK_HOME must be a user config directory, "
-            "not a Git checkout",
-            file=sys.stderr,
-        )
-        return 2
+    rejected = _reject_git_home(grok_home)
+    if rejected is not None:
+        return rejected
 
     sources = _sources(repo)
     missing = [str(src) for src, _ in sources if not src.is_file()]
@@ -236,6 +244,9 @@ def check(*, repo: Path, grok_home: Path) -> int:
 
 def enable_config(*, grok_home: Path, dry_run: bool) -> int:
     """Best-effort write [ui] theme = unigrok. Does not promise Grok 0.2.x loads it."""
+    rejected = _reject_git_home(grok_home)
+    if rejected is not None:
+        return rejected
     config = grok_home / "config.toml"
     if not config.is_file():
         print(f"error: {config} not found; create a Grok config first", file=sys.stderr)

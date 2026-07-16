@@ -109,3 +109,43 @@ def test_enable_config_writes_theme_key(tmp_path: Path) -> None:
     text = config.read_text(encoding="utf-8")
     assert 'theme = "unigrok"' in text
     assert (grok_home / "config.toml.unigrok-theme-bak").is_file()
+
+
+@pytest.mark.skipif(not DESIGN_TOML.is_file(), reason="theme design artifacts not on this checkout")
+def test_enable_config_rejects_git_checkout(tmp_path: Path) -> None:
+    """--check --enable-config must refuse a GROK_HOME that is a Git checkout."""
+    grok_home = tmp_path / "fake-checkout"
+    themes = grok_home / "themes"
+    themes.mkdir(parents=True)
+    (grok_home / ".git").mkdir()
+    # Pre-seed installed themes so --check can pass before enable_config runs.
+    for src_name, dest_name in (
+        ("unigrok-grok-theme.toml", "unigrok.toml"),
+        ("unigrok-grok-theme.json", "unigrok.json"),
+        ("UniGrok.terminal", "UniGrok.terminal"),
+    ):
+        (themes / dest_name).write_bytes(
+            (REPO / "docs" / "design" / src_name).read_bytes()
+        )
+    config = grok_home / "config.toml"
+    config.write_text('[ui]\ntheme = "tokyonight"\n', encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--check",
+            "--repo",
+            str(REPO),
+            "--grok-home",
+            str(grok_home),
+            "--enable-config",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 2
+    assert "not a Git checkout" in result.stderr
+    assert 'theme = "tokyonight"' in config.read_text(encoding="utf-8")
+    assert not (grok_home / "config.toml.unigrok-theme-bak").exists()
