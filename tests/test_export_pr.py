@@ -1,5 +1,4 @@
 import pytest
-from pathlib import Path
 from unittest.mock import patch, AsyncMock
 import hashlib
 from src.tools.swarm import export_swarm_narrow_pr

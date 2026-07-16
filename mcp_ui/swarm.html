@@ -179,6 +179,7 @@
             <label>Function <select id="focusPicker"><option value="">analyze code first</option></select></label>
             <label>Goal <select id="goalPicker"><option value="balanced">balanced</option><option value="latency">latency</option><option value="memory">memory</option><option value="size">size</option></select></label>
             <label>Strategy <select id="strategyPicker"><option value="elite_offspring">evolve from elites</option><option value="baseline_batch">baseline batch</option></select></label>
+            <button id="autoGenBtn" type="button" style="margin-left:auto; background: var(--panel2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 6px 12px; cursor: pointer;">✨ Auto-generate</button>
           </div>
           <div class="paste-grid" style="margin-top:10px">
             <div><div class="code-label">pytest code · required</div><textarea id="testInput" class="code-input oracle-input" spellcheck="false" maxlength="131072" placeholder="from module_under_test import your_function\n\ndef test_behavior(): ..."></textarea></div>

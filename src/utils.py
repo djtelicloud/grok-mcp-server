@@ -10616,7 +10616,6 @@ async def _call_plane(
     # API branch streams for real via chat.stream(), forwarding each chunk as
     # a {"type": "content_delta", "text": ...} event before returning the
     # complete response as usual.
-    from xai_sdk import Client
     from xai_sdk.chat import user, system, assistant
 
     if _attempt_reporting is not None:

@@ -1,7 +1,6 @@
 import pytest
 import json
-from pathlib import Path
-from unittest.mock import patch, AsyncMock
+from unittest.mock import patch
 from src.tools.swarm import plan_swarm_campaign
 
 @pytest.fixture

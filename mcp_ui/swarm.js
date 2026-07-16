@@ -833,3 +833,67 @@ async function bootstrap() {
 }
 
 bootstrap();
+
+
+async function autoGenerateTests() {
+  const code = $("codeInput").value;
+  if (!code.trim()) {
+    $("pasteRunMsg").textContent = "Paste some code first to generate tests.";
+    return;
+  }
+  
+  const btn = $("autoGenBtn");
+  const oldText = btn.textContent;
+  btn.textContent = "✨ Generating...";
+  btn.disabled = true;
+  $("pasteRunMsg").textContent = "Asking UniGrok to write tests and benchmark...";
+  
+  try {
+    const prompt = `You are generating tests and benchmarks for a Swarm optimization task.
+The user has provided the following Python code:
+\`\`\`python
+${code}
+\`\`\`
+
+Generate a \`pytest\` test block (that imports from \`module_under_test\` instead of the actual file name) and a SWARM_BENCH benchmark script (that runs the code multiple times and prints the latency and peak memory as a JSON line, e.g. \`print('SWARM_BENCH ' + json.dumps({'latency_ms': ..., 'peak_mem_bytes': ...}))\`).
+
+Output exactly a JSON object (no markdown formatting around it) with two keys:
+- 'test': a string containing the pytest code.
+- 'bench': a string containing the benchmark code.
+Ensure the benchmark uses tracemalloc and time.perf_counter. Do not output anything else.`;
+
+    const resultText = await mcpCall("agent", { prompt: prompt, mode: "fast" });
+    
+    const agentResult = JSON.parse(resultText);
+    let content = agentResult.text || agentResult.response || "";
+    if (agentResult.messages) {
+      const msg = agentResult.messages.find(m => m.role === "assistant");
+      if (msg) content = msg.content;
+    }
+    
+    // Extract JSON between first { and last }
+    const firstBrace = content.indexOf('{');
+    const lastBrace = content.lastIndexOf('}');
+    
+    if (firstBrace === -1 || lastBrace === -1 || lastBrace < firstBrace) {
+      throw new Error("Could not find valid JSON object in response");
+    }
+    
+    const jsonStr = content.substring(firstBrace, lastBrace + 1);
+    const parsed = JSON.parse(jsonStr);
+    
+    if (parsed.test) $("testInput").value = parsed.test;
+    if (parsed.bench) $("benchInput").value = parsed.bench;
+    
+    $("pasteRunMsg").textContent = "Generation complete. Review the tests and benchmark!";
+  } catch (err) {
+    $("pasteRunMsg").textContent = `Auto-generation failed: ${err.message || err}`;
+  } finally {
+    btn.textContent = oldText;
+    btn.disabled = false;
+  }
+}
+
+if ($("autoGenBtn")) {
+  $("autoGenBtn").addEventListener("click", autoGenerateTests);
+}
