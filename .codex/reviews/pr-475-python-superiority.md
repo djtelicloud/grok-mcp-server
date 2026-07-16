@@ -138,7 +138,11 @@ completion.
 8. After CONTINUE, start from landed `main` on a clean task branch. Improve and
    freeze the oracle/benchmark before changing production code or capturing the
    baseline, then apply the identical method to the exact original and candidate.
-9. Do not retry `extract_routing_features` until its required keyword fixture
+9. Grok may use team/hive generation followed by Swarm refinement, but the
+   baseline harness must execute the exact original implementation. Intermediate
+   team output is diagnostic; approval compares exact original with the final
+   combined candidate under the frozen method.
+10. Do not retry `extract_routing_features` until its required keyword fixture
    and high-noise benchmark are replaced with a stable, reviewable oracle.
 
 ## Approval boundary

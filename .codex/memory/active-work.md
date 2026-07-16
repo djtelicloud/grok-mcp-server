@@ -1,6 +1,6 @@
 # Codex Active Work
 
-Last updated: 2026-07-16T18:04:37Z
+Last updated: 2026-07-16T18:08:36Z
 Owner: Codex integration coordinator
 Status: Current critical repairs are merged and Live; the security queue remains active.
 
@@ -63,6 +63,9 @@ credentials, OAuth codes, tokens, or private keys here.
   Sponsor permits Grok to improve the experiment method before rerun. Freeze
   that method on a clean current-main task branch before any production change
   or baseline capture, then apply it unchanged to original and candidate.
+  Team/hive generation followed by Swarm refinement is allowed, but the harness
+  must call the exact original implementation and approval compares original
+  only with the final combined candidate; intermediate output is diagnostic.
 - Draft #476 repairs that Forge import-provenance bug. Codex's focused suite
   passed 27 tests and the full suite passed 2,204 tests. Normal Codex must
   independently review and land it, then refresh the Forge runtime before
