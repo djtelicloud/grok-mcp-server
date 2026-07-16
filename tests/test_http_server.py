@@ -351,6 +351,66 @@ def test_oauth_introspection_enforces_surface_and_tool_scopes(monkeypatch):
     )
 
 
+@pytest.mark.asyncio
+async def test_oauth_mcp_body_replay_forwards_original_disconnect(monkeypatch):
+    monkeypatch.delenv("UNIGROK_API_KEYS", raising=False)
+    monkeypatch.delenv("UNIGROK_ALLOW_UNAUTHENTICATED", raising=False)
+    monkeypatch.setenv(
+        "UNIGROK_OAUTH_INTROSPECTION_URL",
+        "https://control.grokmcp.org/oauth/introspect",
+    )
+    document = json.dumps(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {"name": "agent", "arguments": {}},
+        }
+    ).encode()
+    source_messages = [
+        {"type": "http.request", "body": document[:20], "more_body": True},
+        {"type": "http.request", "body": document[20:], "more_body": False},
+        {"type": "http.disconnect"},
+    ]
+    received = []
+
+    async def allow(_token, required_scope):
+        assert required_scope == "unigrok:connect unigrok:invoke"
+        return {"active": True, "scope": required_scope, "sub": "service:review"}
+
+    async def downstream(scope, receive, _send):
+        assert scope["unigrok.oauth"]["sub"] == "service:review"
+        received.extend([await receive(), await receive(), await receive()])
+
+    async def original_receive():
+        return source_messages.pop(0)
+
+    async def send(_message):
+        return None
+
+    monkeypatch.setattr("src.http_server._introspect_oauth_token", allow)
+    middleware = GatewayAuthMiddleware(downstream, bound_host="0.0.0.0")
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/mcp",
+        "query_string": b"",
+        "scheme": "https",
+        "client": ("203.0.113.10", 50000),
+        "server": ("mcp.grokmcp.org", 443),
+        "headers": [(b"authorization", b"Bearer oauth-token")],
+    }
+
+    await middleware(scope, original_receive, send)
+
+    assert received == [
+        {"type": "http.request", "body": document[:20], "more_body": True},
+        {"type": "http.request", "body": document[20:], "more_body": False},
+        {"type": "http.disconnect"},
+    ]
+    assert source_messages == []
+
+
 def test_oauth_metadata_challenge_omits_mcp_document_for_query_variant(monkeypatch):
     monkeypatch.setenv("UNIGROK_RUNTIME", "cloudrun")
     monkeypatch.delenv("UNIGROK_API_KEYS", raising=False)
