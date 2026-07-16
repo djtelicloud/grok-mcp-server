@@ -23,20 +23,28 @@ credentials, OAuth codes, tokens, or private keys here.
   accounting is unavailable. Exact-head CI, CodeQL, Codex Approval, Supervisor
   Approval, Security Reviewer, and Bugbot passed; the local suite passed 2,173
   tests.
+- PR #335 is merged. Static bearer identities now use stable explicit IDs,
+  legacy index-based keys fail-closed without an exact migration map, OAuth
+  principals are issuer-bound and audience-checked, and hosted caller-budget
+  keys use the same canonical principal form. Exact-head CI, CodeQL, Codex
+  Approval, Supervisor Approval, Security Reviewer, Cursor Approval, and
+  Bugbot passed; the local suite passed 2,195 tests.
 - Stable `:4765` and contributor `:4766` are healthy and ready on the current
   image with read-only root filesystems.
 - Remote MCP is Live at 100% in both regions on image digest
-  `sha256:8dcfad6810f33c1c4d8d5cc354334f005c4cfd27ad7707ecfc920c699dca3280`:
-  `us-central1` revision `unigrok-remote-mcp-00014-s4s` and `us-east1`
-  revision `unigrok-remote-mcp-00018-bj9`.
+  `sha256:07d44433af44977ca10129def08b543a94dd07734dfd97b9e941a2c3a0bd5c70`:
+  `us-central1` revision `unigrok-remote-mcp-00015-hgv` and `us-east1`
+  revision `unigrok-remote-mcp-00019-g6m`. Both hosted caller-budget entries
+  were migrated atomically with the image rollout.
 - Public health, readiness, OAuth protected-resource metadata, and protected
-  `/metrics` and `/mcp` rejection probes pass. No error logs were found on the
-  new Cloud Run revisions after rollout.
+  `/runtimez`, `/metrics`, and `/mcp` rejection probes pass. No error logs were
+  found on the new Cloud Run revisions after rollout.
 
 ## Active queue and safety posture
 
-- Stable explicit bearer IDs, issuer-bound OAuth principals, and audience
-  binding remain blockers before principal-storage publication.
+- Stable identity prerequisites are Live, but principal-storage publication
+  remains blocked on its owner-scoped schema/migration, legacy-row quarantine,
+  and cross-principal regression contract.
 - Caller-scoped research jobs and other ready security packets remain queued;
   rebase and integrate only after exact-head review and conflict checks.
 - Provider-broker, stateful MCP sampling, Swarm, and shared multi-principal
