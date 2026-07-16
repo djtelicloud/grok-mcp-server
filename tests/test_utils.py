@@ -5051,11 +5051,52 @@ class TestAtomicSaveHistory:
         messages = await store.load_messages("sess-rollback")
         assert [m["content"] for m in messages] == ["original"]
 
+    @pytest.mark.asyncio
+    async def test_save_messages_rolls_back_atomically(self, store):
+        """A mid-batch failure must not leave a half-written user turn."""
+        await store.save_message("sess-pair", "user", "seed")
+
+        with pytest.raises(TypeError):
+            await store.save_messages(
+                "sess-pair",
+                [
+                    {"role": "user", "content": "orphan-risk"},
+                    {
+                        "role": "assistant",
+                        "content": "x",
+                        "metadata": {"bad": object()},
+                    },
+                ],
+            )
+
+        messages = await store.load_messages("sess-pair")
+        assert [m["content"] for m in messages] == ["seed"]
+
+    @pytest.mark.asyncio
+    async def test_concurrent_append_keeps_contiguous_pairs(self, store):
+        """Concurrent turns must not interleave as userA,userB,assistantA,..."""
+        session = "sess-pairs"
+
+        async def one_turn(n: int) -> None:
+            await append_and_save_history(
+                session, [], f"q{n}", f"a{n}", store
+            )
+
+        await asyncio.gather(*(one_turn(i) for i in range(12)))
+        messages = await store.load_messages(session)
+        assert len(messages) == 24
+        for i in range(0, 24, 2):
+            assert messages[i]["role"] == "user"
+            assert messages[i + 1]["role"] == "assistant"
+            q = messages[i]["content"]
+            a = messages[i + 1]["content"]
+            assert q.startswith("q") and a.startswith("a")
+            assert q[1:] == a[1:]
+
     def test_pattern_cache_is_deleted(self):
         """pattern_cache was write-only dead weight (zero callers) — removed."""
         assert not hasattr(GrokSessionStore, "get_cached_pattern")
         assert not hasattr(GrokSessionStore, "save_cached_pattern")
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Phase 4 concurrency — read pool + passive connection recovery

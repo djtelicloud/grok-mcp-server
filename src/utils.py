@@ -6520,25 +6520,57 @@ class GrokSessionStore:
                 rows = await cursor.fetchall()
                 return [dict(r) for r in rows]
 
-    @_with_write_retry_async
     async def save_message(self, session_name: str, role: str, content: str, metadata: Optional[dict] = None):
+        await self.save_messages(
+            session_name,
+            [{"role": role, "content": content, "metadata": metadata}],
+        )
+
+    @_with_write_retry_async
+    async def save_messages(
+        self, session_name: str, messages: List[Dict[str, Any]]
+    ) -> None:
+        """Insert one or more messages atomically (single BEGIN IMMEDIATE).
+
+        Used by append_and_save_history so a user+assistant turn cannot be
+        half-persisted or interleaved with a concurrent turn's pair.
+        """
         await self._ensure_initialized()
+        rows = list(messages or [])
+        if not rows:
+            return
         async with self._lock:
             await self._conn.execute("BEGIN IMMEDIATE;")
             try:
-                async with self._conn.execute("SELECT 1 FROM sessions WHERE session_name = ?", (session_name,)) as cursor:
+                async with self._conn.execute(
+                    "SELECT 1 FROM sessions WHERE session_name = ?", (session_name,)
+                ) as cursor:
                     exists = await cursor.fetchone()
                 now_str = datetime.now().isoformat()
                 if not exists:
                     await self._conn.execute(
                         "INSERT INTO sessions (session_name, last_active) VALUES (?, ?)",
-                        (session_name, now_str)
+                        (session_name, now_str),
                     )
-                meta_str = json.dumps(metadata, separators=(',', ':')) if metadata else None
-                await self._conn.execute(
-                    "INSERT INTO messages (session_name, role, content, timestamp, metadata) VALUES (?, ?, ?, ?, ?)",
-                    (session_name, role, content, now_str, meta_str)
-                )
+                for msg in rows:
+                    metadata = msg.get("metadata")
+                    meta_str = (
+                        json.dumps(metadata, separators=(",", ":"))
+                        if metadata
+                        else None
+                    )
+                    await self._conn.execute(
+                        "INSERT INTO messages "
+                        "(session_name, role, content, timestamp, metadata) "
+                        "VALUES (?, ?, ?, ?, ?)",
+                        (
+                            session_name,
+                            msg.get("role"),
+                            msg.get("content"),
+                            now_str,
+                            meta_str,
+                        ),
+                    )
                 await self._conn.commit()
             except Exception:
                 await self._conn.rollback()
@@ -7098,8 +7130,13 @@ async def append_and_save_history(session: str, history: list, prompt: str, repl
 
     active_store = store_param if store_param is not None else store
     try:
-        await active_store.save_message(session, "user", prompt)
-        await active_store.save_message(session, "assistant", reply, metadata=metadata)
+        await active_store.save_messages(
+            session,
+            [
+                {"role": "user", "content": prompt},
+                {"role": "assistant", "content": reply, "metadata": metadata},
+            ],
+        )
     except Exception as e:
         logging.getLogger("GrokMCP").warning(f"Failed to append/save SQLite chat history for session '{session}': {e}")
 

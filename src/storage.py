@@ -276,6 +276,9 @@ class SessionStoreProtocol(Protocol):
         content: str,
         metadata: Optional[dict] = None,
     ) -> None: ...
+    async def save_messages(
+        self, session_name: str, messages: List[Dict[str, Any]]
+    ) -> None: ...
     async def replace_messages(
         self, session_name: str, messages: List[Dict[str, Any]]
     ) -> None: ...
