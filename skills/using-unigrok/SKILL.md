@@ -44,6 +44,26 @@ search grounding was used.
 - Tasks needing self-critique → `thinking`.
 - Current-events or source-cited answers → `research` (uses web + X search).
 
+## Multi-agent / research fan-out (not local subagent spawn)
+
+UniGrok’s public multi-agent surface is **not** a Grok-Build-style local
+`spawn_subagent` tree. Use these product facts:
+
+1. **`agent(mode="research")`** — requests **server-side** xAI multi-agent
+   fan-out. `agent_count` is only **4 or 16** (env
+   `UNIGROK_RESEARCH_AGENT_COUNT`; invalid values fall back to 4). Citations
+   return under `citations` when present. Fan-out is **not** orchestrated as
+   local child agents in the UniGrok process.
+2. **`submit_research_job(..., agent_count=4|16)`** — deferred research with
+   the same 4|16 bound; illegal counts are rejected at the tool boundary.
+3. **CLI isolation** — contributor/headless paths that set `cli_isolated`
+   always pass **`--no-subagents`** (plus no-memory / no web / dontAsk) so
+   ambient CLI subagents cannot leak into isolated work.
+
+Other modes (`auto` / `fast` / `reasoning` / `thinking`) do **not** set
+research `agent_count`. Do not invent a public MCP tool named
+`spawn_subagent` for ordinary installs.
+
 ## Parallel ship (contributor, private)
 
 Dual-lane product+intelligence shipping process lives in the **private**
