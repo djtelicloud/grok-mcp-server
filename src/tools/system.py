@@ -419,9 +419,22 @@ async def clear_chat_history(session: str = "default") -> str:
     """Delete the history mapping and cascades messages for a chat session."""
     async with GrokInvocationContext("utility", logger, append_signature=False) as ctx:
         import re
-        session = scoped_session(session)
-        if not re.match(r"^[a-zA-Z0-9_\-:]+$", session) or ".." in session or "/" in session or "\\" in session:
-            return ctx.format_output(f"Error: Invalid session name '{session}'. Only alphanumeric, dashes, underscores, and colons are allowed.")
+        # Validate the caller-supplied logical name BEFORE scoped_session.
+        # Principals are percent-encoded into the store key (e.g. http%3Aanon),
+        # so a post-scope alphanumeric allowlist falsely rejects every HTTP
+        # namespaced clear.
+        logical = (session or "default").strip() or "default"
+        if (
+            not re.match(r"^[a-zA-Z0-9_\-:]+$", logical)
+            or ".." in logical
+            or "/" in logical
+            or "\\" in logical
+        ):
+            return ctx.format_output(
+                f"Error: Invalid session name '{logical}'. "
+                "Only alphanumeric, dashes, underscores, and colons are allowed."
+            )
+        session = scoped_session(logical)
 
         await store.delete_session(session)
         try:

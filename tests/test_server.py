@@ -982,6 +982,30 @@ async def test_clear_chat_history_sanitization():
 
 
 @pytest.mark.asyncio
+async def test_clear_chat_history_allows_percent_encoded_principal_scope():
+    """HTTP principals are quote()-encoded into store keys; clear must still work."""
+    from src.identity import (
+        _ACTIVE_CLIENT_ID,
+        reset_active_principal,
+        set_active_principal,
+    )
+
+    principal_token = set_active_principal("http:anon")
+    client_token = _ACTIVE_CLIENT_ID.set("cursor")
+    try:
+        with patch(
+            "src.tools.system.store.delete_session", new_callable=AsyncMock
+        ) as mock_delete:
+            res = await clear_chat_history("default")
+        assert "Cleared history for session" in res
+        mock_delete.assert_awaited_once_with("http%3Aanon:cursor:default")
+        assert "Error: Invalid session name" not in res
+    finally:
+        _ACTIVE_CLIENT_ID.reset(client_token)
+        reset_active_principal(principal_token)
+
+
+@pytest.mark.asyncio
 async def test_agent_tool_reports_progress_via_ctx(monkeypatch):
     """With an injected FastMCP Context, the agent tool adapts progress events
     onto ctx.report_progress: depth events carry n-of-max progress, tool
