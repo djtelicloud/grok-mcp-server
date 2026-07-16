@@ -140,17 +140,37 @@ def _is_inside_product(path: Path, repo: Path) -> bool:
     return True
 
 
+def _product_roots(repo: Path | None) -> list[Path]:
+    """Roots that count as the product tree for write guards.
+
+    Always include the installer's own checkout (``_repo_root()``). Also include
+    an explicit ``--repo`` when present so callers cannot bypass guards by
+    pointing ``--repo`` at a different tree while writing under this checkout.
+    """
+
+    roots: list[Path] = []
+    for candidate in (_repo_root(), repo):
+        if candidate is None:
+            continue
+        resolved = candidate.expanduser().resolve()
+        if resolved not in roots:
+            roots.append(resolved)
+    return roots
+
+
 def _reject_product_write_path(path: Path, *, repo: Path | None, label: str) -> int | None:
     """Keep installer writes out of the product checkout, including via symlinks."""
 
-    if repo is None or not _is_inside_product(path, repo):
-        return None
-    print(
-        f"error: {label} must not resolve inside the product checkout; "
-        "use a user config directory such as ~/.grok",
-        file=sys.stderr,
-    )
-    return 2
+    for root in _product_roots(repo):
+        if not _is_inside_product(path, root):
+            continue
+        print(
+            f"error: {label} must not resolve inside the product checkout; "
+            "use a user config directory such as ~/.grok",
+            file=sys.stderr,
+        )
+        return 2
+    return None
 
 
 def _reject_git_home(grok_home: Path, *, repo: Path | None = None) -> int | None:
@@ -318,11 +338,28 @@ def install(
 
 
 def check(*, repo: Path, grok_home: Path) -> int:
+    rejected = _reject_git_home(grok_home, repo=repo)
+    if rejected is not None:
+        return rejected
     themes = grok_home / "themes"
+    rejected = _reject_product_write_path(
+        themes,
+        repo=repo,
+        label="theme directory",
+    )
+    if rejected is not None:
+        return rejected
     sources = _sources(repo)
     ok = True
     for src, dest_name in sources:
         dest = themes / dest_name
+        rejected = _reject_product_write_path(
+            dest,
+            repo=repo,
+            label="theme destination",
+        )
+        if rejected is not None:
+            return rejected
         if not src.is_file():
             print(f"FAIL source missing: {src}")
             ok = False

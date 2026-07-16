@@ -176,6 +176,80 @@ def test_reject_nested_path_inside_product_checkout(tmp_path: Path) -> None:
 
 
 @pytest.mark.skipif(not DESIGN_TOML.is_file(), reason="theme design artifacts not on this checkout")
+def test_install_rejects_installer_checkout_when_repo_flag_elsewhere(tmp_path: Path) -> None:
+    """`--repo` elsewhere must not allow writes into the installer's checkout."""
+    other_repo = tmp_path / "other-repo"
+    other_repo.mkdir()
+    grok_home = REPO / ".grok-theme-install-bypass-test"
+    grok_home.mkdir(exist_ok=True)
+    try:
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPT),
+                "--repo",
+                str(other_repo),
+                "--grok-home",
+                str(grok_home),
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 2
+        assert "inside the product checkout" in result.stderr
+        assert not (grok_home / "themes").exists()
+    finally:
+        if grok_home.exists():
+            for child in grok_home.iterdir():
+                if child.is_file() or child.is_symlink():
+                    child.unlink(missing_ok=True)
+            grok_home.rmdir()
+
+
+@pytest.mark.skipif(not DESIGN_TOML.is_file(), reason="theme design artifacts not on this checkout")
+def test_check_rejects_product_grok_home(tmp_path: Path) -> None:
+    """`--check` must apply the same path hardening as install."""
+    product = tmp_path / "product-checkout"
+    design = product / "docs" / "design"
+    design.mkdir(parents=True)
+    for name in (
+        "unigrok-grok-theme.toml",
+        "unigrok-grok-theme.json",
+        "UniGrok.terminal",
+    ):
+        (design / name).write_bytes((REPO / "docs" / "design" / name).read_bytes())
+
+    nested = product / ".grok-theme-check-test"
+    themes = nested / "themes"
+    themes.mkdir(parents=True)
+    for src_name, dest_name in (
+        ("unigrok-grok-theme.toml", "unigrok.toml"),
+        ("unigrok-grok-theme.json", "unigrok.json"),
+        ("UniGrok.terminal", "UniGrok.terminal"),
+    ):
+        (themes / dest_name).write_bytes((design / src_name).read_bytes())
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--check",
+            "--repo",
+            str(product),
+            "--grok-home",
+            str(nested),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 2
+    assert "inside the product checkout" in result.stderr
+    assert "check passed" not in result.stdout
+
+
+@pytest.mark.skipif(not DESIGN_TOML.is_file(), reason="theme design artifacts not on this checkout")
 def test_install_rejects_symlinked_theme_directory_inside_product(tmp_path: Path) -> None:
     grok_home = tmp_path / "grok-home"
     grok_home.mkdir()
