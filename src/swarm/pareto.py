@@ -35,17 +35,20 @@ def fast_non_dominated_sort(
     """Return fronts as lists of indices; front 0 is the Pareto-optimal set.
     O(MN^2) — fine for the tens-of-candidates scale here."""
     n = len(points)
+    if n == 0:
+        return []
     dominated_by: List[List[int]] = [[] for _ in range(n)]
     domination_count = [0] * n
     fronts: List[List[int]] = [[]]
     for p in range(n):
-        for q in range(n):
-            if p == q:
-                continue
+        for q in range(p + 1, n):
             if dominates(points[p], points[q]):
                 dominated_by[p].append(q)
+                domination_count[q] += 1
             elif dominates(points[q], points[p]):
+                dominated_by[q].append(p)
                 domination_count[p] += 1
+    for p in range(n):
         if domination_count[p] == 0:
             fronts[0].append(p)
     i = 0
