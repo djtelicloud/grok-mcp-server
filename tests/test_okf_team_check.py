@@ -12,8 +12,7 @@ def test_silent_team_check_topic_covers_low_cost_review_pattern() -> None:
 
     assert "Silent Team Check" in text
     assert "low-cost advisory review habit" in text
-    assert "git diff vote" in lowered
-    assert "not" in lowered
+    assert "not a git diff vote" in lowered.replace("*", "")
     assert "one cheap reviewer" in text
     assert 'agent(mode="fast")' in text
     assert 'agent(mode="reasoning")' in text
