@@ -5,12 +5,13 @@ import ipaddress
 import json
 import logging
 import os
+import posixpath
 import re
 import time
 import uuid
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator, Dict, List, Literal, Optional
-from urllib.parse import quote, urlsplit
+from urllib.parse import quote, unquote, urlsplit
 from .models.results import AgentResult
 from .metrics import build_metrics_snapshot, fetch_provider_api_usage
 from .semantic_evals import get_semantic_eval_stats
@@ -504,6 +505,36 @@ def _path_matches_prefix(path: str, prefix: str) -> bool:
     return path == prefix or path.startswith(f"{prefix}/")
 
 
+def _normalized_subtree_path(raw_path: str) -> Optional[str]:
+    """Collapse a request path for static-subtree prefix matching, or reject.
+
+    uvicorn/httptools and Starlette route on the RAW request path and do NOT
+    collapse dot-segments before dispatch. A raw ``/docs/okf/../threat-model.md``
+    therefore still satisfies a naive ``/docs/okf`` prefix test, and the
+    downstream ``Mount('/docs')`` ``StaticFiles`` app then resolves the ``..``
+    back into the gated ``docs/`` tree — serving any gated doc with no bearer
+    credentials in Cloud Run. Refuse to admit any path that carries a ``..`` or
+    ``.`` segment, or an interior ``//`` empty segment (percent-encoded forms
+    decoded first so ``..%2f`` cannot slip past when the stack forwards it raw),
+    and hand back the ``posixpath.normpath`` form so callers only ever match a
+    genuinely in-subtree path. A single canonical trailing slash (``/ui/``,
+    ``/docs/okf/``) is legitimate and preserved as normalization. Returns
+    ``None`` when the path must fall through to normal bearer auth.
+    """
+    if not raw_path.startswith("/"):
+        return None
+    decoded = unquote(raw_path)
+    segments = decoded.split("/")
+    interior = segments[1:]
+    if interior and interior[-1] == "":
+        # Drop the canonical trailing-slash empty segment before inspection;
+        # every other empty segment is a "//" collapse we refuse to admit.
+        interior = interior[:-1]
+    if any(segment in ("", ".", "..") for segment in interior):
+        return None
+    return posixpath.normpath(decoded)
+
+
 def _is_public_auth_exempt_path(path: str) -> bool:
     return path in _PUBLIC_AUTH_EXEMPT_PATHS
 
@@ -511,6 +542,12 @@ def _is_public_auth_exempt_path(path: str) -> bool:
 def _is_local_operator_request(scope: Dict[str, Any]) -> bool:
     if not _is_verified_local_request(scope):
         return False
+    # The dot-segment discipline in _normalized_subtree_path is deliberately NOT
+    # applied here: this branch is loopback-gated, and _LOCAL_OPERATOR_PREFIXES
+    # already exposes the whole "/docs" tree locally, so a "../" within it leaks
+    # nothing an operator could not GET directly (escape past docs/ is still
+    # blocked by StaticFiles commonpath). Hardening lives centrally in the
+    # Cloud Run static-shell path, which admits only the "/docs/okf" subtree.
     path = scope.get("path", "")
     return path in _LOCAL_OPERATOR_PATHS or any(
         _path_matches_prefix(path, prefix) for prefix in _LOCAL_OPERATOR_PREFIXES
@@ -542,9 +579,14 @@ def _is_public_static_shell_request(scope: Dict[str, Any]) -> bool:
         return False
     if scope.get("method") not in ("GET", "HEAD"):
         return False
-    path = scope.get("path", "")
+    # Normalize (and reject dot-/empty-segment) the RAW path BEFORE the prefix
+    # check: a raw "/docs/okf/../threat-model.md" must not ride this exemption
+    # and then let StaticFiles resolve the ".." back into the gated docs/ tree.
+    normalized = _normalized_subtree_path(scope.get("path", ""))
+    if normalized is None:
+        return False
     return any(
-        _path_matches_prefix(path, prefix)
+        _path_matches_prefix(normalized, prefix)
         for prefix in _PUBLIC_STATIC_SHELL_PREFIXES
     )
 

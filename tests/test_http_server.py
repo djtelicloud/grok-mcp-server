@@ -594,6 +594,83 @@ def test_local_runtime_never_inherits_cloudrun_static_shell_exemption(monkeypatc
     assert okf.status_code == 401
 
 
+@pytest.mark.asyncio
+async def test_cloudrun_static_shell_exemption_rejects_raw_dot_segment_traversal(monkeypatch):
+    """Raw dot-segment paths must not ride the Cloud Run static-shell exemption.
+
+    uvicorn/httptools and Starlette route on the un-normalized request path, so
+    a raw ``/docs/okf/../threat-model.md`` satisfies a naive ``/docs/okf``
+    prefix test and the downstream ``/docs`` StaticFiles Mount then resolves the
+    ``..`` back into the gated docs/ tree — serving any gated doc with no
+    credentials in Cloud Run. TestClient/httpx collapse ``..`` client-side and
+    hide the bypass, so this drives the ASGI middleware directly with a
+    hand-built raw scope (path/raw_path set to the un-normalized string),
+    mirroring how the bypass was reproduced.
+    """
+    monkeypatch.setenv("UNIGROK_RUNTIME", "cloudrun")
+    monkeypatch.setenv("UNIGROK_API_KEYS", "client-secret")
+    monkeypatch.delenv("UNIGROK_ALLOW_UNAUTHENTICATED", raising=False)
+    monkeypatch.delenv("UNIGROK_OAUTH_INTROSPECTION_URL", raising=False)
+
+    async def drive(method: str, raw_path: str):
+        """Return (served_downstream, response_status) for one raw scope."""
+        served = False
+
+        async def downstream(scope, receive, send):
+            nonlocal served
+            served = True
+            await JSONResponse({"ok": True})(scope, receive, send)
+
+        status = {"code": None}
+
+        async def send(message):
+            if message["type"] == "http.response.start":
+                status["code"] = message["status"]
+
+        async def receive():
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        middleware = GatewayAuthMiddleware(downstream, bound_host="0.0.0.0")
+        scope = {
+            "type": "http",
+            "method": method,
+            "path": raw_path,
+            "raw_path": raw_path.encode(),
+            "query_string": b"",
+            "scheme": "https",
+            "client": ("203.0.113.10", 50000),
+            "server": ("mcp.grokmcp.org", 443),
+            "headers": [(b"host", b"mcp.grokmcp.org")],
+        }
+        await middleware(scope, receive, send)
+        return served, status["code"]
+
+    # The traversal escapes the /docs/okf subtree back into gated docs/. It must
+    # NOT be exempt: the downstream app is never reached and normal bearer auth
+    # returns 401 for both GET and HEAD.
+    for method in ("GET", "HEAD"):
+        served, code = await drive(method, "/docs/okf/../threat-model.md")
+        assert served is False, method
+        assert code == 401, method
+
+    # Percent-encoded slash forwarded raw ("..%2f") is decoded and rejected too.
+    served, code = await drive("GET", "/docs/okf/..%2fthreat-model.md")
+    assert served is False
+    assert code == 401
+
+    # An interior "//" empty-segment collapse is likewise never admitted.
+    served, code = await drive("GET", "/docs/okf/..//threat-model.md")
+    assert served is False
+    assert code == 401
+
+    # Positive control: the genuinely in-subtree published shell still serves
+    # anonymously in Cloud Run (a real file under docs/okf, plus /ui assets).
+    for good in ("/docs/okf/", "/docs/okf/okf-manifest.json", "/ui/", "/ui/app.js"):
+        served, code = await drive("GET", good)
+        assert served is True, good
+        assert code == 200, good
+
+
 def test_cloudrun_well_known_allowlist_is_exact(monkeypatch):
     monkeypatch.setenv("UNIGROK_RUNTIME", "cloudrun")
     monkeypatch.setenv("UNIGROK_API_KEYS", "client-secret")
