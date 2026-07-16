@@ -5626,7 +5626,9 @@ class TestCliPlaneV2:
         monkeypatch.setenv("GROK_AUTH_PATH", "/oauth/auth.json")
         monkeypatch.setenv("UNIGROK_RUNTIME", "local")
         (tmp_path / ".grok").mkdir()
-        (tmp_path / ".grok" / "auth.json").write_text("{}", encoding="utf-8")
+        auth_path = tmp_path / ".grok" / "auth.json"
+        auth_path.write_text("{}", encoding="utf-8")
+        auth_path.chmod(0o600)
         monkeypatch.setattr(utils, "grok_cli_available", lambda: True)
         monkeypatch.setattr(
             PathResolver, "get_grok_cli_path", staticmethod(lambda: "/tmp/grok")
@@ -5716,6 +5718,7 @@ class TestCliPlaneV2:
             '{"account":{"access_token":"test-only","expires_at":1}}',
             encoding="utf-8",
         )
+        source_auth.chmod(0o600)
         (source_home / ".grok" / "settings.json").write_text(
             '{"mcpServers":{"unsafe":{}}}', encoding="utf-8"
         )
@@ -5754,6 +5757,27 @@ class TestCliPlaneV2:
             assert "UNRELATED_SECRET" not in env
 
         assert not isolated_root.exists()
+
+    def test_cli_auth_insecure_permissions_are_refused(self, tmp_path, monkeypatch):
+        from src import utils
+
+        source_home = tmp_path / "source-home"
+        auth_path = source_home / ".grok" / "auth.json"
+        auth_path.parent.mkdir(parents=True)
+        auth_path.write_text('{"account":{"access_token":"test-only"}}', encoding="utf-8")
+        auth_path.chmod(0o666)
+        monkeypatch.setenv("HOME", str(source_home))
+        monkeypatch.setenv("UNIGROK_RUNTIME", "local")
+        monkeypatch.delenv("UNI_GROK_TESTING", raising=False)
+        monkeypatch.setattr(utils, "grok_cli_available", lambda: True)
+
+        status = utils.grok_cli_plane_status(timeout_sec=1.0, force=True)
+        assert status["ready"] is False
+        assert status["auth"] == "insecure_permissions"
+
+        with pytest.raises(RuntimeError, match="owner-only"):
+            with utils._isolated_grok_cli_runtime():
+                pass
 
     @pytest.mark.asyncio
     async def test_isolated_agent_turn_skips_inherited_dynamic_context(self, monkeypatch):

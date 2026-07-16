@@ -10,6 +10,7 @@ import hashlib
 import hmac
 import re
 import secrets
+import stat
 import uuid
 import subprocess
 import signal
@@ -244,6 +245,33 @@ def grok_cli_oauth_env(base: Optional[Dict[str, str]] = None) -> Dict[str, str]:
     return scrubbed_subprocess_env(base)
 
 
+def _persisted_grok_auth_path() -> Path:
+    return Path.home() / ".grok" / "auth.json"
+
+
+def _grok_auth_permission_failure(path: Path) -> Optional[str]:
+    """Return a non-secret auth failure token when ``auth.json`` is unsafe.
+
+    Matches the owner-only secret-file contract used for dotenv: refuse
+    group/other permission bits so a world-writable OAuth document cannot
+    satisfy CLI-plane readiness or be copied into an isolated runtime.
+    """
+    try:
+        if path.is_symlink():
+            return "symlink_refused"
+        file_stat = path.stat()
+    except OSError:
+        return "missing"
+    if not stat.S_ISREG(file_stat.st_mode):
+        return "missing"
+    getuid = getattr(os, "getuid", None)
+    if getuid is not None and file_stat.st_uid != getuid():
+        return "wrong_owner"
+    if stat.S_IMODE(file_stat.st_mode) & 0o077:
+        return "insecure_permissions"
+    return None
+
+
 @contextlib.contextmanager
 def _isolated_grok_cli_runtime():
     """Yield an empty CLI workspace and minimal OAuth-only environment.
@@ -255,11 +283,17 @@ def _isolated_grok_cli_runtime():
     never receives a path to the durable auth volume; refresh cannot mutate
     shared credentials. ``GROK_HOME`` stays temporary and config-free.
     """
-    source_auth = Path.home() / ".grok" / "auth.json"
+    source_auth = _persisted_grok_auth_path()
     if not source_auth.is_file():
         raise RuntimeError(
             "Isolated Grok CLI execution requires the persisted OAuth file "
             "at ~/.grok/auth.json."
+        )
+    permission_failure = _grok_auth_permission_failure(source_auth)
+    if permission_failure is not None:
+        raise RuntimeError(
+            "Isolated Grok CLI execution requires an owner-only OAuth file "
+            f"at ~/.grok/auth.json ({permission_failure})."
         )
 
     with tempfile.TemporaryDirectory(prefix="unigrok-cli-isolated-") as raw_root:
@@ -357,13 +391,22 @@ def grok_cli_plane_status(
             "setup_command": setup,
         }
 
-    auth_state = Path.home() / ".grok" / "auth.json"
-    if not auth_state.is_file():
+    auth_state = _persisted_grok_auth_path()
+    if not auth_state.is_file() and not auth_state.is_symlink():
         return {
             "state": "needs_auth",
             "ready": False,
             "binary": True,
             "auth": "missing",
+            "setup_command": setup,
+        }
+    permission_failure = _grok_auth_permission_failure(auth_state)
+    if permission_failure is not None:
+        return {
+            "state": "needs_auth",
+            "ready": False,
+            "binary": True,
+            "auth": permission_failure,
             "setup_command": setup,
         }
 
