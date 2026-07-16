@@ -1,9 +1,9 @@
-import { parseMarkdown, sanitizeHref } from "./markdown.js?v=grok-v0.6.0-r11";
+import { parseMarkdown, sanitizeHref } from "./markdown.js?v=grok-v0.6.0-r12";
 
 // Must match the <meta name="unigrok-ui-version"> baked into index.html and
 // src/version.py UI_ASSET_VERSION; a mismatch means the browser paired a
 // cached page with a different script build (the stale-skew failure class).
-const UI_ASSET_VERSION = "grok-v0.6.0-r11";
+const UI_ASSET_VERSION = "grok-v0.6.0-r12";
 
 const LAYOUT_KEY = "unigrok.mcp.console.layout.v2";
 
@@ -1917,13 +1917,23 @@ function renderFactsPane(method, response, elapsed) {
 
   setText("factTokens", payload.tokens || "-");
   // The wire may deliver cost as a number or a serialized string; only a
-  // finite value renders as currency.
+  // finite value renders as currency. cost===0 is real (CLI subscription or
+  // a free API turn) — never paint "-" which reads as "unknown".
   const rawCost = payload.cost_usd;
   const cost = typeof rawCost === "string" && rawCost.trim() !== "" ? Number(rawCost) : rawCost;
-  setText("factCost", typeof cost === "number" && Number.isFinite(cost) && cost !== 0 ? `$${cost.toFixed(5)}` : "-");
+  const rawBilling = payload.billing_class || payload.routing?.billing_class || "";
+  const billing = typeof rawBilling === "string" ? rawBilling.trim() : "";
+  let costLabel = "-";
+  if (typeof cost === "number" && Number.isFinite(cost)) {
+    const isSubscription = billing.toLowerCase() === "subscription";
+    costLabel = (cost === 0 && isSubscription)
+      ? "Subscription"
+      : `$${cost.toFixed(5)}`;
+  }
+  setText("factCost", costLabel);
   setText("factRoute", payload.route || "-");
   setText("factPlane", payload.plane || "-");
-  setText("factBilling", payload.billing_class || payload.routing?.billing_class || "-");
+  setText("factBilling", billing || "-");
   setText("factRequestedPlane", payload.requested_plane || payload.routing?.requested_plane || "-");
   setText("factModel", payload.model || "-");
   setText("factSelection", routingLabel(payload.routing?.why_detail || payload.why || "-"));
