@@ -1,19 +1,30 @@
 # Codex Active Work
 
-Last updated: 2026-07-15
+Last updated: 2026-07-16
 Owner: Codex
-Status: GitHub and security are clean. Brand-specific rehydrate next steps are
-Live. The remote MCP and Control Center remain live in `us-central1` with
-east-region rollback assets. Stage 1 live generation and training remain
-blocked.
+Status: Protected main is clean and green. The insiders policy/ADR, principal-bound credential hardening, and lint-level unused variable/import cleanup are in exact-head protected review. UI draft work may continue, but merge and publication remain gated.
 
 ## Current Codex review packet
 
-- Draft PR #225 preserves the sponsor-approved, theme-safe in-chat conversation
-  canvas as a Codex-only reference fragment. It changes no MCP runtime,
-  release, cloud, or deployment behavior. The focused contract tests and the
-  attribution check passed; it remains pending normal exact-head review and
-  protected integration.
+- PR #331 head `21cec05654b3708ff48571b7d849cb26474451f5` is the current
+  public-vs-insider policy and same-origin console contract. Exact-head gates
+  are green; an external Copilot metadata thread still blocks merge. Claude UI
+  drafts may continue against this head, but PRs #323/#324 stay draft until the
+  policy lands.
+- PR #334 head `e6f47262d321f01e109d65ed11dc455418c4d275` supersedes #299
+  and includes Claude's independent review repairs. Background distill/eval
+  paths use credential-scoped breakers; two OAuth principals and the owner have
+  distinct SDK clients; `/v1` middleware tests prove OAuth selection and static
+  bearer/header spoof resistance. Exact issuer-bound HTTPS map validation now
+  rejects legacy forms without weakening malformed-map value redaction. Local
+  full suite passed 2,244; all exact-head GitHub CI, CodeQL, Bugbot, Cursor
+  security/approval, Codex Approval, and Supervisor gates are green. It remains
+  GitHub-blocked on a qualifying non-author review (`w1t`) and externally owned
+  unresolved threads. Do not merge or deploy until those protection gates clear.
+- Local and `origin/main` both equal
+  `ea15d046c25b6e58a9a3d8d118d4191c161efc07`. Production predates #334, so
+  principal-map behavior remains inert and owner-default; no live exposure or
+  deployment change occurred.
 
 This is the project-scoped handoff for new Codex chats. Verify drift-prone Git,
 CI, runtime, DNS, cloud, and benchmark state live before acting. Never record
