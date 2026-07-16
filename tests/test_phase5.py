@@ -149,6 +149,26 @@ class TestJobsStore:
         finally:
             await s.close()
 
+    @pytest.mark.asyncio
+    async def test_long_principals_do_not_collide_at_caller_limit(self, tmp_path):
+        """Stable owners compare in full, not by the old 80-char caller prefix."""
+        s = GrokSessionStore(db_path=tmp_path / "jobs-long-owner.db")
+        prefix = "oauth:https%3A%2F%2Fcontrol.grokmcp.org:" + ("x" * 90)
+        owner_a = prefix + "-a"
+        owner_b = prefix + "-b"
+        try:
+            await s.create_job("job-owner-a", "a", "m", caller=owner_a)
+            await s.create_job("job-owner-b", "b", "m", caller=owner_b)
+            assert (await s.get_job("job-owner-a"))["caller"] == owner_a
+            assert (await s.get_job("job-owner-b"))["caller"] == owner_b
+            assert [row["id"] for row in await s.list_jobs(caller=owner_a)] == [
+                "job-owner-a"
+            ]
+            manager = JobManager(job_store=s)
+            assert await manager.get("job-owner-b", caller=owner_a) is None
+        finally:
+            await s.close()
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # JobManager — deferred execution, error capture, staleness

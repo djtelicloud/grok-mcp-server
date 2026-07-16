@@ -6834,7 +6834,9 @@ class GrokSessionStore:
                         str(model or "unknown"),
                         now_str,
                         now_str,
-                        normalize_caller(caller) or get_active_caller(),
+                        normalize_principal(caller)
+                        or get_active_principal()
+                        or get_active_caller(),
                         normalize_request_id(request_id) or get_request_id() or None,
                     ),
                 )

@@ -20,6 +20,7 @@ from .identity import (
     get_active_caller,
     get_active_principal,
     normalize_caller,
+    normalize_principal,
     scoped_session,
 )
 from .utils import (
@@ -343,10 +344,10 @@ class JobManager:
     ) -> bool:
         """When an owner identity is bound, only that owner's rows are visible.
         Unbound requesters keep the historical open local view."""
-        req = normalize_caller(requester)
+        req = normalize_principal(requester)
         if not req:
             return True
-        return normalize_caller(row_caller) == req
+        return normalize_principal(row_caller) == req
 
     async def get(
         self, job_id: str, caller: Optional[str] = None
@@ -361,7 +362,7 @@ class JobManager:
     async def list(
         self, limit: int = 20, caller: Optional[str] = None
     ) -> List[Dict[str, Any]]:
-        requester = normalize_caller(caller)
+        requester = normalize_principal(caller)
         rows = await self._store.list_jobs(limit, caller=requester)
         return [self.describe(row) for row in rows]
 
