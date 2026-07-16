@@ -115,10 +115,11 @@ errors, or other text in the `agent` tool's optional `workspace_context` field,
 with `workspace_label` when useful. This keeps project access explicit and
 prevents one persistent service from silently inheriting every IDE's filesystem.
 
-UniGrok contributors may instead run `docker compose -f
-docker-compose.dev.yml up --build -d` on port 4766. That separate development
-service mounts the UniGrok repository and enables its local file/git/test and
-commit-memory workflows; it is not the globally registered stable service.
+UniGrok contributors may instead run `./scripts/forge-up` on port 4766. The
+wrapper preserves read-only Git visibility from either a primary checkout or a
+linked worktree. That separate development service mounts the UniGrok
+repository and enables its local file/git/test and commit-memory workflows; it
+is not the globally registered stable service.
 
 ## How do contributors enable and test Code Swarm? {#code-swarm-contributor}
 
@@ -129,7 +130,7 @@ service and not a second stdio process. Set `UNIGROK_SWARM=dry_run` in the
 server-side `.env`, then run:
 
 ```bash
-docker compose -f docker-compose.dev.yml up --build -d
+./scripts/forge-up
 curl -s http://localhost:4766/runtimez
 ```
 

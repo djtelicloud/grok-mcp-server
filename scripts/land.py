@@ -31,6 +31,7 @@ def run(
     cwd: Path,
     check: bool = True,
     capture: bool = True,
+    env: Optional[dict[str, str]] = None,
 ) -> subprocess.CompletedProcess[str]:
     result = subprocess.run(
         args,
@@ -38,6 +39,7 @@ def run(
         check=False,
         text=True,
         capture_output=capture,
+        env=env,
     )
     if check and result.returncode:
         detail = (result.stderr or result.stdout or "command failed").strip()
@@ -75,6 +77,34 @@ def main_worktree(repo: Path) -> Path:
 def common_git_dir(repo: Path) -> Path:
     raw = Path(git(repo, "rev-parse", "--git-common-dir"))
     return raw if raw.is_absolute() else (repo / raw).resolve()
+
+
+def forge_compose_env(repo: Path) -> dict[str, str]:
+    """Bind read-only Git metadata at a stable container path.
+
+    A linked worktree's ``.git`` file names a host-absolute administrative
+    directory. Mounting only the worktree at ``/workspace`` leaves that pointer
+    unusable in Docker. The common directory contains the linked-worktree admin
+    directory, so one read-only mount plus an explicit ``GIT_DIR`` preserves
+    normal Git discovery without granting writes.
+    """
+
+    common_dir = common_git_dir(repo).resolve()
+    raw_git_dir = Path(git(repo, "rev-parse", "--git-dir"))
+    git_dir = raw_git_dir if raw_git_dir.is_absolute() else (repo / raw_git_dir).resolve()
+    try:
+        relative_git_dir = git_dir.relative_to(common_dir)
+    except ValueError as exc:
+        raise LandError("worktree Git directory is outside the common Git directory") from exc
+
+    container_git_dir = "/git"
+    if relative_git_dir != Path("."):
+        container_git_dir = f"/git/{relative_git_dir.as_posix()}"
+
+    env = dict(os.environ)
+    env["UNIGROK_FORGE_GIT_COMMON_DIR"] = str(common_dir)
+    env["UNIGROK_FORGE_GIT_DIR"] = container_git_dir
+    return env
 
 
 def require_clean(repo: Path, *, include_untracked: bool, label: str) -> None:
@@ -300,10 +330,12 @@ def reconcile_runtime(repo: Path, paths: list[str]) -> str:
     action = runtime_action(paths)
     if action == "none":
         return "unchanged"
+    compose_env = forge_compose_env(repo)
     compose = run(
         ["docker", "compose", "-p", "grok-mcp-dev", "-f", DEV_COMPOSE_FILE, "ps", "--status", "running", "--services"],
         cwd=repo,
         check=False,
+        env=compose_env,
     )
     if compose.returncode:
         raise LandError((compose.stderr or "cannot inspect Docker Compose").strip())
@@ -314,12 +346,14 @@ def reconcile_runtime(repo: Path, paths: list[str]) -> str:
             ["docker", "compose", "-p", "grok-mcp-dev", "-f", DEV_COMPOSE_FILE, "up", "--build", "-d", "grok-mcp"],
             cwd=repo,
             capture=False,
+            env=compose_env,
         )
     elif action == "restart":
         run(
             ["docker", "compose", "-p", "grok-mcp-dev", "-f", DEV_COMPOSE_FILE, "restart", "grok-mcp"],
             cwd=repo,
             capture=False,
+            env=compose_env,
         )
     base_url = os.environ.get("UNIGROK_LAND_DEV_URL", DEV_BASE_URL).rstrip("/")
     wait_for_runtime(repo, base_url=base_url)

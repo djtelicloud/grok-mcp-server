@@ -65,7 +65,7 @@ UniGrok contributors have a separate live-source “Forge” service at port 476
 
 ```bash
 # Edit .env first: UNIGROK_SWARM=dry_run
-docker compose -f docker-compose.dev.yml up --build -d
+./scripts/forge-up
 curl -s http://localhost:4766/runtimez
 ```
 

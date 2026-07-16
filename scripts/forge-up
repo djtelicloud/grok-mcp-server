@@ -1,0 +1,28 @@
+#!/bin/sh
+set -eu
+
+repo=$(git rev-parse --show-toplevel)
+common_dir=$(git -C "$repo" rev-parse --path-format=absolute --git-common-dir)
+git_dir=$(git -C "$repo" rev-parse --path-format=absolute --git-dir)
+
+case "$git_dir" in
+    "$common_dir")
+        container_git_dir=/git
+        ;;
+    "$common_dir"/*)
+        relative_git_dir=${git_dir#"$common_dir"/}
+        container_git_dir=/git/$relative_git_dir
+        ;;
+    *)
+        echo "Forge Git directory is outside the repository common Git directory." >&2
+        exit 1
+        ;;
+esac
+
+export UNIGROK_FORGE_GIT_COMMON_DIR=$common_dir
+export UNIGROK_FORGE_GIT_DIR=$container_git_dir
+
+exec docker compose \
+    -p grok-mcp-dev \
+    -f "$repo/docker-compose.dev.yml" \
+    up --build -d grok-mcp

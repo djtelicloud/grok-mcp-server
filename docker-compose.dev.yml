@@ -1,6 +1,6 @@
 # Contributor-only live-source service. It is intentionally separate from the
 # stable service registered in IDEs. Start with:
-#   docker compose -f docker-compose.dev.yml up --build -d
+#   ./scripts/forge-up
 name: grok-mcp-dev
 
 services:
@@ -20,6 +20,9 @@ services:
       - "127.0.0.1:${UNIGROK_DEV_PORT:-4766}:8080"
     volumes:
       - .:/workspace:ro
+      # Git metadata stays read-only but is mounted separately so linked
+      # worktrees do not expose an unusable host-absolute .git pointer.
+      - ${UNIGROK_FORGE_GIT_COMMON_DIR:-.git}:/git:ro
       - grok-mcp-dev-state:/state
       - grok-mcp-cli-auth:/home/appuser/.grok
     env_file:
@@ -36,6 +39,8 @@ services:
       - ENABLE_GIT_WRITE=0
       - UNIGROK_SERVICE_ROOT=/app
       - WORKSPACE_ROOT=/workspace
+      - GIT_DIR=${UNIGROK_FORGE_GIT_DIR:-/git}
+      - GIT_WORK_TREE=/workspace
       - UNIGROK_STATE_DIR=/state
       - UNIGROK_TRUSTED_LOOPBACK_PROXY=1
       - PYTHONPATH=/app

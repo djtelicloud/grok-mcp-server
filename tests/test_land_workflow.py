@@ -374,15 +374,47 @@ def test_runtime_reconciliation_only_inspects_contributor_compose(monkeypatch, t
     calls = []
 
     def fake_run(args, **kwargs):
-        calls.append(args)
+        calls.append((args, kwargs))
         return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
 
     monkeypatch.setattr(land, "run", fake_run)
+    monkeypatch.setattr(
+        land,
+        "forge_compose_env",
+        lambda repo: {"UNIGROK_FORGE_GIT_COMMON_DIR": "/host/repo/.git"},
+    )
 
     result = land.reconcile_runtime(tmp_path, ["src/server.py"])
 
     assert result == "contributor dev service not running; stable service untouched"
-    assert calls == [[
-        "docker", "compose", "-p", "grok-mcp-dev", "-f", "docker-compose.dev.yml",
-        "ps", "--status", "running", "--services",
-    ]]
+    assert calls == [(
+        [
+            "docker", "compose", "-p", "grok-mcp-dev", "-f", "docker-compose.dev.yml",
+            "ps", "--status", "running", "--services",
+        ],
+        {
+            "cwd": tmp_path,
+            "check": False,
+            "env": {"UNIGROK_FORGE_GIT_COMMON_DIR": "/host/repo/.git"},
+        },
+    )]
+
+
+def test_forge_compose_env_maps_linked_worktree_git_dir(monkeypatch, tmp_path):
+    common = tmp_path / "repo" / ".git"
+    worktree_git = common / "worktrees" / "main-live"
+    repo = tmp_path / "main-live"
+
+    def fake_git(_repo, *args, **_kwargs):
+        if args == ("rev-parse", "--git-common-dir"):
+            return str(common)
+        if args == ("rev-parse", "--git-dir"):
+            return str(worktree_git)
+        raise AssertionError(args)
+
+    monkeypatch.setattr(land, "git", fake_git)
+
+    env = land.forge_compose_env(repo)
+
+    assert env["UNIGROK_FORGE_GIT_COMMON_DIR"] == str(common)
+    assert env["UNIGROK_FORGE_GIT_DIR"] == "/git/worktrees/main-live"
