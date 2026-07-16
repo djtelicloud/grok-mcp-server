@@ -31,6 +31,7 @@ from starlette.staticfiles import StaticFiles
 from .version import UI_ASSET_VERSION
 
 from .credentials import UPSTREAM_PROVIDER_SECRET_ENV_NAMES
+from .principal_xai import PrincipalXAIConfigurationError, effective_xai_api_key
 from .identity import (
     _ACTIVE_CLIENT_ID,
     _ACTIVE_SESSION_ID,
@@ -1327,12 +1328,12 @@ async def readyz(_: Request) -> JSONResponse:
     except Exception as exc:
         logger.warning(f"readyz CLI-plane probe failed: {exc}")
         cli_plane = {"ready": False}
+    credential_planes = credential_plane_contract(cli_plane)
     checks: Dict[str, bool] = {
         # Compatibility note: this public key predates the dual-plane runtime.
-        # API credentials are checked for presence only; the CLI branch is a
-        # live OAuth probe.
-        "model_auth": bool(os.environ.get("XAI_API_KEY", "").strip())
-        or bool(cli_plane.get("ready")),
+        # Keep it boolean-only while deriving it from the same fail-closed
+        # service-wide credential contract exposed by /runtimez.
+        "model_auth": bool(credential_planes["service_usable"]),
         "state_dir_writable": False,
         "database": False,
     }
@@ -1394,7 +1395,7 @@ async def runtimez(request: Request) -> JSONResponse:
                 ),
             },
             "api_plane": {
-                "xai_api_key": bool(os.environ.get("XAI_API_KEY", "").strip()),
+                "xai_api_key": bool(credential_planes["api"]["available"]),
             },
             "gateway_auth": {
                 "enabled": _auth_is_active() and not _request_may_bypass_auth(request.scope),
@@ -2032,9 +2033,14 @@ async def _stream_agent(payload: Dict[str, Any], model: str) -> AsyncIterator[by
             task.cancel()
 
 
-def _xai_headers() -> Dict[str, str]:
-    key = os.environ.get("XAI_API_KEY", "")
+def _xai_headers(key: str) -> Dict[str, str]:
     return {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
+
+
+def _raw_proxy_xai_key() -> str:
+    """Resolve the active principal's effective key for the raw /v1 proxy."""
+
+    return effective_xai_api_key()
 
 
 def _xai_chat_completions_url() -> Optional[str]:
@@ -2160,8 +2166,20 @@ async def post_xai_chat(payload: Dict[str, Any]) -> Response:
     policy_error = _raw_proxy_policy_error(payload)
     if policy_error is not None:
         return policy_error
-    if not os.environ.get("XAI_API_KEY"):
-        return _json_error("XAI_API_KEY is not configured.", status_code=503, code="service_unavailable")
+    try:
+        api_key = _raw_proxy_xai_key()
+    except PrincipalXAIConfigurationError:
+        return _json_error(
+            "xAI credential configuration is invalid.",
+            status_code=503,
+            code="service_unavailable",
+        )
+    if not api_key:
+        return _json_error(
+            "No effective xAI API key is configured for this principal.",
+            status_code=503,
+            code="service_unavailable",
+        )
     url = _xai_chat_completions_url()
     if url is None:
         return _json_error(
@@ -2175,7 +2193,9 @@ async def post_xai_chat(payload: Dict[str, Any]) -> Response:
             follow_redirects=False,
             trust_env=False,
         ) as client:
-            response = await client.post(url, json=_xai_payload(payload), headers=_xai_headers())
+            response = await client.post(
+                url, json=_xai_payload(payload), headers=_xai_headers(api_key)
+            )
         if response.status_code >= 400:
             return _json_error(
                 _request_error_message("Upstream request failed."),
@@ -2190,7 +2210,7 @@ async def post_xai_chat(payload: Dict[str, Any]) -> Response:
                 {"error": {"message": _request_error_message("Upstream returned invalid JSON."), "type": "bad_gateway"}},
                 status_code=502
             )
-    except Exception:
+    except httpx.HTTPError:
         return JSONResponse(
             {"error": {"message": _request_error_message("Upstream transport error."), "type": "bad_gateway"}},
             status_code=502
@@ -2204,8 +2224,19 @@ async def stream_xai_chat(payload: Dict[str, Any]) -> AsyncIterator[bytes]:
         yield _sse_error(message, code, status_code)
         yield b"data: [DONE]\n\n"
         return
-    if not os.environ.get("XAI_API_KEY"):
-        yield _sse_error("XAI_API_KEY is not configured.", "service_unavailable")
+    try:
+        api_key = _raw_proxy_xai_key()
+    except PrincipalXAIConfigurationError:
+        yield _sse_error(
+            "xAI credential configuration is invalid.", "service_unavailable"
+        )
+        yield b"data: [DONE]\n\n"
+        return
+    if not api_key:
+        yield _sse_error(
+            "No effective xAI API key is configured for this principal.",
+            "service_unavailable",
+        )
         yield b"data: [DONE]\n\n"
         return
     url = _xai_chat_completions_url()
@@ -2230,7 +2261,9 @@ async def stream_xai_chat(payload: Dict[str, Any]) -> AsyncIterator[bytes]:
             follow_redirects=False,
             trust_env=False,
         ) as client:
-            async with client.stream("POST", url, json=_xai_payload(payload), headers=_xai_headers()) as response:
+            async with client.stream(
+                "POST", url, json=_xai_payload(payload), headers=_xai_headers(api_key)
+            ) as response:
                 if response.status_code >= 400:
                     await response.aread()
                     message = _request_error_message("Upstream request failed.")

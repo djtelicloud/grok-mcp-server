@@ -459,6 +459,27 @@ def credential_plane_contract(
 ) -> Dict[str, Any]:
     """Return the shared non-secret plane health and action contract."""
 
+    from src.principal_xai import xai_api_service_configured
+
+    return build_credential_plane_contract(
+        api_configured=xai_api_service_configured(),
+        cli_status=cli_status if cli_status is not None else grok_cli_plane_status(),
+        cloudrun=is_cloudrun_runtime(),
+        containerized=Path("/.dockerenv").exists(),
+    )
+
+
+def request_credential_plane_contract(
+    cli_status: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Return credential availability for the active request principal.
+
+    Service diagnostics intentionally use :func:`credential_plane_contract`,
+    where any valid principal mapping makes the API plane service-available.
+    Execution preflight must instead require the current caller's effective
+    key so an unmapped OAuth principal cannot pass on another insider's key.
+    """
+
     return build_credential_plane_contract(
         api_configured=xai_api_key_configured(),
         cli_status=cli_status if cli_status is not None else grok_cli_plane_status(),
@@ -549,8 +570,12 @@ async def run_blocking(fn: Callable, *args, timeout: Optional[float] = None, **k
     worker and deadlock all SDK bridging in the server. The dedicated threads
     are capped (UNIGROK_MAX_TIMED_THREADS, default 64): at capacity the call
     fails fast with RuntimeError instead of spawning yet another thread.
+
+    Copy caller contextvars into the worker so bound principals, callers, and
+    request ids remain available to credential factories and telemetry.
     """
     call = functools.partial(fn, *args, **kwargs)
+    ctx = contextvars.copy_context()
     loop = asyncio.get_running_loop()
     if timeout is not None:
         global _TIMED_THREADS_IN_FLIGHT, _TIMED_THREADS_PEAK
@@ -576,7 +601,7 @@ async def run_blocking(fn: Callable, *args, timeout: Optional[float] = None, **k
             global _TIMED_THREADS_IN_FLIGHT
             try:
                 try:
-                    result = call()
+                    result = ctx.run(call)
                 except BaseException as exc:  # noqa: BLE001 — delivered to the caller
                     result, delivered_exc = None, exc
                 else:
@@ -594,7 +619,7 @@ async def run_blocking(fn: Callable, *args, timeout: Optional[float] = None, **k
                 _TIMED_THREADS_IN_FLIGHT -= 1
             raise
         return await asyncio.wait_for(future, timeout=timeout)
-    return await loop.run_in_executor(_local_executor(), call)
+    return await loop.run_in_executor(_local_executor(), ctx.run, call)
 
 
 def _owned_descendant_pids(root_pid: int) -> List[int]:
@@ -915,7 +940,16 @@ CLI_MODEL_IDS = tuple(FALLBACK_GROK_CLI_MODELS)
 
 
 def xai_api_key_configured() -> bool:
-    return bool(_normalize_xai_api_key(os.environ.get("XAI_API_KEY") or XAI_API_KEY))
+    """True when the active principal has a usable xAI key (owner or override)."""
+    from src.principal_xai import (
+        PrincipalXAIConfigurationError,
+        effective_xai_api_key,
+    )
+
+    try:
+        return bool(effective_xai_api_key())
+    except PrincipalXAIConfigurationError:
+        return False
 
 
 def cli_plane_ready_for_local_runtime() -> bool:
@@ -1293,6 +1327,15 @@ def redact_secrets(text: str) -> str:
         values = [raw_value.strip()]
         if name.upper() == "UNIGROK_API_KEYS":
             values.extend(part.strip() for part in raw_value.split(","))
+        elif name.upper() == "UNIGROK_PRINCIPAL_XAI_KEYS_JSON":
+            try:
+                from src.principal_xai import load_principal_xai_key_table
+
+                values.extend(load_principal_xai_key_table().values())
+            except Exception:
+                # The complete raw JSON remains an exact redaction candidate.
+                # Invalid configuration is handled fail-closed at inference.
+                pass
         elif name.upper() == "UNIGROK_API_KEY_RECORDS":
             try:
                 records = json.loads(raw_value)
@@ -1984,7 +2027,9 @@ async def build_model_catalog(include_cli: bool = True) -> Dict[str, Any]:
 # Global xAI client connection pools.  The inference client is intentionally
 # incapable of carrying management authority; Collections call sites receive
 # the operation-scoped management facade below.
-_client = None
+# Inference clients keyed by non-secret key fingerprint so optional principal
+# overrides (UNIGROK_PRINCIPAL_XAI_KEYS_JSON) do not share the owner client.
+_clients: dict[str, Any] = {}
 _management_client = None
 # Both factories are called from executor threads — guard each check-then-set
 # so concurrent first calls cannot leak duplicate Client instances or cross
@@ -2072,7 +2117,10 @@ def xai_management_key_state() -> XAIManagementKeyState:
 
 
 def get_xai_inference_client():
-    """Return the cached inference-only xAI SDK client.
+    """Return a cached inference-only xAI SDK client for the active key.
+
+    Owner default is ``XAI_API_KEY``. Optional OAuth principal overrides come
+    from ``UNIGROK_PRINCIPAL_XAI_KEYS_JSON`` (see ``src.principal_xai``).
 
     The installed SDK reads ``XAI_MANAGEMENT_KEY`` whenever its management
     argument is falsey.  Pass a fixed, non-provider isolation canary instead of
@@ -2081,25 +2129,40 @@ def get_xai_inference_client():
     client's channel or inference call paths.
     """
 
-    global _client
-    if _client is None:
-        with _client_lock:
-            if _client is None:
-                if not XAI_API_KEY:
-                    raise ValueError("XAI_API_KEY is not configured in the environment.")
-                from xai_sdk import Client
+    from src.principal_xai import resolve_inference_credential
 
-                raw_client = Client(
-                    api_key=XAI_API_KEY,
-                    management_api_key=_XAI_INFERENCE_MANAGEMENT_ISOLATION_KEY,
-                )
-                _client = _InferenceOnlyXAIClient(raw_client)
+    # Keep credential-generation and client-cache mutation under one lock
+    # order (client -> generation). Shutdown uses the same order, preventing
+    # a generation/client inversion while preserving an atomic cache entry.
+    with _client_lock:
+        api_key, _source, cache_slot, generation = resolve_inference_credential()
+        if not api_key:
+            raise ValueError(
+                "No effective xAI API key is configured for the active principal."
+            )
+
+        # Include a random process-local credential generation so a rotated key
+        # never reuses the prior SDK client. Older generations remain alive until
+        # normal service shutdown, avoiding a close-vs-in-flight race during local
+        # tests or unusual in-process environment replacement. Production Secret
+        # Manager env rotation deploys a new Cloud Run revision/process.
+        cache_id = f"{cache_slot}:{generation}"
+        client = _clients.get(cache_id)
+        if client is None:
+            from xai_sdk import Client
+
+            raw_client = Client(
+                api_key=api_key,
+                management_api_key=_XAI_INFERENCE_MANAGEMENT_ISOLATION_KEY,
+            )
+            client = _InferenceOnlyXAIClient(raw_client)
+            _clients[cache_id] = client
     if _eval_record_enabled():
         # Opt-in eval recording tap (UNIGROK_EVAL_RECORD=1): a thin per-call
         # proxy that appends completed responses to a cassette event log.
         # OFF by default — this branch never runs without the env flag.
-        return _EvalRecordingClient(_client)
-    return _client
+        return _EvalRecordingClient(client)
+    return client
 
 
 def get_xai_client():
@@ -2141,14 +2204,24 @@ def get_xai_management_client():
 def close_xai_inference_client():
     """Close only the inference client cache."""
 
-    global _client
+    from src.principal_xai import (
+        _CREDENTIAL_GENERATIONS,
+        _CREDENTIAL_GENERATIONS_LOCK,
+    )
+
     with _client_lock:
-        if _client is not None:
-            try:
-                _client.close()
-            except Exception:
-                pass
-            _client = None
+        with _CREDENTIAL_GENERATIONS_LOCK:
+            clients = list(_clients.values())
+            _clients.clear()
+            _CREDENTIAL_GENERATIONS.clear()
+
+    # Client close can perform SDK/network cleanup. Keep it outside both
+    # registry locks so shutdown cannot stall concurrent cache readers.
+    for client in clients:
+        try:
+            client.close()
+        except Exception:
+            pass
 
 
 def close_xai_management_client():
@@ -2426,12 +2499,32 @@ def _breaker_cooldown_sec() -> float:
     return _env_timeout("UNIGROK_BREAKER_COOLDOWN_SEC", 60.0)
 
 
-# model → {"consecutive_failures": int, "opened_at": float|None, "trips": int}
+# model or model+opaque credential generation → breaker state. API callers
+# supply a random, process-local credential scope so one insider's revoked or
+# rate-limited key cannot trip another principal's breaker. CLI callers remain
+# model-scoped because they share one machine OAuth session.
 _BREAKER_STATE: Dict[str, Dict[str, Any]] = {}
 _BREAKER_LOCK = threading.Lock()
 
 
-def check_circuit_breaker(model: str):
+def _active_xai_breaker_scope() -> str:
+    """Return an opaque process-local scope for the active API credential."""
+
+    from src.principal_xai import resolve_inference_credential
+
+    key, _source, _cache_slot, generation = resolve_inference_credential()
+    return generation if key else "missing"
+
+
+def _breaker_state_key(model: str, credential_scope: Optional[str]) -> str:
+    return (
+        f"{model}::credential:{credential_scope}"
+        if credential_scope
+        else model
+    )
+
+
+def check_circuit_breaker(model: str, *, credential_scope: Optional[str] = None):
     """Fail fast with CircuitBreakerOpenError while a model's breaker is open.
 
     After the cool-down elapses the breaker half-opens: the next call is
@@ -2439,7 +2532,7 @@ def check_circuit_breaker(model: str):
     re-opens it via record_xai_failure.
     """
     with _BREAKER_LOCK:
-        state = _BREAKER_STATE.get(model)
+        state = _BREAKER_STATE.get(_breaker_state_key(model, credential_scope))
         if not state or not state.get("opened_at"):
             return
         elapsed = time.time() - state["opened_at"]
@@ -2454,12 +2547,13 @@ def check_circuit_breaker(model: str):
         )
 
 
-def record_xai_failure(model: str):
+def record_xai_failure(model: str, *, credential_scope: Optional[str] = None):
     """Count a failed xAI call; open the breaker at the consecutive threshold."""
     threshold = _breaker_threshold()
     with _BREAKER_LOCK:
         state = _BREAKER_STATE.setdefault(
-            model, {"consecutive_failures": 0, "opened_at": None, "trips": 0}
+            _breaker_state_key(model, credential_scope),
+            {"consecutive_failures": 0, "opened_at": None, "trips": 0},
         )
         state["consecutive_failures"] += 1
         if state["consecutive_failures"] >= threshold and not state.get("opened_at"):
@@ -2472,10 +2566,10 @@ def record_xai_failure(model: str):
             )
 
 
-def record_xai_success(model: str):
+def record_xai_success(model: str, *, credential_scope: Optional[str] = None):
     """Reset a model's breaker after any successful xAI call."""
     with _BREAKER_LOCK:
-        state = _BREAKER_STATE.get(model)
+        state = _BREAKER_STATE.get(_breaker_state_key(model, credential_scope))
         if state:
             state["consecutive_failures"] = 0
             state["opened_at"] = None
@@ -7551,7 +7645,8 @@ async def maybe_compact_history(
     # /metrics aggregates never undercount actual spend.
     start_time = time.time()
     try:
-        check_circuit_breaker(model)
+        api_breaker_scope = _active_xai_breaker_scope()
+        check_circuit_breaker(model, credential_scope=api_breaker_scope)
     except Exception as exc:
         logger.warning(f"History compaction skipped for session '{session}': {exc}")
         return history
@@ -7630,7 +7725,7 @@ async def maybe_compact_history(
             )
             summary = str(getattr(response, "content", "") or "").strip()
         except Exception as exc:
-            record_xai_failure(model)
+            record_xai_failure(model, credential_scope=api_breaker_scope)
             logger.warning(f"History compaction failed for session '{session}': {exc}")
             return history
         total_cost += float(getattr(response, "cost_usd", 0.0) or 0.0)
@@ -7640,7 +7735,7 @@ async def maybe_compact_history(
                 f"{summary}"
             )
 
-    record_xai_success(model)
+    record_xai_success(model, credential_scope=api_breaker_scope)
     try:
         active_store = store_param if store_param is not None else store
         if active_store is not None:
@@ -8691,6 +8786,7 @@ def _xai_execution_attempt_receipt(
     tokens: Optional[int] = None,
     cost_usd: Optional[float] = None,
     usage_source: Optional[str] = None,
+    credential_source: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Build one honest physical xAI attempt receipt."""
 
@@ -8734,6 +8830,14 @@ def _xai_execution_attempt_receipt(
         ),
         "cost_usd": 0.0 if is_cli_attempt else cost_usd,
     }
+    if credential_source is None:
+        if is_cli_attempt:
+            credential_source = "subscription_oauth"
+        else:
+            from src.principal_xai import active_xai_credential_source
+
+            credential_source = active_xai_credential_source()
+    attempt["credential_source"] = credential_source
     # The CLI exposes no token usage. Omitting the field distinguishes that
     # fact from a provider-reported exact zero-token API response.
     if not is_cli_attempt and tokens is not None:
@@ -8943,6 +9047,7 @@ class AgentLoop:
             return chat
 
         chat = await run_blocking(_init_chat, timeout=10.0)
+        api_breaker_scope = _active_xai_breaker_scope()
 
         _MAX_SAMPLE_RETRIES = 2
 
@@ -8957,13 +9062,17 @@ class AgentLoop:
                 return chat.sample()
 
             for _attempt in range(_MAX_SAMPLE_RETRIES + 1):
-                check_circuit_breaker(self.model)
+                check_circuit_breaker(
+                    self.model, credential_scope=api_breaker_scope
+                )
                 try:
                     sampled = await run_blocking(
                         _sample,
                         timeout=_env_timeout("UNIGROK_AGENT_SAMPLE_TIMEOUT", 180.0),
                     )
-                    record_xai_success(self.model)
+                    record_xai_success(
+                        self.model, credential_scope=api_breaker_scope
+                    )
                     observed_tokens, observed_cost, usage_source = (
                         _provider_response_usage(sampled)
                     )
@@ -8979,7 +9088,9 @@ class AgentLoop:
                     )
                     return sampled
                 except Exception as _sample_err:
-                    record_xai_failure(self.model)
+                    record_xai_failure(
+                        self.model, credential_scope=api_breaker_scope
+                    )
                     await _emit_physical_attempt(
                         self.attempt_recorder,
                         plane="API",
@@ -9433,16 +9544,27 @@ class ModelResolver:
 
     def __init__(self, ttl: float = _TTL_SEC):
         self._ttl = ttl
-        self._resolved: Dict[str, tuple] = {}  # alias → (slug, timestamp)
-        self._catalog: Optional[tuple] = None  # (ids, source, available, timestamp)
+        # Cache by opaque credential generation as well as alias. Different
+        # principals can have different xAI entitlements, and key rotation
+        # must not inherit the retired key's catalog for the TTL window.
+        self._resolved: Dict[tuple[str, str], tuple] = {}
+        self._catalogs: Dict[str, tuple] = {}
         self._lock = asyncio.Lock()
         self._catalog_lock = asyncio.Lock()
 
     def invalidate(self):
         self._resolved.clear()
-        self._catalog = None
+        self._catalogs.clear()
 
-    async def catalog_snapshot(self) -> tuple[List[str], str, bool]:
+    @staticmethod
+    def _credential_scope() -> str:
+        """Opaque process-local generation for the active API credential."""
+
+        return _active_xai_breaker_scope()
+
+    async def catalog_snapshot(
+        self, credential_scope: Optional[str] = None
+    ) -> tuple[List[str], str, bool]:
         """Return a TTL-cached catalog without making routing depend on it.
 
         Discovery failure returns the known fallback IDs and is cached just
@@ -9451,18 +9573,24 @@ class ModelResolver:
         """
         if not self._discovery_enabled():
             return list(FALLBACK_XAI_LANGUAGE_MODELS), "static_fallback", False
-        cached = self._catalog
+        credential_scope = credential_scope or self._credential_scope()
+        cached = self._catalogs.get(credential_scope)
         if cached is not None and time.time() - cached[3] < self._ttl:
             return list(cached[0]), str(cached[1]), bool(cached[2])
         async with self._catalog_lock:
-            cached = self._catalog
+            cached = self._catalogs.get(credential_scope)
             if cached is not None and time.time() - cached[3] < self._ttl:
                 return list(cached[0]), str(cached[1]), bool(cached[2])
             discovery = await discover_xai_api_models()
             ids = [entry.get("id") for entry in discovery.get("models", []) if entry.get("id")]
             source = str(discovery.get("source") or "unknown")
             available = bool(discovery.get("available"))
-            self._catalog = (ids, source, available, time.time())
+            self._catalogs[credential_scope] = (
+                ids,
+                source,
+                available,
+                time.time(),
+            )
             return list(ids), source, available
 
     @staticmethod
@@ -9506,23 +9634,33 @@ class ModelResolver:
         default = _model_alias_default(alias)
         if not self._discovery_enabled():
             return default
-        cached = self._resolved.get(alias)
+        cache_key = (self._credential_scope(), alias)
+        cached = self._resolved.get(cache_key)
         if cached is not None and time.time() - cached[1] < self._ttl:
             return cached[0]
         async with self._lock:
-            cached = self._resolved.get(alias)
+            # Re-read after waiting: a context-bound credential may have
+            # rotated while another task held the resolver lock.
+            cache_key = (self._credential_scope(), alias)
+            cached = self._resolved.get(cache_key)
             if cached is not None and time.time() - cached[1] < self._ttl:
                 return cached[0]
-            resolved = await self._resolve_from_catalog(alias, default)
+            resolved = await self._resolve_from_catalog(
+                alias, default, credential_scope=cache_key[0]
+            )
             # Discovery-down results are cached too: the fallback IS the
             # default, and re-probing every call would stall each turn on the
             # discovery timeout while the API is unreachable.
-            self._resolved[alias] = (resolved, time.time())
+            self._resolved[cache_key] = (resolved, time.time())
             return resolved
 
-    async def _resolve_from_catalog(self, alias: str, default: str) -> str:
+    async def _resolve_from_catalog(
+        self, alias: str, default: str, *, credential_scope: str
+    ) -> str:
         try:
-            catalog_ids, _, available = await self.catalog_snapshot()
+            catalog_ids, _, available = await self.catalog_snapshot(
+                credential_scope=credential_scope
+            )
         except Exception as exc:  # discover catches internally; belt and braces
             logging.getLogger("GrokMCP").warning(
                 f"Model alias '{alias}': catalog discovery raised, using default '{default}': {exc}"
@@ -10868,7 +11006,6 @@ async def _call_plane(
     # API branch streams for real via chat.stream(), forwarding each chunk as
     # a {"type": "content_delta", "text": ...} event before returning the
     # complete response as usual.
-    from xai_sdk import Client
     from xai_sdk.chat import user, system, assistant
 
     if _attempt_reporting is not None:
@@ -11233,14 +11370,19 @@ async def _call_plane(
 
         # Per-model circuit breaker: fail fast while open, and report the
         # outcome of every real upstream attempt.
-        check_circuit_breaker(model_name)
+        api_breaker_scope = _active_xai_breaker_scope()
+        check_circuit_breaker(
+            model_name, credential_scope=api_breaker_scope
+        )
         try:
             response = await run_blocking(
                 _call_api,
                 timeout=_env_timeout("UNIGROK_API_CALL_TIMEOUT", 180.0),
             )
         except Exception as exc:
-            record_xai_failure(model_name)
+            record_xai_failure(
+                model_name, credential_scope=api_breaker_scope
+            )
             await _emit_physical_attempt(
                 attempt_recorder,
                 plane="API",
@@ -11250,7 +11392,7 @@ async def _call_plane(
                 error=exc,
             )
             raise
-        record_xai_success(model_name)
+        record_xai_success(model_name, credential_scope=api_breaker_scope)
         observed_tokens, observed_cost, usage_source = _provider_response_usage(
             response
         )
@@ -13269,7 +13411,7 @@ async def run_agent_turn(
             "auth": "probe_failed",
             "setup_command": CLI_AUTH_SETUP_COMMAND,
         }
-    credentials = credential_plane_contract(cli_status)
+    credentials = request_credential_plane_contract(cli_status)
     if not credentials["service_usable"]:
         return await _persist_preflight_failure(MetaLayer(
             generation=(
@@ -13390,16 +13532,18 @@ async def run_agent_turn(
                     "prompt_user": True,
                     "prompt_when": "now",
                     "message": (
-                        "This request requires the xAI API plane, but XAI_API_KEY is "
-                        "missing from the global UniGrok service environment. Ask permission "
-                        "to help configure it securely; never request the key in chat."
+                        "This request requires the xAI API plane, but no effective "
+                        "xAI key is configured for the authenticated principal. Ask "
+                        "permission to help configure the owner default or canonical "
+                        "principal mapping securely; never request the key in chat."
                     ),
                 })
         return await _persist_preflight_failure(MetaLayer(
             generation=(
-                "This request requires the xAI API plane, but XAI_API_KEY is not configured. "
-                "Inspect `credentials.api.action`, ask permission to help with the global "
-                "service `.env`, and never request or echo the key in chat."
+                "This request requires the xAI API plane, but no effective xAI key is "
+                "configured for the authenticated principal. Inspect "
+                "`credentials.api.action`, ask permission to help with the owner default "
+                "or canonical principal mapping, and never request or echo the key in chat."
             ),
             finish_reason="error",
             route="credential-setup",

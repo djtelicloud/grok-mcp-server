@@ -20,14 +20,20 @@ def setup_test_env(tmp_path_factory):
 
 @pytest.fixture(autouse=True)
 def reset_global_client():
-    src.utils._client = None
+    if hasattr(src.utils, "_clients"):
+        src.utils._clients.clear()
+    else:
+        src.utils._client = None  # legacy attribute name
     src.utils._management_client = None
     src.utils._MODEL_MAX_TOKENS_CACHE.clear()
     src.utils._BREAKER_STATE.clear()
     src.utils._ROUTING_ADVISOR.invalidate()
     src.utils._CALLER_SPEND_CACHE.clear()
     yield
-    src.utils._client = None
+    if hasattr(src.utils, "_clients"):
+        src.utils._clients.clear()
+    else:
+        src.utils._client = None  # legacy attribute name
     src.utils._management_client = None
     src.utils._MODEL_MAX_TOKENS_CACHE.clear()
     src.utils._BREAKER_STATE.clear()
