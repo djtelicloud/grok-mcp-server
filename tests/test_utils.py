@@ -4584,6 +4584,20 @@ class TestCircuitBreaker:
         check_circuit_breaker("model-y")  # must not raise
         assert get_circuit_breaker_state()["model-y"]["consecutive_failures"] == 0
 
+    def test_breaker_isolates_api_credential_scopes(self, monkeypatch):
+        from src.utils import (
+            CircuitBreakerOpenError,
+            check_circuit_breaker,
+            record_xai_failure,
+        )
+
+        monkeypatch.setenv("UNIGROK_BREAKER_THRESHOLD", "1")
+        record_xai_failure("model-shared", credential_scope="opaque-a")
+
+        with pytest.raises(CircuitBreakerOpenError, match="model-shared"):
+            check_circuit_breaker("model-shared", credential_scope="opaque-a")
+        check_circuit_breaker("model-shared", credential_scope="opaque-b")
+
     def test_breaker_half_opens_after_cooldown(self, monkeypatch):
         import src.utils as utils_module
         from src.utils import check_circuit_breaker, get_circuit_breaker_state, record_xai_failure
@@ -4603,10 +4617,17 @@ class TestCircuitBreaker:
     async def test_call_plane_fails_fast_when_breaker_open(self, monkeypatch):
         """_call_plane's API branch must not touch the SDK while the breaker
         for its model is open."""
-        from src.utils import CircuitBreakerOpenError, _call_plane, record_xai_failure
+        from src.utils import (
+            CircuitBreakerOpenError,
+            _active_xai_breaker_scope,
+            _call_plane,
+            record_xai_failure,
+        )
 
         monkeypatch.setenv("UNIGROK_BREAKER_THRESHOLD", "1")
-        record_xai_failure("grok-4.3")
+        record_xai_failure(
+            "grok-4.3", credential_scope=_active_xai_breaker_scope()
+        )
 
         with patch("src.utils.get_xai_client") as mock_get_client:
             with pytest.raises(CircuitBreakerOpenError):
@@ -4693,7 +4714,12 @@ class TestCircuitBreaker:
     async def test_agentloop_sample_failures_trip_breaker(self, monkeypatch):
         """Consecutive sample failures must open the breaker so the next
         attempt fails fast instead of hammering a broken upstream."""
-        from src.utils import CircuitBreakerOpenError, get_circuit_breaker_state
+        from src.utils import (
+            CircuitBreakerOpenError,
+            _active_xai_breaker_scope,
+            _breaker_state_key,
+            get_circuit_breaker_state,
+        )
 
         monkeypatch.setenv("UNIGROK_BREAKER_THRESHOLD", "2")
 
@@ -4716,7 +4742,9 @@ class TestCircuitBreaker:
                 await loop.run("test prompt")
 
         assert mock_chat.sample.call_count == 2
-        state = get_circuit_breaker_state()["grok-4.3"]
+        state = get_circuit_breaker_state()[
+            _breaker_state_key("grok-4.3", _active_xai_breaker_scope())
+        ]
         assert state["open"] is True
         assert state["trips"] == 1
 
@@ -6987,12 +7015,20 @@ class TestHistoryCompaction:
         """The summarizer rides the per-model circuit breaker like every other
         upstream call: an open breaker skips compaction without a model call,
         and a summarizer failure counts against the breaker."""
-        from src.utils import maybe_compact_history, record_xai_failure, resolve_model
+        from src.utils import (
+            _active_xai_breaker_scope,
+            maybe_compact_history,
+            record_xai_failure,
+            resolve_model,
+        )
 
         monkeypatch.setenv("UNIGROK_COMPACT_THRESHOLD_TOKENS", "1000")
         monkeypatch.setenv("UNIGROK_BREAKER_THRESHOLD", "1")
         history = self._history(n=8, pad=800)
-        record_xai_failure(await resolve_model("coding"))  # trips at threshold 1
+        record_xai_failure(
+            await resolve_model("coding"),
+            credential_scope=_active_xai_breaker_scope(),
+        )  # trips at threshold 1
 
         mock_get = MagicMock()
         with patch("src.utils.get_xai_client", mock_get):

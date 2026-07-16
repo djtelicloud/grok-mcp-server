@@ -2103,31 +2103,32 @@ def get_xai_inference_client():
 
     from src.principal_xai import resolve_inference_credential
 
-    api_key, _source, cache_slot, generation = resolve_inference_credential()
-    if not api_key:
-        raise ValueError(
-            "No effective xAI API key is configured for the active principal."
-        )
+    # Keep credential-generation and client-cache mutation under one lock
+    # order (client -> generation). Shutdown uses the same order, preventing
+    # a generation/client inversion while preserving an atomic cache entry.
+    with _client_lock:
+        api_key, _source, cache_slot, generation = resolve_inference_credential()
+        if not api_key:
+            raise ValueError(
+                "No effective xAI API key is configured for the active principal."
+            )
 
-    # Include a random process-local credential generation so a rotated key
-    # never reuses the prior SDK client. Older generations remain alive until normal
-    # service shutdown, avoiding a close-vs-in-flight race during local tests
-    # or unusual in-process environment replacement. Production Secret Manager
-    # env rotation deploys a new Cloud Run revision/process.
-    cache_id = f"{cache_slot}:{generation}"
-    client = _clients.get(cache_id)
-    if client is None:
-        with _client_lock:
-            client = _clients.get(cache_id)
-            if client is None:
-                from xai_sdk import Client
+        # Include a random process-local credential generation so a rotated key
+        # never reuses the prior SDK client. Older generations remain alive until
+        # normal service shutdown, avoiding a close-vs-in-flight race during local
+        # tests or unusual in-process environment replacement. Production Secret
+        # Manager env rotation deploys a new Cloud Run revision/process.
+        cache_id = f"{cache_slot}:{generation}"
+        client = _clients.get(cache_id)
+        if client is None:
+            from xai_sdk import Client
 
-                raw_client = Client(
-                    api_key=api_key,
-                    management_api_key=_XAI_INFERENCE_MANAGEMENT_ISOLATION_KEY,
-                )
-                client = _InferenceOnlyXAIClient(raw_client)
-                _clients[cache_id] = client
+            raw_client = Client(
+                api_key=api_key,
+                management_api_key=_XAI_INFERENCE_MANAGEMENT_ISOLATION_KEY,
+            )
+            client = _InferenceOnlyXAIClient(raw_client)
+            _clients[cache_id] = client
     if _eval_record_enabled():
         # Opt-in eval recording tap (UNIGROK_EVAL_RECORD=1): a thin per-call
         # proxy that appends completed responses to a cassette event log.
@@ -2175,20 +2176,24 @@ def get_xai_management_client():
 def close_xai_inference_client():
     """Close only the inference client cache."""
 
-    with _client_lock:
-        for client in list(_clients.values()):
-            try:
-                client.close()
-            except Exception:
-                pass
-        _clients.clear()
-        from src.principal_xai import (
-            _CREDENTIAL_GENERATIONS,
-            _CREDENTIAL_GENERATIONS_LOCK,
-        )
+    from src.principal_xai import (
+        _CREDENTIAL_GENERATIONS,
+        _CREDENTIAL_GENERATIONS_LOCK,
+    )
 
+    with _client_lock:
         with _CREDENTIAL_GENERATIONS_LOCK:
+            clients = list(_clients.values())
+            _clients.clear()
             _CREDENTIAL_GENERATIONS.clear()
+
+    # Client close can perform SDK/network cleanup. Keep it outside both
+    # registry locks so shutdown cannot stall concurrent cache readers.
+    for client in clients:
+        try:
+            client.close()
+        except Exception:
+            pass
 
 
 def close_xai_management_client():
@@ -2466,12 +2471,32 @@ def _breaker_cooldown_sec() -> float:
     return _env_timeout("UNIGROK_BREAKER_COOLDOWN_SEC", 60.0)
 
 
-# model → {"consecutive_failures": int, "opened_at": float|None, "trips": int}
+# model or model+opaque credential generation → breaker state. API callers
+# supply a random, process-local credential scope so one insider's revoked or
+# rate-limited key cannot trip another principal's breaker. CLI callers remain
+# model-scoped because they share one machine OAuth session.
 _BREAKER_STATE: Dict[str, Dict[str, Any]] = {}
 _BREAKER_LOCK = threading.Lock()
 
 
-def check_circuit_breaker(model: str):
+def _active_xai_breaker_scope() -> str:
+    """Return an opaque process-local scope for the active API credential."""
+
+    from src.principal_xai import resolve_inference_credential
+
+    key, _source, _cache_slot, generation = resolve_inference_credential()
+    return generation if key else "missing"
+
+
+def _breaker_state_key(model: str, credential_scope: Optional[str]) -> str:
+    return (
+        f"{model}::credential:{credential_scope}"
+        if credential_scope
+        else model
+    )
+
+
+def check_circuit_breaker(model: str, *, credential_scope: Optional[str] = None):
     """Fail fast with CircuitBreakerOpenError while a model's breaker is open.
 
     After the cool-down elapses the breaker half-opens: the next call is
@@ -2479,7 +2504,7 @@ def check_circuit_breaker(model: str):
     re-opens it via record_xai_failure.
     """
     with _BREAKER_LOCK:
-        state = _BREAKER_STATE.get(model)
+        state = _BREAKER_STATE.get(_breaker_state_key(model, credential_scope))
         if not state or not state.get("opened_at"):
             return
         elapsed = time.time() - state["opened_at"]
@@ -2494,12 +2519,13 @@ def check_circuit_breaker(model: str):
         )
 
 
-def record_xai_failure(model: str):
+def record_xai_failure(model: str, *, credential_scope: Optional[str] = None):
     """Count a failed xAI call; open the breaker at the consecutive threshold."""
     threshold = _breaker_threshold()
     with _BREAKER_LOCK:
         state = _BREAKER_STATE.setdefault(
-            model, {"consecutive_failures": 0, "opened_at": None, "trips": 0}
+            _breaker_state_key(model, credential_scope),
+            {"consecutive_failures": 0, "opened_at": None, "trips": 0},
         )
         state["consecutive_failures"] += 1
         if state["consecutive_failures"] >= threshold and not state.get("opened_at"):
@@ -2512,10 +2538,10 @@ def record_xai_failure(model: str):
             )
 
 
-def record_xai_success(model: str):
+def record_xai_success(model: str, *, credential_scope: Optional[str] = None):
     """Reset a model's breaker after any successful xAI call."""
     with _BREAKER_LOCK:
-        state = _BREAKER_STATE.get(model)
+        state = _BREAKER_STATE.get(_breaker_state_key(model, credential_scope))
         if state:
             state["consecutive_failures"] = 0
             state["opened_at"] = None
@@ -7557,7 +7583,8 @@ async def maybe_compact_history(
     # /metrics aggregates never undercount actual spend.
     start_time = time.time()
     try:
-        check_circuit_breaker(model)
+        api_breaker_scope = _active_xai_breaker_scope()
+        check_circuit_breaker(model, credential_scope=api_breaker_scope)
     except Exception as exc:
         logger.warning(f"History compaction skipped for session '{session}': {exc}")
         return history
@@ -7636,7 +7663,7 @@ async def maybe_compact_history(
             )
             summary = str(getattr(response, "content", "") or "").strip()
         except Exception as exc:
-            record_xai_failure(model)
+            record_xai_failure(model, credential_scope=api_breaker_scope)
             logger.warning(f"History compaction failed for session '{session}': {exc}")
             return history
         total_cost += float(getattr(response, "cost_usd", 0.0) or 0.0)
@@ -7646,7 +7673,7 @@ async def maybe_compact_history(
                 f"{summary}"
             )
 
-    record_xai_success(model)
+    record_xai_success(model, credential_scope=api_breaker_scope)
     try:
         active_store = store_param if store_param is not None else store
         if active_store is not None:
@@ -8958,6 +8985,7 @@ class AgentLoop:
             return chat
 
         chat = await run_blocking(_init_chat, timeout=10.0)
+        api_breaker_scope = _active_xai_breaker_scope()
 
         _MAX_SAMPLE_RETRIES = 2
 
@@ -8972,13 +9000,17 @@ class AgentLoop:
                 return chat.sample()
 
             for _attempt in range(_MAX_SAMPLE_RETRIES + 1):
-                check_circuit_breaker(self.model)
+                check_circuit_breaker(
+                    self.model, credential_scope=api_breaker_scope
+                )
                 try:
                     sampled = await run_blocking(
                         _sample,
                         timeout=_env_timeout("UNIGROK_AGENT_SAMPLE_TIMEOUT", 180.0),
                     )
-                    record_xai_success(self.model)
+                    record_xai_success(
+                        self.model, credential_scope=api_breaker_scope
+                    )
                     observed_tokens, observed_cost, usage_source = (
                         _provider_response_usage(sampled)
                     )
@@ -8994,7 +9026,9 @@ class AgentLoop:
                     )
                     return sampled
                 except Exception as _sample_err:
-                    record_xai_failure(self.model)
+                    record_xai_failure(
+                        self.model, credential_scope=api_breaker_scope
+                    )
                     await _emit_physical_attempt(
                         self.attempt_recorder,
                         plane="API",
@@ -11247,14 +11281,19 @@ async def _call_plane(
 
         # Per-model circuit breaker: fail fast while open, and report the
         # outcome of every real upstream attempt.
-        check_circuit_breaker(model_name)
+        api_breaker_scope = _active_xai_breaker_scope()
+        check_circuit_breaker(
+            model_name, credential_scope=api_breaker_scope
+        )
         try:
             response = await run_blocking(
                 _call_api,
                 timeout=_env_timeout("UNIGROK_API_CALL_TIMEOUT", 180.0),
             )
         except Exception as exc:
-            record_xai_failure(model_name)
+            record_xai_failure(
+                model_name, credential_scope=api_breaker_scope
+            )
             await _emit_physical_attempt(
                 attempt_recorder,
                 plane="API",
@@ -11264,7 +11303,7 @@ async def _call_plane(
                 error=exc,
             )
             raise
-        record_xai_success(model_name)
+        record_xai_success(model_name, credential_scope=api_breaker_scope)
         observed_tokens, observed_cost, usage_source = _provider_response_usage(
             response
         )

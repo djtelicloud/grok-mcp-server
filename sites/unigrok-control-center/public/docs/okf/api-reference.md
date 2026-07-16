@@ -4391,7 +4391,7 @@ burn retries — retrying an auth failure only delays the real error.
 ### Function: `check_circuit_breaker` {#utils-check_circuit_breaker}
 
 ```python
-def check_circuit_breaker(model: str)
+def check_circuit_breaker(model: str, *, credential_scope: Optional[str]=None)
 ```
 
 **Keywords:** check, circuit, breaker
@@ -4405,7 +4405,7 @@ re-opens it via record_xai_failure.
 ### Function: `record_xai_failure` {#utils-record_xai_failure}
 
 ```python
-def record_xai_failure(model: str)
+def record_xai_failure(model: str, *, credential_scope: Optional[str]=None)
 ```
 
 **Keywords:** record, xai, failure
@@ -4415,7 +4415,7 @@ Count a failed xAI call; open the breaker at the consecutive threshold.
 ### Function: `record_xai_success` {#utils-record_xai_success}
 
 ```python
-def record_xai_success(model: str)
+def record_xai_success(model: str, *, credential_scope: Optional[str]=None)
 ```
 
 **Keywords:** record, xai, success

@@ -83,7 +83,8 @@ Example map (store the whole JSON as one Secret Manager secret; never commit):
 Rules:
 
 - Only principals with kind `oauth:` use the map; `http:anon` and labels never do.
-- Lookup accepts full `oauth:…` keys or the bare subject after `oauth:`.
+- Every map key must be the full canonical `oauth:<sub>` principal emitted by
+  the gateway. Bare subjects and client labels are rejected fail-closed.
 - Missing map entry → **owner default**.
 - A configured map that is malformed, oversized, duplicated, or contains an
   invalid entry fails closed instead of silently shifting spend to the owner.

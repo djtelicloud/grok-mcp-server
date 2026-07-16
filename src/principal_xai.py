@@ -73,7 +73,13 @@ def _parse_principal_key_table(raw: str) -> Dict[str, str]:
         if not isinstance(key, str):
             raise PrincipalXAIConfigurationError("invalid_principal")
         norm_key = re.sub(r"[\x00-\x1f\x7f]", "", key).strip()
-        if not norm_key or len(norm_key) > 240 or norm_key != key:
+        if (
+            not norm_key
+            or len(norm_key) > 240
+            or norm_key != key
+            or not norm_key.startswith("oauth:")
+            or not norm_key[len("oauth:") :]
+        ):
             raise PrincipalXAIConfigurationError("invalid_principal")
         secret = normalize_xai_api_key(value if isinstance(value, str) else None)
         if not secret:
@@ -93,14 +99,7 @@ def load_principal_xai_key_table(
 def _lookup_principal_key(
     principal: str, table: Mapping[str, str]
 ) -> Optional[str]:
-    if principal in table:
-        return table[principal]
-    # Allow map keys without the ``oauth:`` prefix when principal is OAuth.
-    if principal.startswith("oauth:"):
-        bare = principal[len("oauth:") :]
-        if bare in table:
-            return table[bare]
-    return None
+    return table.get(principal)
 
 
 def resolve_xai_api_key(

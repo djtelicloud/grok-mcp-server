@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import inspect
+import threading
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -44,7 +45,7 @@ def test_inference_factory_constructs_with_only_inference_authority(monkeypatch)
     assert getattr(inference, "collections", None) is None
 
 
-def test_principal_key_rotation_replaces_and_closes_cached_client(monkeypatch):
+def test_principal_key_rotation_keeps_old_generation_until_shutdown(monkeypatch):
     clients = []
 
     class FakeClient:
@@ -121,6 +122,38 @@ def test_principal_client_cache_is_thread_safe(monkeypatch):
     assert len(clients) == 1
     assert all(result is results[0] for result in results)
     assert clients[0].kwargs["api_key"] == "xai-personal"
+
+
+def test_inference_shutdown_closes_outside_cache_locks(monkeypatch):
+    close_started = threading.Event()
+    allow_close = threading.Event()
+    clients = []
+
+    class BlockingCloseClient:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+            self.collections = object()
+            clients.append(self)
+
+        def close(self):
+            close_started.set()
+            assert allow_close.wait(timeout=2)
+
+    monkeypatch.setattr("xai_sdk.Client", BlockingCloseClient)
+    monkeypatch.setenv("XAI_API_KEY", "xai-owner-default")
+    monkeypatch.delenv("UNIGROK_PRINCIPAL_XAI_KEYS_JSON", raising=False)
+    utils._clients.clear()
+    utils.get_xai_inference_client()
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+        closing = pool.submit(utils.close_xai_inference_client)
+        assert close_started.wait(timeout=1)
+        replacement = pool.submit(utils.get_xai_inference_client)
+        assert replacement.result(timeout=1) is not None
+        allow_close.set()
+        closing.result(timeout=1)
+
+    assert len(clients) == 2
 
 
 @pytest.mark.asyncio

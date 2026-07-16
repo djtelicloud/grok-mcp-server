@@ -53,17 +53,15 @@ def test_oauth_principal_override(monkeypatch: pytest.MonkeyPatch) -> None:
         reset_active_principal(token)
 
 
-def test_oauth_principal_bare_map_key(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_oauth_principal_bare_map_key_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("XAI_API_KEY", "xai-owner-default")
     monkeypatch.setenv(
         "UNIGROK_PRINCIPAL_XAI_KEYS_JSON",
         json.dumps({"github|user:99": "xai-bare"}),
     )
-    token = set_active_principal("oauth:github|user:99")
-    try:
-        assert effective_xai_api_key() == "xai-bare"
-    finally:
-        reset_active_principal(token)
+    with pytest.raises(PrincipalXAIConfigurationError) as raised:
+        effective_xai_api_key(principal="oauth:github|user:99")
+    assert raised.value.code == "invalid_principal"
 
 
 def test_unknown_oauth_falls_back_to_owner(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -85,7 +83,7 @@ def test_anon_ignores_principal_map(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("XAI_API_KEY", "xai-owner-default")
     monkeypatch.setenv(
         "UNIGROK_PRINCIPAL_XAI_KEYS_JSON",
-        json.dumps({"http:anon": "xai-should-not-use", "oauth:x": "xai-x"}),
+        json.dumps({"oauth:x": "xai-x"}),
     )
     token = set_active_principal("http:anon")
     try:
@@ -101,14 +99,15 @@ def test_client_id_cannot_select_key(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("XAI_API_KEY", "xai-owner-default")
     monkeypatch.setenv(
         "UNIGROK_PRINCIPAL_XAI_KEYS_JSON",
-        json.dumps({"cursor": "xai-spoof", "oauth:real": "xai-real"}),
+        json.dumps({"oauth:real": "xai-real"}),
     )
     token = set_active_principal("oauth:real")
     try:
         assert effective_xai_api_key() == "xai-real"
     finally:
         reset_active_principal(token)
-    # Without principal, spoof label in map is irrelevant.
+    # Without the authenticated principal, an untrusted client label has no
+    # input to the lookup and the owner default remains authoritative.
     assert default_xai_api_key() == "xai-owner-default"
 
 
@@ -119,6 +118,8 @@ def test_client_id_cannot_select_key(monkeypatch: pytest.MonkeyPatch) -> None:
         ("[]", "not_object"),
         ('{"oauth:a":""}', "invalid_key"),
         ('{" oauth:a":"xai-a"}', "invalid_principal"),
+        ('{"cursor":"xai-a"}', "invalid_principal"),
+        ('{"oauth:":"xai-a"}', "invalid_principal"),
         ('{"oauth:a":"xai-a","oauth:a":"xai-b"}', "duplicate_principal"),
     ],
 )
