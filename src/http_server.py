@@ -248,7 +248,11 @@ async def _introspect_oauth_token(token: str, required_scope: str) -> Optional[D
     if not url or not token or len(token) > 8_192:
         return None
     try:
-        async with httpx.AsyncClient(timeout=5.0, follow_redirects=False) as client:
+        async with httpx.AsyncClient(
+            timeout=5.0,
+            follow_redirects=False,
+            trust_env=False,
+        ) as client:
             response = await client.post(
                 url,
                 headers={
@@ -972,13 +976,27 @@ def _validated_https_url(value: str) -> Optional[str]:
     return f"https://{parsed.netloc}{normalized_path}"
 
 
-def _public_mcp_resource() -> Optional[str]:
-    resource = _validated_https_url(os.environ.get("UNIGROK_PUBLIC_MCP_URL", ""))
-    if resource and not urlsplit(resource).path:
+def _validated_public_mcp_resource(raw: str) -> Optional[str]:
+    """Return a public ``…/mcp`` HTTPS resource, or ``None`` when unsafe.
+
+    Only global HTTPS hosts may publish OAuth metadata or widen the Streamable
+    HTTP DNS-rebinding allowlist.
+    """
+    resource = _validated_https_url(raw)
+    if not resource:
+        return None
+    parsed = urlsplit(resource)
+    path = parsed.path
+    if not path:
         resource = f"{resource}/mcp"
-    if resource and urlsplit(resource).path == "/mcp":
+        path = "/mcp"
+    if path == "/mcp":
         return resource
     return None
+
+
+def _public_mcp_resource() -> Optional[str]:
+    return _validated_public_mcp_resource(os.environ.get("UNIGROK_PUBLIC_MCP_URL", ""))
 
 
 def _oauth_protected_resource_metadata_url(
@@ -1822,6 +1840,23 @@ def _xai_headers() -> Dict[str, str]:
     return {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
 
 
+def _xai_chat_completions_url() -> Optional[str]:
+    """Return the chat-completions URL, or ``None`` when an override is unsafe.
+
+    ``XAI_API_BASE_URL`` is operator-controlled but credential-bearing: the
+    gateway attaches ``XAI_API_KEY``. Unset keeps the built-in xAI default.
+    A set-but-unsafe override fails closed (no silent fallback that would hide
+    a misconfiguration while still shipping the bearer token elsewhere).
+    """
+    raw = os.environ.get("XAI_API_BASE_URL", "").strip()
+    if not raw:
+        return f"{XAI_BASE_URL.rstrip('/')}/chat/completions"
+    base = _validated_https_url(raw)
+    if base is None:
+        return None
+    return f"{base.rstrip('/')}/chat/completions"
+
+
 def _xai_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     allowed = {
         "model",
@@ -1845,9 +1880,19 @@ def _xai_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
 async def post_xai_chat(payload: Dict[str, Any]) -> Response:
     if not os.environ.get("XAI_API_KEY"):
         return _json_error("XAI_API_KEY is not configured.", status_code=503, code="service_unavailable")
-    url = os.environ.get("XAI_API_BASE_URL", XAI_BASE_URL).rstrip("/") + "/chat/completions"
+    url = _xai_chat_completions_url()
+    if url is None:
+        return _json_error(
+            "XAI_API_BASE_URL is not a public HTTPS endpoint.",
+            status_code=503,
+            code="service_unavailable",
+        )
     try:
-        async with httpx.AsyncClient(timeout=120.0) as client:
+        async with httpx.AsyncClient(
+            timeout=120.0,
+            follow_redirects=False,
+            trust_env=False,
+        ) as client:
             response = await client.post(url, json=_xai_payload(payload), headers=_xai_headers())
         if response.status_code >= 400:
             return _json_error(
@@ -1875,7 +1920,14 @@ async def stream_xai_chat(payload: Dict[str, Any]) -> AsyncIterator[bytes]:
         yield _sse_error("XAI_API_KEY is not configured.", "service_unavailable")
         yield b"data: [DONE]\n\n"
         return
-    url = os.environ.get("XAI_API_BASE_URL", XAI_BASE_URL).rstrip("/") + "/chat/completions"
+    url = _xai_chat_completions_url()
+    if url is None:
+        yield _sse_error(
+            "XAI_API_BASE_URL is not a public HTTPS endpoint.",
+            "service_unavailable",
+        )
+        yield b"data: [DONE]\n\n"
+        return
     stream_timeout = httpx.Timeout(
         connect=10.0,
         read=_bounded_env_float(
@@ -1885,7 +1937,11 @@ async def stream_xai_chat(payload: Dict[str, Any]) -> AsyncIterator[bytes]:
         pool=10.0,
     )
     try:
-        async with httpx.AsyncClient(timeout=stream_timeout) as client:
+        async with httpx.AsyncClient(
+            timeout=stream_timeout,
+            follow_redirects=False,
+            trust_env=False,
+        ) as client:
             async with client.stream("POST", url, json=_xai_payload(payload), headers=_xai_headers()) as response:
                 if response.status_code >= 400:
                     await response.aread()
@@ -2142,6 +2198,10 @@ def public_mcp_transport_security(
     host. Production Cloud Run serves ``mcp.grokmcp.org`` (and similar), so
     authenticated /mcp traffic must allow the public hostname from
     ``UNIGROK_PUBLIC_MCP_URL`` or the optional override.
+
+    Unsafe or non-HTTPS overrides are ignored: they must not expand the
+    Host/Origin allowlist (OAuth metadata already rejects them via
+    :func:`_public_mcp_resource`).
     """
     hosts = [
         "127.0.0.1",
@@ -2159,16 +2219,18 @@ def public_mcp_transport_security(
         "http://[::1]",
         "http://[::1]:*",
     ]
-    raw = (public_mcp_url if public_mcp_url is not None else os.environ.get("UNIGROK_PUBLIC_MCP_URL", "")).strip()
-    if raw:
-        parsed = urlsplit(raw)
+    if public_mcp_url is None:
+        resource = _public_mcp_resource()
+    else:
+        resource = _validated_public_mcp_resource(public_mcp_url)
+    if resource:
+        parsed = urlsplit(resource)
         host = (parsed.hostname or "").lower()
         if host:
             hosts.append(host)
             if parsed.port:
                 hosts.append(f"{host}:{parsed.port}")
-            scheme = parsed.scheme if parsed.scheme in {"http", "https"} else "https"
-            origin = f"{scheme}://{host}"
+            origin = f"https://{host}"
             if parsed.port:
                 origin = f"{origin}:{parsed.port}"
             origins.append(origin)
