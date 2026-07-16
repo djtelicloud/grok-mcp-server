@@ -805,9 +805,14 @@ async def enforce_caller_budget(store_param: Any, caller: Optional[str]) -> None
             spent = float(await active_store.get_caller_cost_today(entry))
         except Exception as exc:
             if os.environ.get("UNIGROK_BUDGET_FAIL_CLOSED", "").strip() == "1":
-                raise CallerBudgetExceeded(
-                    f"daily budget check failed and UNIGROK_BUDGET_FAIL_CLOSED is set: {exc}"
+                logging.getLogger("GrokMCP").warning(
+                    "Caller budget check unavailable; rejecting the request because "
+                    "UNIGROK_BUDGET_FAIL_CLOSED is enabled: %s",
+                    exc,
                 )
+                raise CallerBudgetExceeded(
+                    "daily budget check unavailable; fail-closed policy is enabled"
+                ) from None
             logging.getLogger("GrokMCP").warning(
                 f"Caller budget check unavailable (degrading open): {exc}"
             )
@@ -1287,9 +1292,13 @@ def redact_secrets(text: str) -> str:
     # the pattern guard below. Ignore short values to avoid destructive false
     # positives in ordinary output.
     for name in SERVER_OWNED_SECRET_ENV_NAMES:
-        value = os.environ.get(name)
-        if value and len(value) >= 8:
-            redacted = redacted.replace(value, "[REDACTED]")
+        raw_value = os.environ.get(name, "")
+        values = [raw_value.strip()]
+        if name == "UNIGROK_API_KEYS":
+            values.extend(part.strip() for part in raw_value.split(","))
+        for value in values:
+            if len(value) >= 8:
+                redacted = redacted.replace(value, "[REDACTED]")
 
     if "xai-" not in redacted and "sk-" not in redacted:
         # This guard must remain a conservative superset of the two
