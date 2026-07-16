@@ -10,12 +10,12 @@ It is **not** a public multi-tenant SaaS for anonymous vibe users, and it is
 Cloud Run deploys the **same repository `Dockerfile` image** used for local
 product builds (digest-pinned). Behavior is **not** a 1:1 laptop Compose clone:
 
-| | Local Docker / Compose | Cloud Run (`UNIGROK_RUNTIME=cloudrun`) |
+| Aspect | Local Docker / Compose | Cloud Run (`UNIGROK_RUNTIME=cloudrun`) |
 | --- | --- | --- |
 | Image | Product `Dockerfile` | Same image family, digest-pinned |
 | CLI OAuth volume | May attach for SuperGrok CLI plane | **Never** mounted |
 | Default Grok spend | Machine `.env` / local CLI | **Owner** `XAI_API_KEY` from Secret Manager (**Live default**) |
-| Optional teammate own keys | Each engineer’s local keys | **TARGET** (bind to OAuth principal later; does not remove owner default) |
+| Per-insider provider credentials | Each engineer may use local credentials | **Forbidden**; OAuth identity and budgets govern access to the owner-operated service |
 | Forge / git-write tools | Contributor laptop only | **Off** |
 
 The gateway runs with `UNIGROK_RUNTIME=cloudrun`, which disables the CLI plane
@@ -38,8 +38,8 @@ without a bearer.
    Control mint path) — not the xAI provider key.
 6. Confirm: health/ready `200`; `POST /mcp` without token → `401`.
 7. Confirm cloud surface has **no** git-write / Forge mutation tools.
-8. Optional later: per write+ principal own Grok credentials (SM/KMS, bind to
-   OAuth `sub`, cut off when write+ is lost). Owner default remains.
+8. Confirm per-principal budgets and receipts use the authenticated OAuth `sub`,
+   so access and spend policy revoke with contributor authorization.
 
 ## Runtime contract
 
@@ -62,11 +62,11 @@ on the production OAuth service; a static bearer must not become a hidden
 bypass around membership revocation. The service account needs only access to
 that xAI secret and the normal logging/metrics permissions.
 
-Optional **per-insider** cloud credentials (write+ principal binds their own
-Grok key or CLI material) are a **TARGET** design: they must not replace the
-owner default, must bind to OAuth `sub` (never `X-Client-ID`), and must use
-Secret Manager / KMS-class storage — never plaintext browser forms for public
-or unauthenticated callers.
+Per-insider provider credentials are not part of this cloud service: it must
+never accept, store, or proxy a caller's `XAI_API_KEY` or CLI OAuth material.
+Fairness and revocation bind to the authenticated OAuth `sub` through scoped
+access, per-principal budgets, and auditable receipts while the owner-operated
+service credential remains the only provider spend path.
 
 The gateway publishes RFC 9728 metadata without authentication. Every other
 remote route is denied unless control-origin introspection returns an active
