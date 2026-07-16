@@ -48,6 +48,13 @@ each claim you make against the actual source:
 - [ ] Any `@grok` review shown as current names this exact head SHA
 - [ ] This PR comes from the submitting agent's task branch, not shared `main`
 
+## Risk
+
+Declare exactly one risk level in the PR body: `risk: low`, `risk: medium`, or
+`risk: high`. Low/medium packets may use the authorized Cursor failover path
+when `Supervisor Approval` is green. High-risk packets require exact-head
+`Codex Approval`.
+
 ## Security
 
 - [ ] No secrets, tokens, or machine-specific absolute paths in the diff
@@ -62,5 +69,6 @@ each claim you make against the actual source:
 
 - [ ] Required CI and CODEOWNER review pass on the current head
 - [ ] Codex disposition applies to the current head
-- [ ] Required `Codex Approval` status is present on the current head
+- [ ] Required `Supervisor Approval` status is present on the current head
+- [ ] High-risk packets also have exact-head `Codex Approval`
 - [ ] Landing/merge receipt is captured by the currently operative integration path
