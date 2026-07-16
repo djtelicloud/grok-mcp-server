@@ -2452,3 +2452,425 @@ pre {
   color: var(--ink);
 }
 .console-grid[data-nav="rail"] .nav-link { justify-content: center; padding-inline: 5px; }
+
+/* ========================================================================
+   Swarm Optimizer — Pareto Playground
+   Rebuilt on the same fluid container-query system as the Control Center
+   (index.html). It reuses the shared identity tokens (tokens.css) and the
+   shared .panel-splitter directly — no page-local re-aliasing of --accent /
+   --green / --muted onto the tokens, and no viewport @media reflow. Panes
+   reflow on their OWN container width; the detail pane is a resizable, keyboard
+   -accessible splitter column; the code editor is a resize:horizontal pane
+   clamped by cqw. minmax(0,...) + min-width/height:0 keep everything on-canvas.
+   ======================================================================== */
+
+.swarm-app {
+  height: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  container: swarm-app / size;
+  overflow: hidden;
+}
+
+.swarm-topbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: clamp(12px, 2vw, 24px);
+  padding: clamp(14px, 2vw, 24px) clamp(12px, 2vw, 20px) 16px;
+  border-bottom: 1px solid var(--border);
+  background: radial-gradient(circle at 16% -40%, rgba(79, 231, 255, 0.12), transparent 42%);
+}
+
+.swarm-topbar h1 {
+  font-size: clamp(21px, 3vw, 30px);
+  line-height: 1.15;
+  margin: 4px 0 5px;
+  letter-spacing: -0.03em;
+}
+
+.swarm-topbar .product-law { max-width: 44rem; }
+
+.swarm-nav {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.swarm-nav a {
+  color: var(--ink);
+  text-decoration: none;
+  font-size: 12px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: 999px;
+  padding: 7px 12px;
+  white-space: nowrap;
+}
+
+.swarm-nav a:hover { border-color: var(--border-strong); }
+
+/* Runtime banner — same-origin session, no manual bearer field, no live
+   cross-port link (single-origin). Forge is referenced only as a locked note. */
+.runtime-banner {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  margin: clamp(10px, 1.6vw, 14px) clamp(12px, 2vw, 20px) 0;
+  padding: 11px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+}
+
+.runtime-banner .dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--ink-soft);
+  flex: 0 0 auto;
+}
+
+.runtime-banner.ready .dot { background: var(--teal); box-shadow: var(--glow-teal); }
+.runtime-banner strong { display: block; font-size: 12px; }
+.runtime-banner span { color: var(--ink-soft); font-size: 11px; }
+.runtime-banner .forge-note {
+  margin-left: auto;
+  color: var(--ink-faint);
+  font-size: 11px;
+  max-width: 22rem;
+  text-align: right;
+}
+.runtime-banner .forge-note[hidden] { display: none; }
+
+/* The resizable shell: main workspace | splitter | detail receipt. */
+.swarm-shell {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--swarm-splitter, 6px) var(--swarm-detail, 360px);
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  container: swarm-shell / inline-size;
+}
+
+.swarm-main {
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding: clamp(12px, 1.6vw, 16px) clamp(12px, 2vw, 20px);
+  display: flex;
+  flex-direction: column;
+  gap: clamp(12px, 1.4vw, 14px);
+  container: swarm-main / inline-size;
+}
+
+.swarm-detail {
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  align-self: stretch;
+  margin: clamp(12px, 1.6vw, 16px) clamp(12px, 2vw, 20px) clamp(12px, 1.6vw, 16px) 0;
+}
+
+.swarm-detail h2 { font-size: 15px; margin: 0 0 10px; }
+
+.swarm-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px;
+  box-shadow: var(--shadow);
+}
+
+.swarm-app .section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.swarm-app .section-head h2 { font-size: 17px; margin: 2px 0 0; }
+
+.source-badge {
+  color: var(--ink-soft);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 3px 8px;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.source-badge.live { color: var(--teal); border-color: var(--border-strong); }
+
+/* Form controls scoped to the swarm surface (Control Center uses *-btn-glow). */
+.swarm-app button,
+.swarm-app input,
+.swarm-app select,
+.swarm-app textarea { font: inherit; }
+
+.swarm-app input[type="text"] {
+  background: var(--surface-soft);
+  color: var(--ink);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  min-width: min(230px, 100%);
+}
+.swarm-app select {
+  background: var(--surface-soft);
+  color: var(--ink);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  max-width: 100%;
+}
+.swarm-app button {
+  background: var(--surface-soft);
+  color: var(--ink);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+.swarm-app button:hover { border-color: var(--border-strong); }
+.swarm-app button.primary {
+  background: var(--cyan);
+  border-color: var(--cyan);
+  color: #08101f;
+  font-weight: 700;
+}
+.swarm-app button:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* Paste grid: left code editor is a resize:horizontal pane clamped by cqw
+   (schema-list pattern); the analysis panel takes the remaining track. */
+.paste-grid {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px;
+}
+.paste-editor {
+  min-width: 0;
+  width: clamp(300px, 52cqw, 640px);
+  min-width: 260px;
+  max-width: min(680px, 70cqw);
+  resize: horizontal;
+  overflow: auto;
+}
+.oracle-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.oracle-grid > div { min-width: 0; }
+
+.code-input {
+  width: 100%;
+  min-height: clamp(180px, 34cqi, 300px);
+  resize: vertical;
+  background: var(--page-deep);
+  color: #dce6f3;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  tab-size: 4;
+}
+.code-input:focus { outline: 2px solid var(--border-strong); border-color: var(--cyan); }
+.oracle-input { min-height: clamp(110px, 20cqi, 200px); }
+
+.paste-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.privacy-note { color: var(--ink-soft); font-size: 11px; margin-top: 7px; }
+
+.analysis-results {
+  min-width: 0;
+  min-height: clamp(180px, 32cqi, 300px);
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 11px;
+}
+.analysis-results h3 { font-size: 13px; margin: 0 0 8px; }
+
+.function-list { display: grid; gap: 6px; margin-top: 10px; }
+.function-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) repeat(3, auto);
+  gap: 8px;
+  align-items: center;
+  padding: 7px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 11px;
+}
+.function-row code { overflow-wrap: anywhere; }
+.fn-chip { color: var(--ink-soft); white-space: nowrap; }
+
+.advanced { margin-top: 10px; border-top: 1px solid var(--border); padding-top: 9px; }
+.advanced summary { color: var(--ink-soft); cursor: pointer; font-size: 11px; user-select: none; }
+.advanced .controls { margin-top: 9px; }
+.advanced .paste-actions label { display: inline-flex; align-items: center; gap: 6px; }
+
+.controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+
+.swarm-app .scorecard {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+.swarm-app .stat {
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+.swarm-app .stat .k { color: var(--ink-soft); font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
+.swarm-app .stat .v { font-size: 16px; font-weight: 600; margin-top: 2px; overflow-wrap: anywhere; }
+
+.journeys {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(230px, 100%), 1fr));
+  gap: 9px;
+}
+.journey {
+  display: flex;
+  flex-direction: column;
+  min-height: 144px;
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 11px;
+}
+.journey.primary {
+  border-color: var(--border-strong);
+  background: linear-gradient(145deg, var(--cyan-soft), var(--surface-soft) 65%);
+}
+.journey .step { color: var(--ink-soft); font-size: 10px; letter-spacing: 0.12em; }
+.journey h3 { font-size: 13px; margin: 5px 0 3px; }
+.journey p { color: var(--ink-soft); font-size: 11px; margin: 0 0 10px; flex: 1; }
+.journey .controls { gap: 6px; }
+.journey select { min-width: 0; width: 100%; }
+
+#loadMsg { display: block; min-height: 20px; margin-top: 9px; font-size: 11px; }
+.swarm-app .muted { color: var(--ink-soft); }
+.swarm-app .err { color: var(--red); }
+
+.insight {
+  margin: 10px 0 2px;
+  padding: 9px 11px;
+  background: var(--cyan-soft);
+  border-left: 3px solid var(--cyan);
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.legend {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin: 10px 0 4px;
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+.legend span::before { content: "●"; margin-right: 5px; }
+.lg-red::before { color: var(--red); }
+.lg-orange::before { color: var(--orange); }
+.lg-gray::before { color: var(--ink-faint); }
+.lg-green::before { color: var(--teal); }
+
+.swarm-chart {
+  display: block;
+  width: 100%;
+  height: auto;
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.timeline { display: flex; gap: 10px; align-items: center; margin-top: 10px; }
+.timeline input[type="range"] { flex: 1; min-width: 0; }
+.gutter-note { font-size: 11px; margin-top: 6px; }
+
+circle.dot { cursor: pointer; outline: none; }
+circle.dot:focus { stroke: #fff; stroke-width: 2px; }
+circle.elite { filter: drop-shadow(0 0 4px var(--teal)); }
+text.gutter-more { cursor: default; }
+
+.outcome-pill {
+  display: inline-block;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 7px;
+  font-size: 10px;
+  margin-bottom: 9px;
+}
+.receipt-grid { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 5px 8px; }
+.receipt-value { overflow-wrap: anywhere; }
+.receipt-json { margin-top: 10px; }
+.receipt-json summary { color: var(--ink-soft); cursor: pointer; font-size: 11px; }
+.code-label { color: var(--ink-soft); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: -3px; }
+.diff-grid { display: grid; grid-template-columns: 1fr; gap: 8px; }
+
+.swarm-detail pre {
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px;
+  overflow: auto;
+  max-height: min(40cqb, 320px);
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.honesty {
+  color: var(--ink-soft);
+  font-size: 11px;
+  padding: 10px clamp(12px, 2vw, 20px) 18px;
+  max-width: 1280px;
+}
+.honesty code { color: var(--ink); }
+
+/* Reflow is driven by each pane's OWN container width, never the viewport.
+   Below the shell breakpoint the detail pane drops under the main column and
+   the whole shell scrolls as one; the splitter has nothing to resize. */
+/* Collapse is driven by the ancestor swarm-app container: an element cannot
+   size-query the container it declares itself, so swarm-shell must be
+   restyled from a parent context. */
+@container swarm-app (max-width: 900px) {
+  /* Stack as a flex column, not grid: a bounded-height grid distributes its
+     height across the two rows and each pane's taller content overflows onto
+     the next. A flex column sizes each pane to its own content and scrolls the
+     shell as one. */
+  .swarm-shell {
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+  }
+  .swarm-shell .panel-splitter { display: none; }
+  .swarm-main,
+  .swarm-detail {
+    height: auto;
+    min-height: 0;
+    flex: 0 0 auto;
+    overflow: visible;
+  }
+  .swarm-detail {
+    margin: 0 clamp(12px, 2vw, 20px) clamp(12px, 1.6vw, 16px);
+  }
+}
+
+@container swarm-main (max-width: 640px) {
+  .paste-grid,
+  .oracle-grid,
+  .journeys { grid-template-columns: minmax(0, 1fr); }
+  /* Stacked: the draggable editor width no longer applies. !important because
+     a native resize drag persists as an inline width that would otherwise win
+     with no handle left to undo it. */
+  .paste-editor {
+    width: auto !important;
+    min-width: 0;
+    max-width: none !important;
+    resize: none;
+  }
+}
+

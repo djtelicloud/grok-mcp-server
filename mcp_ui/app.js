@@ -1,9 +1,9 @@
-import { parseMarkdown, sanitizeHref } from "./markdown.js?v=grok-v0.6.0-r12";
+import { parseMarkdown, sanitizeHref } from "./markdown.js?v=grok-v0.6.0-r13";
 
 // Must match the <meta name="unigrok-ui-version"> baked into index.html and
 // src/version.py UI_ASSET_VERSION; a mismatch means the browser paired a
 // cached page with a different script build (the stale-skew failure class).
-const UI_ASSET_VERSION = "grok-v0.6.0-r12";
+const UI_ASSET_VERSION = "grok-v0.6.0-r13";
 
 const LAYOUT_KEY = "unigrok.mcp.console.layout.v2";
 

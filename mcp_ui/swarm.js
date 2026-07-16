@@ -4,21 +4,29 @@
 // rendering is the local/public symmetry). No frameworks, no CDN, no
 // simulated data: unmeasured candidates stack in a gutter instead of being
 // plotted at invented coordinates.
+//
+// Layout is the shared fluid container-query system (styles.css); this module
+// only owns behavior: the resizable detail splitter, the responsive/clamped
+// Pareto SVG, and the run flow that consumes a structured task_id (with a
+// list_swarm_tasks poll fallback — never a regex scrape of prose).
 
 "use strict";
 
 // Must match src/version.py UI_ASSET_VERSION and the query token on the
 // swarm.js reference in swarm.html. The sample uses the same token so a
 // revalidated page cannot pair new logic with a heuristically cached payload.
-const UI_ASSET_VERSION = "grok-v0.6.0-r12";
+const UI_ASSET_VERSION = "grok-v0.6.0-r13";
 
 const $ = (id) => document.getElementById(id);
 const SVG_NS = "http://www.w3.org/2000/svg";
+// Colors come straight from the shared tokens (tokens.css). The old page
+// re-aliased --green/--gray/--text/--muted onto tokens; this uses the real
+// token names directly so there is one palette, not two.
 const COLORS = {
   static_wall: "var(--red)",
   test_wall: "var(--orange)",
-  dominated: "var(--gray)",
-  pareto_elite: "var(--green)",
+  dominated: "var(--ink-faint)",
+  pareto_elite: "var(--teal)",
 };
 const STATUS_FORMATS = new Set(["unigrok-swarm-status-v1", "unigrok-swarm-status-v2"]);
 
@@ -29,9 +37,14 @@ const state = {
   shownGen: 1,
   playing: null,
   runtimeMode: "unknown",
+  lastChartWidth: 0,
 };
 
+const clampN = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+
 // ── MCP plumbing (same JSON-RPC shape the Control Center uses) ──────────────
+// Same-origin session: the browser sends its own cookies/credentials to /mcp.
+// There is no manual bearer-token field (removed for single-origin honesty).
 
 let rpcId = 1;
 async function mcpCall(toolName, args) {
@@ -40,8 +53,6 @@ async function mcpCall(toolName, args) {
     "Accept": "application/json, text/event-stream",
     "X-Client-ID": "mcp-ui-swarm",
   };
-  const token = $("token").value.trim();
-  if (token) headers["Authorization"] = `Bearer ${token}`;
   const res = await fetch("/mcp", {
     method: "POST",
     headers,
@@ -68,7 +79,8 @@ async function mcpCall(toolName, args) {
 // ── Loading ──────────────────────────────────────────────────────────────────
 
 async function loadLive() {
-  const taskId = $("taskId").value.trim();
+  const field = $("taskId");
+  const taskId = field ? field.value.trim() : "";
   if (!taskId) { setMsg("enter a task id", true); return; }
   setMsg("loading…");
   try {
@@ -100,6 +112,7 @@ function loadFile(file) {
 
 function setMsg(text, isError) {
   const el = $("loadMsg");
+  if (!el) return;
   el.textContent = text;
   el.className = isError ? "err" : "muted";
 }
@@ -110,12 +123,17 @@ function setPayload(payload, sourceLabel, source) {
   state.source = source;
   state.maxGen = Math.max(1, ...(payload.generations || []).map((g) => g.generation));
   state.shownGen = state.maxGen;
-  $("genSlider").max = String(state.maxGen);
-  $("genSlider").value = String(state.maxGen);
+  const slider = $("genSlider");
+  if (slider) {
+    slider.max = String(state.maxGen);
+    slider.value = String(state.maxGen);
+  }
   setMsg(`loaded (${sourceLabel})`);
   const badge = $("sourceBadge");
-  badge.textContent = source === "live" ? "live gateway data" : sourceLabel;
-  badge.className = source === "live" ? "source-badge live" : "source-badge";
+  if (badge) {
+    badge.textContent = source === "live" ? "live gateway data" : sourceLabel;
+    badge.className = source === "live" ? "source-badge live" : "source-badge";
+  }
   // Each render step is independent diagnostics; one failing panel must not
   // blank the rest of the page.
   for (const step of [renderScorecard, renderTradeoffSummary, renderChart]) {
@@ -131,8 +149,9 @@ function setPayload(payload, sourceLabel, source) {
     || candidates.find((candidate) => candidate.outcome === "pareto_elite" && candidate.code)
     || candidates.find((candidate) => candidate.code)
     || candidates[0];
+  const detail = $("detail");
   if (firstUseful) renderDetail(firstUseful);
-  else $("detail").innerHTML = '<div class="muted">No candidates have landed yet.</div>';
+  else if (detail) detail.innerHTML = '<div class="muted">No candidates have landed yet.</div>';
 }
 
 function normalizePayload(payload) {
@@ -166,6 +185,8 @@ function fmtMemoryImprovement(v) {
 }
 
 function renderScorecard() {
+  const board = $("scorecard");
+  if (!board) return;
   const p = state.payload;
   const agg = p.aggregates || {};
   const oracle = p.oracle || {};
@@ -178,21 +199,24 @@ function renderScorecard() {
       : `${(agg.feasibility_rate * 100).toFixed(0)}% of ${agg.candidates_total}`],
     ["best latency", fmtLatencyImprovement(agg.best_latency_improvement_pct)],
     ["memory impact", fmtMemoryImprovement(agg.best_memory_improvement_pct)],
+    // Budget ceiling is shown before any Run: spent / ceiling.
     ["cost to optimize", `${fmtUsd(agg.cost_to_optimize_usd)} / $${(p.budget?.budget_usd ?? 0).toFixed(2)}`],
     ["focus coverage", oracle.focus_coverage_pct == null ? "n/a" : `${oracle.focus_coverage_pct}%`],
     ["bench", `${bench.stability || "n/a"} (floor ${bench.noise_floor_pct ?? "?"}%)`],
     ["generations", String(p.budget?.generations_run ?? 0)],
   ];
-  $("scorecard").innerHTML = cards
+  board.innerHTML = cards
     .map(([k, v]) => `<div class="stat"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div></div>`)
     .join("");
 }
 
 function renderTradeoffSummary() {
+  const el = $("tradeoffSummary");
+  if (!el) return;
   const agg = state.payload?.aggregates || {};
   const latency = fmtLatencyImprovement(agg.best_latency_improvement_pct);
   const memory = fmtMemoryImprovement(agg.best_memory_improvement_pct);
-  $("tradeoffSummary").textContent = latency === "n/a"
+  el.textContent = latency === "n/a"
     ? "No benchmark-qualified candidate is available yet."
     : `Pareto readout: the fastest verified candidate is ${latency} and uses ${memory} peak memory. Neither axis is hidden.`;
 }
@@ -203,21 +227,43 @@ function esc(value) {
 }
 
 // ── Chart ────────────────────────────────────────────────────────────────────
-
-const M = { l: 70, r: 20, t: 16, b: 42 };
-const W = 860, H = 420;
-const GUTTER_X = 34; // unmeasured candidates stack here, outside the axes
+// The SVG is responsive (viewBox measured from the pane's own width) AND safe:
+// every coordinate is clamped inside the plot box, and the unmeasured "walls"
+// gutter is capped to what fits and rolled up into a "+N more" marker so no dot
+// ever marches off-canvas.
 
 function candidatesUpTo(gen) {
   return (state.payload.generations || [])
     .filter((g) => g.generation <= gen)
-    .flatMap((g) => g.candidates);
+    .flatMap((g) => g.candidates || []);
+}
+
+function chartMetrics(svg) {
+  const rect = svg.getBoundingClientRect ? svg.getBoundingClientRect() : { width: 0 };
+  const W = clampN(Math.round(rect.width) || 720, 360, 1400);
+  const H = clampN(Math.round(W * 0.52), 300, 460);
+  const compact = W < 560;
+  const M = {
+    l: compact ? 52 : 70,
+    r: compact ? 14 : 20,
+    t: 16,
+    b: compact ? 36 : 42,
+  };
+  const ticks = compact ? 3 : 4;
+  const gutterX = clampN(M.l - (compact ? 28 : 36), 14, M.l - 12);
+  return { W, H, M, ticks, gutterX, compact };
 }
 
 function renderChart() {
   const svg = $("chart");
+  if (!svg) return;
   svg.innerHTML = "";
   const p = state.payload;
+  if (!p) return;
+  const { W, H, M, ticks, gutterX, compact } = chartMetrics(svg);
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  state.lastChartWidth = W;
+
   const shown = candidatesUpTo(state.shownGen);
   const measured = shown.filter((c) => c.feasible && c.latency_ms != null);
   const walls = shown.filter((c) => !(c.feasible && c.latency_ms != null));
@@ -227,17 +273,42 @@ function renderChart() {
   const ys = measured.map((c) => c.peak_mem_bytes).concat(baseline.peak_mem_bytes ?? []);
   const [x0, x1] = pad(Math.min(...xs, Infinity), Math.max(...xs, -Infinity));
   const [y0, y1] = pad(Math.min(...ys, Infinity), Math.max(...ys, -Infinity));
-  const sx = (v) => M.l + ((v - x0) / (x1 - x0)) * (W - M.l - M.r);
-  const sy = (v) => H - M.b - ((v - y0) / (y1 - y0)) * (H - M.t - M.b);
+  const sx = (v) => clampN(M.l + ((v - x0) / (x1 - x0)) * (W - M.l - M.r), M.l, W - M.r);
+  const sy = (v) => clampN(H - M.b - ((v - y0) / (y1 - y0)) * (H - M.t - M.b), M.t, H - M.b);
 
-  drawAxes(svg, x0, x1, y0, y1, sx, sy);
+  drawAxes(svg, x0, x1, y0, y1, sx, sy, W, H, M, ticks);
 
   // Gutter stack: killed-before-measurement candidates, deterministic order.
-  walls.forEach((c, i) => {
-    dot(svg, GUTTER_X, H - M.b - 10 - i * 12, 4, COLORS[c.outcome] || "var(--red)", c, false);
+  // Capped to the plot height with a "+N more" rollup so nothing draws off the
+  // canvas; every y is clamped inside [gutterTop, gutterBottom].
+  const spacing = 12;
+  const gutterTop = M.t + 6;
+  const gutterBottom = H - M.b - 10;
+  const capacity = Math.max(1, Math.floor((gutterBottom - gutterTop) / spacing));
+  const visibleWalls = walls.length > capacity ? walls.slice(0, capacity - 1) : walls;
+  const wallR = compact ? 3 : 4;
+  visibleWalls.forEach((c, i) => {
+    const y = clampN(gutterBottom - i * spacing, gutterTop, gutterBottom);
+    dot(svg, gutterX, y, wallR, COLORS[c.outcome] || "var(--red)", c, false);
   });
+  const hiddenWalls = walls.length - visibleWalls.length;
+  if (hiddenWalls > 0) {
+    const y = clampN(gutterBottom - visibleWalls.length * spacing, gutterTop, gutterBottom);
+    const more = document.createElementNS(SVG_NS, "text");
+    more.setAttribute("x", gutterX);
+    more.setAttribute("y", y);
+    more.setAttribute("text-anchor", "middle");
+    more.setAttribute("fill", "var(--ink-soft)");
+    more.setAttribute("font-size", "10");
+    more.setAttribute("class", "gutter-more");
+    more.textContent = `+${hiddenWalls} more`;
+    const title = document.createElementNS(SVG_NS, "title");
+    title.textContent = `${hiddenWalls} more unmeasured candidate(s) killed at a wall before bench`;
+    more.appendChild(title);
+    svg.appendChild(more);
+  }
   if (walls.length) {
-    label(svg, GUTTER_X, H - M.b + 16, "walls", "middle");
+    label(svg, gutterX, H - M.b + 16, "walls", "middle");
   }
 
   // Baseline star.
@@ -246,7 +317,7 @@ function renderChart() {
     el.setAttribute("x", sx(baseline.latency_ms));
     el.setAttribute("y", sy(baseline.peak_mem_bytes) + 5);
     el.setAttribute("text-anchor", "middle");
-    el.setAttribute("fill", "var(--text)");
+    el.setAttribute("fill", "var(--ink)");
     el.setAttribute("font-size", "16");
     el.textContent = "★";
     svg.appendChild(el);
@@ -260,7 +331,7 @@ function renderChart() {
     const line = document.createElementNS(SVG_NS, "polyline");
     line.setAttribute("points", elites.map((c) => `${sx(c.latency_ms)},${sy(c.peak_mem_bytes)}`).join(" "));
     line.setAttribute("fill", "none");
-    line.setAttribute("stroke", "var(--green)");
+    line.setAttribute("stroke", "var(--teal)");
     line.setAttribute("stroke-width", "1.5");
     line.setAttribute("stroke-dasharray", "4 3");
     svg.appendChild(line);
@@ -270,14 +341,17 @@ function renderChart() {
   measured
     .sort((a, b) => (a.outcome === "pareto_elite") - (b.outcome === "pareto_elite"))
     .forEach((c) => {
-      const r = 4 + Math.min(6, Math.sqrt((c.diff_bytes || 0) / 12));
+      const r = clampN(4 + Math.min(6, Math.sqrt((c.diff_bytes || 0) / 12)), 3, compact ? 8 : 10);
       dot(svg, sx(c.latency_ms), sy(c.peak_mem_bytes), r,
-          COLORS[c.outcome] || "var(--gray)", c, c.outcome === "pareto_elite");
+          COLORS[c.outcome] || "var(--ink-faint)", c, c.outcome === "pareto_elite");
     });
 
-  const newCandidates = (p.generations || [])
-    .find((generation) => generation.generation === state.shownGen)?.candidates?.length || 0;
-  $("genLabel").textContent = `generation ${state.shownGen}/${state.maxGen} · ${newCandidates ? `${newCandidates} new` : "no new candidates"}`;
+  const genLabel = $("genLabel");
+  if (genLabel) {
+    const newCandidates = (p.generations || [])
+      .find((generation) => generation.generation === state.shownGen)?.candidates?.length || 0;
+    genLabel.textContent = `generation ${state.shownGen}/${state.maxGen} · ${newCandidates ? `${newCandidates} new` : "no new candidates"}`;
+  }
 }
 
 function pad(lo, hi) {
@@ -287,7 +361,7 @@ function pad(lo, hi) {
   return [Math.max(0, lo - span * 0.08), hi + span * 0.08];
 }
 
-function drawAxes(svg, x0, x1, y0, y1, sx, sy) {
+function drawAxes(svg, x0, x1, y0, y1, sx, sy, W, H, M, ticks) {
   const axis = (x1p, y1p, x2p, y2p) => {
     const l = document.createElementNS(SVG_NS, "line");
     l.setAttribute("x1", x1p); l.setAttribute("y1", y1p);
@@ -297,9 +371,9 @@ function drawAxes(svg, x0, x1, y0, y1, sx, sy) {
   };
   axis(M.l, H - M.b, W - M.r, H - M.b);
   axis(M.l, M.t, M.l, H - M.b);
-  for (let i = 0; i <= 4; i++) {
-    const xv = x0 + ((x1 - x0) * i) / 4;
-    const yv = y0 + ((y1 - y0) * i) / 4;
+  for (let i = 0; i <= ticks; i++) {
+    const xv = x0 + ((x1 - x0) * i) / ticks;
+    const yv = y0 + ((y1 - y0) * i) / ticks;
     label(svg, sx(xv), H - M.b + 16, xv.toFixed(2), "middle");
     label(svg, M.l - 8, sy(yv) + 4, humanBytes(yv), "end");
   }
@@ -307,7 +381,7 @@ function drawAxes(svg, x0, x1, y0, y1, sx, sy) {
   const yl = document.createElementNS(SVG_NS, "text");
   yl.setAttribute("transform", `translate(14 ${(M.t + H - M.b) / 2}) rotate(-90)`);
   yl.setAttribute("text-anchor", "middle");
-  yl.setAttribute("fill", "var(--muted)");
+  yl.setAttribute("fill", "var(--ink-soft)");
   yl.setAttribute("font-size", "11");
   yl.textContent = "peak_mem_bytes (lower is better)";
   svg.appendChild(yl);
@@ -317,7 +391,7 @@ function label(svg, x, y, text, anchor) {
   const el = document.createElementNS(SVG_NS, "text");
   el.setAttribute("x", x); el.setAttribute("y", y);
   el.setAttribute("text-anchor", anchor);
-  el.setAttribute("fill", "var(--muted)");
+  el.setAttribute("fill", "var(--ink-soft)");
   el.setAttribute("font-size", "10");
   el.textContent = text;
   svg.appendChild(el);
@@ -354,8 +428,13 @@ function dot(svg, x, y, r, color, candidate, elite) {
 }
 
 // ── Detail panel ─────────────────────────────────────────────────────────────
+// Measured-only candidate receipts: fields the stack did not measure read
+// "not measured", never an invented number. All values escaped; no raw model
+// output is ever assigned as innerHTML.
 
 function renderDetail(candidate) {
+  const host = $("detail");
+  if (!host) return;
   const p = state.payload;
   const rows = [
     ["candidate", candidate.candidate_id],
@@ -406,67 +485,138 @@ function renderDetail(candidate) {
                <span class="muted" style="font-size:11px"> ${esc(reason)}</span>
              </div><div id="applyOut" class="muted" style="margin-top:6px;font-size:12px"></div>`;
   }
-  $("detail").innerHTML = html;
+  host.innerHTML = html;
   const copyBtn = $("copyBtn");
   if (copyBtn) {
     copyBtn.addEventListener("click", async () => {
+      const out = $("applyOut");
       try {
         await navigator.clipboard.writeText(candidate.code);
-        $("applyOut").textContent = "Best verified code copied exactly.";
+        if (out) out.textContent = "Best verified code copied exactly.";
       } catch (_error) {
-        $("applyOut").textContent = "Clipboard access was blocked; select the code above and copy it.";
+        if (out) out.textContent = "Clipboard access was blocked; select the code above and copy it.";
       }
     });
   }
   const applyBtn = $("applyBtn");
   if (applyBtn && !applyBtn.disabled) {
     applyBtn.addEventListener("click", async () => {
+      // Never auto-commit a winner: apply re-runs the tests and reverts the
+      // file on failure, and only after an explicit confirmation.
       if (!window.confirm(
         `Apply ${candidate.candidate_id} to ${p.target?.path}? Tests re-run before it lands; the file reverts on failure.`
       )) return;
       applyBtn.disabled = true;
+      const out = $("applyOut");
       try {
-        $("applyOut").textContent = await mcpCall("apply_swarm_winner", {
+        const result = await mcpCall("apply_swarm_winner", {
           candidate_id: candidate.candidate_id,
         });
+        if (out) out.textContent = result;
       } catch (err) {
-        $("applyOut").textContent = String(err.message || err);
+        if (out) out.textContent = String(err.message || err);
       }
     });
   }
+}
+
+// ── Detail splitter (keyboard-accessible, right-docked, clamped) ─────────────
+// Mirrors the Control Center's inspector splitter: the detail pane is right-
+// docked, so dragging left grows it. Width is clamped in JS (the CSS max is
+// cqw-relative) and written to --swarm-detail on the shell.
+
+function setupDetailSplitter() {
+  const splitter = $("detailSplitter");
+  const shell = document.querySelector(".swarm-shell");
+  if (!splitter || !shell) return;
+  const MIN = 280;
+  const HARD_MAX = 560;
+  const maxFor = () => {
+    const shellW = Math.round(shell.getBoundingClientRect().width) || (HARD_MAX * 2);
+    return Math.min(HARD_MAX, Math.max(MIN, Math.round(shellW * 0.6)));
+  };
+  const current = () => {
+    const raw = parseInt(getComputedStyle(shell).getPropertyValue("--swarm-detail"), 10);
+    return Number.isFinite(raw) ? raw : 360;
+  };
+  const setWidth = (w) => {
+    const width = clampN(Math.round(w), MIN, maxFor());
+    shell.style.setProperty("--swarm-detail", `${width}px`);
+    splitter.setAttribute("aria-valuenow", String(width));
+  };
+  splitter.addEventListener("pointerdown", (event) => {
+    const startX = event.clientX;
+    const startWidth = current();
+    splitter.setPointerCapture(event.pointerId);
+    splitter.classList.add("dragging");
+    const move = (nextEvent) => setWidth(startWidth - (nextEvent.clientX - startX));
+    const end = () => {
+      splitter.classList.remove("dragging");
+      splitter.removeEventListener("pointermove", move);
+    };
+    splitter.addEventListener("pointermove", move);
+    splitter.addEventListener("pointerup", end, { once: true });
+    splitter.addEventListener("pointercancel", end, { once: true });
+  });
+  splitter.addEventListener("keydown", (event) => {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    const step = event.shiftKey ? 24 : 8;
+    // ArrowLeft grows the right-docked pane.
+    setWidth(current() + (event.key === "ArrowLeft" ? step : -step));
+  });
+}
+
+function observeChartResize() {
+  const svg = $("chart");
+  if (!svg || typeof ResizeObserver === "undefined") return;
+  let frame = 0;
+  const observer = new ResizeObserver((entries) => {
+    if (!state.payload) return;
+    const width = Math.round(entries[0]?.contentRect?.width ?? 0);
+    if (Math.abs(width - state.lastChartWidth) < 2) return;
+    cancelAnimationFrame(frame);
+    frame = requestAnimationFrame(() => {
+      try { renderChart(); } catch (err) { console.error("renderChart failed:", err); }
+    });
+  });
+  observer.observe(svg);
 }
 
 // ── Timeline / play ──────────────────────────────────────────────────────────
 
 function stopPlaying() {
   if (state.playing) { clearInterval(state.playing); state.playing = null; }
-  $("playBtn").textContent = "▶ Play";
+  const btn = $("playBtn");
+  if (btn) btn.textContent = "▶ Play";
 }
 
-$("playBtn").addEventListener("click", () => {
+$("playBtn")?.addEventListener("click", () => {
   if (!state.payload) return;
   if (state.playing) { stopPlaying(); return; }
   state.shownGen = 0;
-  $("playBtn").textContent = "⏸ Stop";
+  const btn = $("playBtn");
+  if (btn) btn.textContent = "⏸ Stop";
   state.playing = setInterval(() => {
     state.shownGen = Math.min(state.maxGen, state.shownGen + 1);
-    $("genSlider").value = String(state.shownGen);
+    const slider = $("genSlider");
+    if (slider) slider.value = String(state.shownGen);
     renderChart();
     if (state.shownGen >= state.maxGen) stopPlaying();
   }, 650);
 });
 
-$("genSlider").addEventListener("input", (event) => {
+$("genSlider")?.addEventListener("input", (event) => {
   if (!state.payload) return;
   stopPlaying();
   state.shownGen = Number(event.target.value);
   renderChart();
 });
 
-$("loadBtn").addEventListener("click", loadLive);
-$("fileBtn").addEventListener("click", () => $("fileInput").click());
-$("taskId").addEventListener("keydown", (e) => { if (e.key === "Enter") loadLive(); });
-$("fileInput").addEventListener("change", (e) => {
+$("loadBtn")?.addEventListener("click", loadLive);
+$("fileBtn")?.addEventListener("click", () => $("fileInput")?.click());
+$("taskId")?.addEventListener("keydown", (e) => { if (e.key === "Enter") loadLive(); });
+$("fileInput")?.addEventListener("change", (e) => {
   if (e.target.files && e.target.files[0]) loadFile(e.target.files[0]);
 });
 
@@ -500,6 +650,72 @@ async function loadSample() {
   } catch (err) {
     setMsg(`sample unavailable: ${err.message || err}`, true);
   }
+}
+
+// ── Structured task_id resolution (no regex-scrape of prose) ─────────────────
+// A run tool's response may already carry a structured task_id (the companion
+// change adds it). If not, we fall back to polling list_swarm_tasks for a
+// task_id that did not exist before the run. We NEVER pull a task id out of a
+// human-readable sentence, so re-wording a message can't silently break Run.
+
+function isTaskId(candidate) {
+  return typeof candidate === "string" && /^[0-9a-f]{8,}$/i.test(candidate.trim());
+}
+
+function parseStructuredTaskId(output) {
+  if (typeof output !== "string") return null;
+  // Preferred: the wording-independent launch receipt the swarm tools append
+  // as an HTML-comment trailer (unigrok-swarm-launch-v1). Deterministic parse,
+  // never regex over human prose.
+  const receipt = output.match(/<!--unigrok-swarm-launch-v1 (\{.*?\})-->/);
+  if (receipt) {
+    try {
+      const payload = JSON.parse(receipt[1]);
+      const id = payload && (payload.task_id ?? payload.taskId);
+      if (isTaskId(id)) return id.trim();
+    } catch (_error) {
+      /* fall through to the bare-JSON shape */
+    }
+  }
+  // Fallback: a bare-JSON tool response carrying task_id directly.
+  const trimmed = output.trim();
+  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return null;
+  try {
+    const obj = JSON.parse(trimmed);
+    const candidate = obj && (obj.task_id ?? obj.taskId);
+    if (isTaskId(candidate)) return candidate.trim();
+  } catch (_error) {
+    return null;
+  }
+  return null;
+}
+
+async function snapshotTaskIds() {
+  try {
+    const raw = await mcpCall("list_swarm_tasks", { limit: 50 });
+    const tasks = JSON.parse(raw);
+    return new Set((Array.isArray(tasks) ? tasks : []).map((t) => t.task_id));
+  } catch (_error) {
+    return new Set();
+  }
+}
+
+async function resolveTaskId(output, priorIds) {
+  const structured = parseStructuredTaskId(output);
+  if (structured) return structured;
+  // Poll the task list for a run that appeared after we started.
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      const raw = await mcpCall("list_swarm_tasks", { limit: 50 });
+      const tasks = JSON.parse(raw);
+      const fresh = (Array.isArray(tasks) ? tasks : []).find((t) => t.task_id && !priorIds.has(t.task_id));
+      if (fresh) return fresh.task_id;
+    } catch (_error) {
+      // fall through and retry
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+  }
+  return null;
 }
 
 // ── Paste analysis ──────────────────────────────────────────────────────────
@@ -554,10 +770,14 @@ function browserAnalyzePython(code) {
 
 function renderAnalysis(result, exact) {
   const badge = $("analysisBadge");
-  badge.textContent = exact ? "exact local AST" : "client-side preview";
-  badge.className = exact ? "source-badge live" : "source-badge";
+  if (badge) {
+    badge.textContent = exact ? "exact local AST" : "client-side preview";
+    badge.className = exact ? "source-badge live" : "source-badge";
+  }
+  const panel = $("analysisResults");
+  if (!panel) return;
   if (result.error) {
-    $("analysisResults").innerHTML = `<h3>Could not analyze</h3><div class="err">${esc(result.error)}</div>`;
+    panel.innerHTML = `<h3>Could not analyze</h3><div class="err">${esc(result.error)}</div>`;
     return;
   }
   // Only a real parser failure is a parse error. The approximate browser
@@ -565,47 +785,55 @@ function renderAnalysis(result, exact) {
   // must not be misreported as invalid Python.
   if (!result.parse_ok && result.parse_error) {
     const error = result.parse_error;
-    $("analysisResults").innerHTML = `<h3>Fix the parse error first</h3><div class="err">Line ${esc(error.line ?? "?")}: ${esc(error.message || "invalid Python")}</div>`;
+    panel.innerHTML = `<h3>Fix the parse error first</h3><div class="err">Line ${esc(error.line ?? "?")}: ${esc(error.message || "invalid Python")}</div>`;
     return;
   }
   const rows = (result.functions || []).map((fn) => `
     <div class="function-row">
       <code>${esc(fn.focus_node)}</code>
-      <span class="metric-chip">${esc(fn.loc)} LOC</span>
-      <span class="metric-chip">CC ${esc(fn.cyclomatic_complexity)}</span>
-      <span class="metric-chip">nest ${esc(fn.max_nesting)}</span>
+      <span class="fn-chip">${esc(fn.loc)} LOC</span>
+      <span class="fn-chip">CC ${esc(fn.cyclomatic_complexity)}</span>
+      <span class="fn-chip">nest ${esc(fn.max_nesting)}</span>
     </div>`).join("");
   const ruffCount = Object.values(result.ruff?.counts_by_code || {})
     .reduce((sum, value) => sum + Number(value || 0), 0);
-  $("analysisResults").innerHTML = `
+  panel.innerHTML = `
     <h3>${(result.functions || []).length} function${(result.functions || []).length === 1 ? "" : "s"} found</h3>
     <div class="muted">${esc(result.loc ?? 0)} source lines · ${esc(result.bytes ?? 0)} bytes${exact ? ` · ${ruffCount} Ruff finding${ruffCount === 1 ? "" : "s"}` : " · approximate browser metrics"}</div>
     ${result.secret_warning ? '<div class="err" style="margin-top:7px">Secret-like text detected. Remove it before export or search.</div>' : ""}
     <div class="function-list">${rows || `<div class="muted">${exact ? "No functions found." : "No top-level functions detected by the approximate browser scanner."}</div>`}</div>
     <div class="privacy-note">Search blockers: ${esc((result.searchability?.blockers || []).join(", ") || "none")}</div>`;
   const picker = $("focusPicker");
-  picker.replaceChildren(new Option(
-    (result.functions || []).length ? "choose a function…" : "no functions found", ""
-  ));
-  for (const fn of result.functions || []) {
-    picker.appendChild(new Option(
-      `${fn.focus_node} · CC ${fn.cyclomatic_complexity} · ${fn.loc} LOC`, fn.focus_node
+  if (picker) {
+    picker.replaceChildren(new Option(
+      (result.functions || []).length ? "choose a function…" : "no functions found", ""
     ));
+    for (const fn of result.functions || []) {
+      picker.appendChild(new Option(
+        `${fn.focus_node} · CC ${fn.cyclomatic_complexity} · ${fn.loc} LOC`, fn.focus_node
+      ));
+    }
+    if ((result.functions || []).length) picker.value = result.functions[0].focus_node;
   }
-  if ((result.functions || []).length) picker.value = result.functions[0].focus_node;
   const canSearch = exact && state.runtimeMode === "contributor" && (result.functions || []).length > 0;
-  $("runPasteBtn").disabled = !canSearch;
-  $("pasteRunMsg").textContent = canSearch
-    ? "Tests and benchmark are required; every winner is re-measured."
-    : "Verified execution is available only in contributor Forge after exact analysis.";
+  const runBtn = $("runPasteBtn");
+  if (runBtn) runBtn.disabled = !canSearch;
+  const runMsg = $("pasteRunMsg");
+  if (runMsg) {
+    runMsg.textContent = canSearch
+      ? "Tests and benchmark are required; every winner is re-measured."
+      : "Verified execution is available only in contributor Forge after exact analysis.";
+  }
 }
 
 async function analyzePastedCode() {
-  const code = $("codeInput").value;
+  const input = $("codeInput");
+  const msg = $("analysisMsg");
+  const code = input ? input.value : "";
   const size = new TextEncoder().encode(code).length;
-  if (!code.trim()) { $("analysisMsg").textContent = "paste Python first"; return; }
-  if (size > 256 * 1024) { $("analysisMsg").textContent = "code exceeds 256 KiB"; return; }
-  $("analysisMsg").textContent = "analyzing…";
+  if (!code.trim()) { if (msg) msg.textContent = "paste Python first"; return; }
+  if (size > 256 * 1024) { if (msg) msg.textContent = "code exceeds 256 KiB"; return; }
+  if (msg) msg.textContent = "analyzing…";
   let result;
   let exact = false;
   // "not uploaded" may only be claimed when no gateway call was attempted;
@@ -626,27 +854,31 @@ async function analyzePastedCode() {
     usedBrowserFallback = true;
   }
   renderAnalysis(result, exact);
+  if (!msg) return;
   if (exact) {
-    $("analysisMsg").textContent = "analyzed locally without a model call";
+    msg.textContent = "analyzed locally without a model call";
   } else if (usedBrowserFallback && submittedToGateway) {
-    $("analysisMsg").textContent = "gateway unreachable; showing approximate browser metrics (the paste was submitted to the local gateway)";
+    msg.textContent = "gateway unreachable; showing approximate browser metrics (the paste was submitted to the local gateway)";
   } else if (submittedToGateway) {
     // Gateway returned an error object — the panel shows it; no browser metrics.
-    $("analysisMsg").textContent = "gateway analysis failed — see the error above (the paste was submitted to the local gateway)";
+    msg.textContent = "gateway analysis failed — see the error above (the paste was submitted to the local gateway)";
   } else {
-    $("analysisMsg").textContent = "analyzed in this browser; source was not uploaded";
+    msg.textContent = "analyzed in this browser; source was not uploaded";
   }
 }
 
-$("analyzeBtn").addEventListener("click", analyzePastedCode);
-$("pasteExampleBtn").addEventListener("click", () => {
-  $("codeInput").value = SLOW_EXAMPLE;
-  $("testInput").value = `from module_under_test import deduplicate
+$("analyzeBtn")?.addEventListener("click", analyzePastedCode);
+$("pasteExampleBtn")?.addEventListener("click", () => {
+  const code = $("codeInput");
+  const test = $("testInput");
+  const bench = $("benchInput");
+  if (code) code.value = SLOW_EXAMPLE;
+  if (test) test.value = `from module_under_test import deduplicate
 
 def test_order_and_duplicates():
     assert deduplicate([3, 1, 3, 2, 1]) == [3, 1, 2]
 `;
-  $("benchInput").value = `import json
+  if (bench) bench.value = `import json
 import time
 import tracemalloc
 from module_under_test import deduplicate
@@ -667,46 +899,57 @@ print("SWARM_BENCH " + json.dumps({"latency_ms": latency_ms, "peak_mem_bytes": p
 
 async function runPasteSwarm() {
   const button = $("runPasteBtn");
+  const runMsg = $("pasteRunMsg");
   const args = {
-    code: $("codeInput").value,
-    test_code: $("testInput").value,
-    bench_code: $("benchInput").value,
-    focus_node: $("focusPicker").value,
-    search_strategy: $("strategyPicker").value,
-    primary_goal: $("goalPicker").value,
+    code: $("codeInput")?.value ?? "",
+    test_code: $("testInput")?.value ?? "",
+    bench_code: $("benchInput")?.value ?? "",
+    focus_node: $("focusPicker")?.value ?? "",
+    search_strategy: $("strategyPicker")?.value ?? "",
+    primary_goal: $("goalPicker")?.value ?? "",
   };
   if (!args.focus_node || !args.test_code.trim() || !args.bench_code.trim()) {
-    $("pasteRunMsg").textContent = "Choose a function and provide both tests and benchmark.";
+    if (runMsg) runMsg.textContent = "Choose a function and provide both tests and benchmark.";
     return;
   }
-  button.disabled = true;
-  $("pasteRunMsg").textContent = "materializing a private local scratch task…";
+  if (button) button.disabled = true;
+  if (runMsg) runMsg.textContent = "materializing a private local scratch task…";
   try {
+    const priorIds = await snapshotTaskIds();
     const output = await mcpCall("start_paste_swarm", args);
-    const match = output.match(/`([0-9a-f]{16,})`/);
-    if (!match) { $("pasteRunMsg").textContent = output.replace(/\s+/g, " ").trim(); return; }
-    $("taskId").value = match[1];
-    $("pasteRunMsg").textContent = "verified swarm running…";
-    const final = await pollUntilDone(match[1]);
-    if (final && final.status === "completed") {
-      $("pasteRunMsg").textContent = "Search complete. Copy Best Verified Code from the receipt.";
-    } else if (final) {
-      $("pasteRunMsg").textContent = `Swarm ended with status ${final.status} — inspect the receipt before trusting any candidate.`;
-    } else {
-      $("pasteRunMsg").textContent = "Run did not complete — see the run status message for details.";
+    const taskId = await resolveTaskId(output, priorIds);
+    if (!taskId) {
+      // No structured id and nothing new in the task list: surface the tool's
+      // own words verbatim (a gate refusal or an error is instructive).
+      if (runMsg) runMsg.textContent = output.replace(/\s+/g, " ").trim();
+      return;
+    }
+    const idField = $("taskId");
+    if (idField) idField.value = taskId;
+    if (runMsg) runMsg.textContent = "verified swarm running…";
+    const final = await pollUntilDone(taskId);
+    if (runMsg) {
+      if (final && final.status === "completed") {
+        runMsg.textContent = "Search complete. Copy Best Verified Code from the receipt.";
+      } else if (final) {
+        runMsg.textContent = `Swarm ended with status ${final.status} — inspect the receipt before trusting any candidate.`;
+      } else {
+        runMsg.textContent = "Run did not complete — see the run status message for details.";
+      }
     }
     refreshTaskPicker();
   } catch (error) {
-    $("pasteRunMsg").textContent = String(error.message || error);
+    if (runMsg) runMsg.textContent = String(error.message || error);
   } finally {
-    button.disabled = state.runtimeMode !== "contributor";
+    if (button) button.disabled = state.runtimeMode !== "contributor";
   }
 }
 
-$("runPasteBtn").addEventListener("click", runPasteSwarm);
+$("runPasteBtn")?.addEventListener("click", runPasteSwarm);
 
 async function refreshTaskPicker() {
   const picker = $("taskPicker");
+  if (!picker) return;
   if (state.runtimeMode !== "contributor") {
     picker.replaceChildren(new Option("live runs are available in contributor Forge", ""));
     picker.disabled = true;
@@ -733,65 +976,75 @@ async function refreshTaskPicker() {
 
 async function discoverRuntime() {
   const banner = $("runtimeBanner");
+  const title = $("runtimeTitle");
+  const copy = $("runtimeCopy");
+  const forgeNote = $("forgeNote");
+  const demoBtn = $("demoBtn");
+  const refreshBtn = $("refreshTasksBtn");
+  const demoHint = $("demoHint");
   try {
     const response = await fetch("/runtimez", { headers: { Accept: "application/json" } });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const runtime = await response.json();
     state.runtimeMode = runtime.service?.mode || "unknown";
-    banner.classList.add("ready");
+    banner?.classList.add("ready");
     if (state.runtimeMode === "contributor" && runtime.service?.workspace_attached) {
-      $("runtimeTitle").textContent = "Contributor Forge connected";
-      $("runtimeCopy").textContent = "Live task history and real demo runs are available from the attached workspace.";
-      $("forgeLink").hidden = true;
-      $("demoBtn").disabled = false;
-      $("refreshTasksBtn").disabled = false;
-      $("demoHint").innerHTML = "Runs against the attached golden target. If Swarm is off, the exact gate instruction appears below.";
+      if (title) title.textContent = "Contributor Forge connected";
+      if (copy) copy.textContent = "Live task history and real demo runs are available from the attached workspace.";
+      if (forgeNote) forgeNote.hidden = true;
+      if (demoBtn) demoBtn.disabled = false;
+      if (refreshBtn) refreshBtn.disabled = false;
+      if (demoHint) demoHint.textContent = "Runs against the attached golden target. If Swarm is off, the exact gate instruction appears below.";
     } else {
-      $("runtimeTitle").textContent = "Stable gateway connected — exploration mode";
-      $("runtimeCopy").textContent = "The recorded tour works here. Live Swarm tools stay isolated in contributor Forge on port 4766.";
-      $("demoBtn").disabled = true;
-      $("refreshTasksBtn").disabled = true;
-      $("demoHint").textContent = "Live execution is intentionally unavailable on the workspace-neutral stable service.";
-      if (["127.0.0.1", "localhost"].includes(window.location.hostname)) {
-        $("forgeLink").href = `${window.location.protocol}//${window.location.hostname}:4766/ui/swarm.html`;
-        $("forgeLink").hidden = false;
-      }
+      if (title) title.textContent = "Stable gateway connected — exploration mode";
+      if (copy) copy.textContent = "The recorded tour works here. Live Swarm tools stay isolated in contributor Forge.";
+      if (demoBtn) demoBtn.disabled = true;
+      if (refreshBtn) refreshBtn.disabled = true;
+      if (demoHint) demoHint.textContent = "Live execution is intentionally unavailable on the workspace-neutral stable service.";
+      // Single-origin: reference Forge as a visible-but-locked note only. No
+      // live cross-port link is ever emitted from this page.
+      if (forgeNote) forgeNote.hidden = false;
     }
   } catch (err) {
     const isLocal = ["127.0.0.1", "localhost", "::1"].includes(window.location.hostname);
     state.runtimeMode = isLocal ? "unknown" : "public";
-    $("runtimeTitle").textContent = isLocal
-      ? "Gateway capability check unavailable"
-      : "Public showcase — client-side analysis only";
-    $("runtimeCopy").textContent = isLocal
-      ? "The recorded tour still works; live controls may not."
-      : "Pasted source stays in this browser. Verified search and Apply require the local contributor Forge.";
-    $("demoBtn").disabled = true;
-    $("refreshTasksBtn").disabled = true;
+    if (title) {
+      title.textContent = isLocal
+        ? "Gateway capability check unavailable"
+        : "Public showcase — client-side analysis only";
+    }
+    if (copy) {
+      copy.textContent = isLocal
+        ? "The recorded tour still works; live controls may not."
+        : "Pasted source stays in this browser. Verified search and Apply require the local contributor Forge.";
+    }
+    if (demoBtn) demoBtn.disabled = true;
+    if (refreshBtn) refreshBtn.disabled = true;
   }
 }
 
 async function runGoldenDemo() {
   const btn = $("demoBtn");
-  btn.disabled = true;
+  if (btn) btn.disabled = true;
   setMsg("starting demo swarm on the golden O(N²) dedup target…");
   try {
+    const priorIds = await snapshotTaskIds();
     const out = await mcpCall("start_code_swarm", GOLDEN_DEMO);
-    const match = out.match(/`([0-9a-f]{16,})`/);
-    if (!match) {
+    const taskId = await resolveTaskId(out, priorIds);
+    if (!taskId) {
       // Refusals (mode off, stable service, no workspace) are instructive —
       // show the tool's own words verbatim.
       setMsg(out.replace(/\s+/g, " ").trim(), true);
       return;
     }
-    const taskId = match[1];
-    $("taskId").value = taskId;
+    const idField = $("taskId");
+    if (idField) idField.value = taskId;
     await pollUntilDone(taskId);
     refreshTaskPicker();
   } catch (err) {
     setMsg(String(err.message || err), true);
   } finally {
-    btn.disabled = false;
+    if (btn) btn.disabled = false;
   }
 }
 
@@ -817,16 +1070,19 @@ async function pollUntilDone(taskId, intervalMs = 3000, maxPolls = 200) {
   return null;
 }
 
-$("sampleBtn").addEventListener("click", loadSample);
-$("demoBtn").addEventListener("click", runGoldenDemo);
-$("refreshTasksBtn").addEventListener("click", refreshTaskPicker);
-$("taskPicker").addEventListener("change", (event) => {
+$("sampleBtn")?.addEventListener("click", loadSample);
+$("demoBtn")?.addEventListener("click", runGoldenDemo);
+$("refreshTasksBtn")?.addEventListener("click", refreshTaskPicker);
+$("taskPicker")?.addEventListener("change", (event) => {
   if (!event.target.value) return;
-  $("taskId").value = event.target.value;
+  const idField = $("taskId");
+  if (idField) idField.value = event.target.value;
   loadLive();
 });
 
 async function bootstrap() {
+  setupDetailSplitter();
+  observeChartResize();
   await loadSample();
   await discoverRuntime();
   await refreshTaskPicker();

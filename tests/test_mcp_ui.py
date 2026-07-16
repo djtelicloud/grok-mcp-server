@@ -47,9 +47,9 @@ def test_mcp_ui_static_files_are_served(monkeypatch):
     assert index.status_code == 200
     assert "<title>UniGrok Gateway Console v0.6.0</title>" in index.text
     assert '<span class="version-badge">v0.6.0</span>' in index.text
-    assert 'script type="module" src="./app.js?v=grok-v0.6.0-r12"' in index.text
-    assert '<link rel="stylesheet" href="./styles.css?v=grok-v0.6.0-r12" />' in index.text
-    assert '<link rel="stylesheet" href="./tokens.css?v=grok-v0.6.0-r12" />' in index.text
+    assert 'script type="module" src="./app.js?v=grok-v0.6.0-r13"' in index.text
+    assert '<link rel="stylesheet" href="./styles.css?v=grok-v0.6.0-r13" />' in index.text
+    assert '<link rel="stylesheet" href="./tokens.css?v=grok-v0.6.0-r13" />' in index.text
     assert "Console" in index.text
     assert 'id="surfaceModeBadge"' in index.text
     assert 'id="tab-btn-schemas"' not in index.text
@@ -269,7 +269,24 @@ def test_mcp_ui_swarm_playground_is_served_and_honest(monkeypatch):
     assert "nsquared_dedup" in script.text  # the golden demo target
     assert 'fetch("/runtimez"' in script.text
     assert "Stable gateway connected" in script.text
-    assert ":4766/ui/swarm.html" in script.text
+    # Single-origin: the hardcoded cross-port :4766 Forge link is retired. Forge
+    # is referenced only as a visible-but-locked note, never a live link.
+    assert "4766" not in script.text
+    assert "4766" not in page.text
+    assert 'id="forgeNote"' in page.text
+    # The manual bearer-token field is gone (same-origin session).
+    assert 'id="token"' not in page.text
+    assert 'type="password"' not in page.text
+    assert '$("token")' not in script.text
+    # Run flow consumes a structured task_id, else polls list_swarm_tasks — it
+    # never scrapes a task id out of prose with a backtick regex.
+    assert "parseStructuredTaskId" in script.text
+    assert "resolveTaskId" in script.text
+    assert "match(/`" not in script.text
+    # Shared fluid system: the bespoke inline stylesheet is deleted; the page
+    # links the shared styles.css and reuses the shared .panel-splitter.
+    assert "<style>" not in page.text
+    assert 'href="./styles.css' in page.text
     assert "await loadSample()" in script.text  # useful content, not empty boxes, on arrival
     assert "rpc.result?.isError" in script.text
     assert 'c.setAttribute("tabindex", "0")' in script.text
@@ -466,7 +483,7 @@ def test_mcp_ui_markdown_renderer_is_shared_and_escape_first():
     assert "\\u000E-\\u001F" in renderer.text
     # app.js imports the shared renderer at the current cache-bust version and
     # no longer defines its own.
-    assert 'from "./markdown.js?v=grok-v0.6.0-r12"' in script.text
+    assert 'from "./markdown.js?v=grok-v0.6.0-r13"' in script.text
     assert "import { parseMarkdown" in script.text
     assert "function parseMarkdown" not in script.text
     assert "renderMarkdownInto" in script.text
@@ -632,6 +649,9 @@ def test_mcp_ui_asset_version_is_single_sourced():
     assert f'const UI_ASSET_VERSION = "{UI_ASSET_VERSION}"' in script
     assert f'from "./markdown.js?v={UI_ASSET_VERSION}"' in script
     assert f'href="./tokens.css?v={UI_ASSET_VERSION}"' in swarm
+    # The swarm page now also links the shared styles.css (its bespoke inline
+    # stylesheet was retired); that pin must move in lockstep too.
+    assert f'href="./styles.css?v={UI_ASSET_VERSION}"' in swarm
     assert f'src="./swarm.js?v={UI_ASSET_VERSION}"' in swarm
     assert f'const UI_ASSET_VERSION = "{UI_ASSET_VERSION}"' in swarm_script
     assert (
@@ -719,6 +739,41 @@ def test_mcp_ui_reflow_is_container_driven():
     assert "@media (max-width: 768px)" not in styles
     # Fixed sidebar columns became user-resizable with clamps.
     assert "resize: horizontal" in styles
+
+
+def test_mcp_ui_swarm_reflow_is_container_driven():
+    """The swarm page reflows on its OWN container widths (swarm-shell /
+    swarm-main), not the viewport: the brittle single @media(max-width:900px)
+    plus the fixed 380px detail sidebar and vw/vh pane sizing are retired in
+    favor of container queries, a keyboard-accessible resizable .panel-splitter
+    detail pane, and a resize:horizontal editor clamped by cqw."""
+    with TestClient(create_app(), base_url="http://localhost:8080") as client:
+        styles = client.get("/ui/styles.css").text
+        page = client.get("/ui/swarm.html").text
+        script = client.get("/ui/swarm.js").text
+
+    # Swarm reflow is authored as container queries on the swarm contexts.
+    assert "container: swarm-shell / inline-size" in styles
+    assert "container: swarm-main / inline-size" in styles
+    # The shell collapse is driven by the ancestor swarm-app container — an
+    # element cannot size-query the container it declares itself.
+    assert "@container swarm-app (max-width: 900px)" in styles
+    assert "@container swarm-main (max-width: 640px)" in styles
+    # The old brittle viewport reflow is gone from the whole sheet.
+    assert "@media (max-width: 900px)" not in styles
+    # The detail pane is a real, keyboard-accessible splitter (shared class),
+    # and the code editor is user-resizable — both like the Control Center.
+    assert ".panel-splitter" in styles
+    assert "resize: horizontal" in styles
+    assert 'id="detailSplitter"' in page
+    assert 'class="panel-splitter"' in page
+    assert 'role="separator"' in page
+    assert "setupDetailSplitter" in script
+    assert "pointerdown" in script
+    # The bespoke inline stylesheet (with its re-aliased tokens and fixed
+    # 380px sidebar) is deleted, not just overridden.
+    assert "<style>" not in page
+    assert "380px" not in page
 
 
 def test_ui_root_redirects_to_trailing_slash(monkeypatch):
