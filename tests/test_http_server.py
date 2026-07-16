@@ -1947,7 +1947,7 @@ async def test_post_xai_chat_rejects_unsafe_base_url_without_calling_out(monkeyp
     body = json.loads(res.body.decode())
     assert body["error"]["code"] == "service_unavailable"
     assert "XAI_API_BASE_URL" in body["error"]["message"]
-    assert called["post"] is False
+    assert not called["post"]
 
 
 @pytest.mark.asyncio
