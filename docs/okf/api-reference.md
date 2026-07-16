@@ -4592,6 +4592,19 @@ async def GrokSessionStore.list_facts(self, limit: int=20, scope: Optional[str]=
 
 Most recent facts first (the grok://knowledge resource view).
 
+### Method: `GrokSessionStore.save_messages` {#utils-groksessionstore-save_messages}
+
+```python
+async def GrokSessionStore.save_messages(self, session_name: str, messages: List[Dict[str, Any]]) -> None
+```
+
+**Keywords:** grok, session, store, save, messages
+
+Insert one or more messages atomically (single BEGIN IMMEDIATE).
+
+Used by append_and_save_history so a user+assistant turn cannot be
+half-persisted or interleaved with a concurrent turn's pair.
+
 ### Method: `GrokSessionStore.replace_messages` {#utils-groksessionstore-replace_messages}
 
 ```python
