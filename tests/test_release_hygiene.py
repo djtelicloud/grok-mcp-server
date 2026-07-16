@@ -145,14 +145,22 @@ def test_local_provider_credentials_are_ignored_and_not_force_included():
 
 def test_forge_execution_tools_are_not_core_runtime_dependencies():
     metadata = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-    core = set(metadata["project"]["dependencies"])
-    forge = set(metadata["project"]["optional-dependencies"]["forge"])
-    dev = set(metadata["dependency-groups"]["dev"])
+    def requirement_name(spec: str) -> str:
+        return re.split(r"[<>=!~;\s\[]", spec, maxsplit=1)[0].lower().replace(
+            "_", "-"
+        )
+
+    core = {requirement_name(dep) for dep in metadata["project"]["dependencies"]}
+    forge = {
+        requirement_name(dep)
+        for dep in metadata["project"]["optional-dependencies"]["forge"]
+    }
+    dev = {requirement_name(dep) for dep in metadata["dependency-groups"]["dev"]}
 
     for name in ("coverage", "pytest", "pytest-asyncio", "ruff"):
-        assert not any(dep.startswith(name) for dep in core)
-        assert any(dep.startswith(name) for dep in forge)
-        assert any(dep.startswith(name) for dep in dev)
+        assert name not in core
+        assert name in forge
+        assert name in dev
 
 
 def test_sdist_configuration_excludes_generated_dependency_trees():
