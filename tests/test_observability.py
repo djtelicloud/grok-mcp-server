@@ -270,7 +270,10 @@ class TestGatewayRequestIdEcho:
     def test_auth_rejections_still_carry_request_id(self, monkeypatch):
         """The middleware is outermost: even a 401 is correlatable."""
         monkeypatch.delenv("UNIGROK_RUNTIME", raising=False)
-        monkeypatch.setenv("UNIGROK_API_KEYS", "sekret-key")
+        monkeypatch.delenv("UNIGROK_API_KEYS", raising=False)
+        monkeypatch.setenv(
+            "UNIGROK_API_KEY_RECORDS", '{"observer":"sekret-key"}'
+        )
         monkeypatch.delenv("UNIGROK_ALLOW_UNAUTHENTICATED", raising=False)
 
         with TestClient(create_app()) as client:
