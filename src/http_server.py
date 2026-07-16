@@ -1908,13 +1908,10 @@ def _raw_proxy_policy_violation(
     if isinstance(n, bool) or not isinstance(n, int) or n != 1:
         return ("Raw model proxy requires n=1.", "invalid_request", 400)
 
-    max_tokens = payload.get(
-        "max_tokens",
-        _bounded_env_int("UNIGROK_RAW_PROXY_MAX_TOKENS", 32_768, 1, 131_072),
-    )
     max_allowed = _bounded_env_int(
         "UNIGROK_RAW_PROXY_MAX_TOKENS", 32_768, 1, 131_072
     )
+    max_tokens = payload.get("max_tokens", max_allowed)
     if (
         isinstance(max_tokens, bool)
         or not isinstance(max_tokens, int)
