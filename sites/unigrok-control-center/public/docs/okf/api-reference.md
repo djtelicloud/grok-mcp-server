@@ -2443,12 +2443,12 @@ Raised defensively if a swarm generation is non-CLI or charged.
 ### Function: `generate_mutation` {#swarm-generate-generate_mutation}
 
 ```python
-async def generate_mutation(prompt: str, system_prompt: str, *, remaining_budget_usd: float, session: Optional[str]=None) -> GenerationResult
+async def generate_mutation(prompt: str, system_prompt: str, *, remaining_budget_usd: float, session: Optional[str]=None, model_provider: Optional[str]=None) -> GenerationResult
 ```
 
 **Keywords:** generate, mutation
 
-One toolless completion, strictly on the CLI subscription plane.
+One toolless completion, supporting cross-model routing if model_provider is set.
 
 ## swarm/mutators.py {#swarm-mutators}
 
