@@ -26,6 +26,26 @@ def _brute_front(points):
     return set(front)
 
 
+def _brute_fronts(points):
+    """Peel every non-dominated front with the simple reference oracle."""
+    remaining = list(range(len(points)))
+    fronts = []
+    while remaining:
+        front = [
+            i
+            for i in remaining
+            if not any(
+                dominates(points[j], points[i])
+                for j in remaining
+                if j != i
+            )
+        ]
+        fronts.append(front)
+        selected = set(front)
+        remaining = [i for i in remaining if i not in selected]
+    return fronts
+
+
 class TestDomination:
     def test_strict_domination(self):
         assert dominates((1.0, 1.0), (2.0, 2.0))
@@ -34,6 +54,9 @@ class TestDomination:
 
 
 class TestNonDominatedSort:
+    def test_empty_points(self):
+        assert fast_non_dominated_sort([]) == []
+
     def test_matches_brute_force_on_random_fixtures(self):
         rng = random.Random(7)
         for _ in range(50):
@@ -43,6 +66,7 @@ class TestNonDominatedSort:
                 for _ in range(n)
             ]
             fronts = fast_non_dominated_sort(points)
+            assert fronts == _brute_fronts(points)
             assert set(fronts[0]) == _brute_front(points)
             # Every index appears in exactly one front.
             flat = list(itertools.chain.from_iterable(fronts))
