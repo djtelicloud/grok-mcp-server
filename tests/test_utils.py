@@ -4780,6 +4780,45 @@ class TestTimedThreadCap:
         assert stats["timed_threads_in_flight"] == 0
         assert stats["timed_threads_peak"] >= 1
 
+    @pytest.mark.asyncio
+    async def test_run_blocking_sets_cancel_event_on_timeout(self):
+        """Timed-out awaiters must signal cooperative workers to stop."""
+        from src.utils import run_blocking
+
+        cancel_event = threading.Event()
+        hang = threading.Event()
+        try:
+            with pytest.raises(asyncio.TimeoutError):
+                await run_blocking(
+                    hang.wait, timeout=0.05, cancel_event=cancel_event
+                )
+            assert cancel_event.is_set()
+        finally:
+            hang.set()
+
+    @pytest.mark.asyncio
+    async def test_run_blocking_sets_cancel_event_on_task_cancel(self):
+        from src.utils import run_blocking
+
+        cancel_event = threading.Event()
+        started = threading.Event()
+        hang = threading.Event()
+
+        def _block():
+            started.set()
+            hang.wait(timeout=5.0)
+            return "done"
+
+        task = asyncio.create_task(
+            run_blocking(_block, timeout=5.0, cancel_event=cancel_event)
+        )
+        assert await asyncio.to_thread(started.wait, 1.0)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert cancel_event.is_set()
+        hang.set()
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Next#9 — Real memory: stable partition key, tool-trace persistence + replay,

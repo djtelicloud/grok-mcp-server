@@ -538,7 +538,13 @@ def get_runtime_stats() -> Dict[str, int]:
         }
 
 
-async def run_blocking(fn: Callable, *args, timeout: Optional[float] = None, **kwargs):
+async def run_blocking(
+    fn: Callable,
+    *args,
+    timeout: Optional[float] = None,
+    cancel_event: Optional[threading.Event] = None,
+    **kwargs,
+):
     """Run blocking SDK/local work on a bounded executor.
 
     Timed calls get a dedicated daemon thread instead of a shared-pool worker:
@@ -547,6 +553,11 @@ async def run_blocking(fn: Callable, *args, timeout: Optional[float] = None, **k
     worker and deadlock all SDK bridging in the server. The dedicated threads
     are capped (UNIGROK_MAX_TIMED_THREADS, default 64): at capacity the call
     fails fast with RuntimeError instead of spawning yet another thread.
+
+    Optional ``cancel_event`` is set when the awaiter times out or is
+    cancelled so cooperative callables (API ``chat.stream``) can stop
+    consuming the metered upstream instead of running to completion after
+    the client disconnects.
     """
     call = functools.partial(fn, *args, **kwargs)
     loop = asyncio.get_running_loop()
@@ -591,8 +602,18 @@ async def run_blocking(fn: Callable, *args, timeout: Optional[float] = None, **k
             with _TIMED_THREADS_LOCK:
                 _TIMED_THREADS_IN_FLIGHT -= 1
             raise
-        return await asyncio.wait_for(future, timeout=timeout)
-    return await loop.run_in_executor(_local_executor(), call)
+        try:
+            return await asyncio.wait_for(future, timeout=timeout)
+        except (asyncio.TimeoutError, asyncio.CancelledError):
+            if cancel_event is not None:
+                cancel_event.set()
+            raise
+    try:
+        return await loop.run_in_executor(_local_executor(), call)
+    except asyncio.CancelledError:
+        if cancel_event is not None:
+            cancel_event.set()
+        raise
 
 
 def _owned_descendant_pids(root_pid: int) -> List[int]:
@@ -10940,6 +10961,12 @@ async def _call_plane(
                 event_loop,
             )
 
+        # Cooperative abort for SSE disconnect / await cancellation: the
+        # asyncio task cancel alone cannot stop the dedicated run_blocking
+        # thread. The stream loop polls this event; sample() remains
+        # uninterruptible until the SDK exposes a hard abort.
+        api_cancel_event = threading.Event()
+
         def _call_api():
             client = get_xai_client()
             chat_params = {"model": model_name}
@@ -10979,6 +11006,10 @@ async def _call_plane(
                 # accounting below is identical to the sample() path.
                 final_response = None
                 for final_response, chunk in grok.stream():
+                    if api_cancel_event.is_set():
+                        raise RuntimeError(
+                            "API stream aborted after client disconnect or timeout"
+                        )
                     delta = str(getattr(chunk, "content", "") or "")
                     if delta:
                         _forward_delta(delta)
@@ -10995,6 +11026,7 @@ async def _call_plane(
             response = await run_blocking(
                 _call_api,
                 timeout=_env_timeout("UNIGROK_API_CALL_TIMEOUT", 180.0),
+                cancel_event=api_cancel_event,
             )
         except Exception as exc:
             record_xai_failure(model_name)
