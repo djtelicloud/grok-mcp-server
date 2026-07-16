@@ -5,6 +5,7 @@ import logging
 from typing import Optional, List
 from mcp.server.fastmcp import FastMCP
 from ..models.results import MediaResult
+from ..identity import get_active_principal, resolve_request_caller
 
 from ..utils import (
     get_xai_client,
@@ -16,9 +17,44 @@ from ..utils import (
     run_blocking,
     input_limit,
     validate_local_input,
+    enforce_caller_budget,
+    store,
 )
 
 logger = logging.getLogger("GrokMCP")
+
+
+async def _enforce_media_budget() -> Optional[str]:
+    """Gate Imagine spend on UNIGROK_CALLER_BUDGETS before any xAI call."""
+    caller = resolve_request_caller(None)
+    budget_principal = get_active_principal() or caller
+    await enforce_caller_budget(store, budget_principal)
+    return caller
+
+
+async def _record_media_telemetry(
+    *,
+    intent: str,
+    route: str,
+    cost_usd: float,
+    model: str,
+    latency_sec: float,
+    caller: Optional[str],
+) -> None:
+    """Persist Imagine spend so caller budgets and rolls see direct media tools."""
+    await store.save_telemetry(
+        (intent or route)[:100],
+        "API",
+        1,
+        float(latency_sec or 0.0),
+        float(cost_usd or 0.0),
+        caller=caller,
+        model=model,
+        tokens=0,
+        token_kind="provider_exact",
+        billing_source="xai_response_exact",
+        routing={"route": route, "plane": "API"},
+    )
 
 
 async def generate_image(
@@ -46,6 +82,7 @@ async def generate_image(
     Returns:
         MediaResult containing image metadata and URLs.
     """
+    caller = await _enforce_media_budget()
     async with GrokInvocationContext(model, logger, append_signature=True) as ctx:
         if not 1 <= int(n) <= 10:
             raise ValueError("n must be between 1 and 10")
@@ -93,7 +130,15 @@ async def generate_image(
 
         cost_usd = sum(float(getattr(img, "cost_usd", 0.0) or 0.0) for img in images)
         summary_text = ctx.format_output("".join(result), images)
-        
+        await _record_media_telemetry(
+            intent=prompt,
+            route="imagine",
+            cost_usd=cost_usd,
+            model=model,
+            latency_sec=ctx.elapsed,
+            caller=caller,
+        )
+
         return MediaResult(
             response=",".join([img.url for img in images]),
             text=summary_text,
@@ -138,6 +183,7 @@ async def generate_video(
         aspect_ratio: Aspect ratio like `"16:9"` or `"9:16"`.
         resolution: `"480p"` or `"720p"`.
     """
+    caller = await _enforce_media_budget()
     async with GrokInvocationContext(model, logger, append_signature=True) as ctx:
         if duration is not None and not 1 <= int(duration) <= 15:
             raise ValueError("duration must be between 1 and 15 seconds")
@@ -208,7 +254,15 @@ async def generate_video(
         output_text = f"## Generated Video\n\n\n**URL:** {response.url}\n\n\n**Duration:** {response.duration}s\n\n"
         cost_usd = float(getattr(response, "cost_usd", 0.0) or 0.0)
         summary_text = ctx.format_output(output_text, [response])
-        
+        await _record_media_telemetry(
+            intent=prompt,
+            route="imagine_video",
+            cost_usd=cost_usd,
+            model=model,
+            latency_sec=ctx.elapsed,
+            caller=caller,
+        )
+
         return MediaResult(
             response=output_text,
             text=summary_text,
@@ -247,6 +301,7 @@ async def extend_video(
         model: Video model (default `grok-imagine-video`).
         duration: Length of the extension in seconds (2–10, default 6).
     """
+    caller = await _enforce_media_budget()
     async with GrokInvocationContext(model, logger, append_signature=True) as ctx:
         if duration is not None and not 2 <= int(duration) <= 10:
             raise ValueError("duration must be between 2 and 10 seconds")
@@ -263,7 +318,15 @@ async def extend_video(
         output_text = f"## Extended Video\n\n\n**URL:** {response.url}\n\n\n**Duration:** {response.duration}s\n\n"
         cost_usd = float(getattr(response, "cost_usd", 0.0) or 0.0)
         summary_text = ctx.format_output(output_text, [response])
-        
+        await _record_media_telemetry(
+            intent=prompt,
+            route="extend_video",
+            cost_usd=cost_usd,
+            model=model,
+            latency_sec=ctx.elapsed,
+            caller=caller,
+        )
+
         return MediaResult(
             response=output_text,
             text=summary_text,
@@ -288,3 +351,4 @@ def register_media_tools(mcp: FastMCP):
     mcp.add_tool(extend_video)
 
 register_internal_tool("generate_image", generate_image)
+register_internal_tool("generate_video", generate_video)
