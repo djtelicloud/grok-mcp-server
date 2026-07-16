@@ -466,6 +466,18 @@ def test_cursor_python_superiority_loop_requires_measured_serial_evidence():
     assert "Do not sum or" in review
     assert "approve measured win" in review
 
+    pr_review = (
+        ROOT
+        / ".codex"
+        / "reviews"
+        / "pr-475-python-superiority.md"
+    ).read_text(encoding="utf-8")
+    assert "Exact candidate SHA" in pr_review
+    assert "entire candidate bundle" in pr_review
+    assert "needs changes" in pr_review
+    assert "Public-results status: `held`" in pr_review
+    assert "should not\nmerge #475" in pr_review
+
 
 def test_dual_supervisor_land_law_is_consistent() -> None:
     """Cursor may land green low/medium work; high-risk stays Codex."""
