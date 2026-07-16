@@ -7,6 +7,7 @@ import json
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 from urllib.error import URLError
 from urllib.request import urlopen
@@ -25,11 +26,64 @@ def tree_id(repo: Path, revision: str) -> str | None:
         return None
 
 
+def format_age(seconds: float) -> str:
+    """Render elapsed time as a coarse, human-readable age."""
+
+    if seconds < 60:
+        return f"~{int(seconds)}s ago"
+    if seconds < 3600:
+        return f"~{int(seconds // 60)}m ago"
+    if seconds < 86400:
+        return f"~{int(seconds // 3600)}h ago"
+    return f"~{int(seconds // 86400)}d ago"
+
+
+def origin_sync_line(primary: Path, main_head: str) -> str:
+    """Compare visible main against last-fetched origin/main, all offline."""
+
+    try:
+        git(primary, "rev-parse", "--verify", "refs/remotes/origin/main")
+    except LandError:
+        return "origin/main not found (unfetched or local-only repo)"
+    try:
+        counts = git(
+            primary,
+            "rev-list",
+            "--left-right",
+            "--count",
+            f"{main_head}...refs/remotes/origin/main",
+        )
+    except LandError:
+        # Degrade just this line; details stay out of shared logs.
+        return "origin/main comparison failed"
+    ahead, _, behind = counts.partition("\t")
+    return f"{ahead} ahead / {behind} behind origin/main"
+
+
+def fetch_age_line(repo: Path) -> str:
+    """Report the most recent FETCH_HEAD write across all worktrees."""
+
+    git_dir = common_git_dir(repo)
+    candidates = [git_dir / "FETCH_HEAD", *git_dir.glob("worktrees/*/FETCH_HEAD")]
+    latest: float | None = None
+    for candidate in candidates:
+        try:
+            mtime = candidate.stat().st_mtime
+        except OSError:
+            continue
+        if latest is None or mtime > latest:
+            latest = mtime
+    if latest is None:
+        return "never fetched"
+    return f"last fetch {format_age(time.time() - latest)}"
+
+
 def main() -> int:
     repo = Path(git(Path.cwd(), "rev-parse", "--show-toplevel"))
     primary = main_worktree(repo)
     main_head = git(primary, "rev-parse", "HEAD")
     print(f"Visible main: {main_head} ({primary})")
+    print(f"Origin sync: {origin_sync_line(primary, main_head)} ({fetch_age_line(repo)})")
     marker = common_git_dir(repo) / "unigrok-land" / "runtime-head"
     try:
         runtime_head = marker.read_text(encoding="utf-8").strip()

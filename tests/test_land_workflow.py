@@ -165,6 +165,68 @@ def test_land_status_missing_marker_cannot_resolve_unknown_ref(repo_with_agent):
     )
 
 
+def test_land_status_reports_origin_sync_and_fetch_age(repo_with_agent):
+    main, agent = repo_with_agent
+    new = commit(agent, "remote-only change\n")
+    git(main, "update-ref", "refs/remotes/origin/main", new)
+    write(main / ".git" / "FETCH_HEAD", f"{new}\t\tbranch 'main' of example\n")
+
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "scripts" / "land-status.py")],
+        cwd=main,
+        check=True,
+        text=True,
+        capture_output=True,
+    )
+
+    assert "Origin sync: 0 ahead / 1 behind origin/main" in result.stdout
+    assert "last fetch ~" in result.stdout
+
+
+def test_land_status_reports_in_sync_and_ahead_of_origin(repo_with_agent):
+    main, agent = repo_with_agent
+    base = git(main, "rev-parse", "HEAD")
+    git(main, "update-ref", "refs/remotes/origin/main", base)
+
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "scripts" / "land-status.py")],
+        cwd=main,
+        check=True,
+        text=True,
+        capture_output=True,
+    )
+
+    assert "Origin sync: 0 ahead / 0 behind origin/main" in result.stdout
+
+    commit(agent, "agent change\n")
+    git(main, "merge", "--ff-only", "codex/task")
+
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "scripts" / "land-status.py")],
+        cwd=main,
+        check=True,
+        text=True,
+        capture_output=True,
+    )
+
+    assert "Origin sync: 1 ahead / 0 behind origin/main" in result.stdout
+
+
+def test_land_status_handles_missing_origin_main(repo_with_agent):
+    main, _ = repo_with_agent
+
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "scripts" / "land-status.py")],
+        cwd=main,
+        check=True,
+        text=True,
+        capture_output=True,
+    )
+
+    assert "Origin sync: origin/main not found" in result.stdout
+    assert "never fetched" in result.stdout
+
+
 def test_land_refuses_behind_reviewed_head(repo_with_agent, monkeypatch):
     main, agent = repo_with_agent
     write(main / "main-only.txt", "other agent\n")
