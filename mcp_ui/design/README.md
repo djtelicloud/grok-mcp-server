@@ -3,6 +3,9 @@
 **Source of truth:** [https://grokmcp.org/](https://grokmcp.org/) and
 `sites/unigrok-control-center/app/globals.css`.
 
+Canonical design docs and install path live under
+[`docs/design/unigrok-theme.md`](../../docs/design/unigrok-theme.md).
+
 ## Brand tokens
 
 | Token | Hex |
@@ -20,17 +23,17 @@
 | File | Role |
 | --- | --- |
 | [unigrok-grok-theme.toml](unigrok-grok-theme.toml) | Full Grok TUI slot map (`bg_*`, `accent_*`, `md_*`, …) |
-| [unigrok-grok-theme.json](unigrok-grok-theme.json) | Same, machine-readable |
-| [UniGrok.terminal](UniGrok.terminal) | Apple Terminal profile (import or double-click) |
+| [../../docs/design/unigrok-grok-theme.json](../../docs/design/unigrok-grok-theme.json) | Machine-readable twin |
+| [../../docs/design/UniGrok.terminal](../../docs/design/UniGrok.terminal) | Apple Terminal profile |
 
-## Grok Build limitation (0.2.x)
+## Install
 
-Grok Build only ships five **built-in** theme names. It does **not** load
-`unigrok` from disk yet. Until custom themes exist:
+```bash
+./scripts/install-unigrok-theme
+./scripts/install-unigrok-theme --check
+```
 
-1. Install **UniGrok.terminal** so the host shell matches brand navy + cyan.
-2. Keep the slot map as the contract for a future `/theme unigrok`.
-3. Prefer TokyoNight among stock skins only as a temporary blue stand-in — it
-   is **not** brand-correct.
-
-Local install path used by Grok CLI sessions: `~/.grok/themes/unigrok.toml`.
+Copies design sources into `~/.grok/themes/` (`unigrok.toml`, `unigrok.json`,
+`UniGrok.terminal`). Grok 0.2.x still only lists built-in theme names; files are
+forward-ready for custom load. Import the Terminal profile for host brand match
+today.
