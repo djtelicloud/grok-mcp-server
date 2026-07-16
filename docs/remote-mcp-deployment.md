@@ -1,14 +1,45 @@
 # Private remote MCP deployment
 
-`https://mcp.grokmcp.org/mcp` is the private, API-plane-only UniGrok resource.
-It is not an anonymous inference endpoint and it never receives the local Grok
-CLI OAuth volume. The Python gateway runs with `UNIGROK_RUNTIME=cloudrun`, which
-disables the CLI plane and all local agent-tool execution.
+`https://mcp.grokmcp.org/mcp` is the **owner-operated insider** UniGrok Cloud Run
+resource for **team members and cloud agents** (GitHub write+ / scoped tokens).
+It is **not** a public multi-tenant SaaS for anonymous vibe users, and it is
+**not** an anonymous inference endpoint.
+
+## Same Docker, cloud mode
+
+Cloud Run deploys the **same repository `Dockerfile` image** used for local
+product builds (digest-pinned). Behavior is **not** a 1:1 laptop Compose clone:
+
+| | Local Docker / Compose | Cloud Run (`UNIGROK_RUNTIME=cloudrun`) |
+| --- | --- | --- |
+| Image | Product `Dockerfile` | Same image family, digest-pinned |
+| CLI OAuth volume | May attach for SuperGrok CLI plane | **Never** mounted |
+| Default Grok spend | Machine `.env` / local CLI | **Owner** `XAI_API_KEY` from Secret Manager (**Live default**) |
+| Optional teammate own keys | Each engineer’s local keys | **TARGET** (bind to OAuth principal later; does not remove owner default) |
+| Forge / git-write tools | Contributor laptop only | **Off** |
+
+The gateway runs with `UNIGROK_RUNTIME=cloudrun`, which disables the CLI plane
+and all local agent-tool execution. Hosted PR review wiring is
+[design/hosted-review-p0.md](design/hosted-review-p0.md).
 
 **Live probes (re-verify):** `GET /healthz` and `GET /readyz` on the same host
 are public process gates. Authenticated MCP and status routes return `401`
-without a bearer. Hosted PR review wiring is
-[design/hosted-review-p0.md](design/hosted-review-p0.md).
+without a bearer.
+
+## Operator checklist (cloud agents)
+
+1. Build the product image; record the Artifact Registry **digest**.
+2. Deploy that digest with `UNIGROK_RUNTIME=cloudrun` and OAuth introspection
+   pointing at Control (`control.grokmcp.org`).
+3. Inject **owner** `XAI_API_KEY` only from Secret Manager (default spend path).
+4. Do **not** put raw `XAI_API_KEY` in IDE MCP JSON, Cursor Cloud agent secrets,
+   or GitHub as a substitute for owner SM injection.
+5. Cloud agents authenticate with **scoped short-lived tokens** (or the approved
+   Control mint path) — not the xAI provider key.
+6. Confirm: health/ready `200`; `POST /mcp` without token → `401`.
+7. Confirm cloud surface has **no** git-write / Forge mutation tools.
+8. Optional later: per write+ principal own Grok credentials (SM/KMS, bind to
+   OAuth `sub`, cut off when write+ is lost). Owner default remains.
 
 ## Runtime contract
 
@@ -25,10 +56,17 @@ Deploy the repository `Dockerfile` to a dedicated Cloud Run service and set:
 | `UNIGROK_CALLER_BUDGETS` | JSON daily cost caps keyed by authenticated OAuth subject |
 | `UNIGROK_STATE_DIR` | `/tmp/uni-grok` unless a durable store is deliberately attached |
 
-Inject `XAI_API_KEY` from a version-pinned Secret Manager resource. Do not set
-`UNIGROK_API_KEYS` on the production OAuth service; a static bearer must not
-become a hidden bypass around membership revocation. The service account needs
-only access to that xAI secret and the normal logging/metrics permissions.
+Inject the **owner** `XAI_API_KEY` from a version-pinned Secret Manager resource
+— this is the cloud twin **default** spend path. Do not set `UNIGROK_API_KEYS`
+on the production OAuth service; a static bearer must not become a hidden
+bypass around membership revocation. The service account needs only access to
+that xAI secret and the normal logging/metrics permissions.
+
+Optional **per-insider** cloud credentials (write+ principal binds their own
+Grok key or CLI material) are a **TARGET** design: they must not replace the
+owner default, must bind to OAuth `sub` (never `X-Client-ID`), and must use
+Secret Manager / KMS-class storage — never plaintext browser forms for public
+or unauthenticated callers.
 
 The gateway publishes RFC 9728 metadata without authentication. Every other
 remote route is denied unless control-origin introspection returns an active
