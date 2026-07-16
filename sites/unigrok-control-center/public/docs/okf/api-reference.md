@@ -3423,6 +3423,20 @@ Args:
     test_roots: Workspace-relative paths where tests live (default: ["tests"]).
     max_targets: Maximum number of swarm-ready targets to rank and return.
 
+### Function: `export_swarm_narrow_pr` {#tools-swarm-export_swarm_narrow_pr}
+
+```python
+async def export_swarm_narrow_pr(task_id: str) -> Dict[str, Any]
+```
+
+**Keywords:** export, swarm, narrow, pr
+
+Export a narrow PR-shaped payload for the best verified swarm candidate.
+
+Read-only: builds a unified diff against the live workspace bytes without
+writing files. Used by contributor tooling to hand a single candidate to a
+human/supervisor review packet.
+
 ## tools/system.py {#tools-system}
 
 ### Function: `grok_mcp_status` {#tools-system-grok_mcp_status}
