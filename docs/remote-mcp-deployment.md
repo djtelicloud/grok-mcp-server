@@ -88,6 +88,9 @@ Rules:
   the gateway. Bare subjects, unbound subjects, and client labels are rejected
   fail-closed.
 - Missing map entry → **owner default**.
+- The binding applies to both MCP agent execution and the authenticated
+  `/v1/chat/completions` proxy; neither path may silently switch a mapped
+  principal back to owner billing.
 - A configured map that is malformed, oversized, duplicated, or contains an
   invalid entry fails closed instead of silently shifting spend to the owner.
 - Key rotation creates a new random process-local client generation instead of

@@ -936,6 +936,41 @@ def test_readyz_accepts_cli_auth_without_xai_api_key(monkeypatch, tmp_path):
     assert res.json()["checks"]["model_auth"] is True
 
 
+def test_readyz_uses_fail_closed_service_credential_contract(monkeypatch, tmp_path):
+    monkeypatch.setenv("XAI_API_KEY", "xai-owner-default")
+    monkeypatch.setenv("UNIGROK_PRINCIPAL_XAI_KEYS_JSON", "{")
+    monkeypatch.setenv("UNIGROK_STATE_DIR", str(tmp_path))
+    monkeypatch.setattr(
+        "src.http_server.grok_cli_plane_status",
+        lambda **_: {"state": "disabled", "ready": False, "binary": False},
+    )
+
+    with TestClient(create_app()) as client:
+        res = client.get("/readyz")
+
+    assert res.status_code == 503
+    assert res.json()["checks"]["model_auth"] is False
+
+
+def test_readyz_accepts_principal_only_service_credential(monkeypatch, tmp_path):
+    monkeypatch.delenv("XAI_API_KEY", raising=False)
+    monkeypatch.setenv(
+        "UNIGROK_PRINCIPAL_XAI_KEYS_JSON",
+        '{"oauth:https%3A%2F%2Fcontrol.grokmcp.org:github%3A42":"xai-personal"}',
+    )
+    monkeypatch.setenv("UNIGROK_STATE_DIR", str(tmp_path))
+    monkeypatch.setattr(
+        "src.http_server.grok_cli_plane_status",
+        lambda **_: {"state": "disabled", "ready": False, "binary": False},
+    )
+
+    with TestClient(create_app()) as client:
+        res = client.get("/readyz")
+
+    assert res.status_code == 200
+    assert res.json()["checks"]["model_auth"] is True
+
+
 def test_readyz_body_stays_boolean_on_failure(monkeypatch):
     """The auth-exempt probe must not disclose exception text or filesystem
     paths; failures are logged server-side and the body carries booleans only."""
@@ -1365,6 +1400,95 @@ async def test_direct_xai_streaming_success_passes_through(monkeypatch):
     assert client_kwargs["timeout"].read == 45.0
     assert client_kwargs["timeout"].write == 30.0
     assert client_kwargs["timeout"].pool == 10.0
+
+
+@pytest.mark.asyncio
+async def test_raw_proxy_uses_active_principal_key_for_stream_and_nonstream(
+    monkeypatch,
+):
+    from src.http_server import post_xai_chat
+    from src.identity import reset_active_principal, set_active_principal
+
+    calls = []
+
+    class JsonResponse:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {"id": "principal-response", "choices": []}
+
+    class CapturingClient:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def post(self, _url, **kwargs):
+            calls.append(kwargs["headers"])
+            return JsonResponse()
+
+        def stream(self, _method, _url, **kwargs):
+            calls.append(kwargs["headers"])
+            return FakeStreamResponse(status_code=200, chunks=[b"data: [DONE]\n\n"])
+
+    monkeypatch.setenv("XAI_API_KEY", "xai-owner-default")
+    monkeypatch.setenv(
+        "UNIGROK_PRINCIPAL_XAI_KEYS_JSON",
+        '{"oauth:https%3A%2F%2Fcontrol.grokmcp.org:github%3A42":"xai-personal"}',
+    )
+    monkeypatch.setattr("src.http_server.httpx.AsyncClient", CapturingClient)
+    token = set_active_principal(
+        "oauth:https%3A%2F%2Fcontrol.grokmcp.org:github%3A42"
+    )
+    try:
+        nonstream = await post_xai_chat({"model": "grok-4.3", "messages": []})
+        chunks = [
+            chunk
+            async for chunk in stream_xai_chat(
+                {"model": "grok-4.3", "stream": True, "messages": []}
+            )
+        ]
+    finally:
+        reset_active_principal(token)
+
+    assert nonstream.status_code == 200
+    assert chunks == [b"data: [DONE]\n\n"]
+    assert calls == [
+        {"Authorization": "Bearer xai-personal", "Content-Type": "application/json"},
+        {"Authorization": "Bearer xai-personal", "Content-Type": "application/json"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_raw_proxy_invalid_principal_map_fails_closed(monkeypatch):
+    from src.http_server import post_xai_chat
+
+    monkeypatch.setenv("XAI_API_KEY", "xai-owner-default")
+    monkeypatch.setenv("UNIGROK_PRINCIPAL_XAI_KEYS_JSON", "{")
+
+    class UnexpectedClient:
+        def __init__(self, **_kwargs):
+            raise AssertionError("invalid credential map must not reach upstream")
+
+    monkeypatch.setattr("src.http_server.httpx.AsyncClient", UnexpectedClient)
+    nonstream = await post_xai_chat({"model": "grok-4.3", "messages": []})
+    chunks = [
+        chunk
+        async for chunk in stream_xai_chat(
+            {"model": "grok-4.3", "stream": True, "messages": []}
+        )
+    ]
+
+    assert nonstream.status_code == 503
+    assert json.loads(nonstream.body)["error"]["code"] == "service_unavailable"
+    body = b"".join(chunks).decode("utf-8")
+    assert "credential configuration is invalid" in body
+    assert "xai-owner-default" not in body
 
 
 @pytest.mark.asyncio
