@@ -325,6 +325,15 @@ selected route or plane.
 The local CLI plane works **inside the container**: the image bakes the Linux
 `grok` binary (version-pinned in the Dockerfile), while compose persists its
 machine-level OAuth session in the dedicated `unigrok-cli-auth` Docker volume.
+
+**Session continuity note:** UniGrok maps each logical MCP `session` name to a
+native CLI conversation id. The CLI binds an agent type to that native id, so
+composer/`fast` then planning/`reasoning` on the same logical session may hit
+`MODEL_SWITCH_INCOMPATIBLE_AGENT`. Current builds recover by opening a fresh
+native session and replaying server-side history (fork would keep the sticky
+agent). If you still see the raw CLI error after a mode switch, rebuild the
+stable image from current product `main` so recovery code is loaded.
+
 Authenticate that service identity once with:
 
 ```bash
