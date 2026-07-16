@@ -590,6 +590,30 @@ subordinate label that separates one principal's IDEs; it never provides
 the security boundary by itself. Non-HTTP callers preserve the historical
 unscoped behavior unless their transport binds one of these context vars.
 
+### Function: `principal_session_prefix` {#identity-principal_session_prefix}
+
+```python
+def principal_session_prefix() -> Optional[str]
+```
+
+**Keywords:** principal, session, prefix
+
+Percent-encoded principal prefix used as the session security boundary.
+
+Returns ``None`` when no principal is bound (stdio / unscoped callers keep
+the historical global session view). Client labels are intentionally
+omitted — they are subordinate and must not widen or shrink authz.
+
+### Function: `filter_sessions_for_principal` {#identity-filter_sessions_for_principal}
+
+```python
+def filter_sessions_for_principal(rows: Optional[List[Dict[str, Any]]]) -> List[Dict[str, Any]]
+```
+
+**Keywords:** filter, sessions, for, principal
+
+Keep only session rows owned by the active principal, when bound.
+
 ### Function: `normalize_caller` {#identity-normalize_caller}
 
 ```python
@@ -3461,7 +3485,7 @@ async def list_chat_sessions() -> str
 
 **Keywords:** list, chat, sessions
 
-List all chat sessions stored under the SQLite session store.
+List chat sessions visible to the active principal (or all when unscoped).
 
 ### Function: `get_chat_history` {#tools-system-get_chat_history}
 
