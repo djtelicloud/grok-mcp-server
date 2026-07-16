@@ -148,6 +148,10 @@ binding path. That control plane does not replace local UniGrok MCP on
 
 ## 8. Where docs live
 
+> **Python superiority loop** — projected −91.1% LOC cut across Ready refactor plans (46/210).
+> See [docs/python-superiority-loop.md](docs/python-superiority-loop.md) or the visual board [docs/python-superiority-loop.html](docs/python-superiority-loop.html).
+
+
 | You are… | Use |
 |---|---|
 | Installing / connecting an IDE | This README |

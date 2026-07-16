@@ -1,0 +1,779 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Python superiority loop — projected LOC cut</title>
+<style>
+:root{
+  --page:#060d13; --page-deep:#030609;
+  --surface:rgba(13,27,42,.72); --surface-soft:rgba(22,38,57,.55); --surface-strong:rgba(27,51,79,.9);
+  --ink:#f0f6fc; --ink-soft:#8b9eb0; --ink-faint:#7d93a6;
+  --border:rgba(79,231,255,.15); --border-strong:rgba(79,231,255,.35);
+  --cyan:#4fe7ff; --teal:#16f0ae; --ember:#ff6b4a;
+  --cyan-soft:rgba(79,231,255,.08); --teal-soft:rgba(22,240,174,.10); --ember-soft:rgba(255,107,74,.10);
+  --shadow:0 16px 48px rgba(0,0,0,.45);
+  --glow-cyan:0 0 20px rgba(79,231,255,.18); --glow-teal:0 0 24px rgba(22,240,174,.22);
+  --radius:12px; --radius-sm:6px;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  --sans:ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+}
+*{box-sizing:border-box}
+body{
+  margin:0; color:var(--ink); font-family:var(--sans); line-height:1.55; min-height:100vh;
+  background:var(--page);
+  background-image:
+    radial-gradient(120% 55% at 50% -10%, rgba(79,231,255,.12), transparent 60%),
+    radial-gradient(80% 40% at 90% 10%, rgba(255,107,74,.08), transparent 50%),
+    radial-gradient(circle at 1px 1px, rgba(79,231,255,.05) 1px, transparent 0);
+  background-size:auto,auto,22px 22px;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:1100px; margin:0 auto; padding:clamp(1.5rem,4vw,3rem) 1.25rem 4rem}
+.eyebrow{display:flex; align-items:center; gap:.7rem; font-family:var(--mono); font-size:12px;
+  letter-spacing:.18em; text-transform:uppercase; color:var(--cyan); text-shadow:var(--glow-cyan); margin:0 0 .75rem}
+.eyebrow::before{content:""; width:26px; height:1px; background:var(--cyan); box-shadow:var(--glow-cyan)}
+h1{font-size:clamp(1.7rem,4.5vw,2.6rem); font-weight:650; letter-spacing:-.03em; margin:0; text-wrap:balance}
+.lede{color:var(--ink-soft); font-size:1.05rem; margin:.75rem 0 1.5rem; max-width:62ch}
+.meta{display:flex; flex-wrap:wrap; gap:.55rem; margin-bottom:1.75rem}
+.chip{font-family:var(--mono); font-size:11px; letter-spacing:.04em; border:1px solid var(--border);
+  background:var(--surface-soft); border-radius:999px; padding:.38rem .75rem; color:var(--ink-soft)}
+.chip strong{color:var(--teal)}
+.kpis{display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:.85rem; margin:0 0 1.5rem}
+.kpi{background:var(--surface); border:1px solid var(--border); border-radius:var(--radius);
+  padding:1.1rem 1.15rem; box-shadow:var(--shadow)}
+.kpi .v{font-size:clamp(1.55rem,3vw,2.15rem); font-weight:700; letter-spacing:-.03em; color:var(--teal);
+  text-shadow:var(--glow-teal); line-height:1.1}
+.kpi .l{margin-top:.35rem; font-size:.85rem; color:var(--ink-soft)}
+.hero{
+  text-align:center; margin:1.25rem 0 1.75rem; padding:1.6rem 1rem;
+  border:1px solid var(--border); border-radius:var(--radius);
+  background:linear-gradient(180deg, var(--teal-soft), transparent 70%), var(--surface);
+}
+.hero .big{font-size:clamp(3rem,10vw,5.2rem); font-weight:750; letter-spacing:-.04em; color:var(--teal);
+  text-shadow:var(--glow-teal); line-height:1}
+.hero .sub{margin-top:.55rem; color:var(--ink-soft); font-family:var(--mono); font-size:12px; letter-spacing:.04em}
+.progress{margin:0 0 1.75rem; background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:1rem 1.15rem}
+.progress-head{display:flex; justify-content:space-between; gap:1rem; font-family:var(--mono); font-size:12px; color:var(--ink-soft); margin-bottom:.55rem}
+.track{height:10px; border-radius:999px; background:rgba(255,255,255,.06); overflow:hidden}
+.fill{height:100%; width:21.9%; background:linear-gradient(90deg, var(--cyan), var(--teal)); box-shadow:var(--glow-teal)}
+h2{font-size:1.15rem; margin:1.75rem 0 .85rem; letter-spacing:-.01em}
+.wins{display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:.7rem}
+.win{background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:.9rem}
+.win-name{font-size:.85rem; color:var(--ink-soft); display:flex; justify-content:space-between; gap:.4rem}
+.win-name span{font-family:var(--mono); color:var(--cyan)}
+.win-pct{font-size:1.55rem; font-weight:700; color:var(--teal); margin:.35rem 0 .15rem; text-shadow:var(--glow-teal)}
+.win-loc{font-family:var(--mono); font-size:11px; color:var(--ink-faint)}
+.chart{background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:1rem 1.15rem; margin:1rem 0 1.5rem}
+.bar-row{display:grid; grid-template-columns:140px 1fr 140px; gap:.7rem; align-items:center; margin:.45rem 0}
+.bar-label{font-family:var(--mono); font-size:11px; color:var(--ink-soft); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.bar-track{position:relative; height:18px}
+.bar{position:absolute; left:0; top:0; height:100%; border-radius:4px}
+.bar.before{background:rgba(255,107,74,.35); border:1px solid rgba(255,107,74,.55)}
+.bar.after{background:rgba(22,240,174,.55); border:1px solid rgba(22,240,174,.8); top:4px; height:10px}
+.bar-vals{font-family:var(--mono); font-size:11px; color:var(--ink-faint); text-align:right}
+.legend{display:flex; gap:1rem; font-family:var(--mono); font-size:11px; color:var(--ink-faint); margin-bottom:.5rem}
+.legend i{display:inline-block; width:10px; height:10px; border-radius:2px; margin-right:.35rem; vertical-align:middle}
+.legend .b{background:rgba(255,107,74,.55)} .legend .a{background:rgba(22,240,174,.7)}
+.table-wrap{overflow:auto; border:1px solid var(--border); border-radius:var(--radius); background:var(--surface); box-shadow:var(--shadow)}
+table{width:100%; border-collapse:collapse; font-size:.9rem}
+th,td{padding:.55rem .7rem; border-bottom:1px solid rgba(79,231,255,.08); text-align:left}
+th{position:sticky; top:0; background:var(--surface-strong); font-family:var(--mono); font-size:11px;
+  letter-spacing:.04em; text-transform:uppercase; color:var(--ink-faint); z-index:1}
+td.num, td.pct{text-align:right; font-variant-numeric:tabular-nums; font-family:var(--mono); font-size:12px}
+td.pct{color:var(--teal); font-weight:650}
+td.muted{color:var(--ink-faint); font-size:.8rem}
+code{font-family:var(--mono); font-size:11px; color:var(--cyan)}
+a{color:var(--cyan); text-decoration:none} a:hover{text-decoration:underline}
+.pill{font-family:var(--mono); font-size:10px; letter-spacing:.05em; text-transform:uppercase;
+  color:var(--teal); background:var(--teal-soft); border:1px solid rgba(22,240,174,.35);
+  border-radius:999px; padding:.18rem .45rem}
+.callout{margin-top:1.5rem; padding:1rem 1.15rem; border-left:2px solid var(--cyan);
+  background:var(--cyan-soft); color:var(--ink-soft); border-radius:0 var(--radius-sm) var(--radius-sm) 0}
+.foot{margin-top:1.75rem; font-family:var(--mono); font-size:11px; color:var(--ink-faint); text-align:center}
+@media (max-width:900px){
+  .kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .wins{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .bar-row{grid-template-columns:1fr; gap:.2rem}
+  .bar-vals{text-align:left}
+}
+@media (prefers-reduced-motion:no-preference){
+  .kpi,.win,.hero{animation:rise .55s cubic-bezier(.4,0,.2,1) both}
+  .kpi:nth-child(1){animation-delay:.05s} .kpi:nth-child(2){animation-delay:.1s}
+  .kpi:nth-child(3){animation-delay:.15s} .kpi:nth-child(4){animation-delay:.2s}
+  @keyframes rise{from{opacity:0; transform:translateY(8px)} to{opacity:1; transform:none}}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="eyebrow">Cursor × UniGrok · Python superiority loop</div>
+  <h1>Projected LOC cut — live % board</h1>
+  <p class="lede">Before → after facade/shim projections from Ready draft PRs.
+  Green = reduction. Codex Sol High can watch Ready drafts; merge stays the normal Codex land path.
+  Loop still in progress (46/210).</p>
+  <div class="meta">
+    <span class="chip">Snapshot <strong>2026-07-16T17:06:47Z</strong></span>
+    <span class="chip">Ready PRs <strong>#342–#389</strong></span>
+    <span class="chip">Next <strong>tests/test_swarm_tools.py (~539 LOC)</strong></span>
+    <span class="chip"><a href="python-superiority-loop.md">Markdown table</a></span>
+  </div>
+
+  <div class="hero">
+    <div class="big">-91.1%</div>
+    <div class="sub">OVERALL PROJECTED LOC REDUCTION · 73,561 → 6,550 LINES</div>
+  </div>
+
+  <div class="kpis">
+    <div class="kpi"><div class="v">-91.1%</div><div class="l">Overall LOC reduction</div></div>
+    <div class="kpi"><div class="v">-88.9%</div><div class="l">Avg file % cut</div></div>
+    <div class="kpi"><div class="v">46 / 210</div><div class="l">Files with plans</div></div>
+    <div class="kpi"><div class="v">46</div><div class="l">Ready draft PRs</div></div>
+  </div>
+
+  <div class="progress">
+    <div class="progress-head"><span>46 plans Ready</span><span>164 pending · 210 total · 22%</span></div>
+    <div class="track"><div class="fill"></div></div>
+  </div>
+
+  <h2>Biggest % wins</h2>
+  <div class="wins">
+    <div class="win"><div class="win-name">test_utils.py <span>#345</span></div><div class="win-pct">-97.5%</div><div class="win-loc">7,848 → 200 LOC</div></div><div class="win"><div class="win-name">test_provider_broker.py <span>#346</span></div><div class="win-pct">-96.8%</div><div class="win-loc">4,707 → 150 LOC</div></div><div class="win"><div class="win-name">utils.py <span>#342</span></div><div class="win-pct">-94.2%</div><div class="win-loc">13,830 → 800 LOC</div></div><div class="win"><div class="win-name">test_http_server.py <span>#349</span></div><div class="win-pct">-93.7%</div><div class="win-loc">2,371 → 150 LOC</div></div><div class="win"><div class="win-name">intelligence_payloads.py <span>#350</span></div><div class="win-pct">-93.1%</div><div class="win-loc">1,749 → 120 LOC</div></div>
+  </div>
+
+  <h2>Top 8 files — projected LOC before vs after</h2>
+  <div class="chart">
+    <div class="legend"><span><i class="b"></i>Before</span><span><i class="a"></i>After (projected)</span></div>
+    <div class="bar-row"><div class="bar-label">utils.py</div><div class="bar-track"><div class="bar before" style="width:100.0%"></div><div class="bar after" style="width:5.8%"></div></div><div class="bar-vals">13,830 → 800</div></div><div class="bar-row"><div class="bar-label">test_utils.py</div><div class="bar-track"><div class="bar before" style="width:56.7%"></div><div class="bar after" style="width:1.4%"></div></div><div class="bar-vals">7,848 → 200</div></div><div class="bar-row"><div class="bar-label">test_provider_broker.py</div><div class="bar-track"><div class="bar before" style="width:34.0%"></div><div class="bar after" style="width:1.1%"></div></div><div class="bar-vals">4,707 → 150</div></div><div class="bar-row"><div class="bar-label">broker.py</div><div class="bar-track"><div class="bar before" style="width:22.6%"></div><div class="bar after" style="width:4.3%"></div></div><div class="bar-vals">3,122 → 600</div></div><div class="bar-row"><div class="bar-label">http_server.py</div><div class="bar-track"><div class="bar before" style="width:20.8%"></div><div class="bar after" style="width:2.9%"></div></div><div class="bar-vals">2,874 → 400</div></div><div class="bar-row"><div class="bar-label">test_http_server.py</div><div class="bar-track"><div class="bar before" style="width:17.1%"></div><div class="bar after" style="width:1.1%"></div></div><div class="bar-vals">2,371 → 150</div></div><div class="bar-row"><div class="bar-label">intelligence_payloads.py</div><div class="bar-track"><div class="bar before" style="width:12.6%"></div><div class="bar after" style="width:0.9%"></div></div><div class="bar-vals">1,749 → 120</div></div><div class="bar-row"><div class="bar-label">stage1_harness.py</div><div class="bar-track"><div class="bar before" style="width:11.9%"></div><div class="bar after" style="width:1.4%"></div></div><div class="bar-vals">1,644 → 200</div></div>
+  </div>
+
+  <h2>File metrics</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr>
+        <th>Loop</th><th>File</th><th>Before</th><th>After</th><th>Δ LOC</th><th>Δ%</th><th>Latency</th><th>PR</th><th>Status</th>
+      </tr></thead>
+      <tbody>
+        <tr class="win"><td>2</td><td><code>tests/test_utils.py</code></td><td class="num">7,848</td><td class="num">200</td><td class="num">-7,648</td><td class="pct">-97.5%</td><td class="muted">parse 29ms / compile 26ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/345">#345</a></td><td><span class="pill">Ready</span></td></tr><tr class="win"><td>3</td><td><code>tests/test_provider_broker.py</code></td><td class="num">4,707</td><td class="num">150</td><td class="num">-4,557</td><td class="pct">-96.8%</td><td class="muted">parse 17ms / compile 14ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/346">#346</a></td><td><span class="pill">Ready</span></td></tr><tr class="win"><td>1</td><td><code>src/utils.py</code></td><td class="num">13,830</td><td class="num">800</td><td class="num">-13,030</td><td class="pct">-94.2%</td><td class="muted">parse 53ms / compile 42ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/342">#342</a></td><td><span class="pill">Ready</span></td></tr><tr class="win"><td>6</td><td><code>tests/test_http_server.py</code></td><td class="num">2,371</td><td class="num">150</td><td class="num">-2,221</td><td class="pct">-93.7%</td><td class="muted">parse 10ms / compile 7ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/349">#349</a></td><td><span class="pill">Ready</span></td></tr><tr class="win"><td>7</td><td><code>src/intelligence_payloads.py</code></td><td class="num">1,749</td><td class="num">120</td><td class="num">-1,629</td><td class="pct">-93.1%</td><td class="muted">parse 8ms / compile 5ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/350">#350</a></td><td><span class="pill">Ready</span></td></tr><tr class="win"><td>14</td><td><code>tests/test_intelligence_payloads.py</code></td><td class="num">1,278</td><td class="num">100</td><td class="num">-1,178</td><td class="pct">-92.2%</td><td class="muted">parse 5ms / compile 4ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/357">#357</a></td><td><span class="pill">Ready</span></td></tr><tr class="win"><td>9</td><td><code>src/tools/system.py</code></td><td class="num">1,525</td><td class="num">120</td><td class="num">-1,405</td><td class="pct">-92.1%</td><td class="muted">parse 6ms / compile 5ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/352">#352</a></td><td><span class="pill">Ready</span></td></tr><tr class="win"><td>15</td><td><code>tests/test_subscription_transports.py</code></td><td class="num">1,235</td><td class="num">100</td><td class="num">-1,135</td><td class="pct">-91.9%</td><td class="muted">parse 4ms / compile 3ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/358">#358</a></td><td><span class="pill">Ready</span></td></tr><tr class="win"><td>16</td><td><code>tests/test_task_rag.py</code></td><td class="num">1,201</td><td class="num">100</td><td class="num">-1,101</td><td class="pct">-91.7%</td><td class="muted">parse 5ms / compile 4ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/359">#359</a></td><td><span class="pill">Ready</span></td></tr><tr class="win"><td>17</td><td><code>tests/test_provider_harvest.py</code></td><td class="num">1,188</td><td class="num">100</td><td class="num">-1,088</td><td class="pct">-91.6%</td><td class="muted">parse 5.28ms / compile 4.75ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/360">#360</a></td><td><span class="pill">Ready</span></td></tr><tr class="win"><td>11</td><td><code>tests/test_mcp_session_guard.py</code></td><td class="num">1,397</td><td class="num">120</td><td class="num">-1,277</td><td class="pct">-91.4%</td><td class="muted">parse 6ms / compile 5ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/354">#354</a></td><td><span class="pill">Ready</span></td></tr><tr class="win"><td>12</td><td><code>tests/test_mcp_sampling_bridge.py</code></td><td class="num">1,379</td><td class="num">120</td><td class="num">-1,259</td><td class="pct">-91.3%</td><td class="muted">parse 5ms / compile 4ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/355">#355</a></td><td><span class="pill">Ready</span></td></tr><tr class="win"><td>20</td><td><code>tests/test_server.py</code></td><td class="num">1,110</td><td class="num">100</td><td class="num">-1,010</td><td class="pct">-91.0%</td><td class="muted">parse 3.86ms / compile 3.92ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/363">#363</a></td><td><span class="pill">Ready</span></td></tr><tr class="win"><td>22</td><td><code>tests/test_multiagent.py</code></td><td class="num">1,102</td><td class="num">100</td><td class="num">-1,002</td><td class="pct">-90.9%</td><td class="muted">parse 4.4ms / compile 3.52ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/365">#365</a></td><td><span class="pill">Ready</span></td></tr><tr class="win"><td>21</td><td><code>tests/test_provider_adapters.py</code></td><td class="num">1,061</td><td class="num">100</td><td class="num">-961</td><td class="pct">-90.6%</td><td class="muted">parse 4.49ms / compile 2.88ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/364">#364</a></td><td><span class="pill">Ready</span></td></tr><tr class="win"><td>25</td><td><code>tests/test_knowledge.py</code></td><td class="num">1,021</td><td class="num">100</td><td class="num">-921</td><td class="pct">-90.2%</td><td class="muted">parse 4.53ms / compile 3.34ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/368">#368</a></td><td><span class="pill">Ready</span></td></tr><tr class="win"><td>18</td><td><code>src/tools/swarm.py</code></td><td class="num">1,155</td><td class="num">120</td><td class="num">-1,035</td><td class="pct">-89.6%</td><td class="muted">parse 5.21ms / compile 4.12ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/361">#361</a></td><td><span class="pill">Ready</span></td></tr><tr class="win"><td>10</td><td><code>src/providers/subscription.py</code></td><td class="num">1,427</td><td class="num">150</td><td class="num">-1,277</td><td class="pct">-89.5%</td><td class="muted">parse 5ms / compile 3ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/353">#353</a></td><td><span class="pill">Ready</span></td></tr><tr class="win"><td>26</td><td><code>tests/test_evals.py</code></td><td class="num">926</td><td class="num">100</td><td class="num">-826</td><td class="pct">-89.2%</td><td class="muted">parse 3.66ms / compile 3.19ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/369">#369</a></td><td><span class="pill">Ready</span></td></tr><tr class="win"><td>19</td><td><code>src/mcp_session_guard.py</code></td><td class="num">1,105</td><td class="num">120</td><td class="num">-985</td><td class="pct">-89.1%</td><td class="muted">parse 4.25ms / compile 3.02ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/362">#362</a></td><td><span class="pill">Ready</span></td></tr><tr class="win"><td>43</td><td><code>tests/test_phase5.py</code></td><td class="num">798</td><td class="num">90</td><td class="num">-708</td><td class="pct">-88.7%</td><td class="muted">parse 2.98ms / compile 2.19ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/386">#386</a></td><td><span class="pill">Ready</span></td></tr><tr class="win"><td>27</td><td><code>src/providers/contracts.py</code></td><td class="num">877</td><td class="num">100</td><td class="num">-777</td><td class="pct">-88.6%</td><td class="muted">parse 3.35ms / compile 2.42ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/370">#370</a></td><td><span class="pill">Ready</span></td></tr><tr class="win"><td>8</td><td><code>evals/.../stage1_harness.py</code></td><td class="num">1,644</td><td class="num">200</td><td class="num">-1,444</td><td class="pct">-87.8%</td><td class="muted">parse 5ms / compile 5ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/351">#351</a></td><td><span class="pill">Ready</span></td></tr><tr class="win"><td>24</td><td><code>src/providers/mcp_sampling.py</code></td><td class="num">986</td><td class="num">120</td><td class="num">-866</td><td class="pct">-87.8%</td><td class="muted">parse 3.13ms / compile 2.66ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/367">#367</a></td><td><span class="pill">Ready</span></td></tr><tr class="win"><td>32</td><td><code>tests/test_completion_envelope.py</code></td><td class="num">733</td><td class="num">90</td><td class="num">-643</td><td class="pct">-87.7%</td><td class="muted">parse 2.48ms / compile 1.83ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/375">#375</a></td><td><span class="pill">Ready</span></td></tr><tr class="win"><td>35</td><td><code>tests/test_mcp_ui.py</code></td><td class="num">730</td><td class="num">90</td><td class="num">-640</td><td class="pct">-87.7%</td><td class="muted">parse 2.93ms / compile 2.07ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/378">#378</a></td><td><span class="pill">Ready</span></td></tr><tr class="win"><td>29</td><td><code>tests/test_credentials.py</code></td><td class="num">804</td><td class="num">100</td><td class="num">-704</td><td class="pct">-87.6%</td><td class="muted">parse 2.67ms / compile 2.27ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/372">#372</a></td><td><span class="pill">Ready</span></td></tr><tr class="win"><td>33</td><td><code>tests/campaigns/.../test_stage1_schema_safety.py</code></td><td class="num">721</td><td class="num">90</td><td class="num">-631</td><td class="pct">-87.5%</td><td class="muted">parse 1.99ms / compile 1.95ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/376">#376</a></td><td><span class="pill">Ready</span></td></tr><tr class="win"><td>30</td><td><code>src/tools/chats.py</code></td><td class="num">800</td><td class="num">100</td><td class="num">-700</td><td class="pct">-87.5%</td><td class="muted">parse 2.35ms / compile 2.0ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/373">#373</a></td><td><span class="pill">Ready</span></td></tr><tr class="win"><td>45</td><td><code>evals/.../role_schemas.py</code></td><td class="num">559</td><td class="num">70</td><td class="num">-489</td><td class="pct">-87.5%</td><td class="muted">parse 2.08ms / compile 1.48ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/388">#388</a></td><td><span class="pill">Ready</span></td></tr><tr class="win"><td>46</td><td><code>evals/.../schemas.py</code></td><td class="num">558</td><td class="num">70</td><td class="num">-488</td><td class="pct">-87.5%</td><td class="muted">parse 1.65ms / compile 1.41ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/389">#389</a></td><td><span class="pill">Ready</span></td></tr><tr class="win"><td>34</td><td><code>tests/test_provider_attempt_ledger.py</code></td><td class="num">714</td><td class="num">90</td><td class="num">-624</td><td class="pct">-87.4%</td><td class="muted">parse 2.48ms / compile 1.86ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/377">#377</a></td><td><span class="pill">Ready</span></td></tr><tr class="win"><td>36</td><td><code>tests/test_observability.py</code></td><td class="num">712</td><td class="num">90</td><td class="num">-622</td><td class="pct">-87.4%</td><td class="muted">parse 2.51ms / compile 2.13ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/379">#379</a></td><td><span class="pill">Ready</span></td></tr><tr class="win"><td>31</td><td><code>src/completion_envelope.py</code></td><td class="num">791</td><td class="num">100</td><td class="num">-691</td><td class="pct">-87.4%</td><td class="muted">parse 2.98ms / compile 2.04ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/374">#374</a></td><td><span class="pill">Ready</span></td></tr><tr class="win"><td>40</td><td><code>evals/.../provider_adapters.py</code></td><td class="num">623</td><td class="num">80</td><td class="num">-543</td><td class="pct">-87.2%</td><td class="muted">parse 2.46ms / compile 1.69ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/383">#383</a></td><td><span class="pill">Ready</span></td></tr><tr class="win"><td>37</td><td><code>tests/test_migrations.py</code></td><td class="num">696</td><td class="num">90</td><td class="num">-606</td><td class="pct">-87.1%</td><td class="muted">parse 2.38ms / compile 1.59ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/380">#380</a></td><td><span class="pill">Ready</span></td></tr><tr class="win"><td>41</td><td><code>tests/campaigns/.../test_attempt_ledger_safety.py</code></td><td class="num">612</td><td class="num">80</td><td class="num">-532</td><td class="pct">-86.9%</td><td class="muted">parse 2.4ms / compile 1.88ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/384">#384</a></td><td><span class="pill">Ready</span></td></tr><tr class="win"><td>44</td><td><code>tests/test_service_workspace_boundary.py</code></td><td class="num">580</td><td class="num">80</td><td class="num">-500</td><td class="pct">-86.2%</td><td class="muted">parse 2.28ms / compile 1.73ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/387">#387</a></td><td><span class="pill">Ready</span></td></tr><tr class="win"><td>5</td><td><code>src/http_server.py</code></td><td class="num">2,874</td><td class="num">400</td><td class="num">-2,474</td><td class="pct">-86.1%</td><td class="muted">parse 11ms / compile 9ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/348">#348</a></td><td><span class="pill">Ready</span></td></tr><tr class="win"><td>42</td><td><code>src/swarm/engine.py</code></td><td class="num">570</td><td class="num">80</td><td class="num">-490</td><td class="pct">-86.0%</td><td class="muted">parse 2.33ms / compile 1.62ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/385">#385</a></td><td><span class="pill">Ready</span></td></tr><tr class="win"><td>28</td><td><code>src/provider_harvest.py</code></td><td class="num">816</td><td class="num">120</td><td class="num">-696</td><td class="pct">-85.3%</td><td class="muted">parse 2.54ms / compile 2.14ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/371">#371</a></td><td><span class="pill">Ready</span></td></tr><tr class="win"><td>38</td><td><code>src/workspace_memory.py</code></td><td class="num">668</td><td class="num">100</td><td class="num">-568</td><td class="pct">-85.0%</td><td class="muted">parse 3.19ms / compile 2.47ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/381">#381</a></td><td><span class="pill">Ready</span></td></tr><tr class="win"><td>23</td><td><code>src/rag.py</code></td><td class="num">1,001</td><td class="num">150</td><td class="num">-851</td><td class="pct">-85.0%</td><td class="muted">parse 3.37ms / compile 3.01ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/366">#366</a></td><td><span class="pill">Ready</span></td></tr><tr class="win"><td>39</td><td><code>evals/runner.py</code></td><td class="num">659</td><td class="num">100</td><td class="num">-559</td><td class="pct">-84.8%</td><td class="muted">parse 3.25ms / compile 2.63ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/382">#382</a></td><td><span class="pill">Ready</span></td></tr><tr class="win"><td>13</td><td><code>evals/.../attempt_ledger.py</code></td><td class="num">1,298</td><td class="num">200</td><td class="num">-1,098</td><td class="pct">-84.6%</td><td class="muted">parse 4ms / compile 4ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/356">#356</a></td><td><span class="pill">Ready</span></td></tr><tr class="win"><td>4</td><td><code>src/providers/broker.py</code></td><td class="num">3,122</td><td class="num">600</td><td class="num">-2,522</td><td class="pct">-80.8%</td><td class="muted">parse 9ms / compile 8ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/347">#347</a></td><td><span class="pill">Ready</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout">
+    <strong style="color:var(--ink)">Watcher handoff.</strong>
+    46 Ready refactor_plan drafts (#342–#389) are queued for Codex Sol High review.
+    Land/merge remains the normal Codex supervisor path — this board is visibility only.
+    Refresh by updating the embedded file rows in this HTML and the companion markdown.
+  </div>
+  <p class="foot">Public share surface · IDE canvas is a local companion only · source snapshot in docs/snapshots/</p>
+</div>
+<!-- EMBEDDED_METRICS_JSON
+{
+  "snapshot": "2026-07-16T17:06:47Z",
+  "totalInventory": 210,
+  "files": [
+    {
+      "file": "src/utils.py",
+      "short": "utils.py",
+      "before": 13830,
+      "after": 800,
+      "parseMs": 53,
+      "compileMs": 42,
+      "pr": 342,
+      "status": "Ready",
+      "loop": 1,
+      "pct": -94.21547360809834,
+      "delta": -13030
+    },
+    {
+      "file": "tests/test_utils.py",
+      "short": "test_utils.py",
+      "before": 7848,
+      "after": 200,
+      "parseMs": 29,
+      "compileMs": 26,
+      "pr": 345,
+      "status": "Ready",
+      "loop": 2,
+      "pct": -97.45158002038737,
+      "delta": -7648
+    },
+    {
+      "file": "tests/test_provider_broker.py",
+      "short": "test_provider_broker.py",
+      "before": 4707,
+      "after": 150,
+      "parseMs": 17,
+      "compileMs": 14,
+      "pr": 346,
+      "status": "Ready",
+      "loop": 3,
+      "pct": -96.81325685149777,
+      "delta": -4557
+    },
+    {
+      "file": "src/providers/broker.py",
+      "short": "broker.py",
+      "before": 3122,
+      "after": 600,
+      "parseMs": 9,
+      "compileMs": 8,
+      "pr": 347,
+      "status": "Ready",
+      "loop": 4,
+      "pct": -80.78155028827675,
+      "delta": -2522
+    },
+    {
+      "file": "src/http_server.py",
+      "short": "http_server.py",
+      "before": 2874,
+      "after": 400,
+      "parseMs": 11,
+      "compileMs": 9,
+      "pr": 348,
+      "status": "Ready",
+      "loop": 5,
+      "pct": -86.0821155184412,
+      "delta": -2474
+    },
+    {
+      "file": "tests/test_http_server.py",
+      "short": "test_http_server.py",
+      "before": 2371,
+      "after": 150,
+      "parseMs": 10,
+      "compileMs": 7,
+      "pr": 349,
+      "status": "Ready",
+      "loop": 6,
+      "pct": -93.67355546183045,
+      "delta": -2221
+    },
+    {
+      "file": "src/intelligence_payloads.py",
+      "short": "intelligence_payloads.py",
+      "before": 1749,
+      "after": 120,
+      "parseMs": 8,
+      "compileMs": 5,
+      "pr": 350,
+      "status": "Ready",
+      "loop": 7,
+      "pct": -93.13893653516296,
+      "delta": -1629
+    },
+    {
+      "file": "evals/.../stage1_harness.py",
+      "short": "stage1_harness.py",
+      "before": 1644,
+      "after": 200,
+      "parseMs": 5,
+      "compileMs": 5,
+      "pr": 351,
+      "status": "Ready",
+      "loop": 8,
+      "pct": -87.8345498783455,
+      "delta": -1444
+    },
+    {
+      "file": "src/tools/system.py",
+      "short": "system.py",
+      "before": 1525,
+      "after": 120,
+      "parseMs": 6,
+      "compileMs": 5,
+      "pr": 352,
+      "status": "Ready",
+      "loop": 9,
+      "pct": -92.1311475409836,
+      "delta": -1405
+    },
+    {
+      "file": "src/providers/subscription.py",
+      "short": "subscription.py",
+      "before": 1427,
+      "after": 150,
+      "parseMs": 5,
+      "compileMs": 3,
+      "pr": 353,
+      "status": "Ready",
+      "loop": 10,
+      "pct": -89.48843728100911,
+      "delta": -1277
+    },
+    {
+      "file": "tests/test_mcp_session_guard.py",
+      "short": "test_mcp_session_guard.py",
+      "before": 1397,
+      "after": 120,
+      "parseMs": 6,
+      "compileMs": 5,
+      "pr": 354,
+      "status": "Ready",
+      "loop": 11,
+      "pct": -91.41016463851109,
+      "delta": -1277
+    },
+    {
+      "file": "tests/test_mcp_sampling_bridge.py",
+      "short": "test_mcp_sampling_bridge.py",
+      "before": 1379,
+      "after": 120,
+      "parseMs": 5,
+      "compileMs": 4,
+      "pr": 355,
+      "status": "Ready",
+      "loop": 12,
+      "pct": -91.29804205946338,
+      "delta": -1259
+    },
+    {
+      "file": "evals/.../attempt_ledger.py",
+      "short": "attempt_ledger.py",
+      "before": 1298,
+      "after": 200,
+      "parseMs": 4,
+      "compileMs": 4,
+      "pr": 356,
+      "status": "Ready",
+      "loop": 13,
+      "pct": -84.59167950693374,
+      "delta": -1098
+    },
+    {
+      "file": "tests/test_intelligence_payloads.py",
+      "short": "test_intelligence_payloads.py",
+      "before": 1278,
+      "after": 100,
+      "parseMs": 5,
+      "compileMs": 4,
+      "pr": 357,
+      "status": "Ready",
+      "loop": 14,
+      "pct": -92.17527386541471,
+      "delta": -1178
+    },
+    {
+      "file": "tests/test_subscription_transports.py",
+      "short": "test_subscription_transports.py",
+      "before": 1235,
+      "after": 100,
+      "parseMs": 4,
+      "compileMs": 3,
+      "pr": 358,
+      "status": "Ready",
+      "loop": 15,
+      "pct": -91.90283400809717,
+      "delta": -1135
+    },
+    {
+      "file": "tests/test_task_rag.py",
+      "short": "test_task_rag.py",
+      "before": 1201,
+      "after": 100,
+      "parseMs": 5,
+      "compileMs": 4,
+      "pr": 359,
+      "status": "Ready",
+      "loop": 16,
+      "pct": -91.67360532889259,
+      "delta": -1101
+    },
+    {
+      "file": "tests/test_provider_harvest.py",
+      "short": "test_provider_harvest.py",
+      "before": 1188,
+      "after": 100,
+      "parseMs": 5.28,
+      "compileMs": 4.75,
+      "pr": 360,
+      "status": "Ready",
+      "loop": 17,
+      "pct": -91.58249158249158,
+      "delta": -1088
+    },
+    {
+      "file": "src/tools/swarm.py",
+      "short": "swarm.py",
+      "before": 1155,
+      "after": 120,
+      "parseMs": 5.21,
+      "compileMs": 4.12,
+      "pr": 361,
+      "status": "Ready",
+      "loop": 18,
+      "pct": -89.6103896103896,
+      "delta": -1035
+    },
+    {
+      "file": "src/mcp_session_guard.py",
+      "short": "mcp_session_guard.py",
+      "before": 1105,
+      "after": 120,
+      "parseMs": 4.25,
+      "compileMs": 3.02,
+      "pr": 362,
+      "status": "Ready",
+      "loop": 19,
+      "pct": -89.14027149321268,
+      "delta": -985
+    },
+    {
+      "file": "tests/test_server.py",
+      "short": "test_server.py",
+      "before": 1110,
+      "after": 100,
+      "parseMs": 3.86,
+      "compileMs": 3.92,
+      "pr": 363,
+      "status": "Ready",
+      "loop": 20,
+      "pct": -90.990990990991,
+      "delta": -1010
+    },
+    {
+      "file": "tests/test_provider_adapters.py",
+      "short": "test_provider_adapters.py",
+      "before": 1061,
+      "after": 100,
+      "parseMs": 4.49,
+      "compileMs": 2.88,
+      "pr": 364,
+      "status": "Ready",
+      "loop": 21,
+      "pct": -90.57492931196984,
+      "delta": -961
+    },
+    {
+      "file": "tests/test_multiagent.py",
+      "short": "test_multiagent.py",
+      "before": 1102,
+      "after": 100,
+      "parseMs": 4.4,
+      "compileMs": 3.52,
+      "pr": 365,
+      "status": "Ready",
+      "loop": 22,
+      "pct": -90.92558983666062,
+      "delta": -1002
+    },
+    {
+      "file": "src/rag.py",
+      "short": "rag.py",
+      "before": 1001,
+      "after": 150,
+      "parseMs": 3.37,
+      "compileMs": 3.01,
+      "pr": 366,
+      "status": "Ready",
+      "loop": 23,
+      "pct": -85.01498501498502,
+      "delta": -851
+    },
+    {
+      "file": "src/providers/mcp_sampling.py",
+      "short": "mcp_sampling.py",
+      "before": 986,
+      "after": 120,
+      "parseMs": 3.13,
+      "compileMs": 2.66,
+      "pr": 367,
+      "status": "Ready",
+      "loop": 24,
+      "pct": -87.82961460446246,
+      "delta": -866
+    },
+    {
+      "file": "tests/test_knowledge.py",
+      "short": "test_knowledge.py",
+      "before": 1021,
+      "after": 100,
+      "parseMs": 4.53,
+      "compileMs": 3.34,
+      "pr": 368,
+      "status": "Ready",
+      "loop": 25,
+      "pct": -90.205680705191,
+      "delta": -921
+    },
+    {
+      "file": "tests/test_evals.py",
+      "short": "test_evals.py",
+      "before": 926,
+      "after": 100,
+      "parseMs": 3.66,
+      "compileMs": 3.19,
+      "pr": 369,
+      "status": "Ready",
+      "loop": 26,
+      "pct": -89.20086393088553,
+      "delta": -826
+    },
+    {
+      "file": "src/providers/contracts.py",
+      "short": "contracts.py",
+      "before": 877,
+      "after": 100,
+      "parseMs": 3.35,
+      "compileMs": 2.42,
+      "pr": 370,
+      "status": "Ready",
+      "loop": 27,
+      "pct": -88.59749144811857,
+      "delta": -777
+    },
+    {
+      "file": "src/provider_harvest.py",
+      "short": "provider_harvest.py",
+      "before": 816,
+      "after": 120,
+      "parseMs": 2.54,
+      "compileMs": 2.14,
+      "pr": 371,
+      "status": "Ready",
+      "loop": 28,
+      "pct": -85.29411764705883,
+      "delta": -696
+    },
+    {
+      "file": "tests/test_credentials.py",
+      "short": "test_credentials.py",
+      "before": 804,
+      "after": 100,
+      "parseMs": 2.67,
+      "compileMs": 2.27,
+      "pr": 372,
+      "status": "Ready",
+      "loop": 29,
+      "pct": -87.56218905472637,
+      "delta": -704
+    },
+    {
+      "file": "src/tools/chats.py",
+      "short": "chats.py",
+      "before": 800,
+      "after": 100,
+      "parseMs": 2.35,
+      "compileMs": 2.0,
+      "pr": 373,
+      "status": "Ready",
+      "loop": 30,
+      "pct": -87.5,
+      "delta": -700
+    },
+    {
+      "file": "src/completion_envelope.py",
+      "short": "completion_envelope.py",
+      "before": 791,
+      "after": 100,
+      "parseMs": 2.98,
+      "compileMs": 2.04,
+      "pr": 374,
+      "status": "Ready",
+      "loop": 31,
+      "pct": -87.35777496839444,
+      "delta": -691
+    },
+    {
+      "file": "tests/test_completion_envelope.py",
+      "short": "test_completion_envelope.py",
+      "before": 733,
+      "after": 90,
+      "parseMs": 2.48,
+      "compileMs": 1.83,
+      "pr": 375,
+      "status": "Ready",
+      "loop": 32,
+      "pct": -87.72169167803547,
+      "delta": -643
+    },
+    {
+      "file": "tests/campaigns/.../test_stage1_schema_safety.py",
+      "short": "test_stage1_schema_safety.py",
+      "before": 721,
+      "after": 90,
+      "parseMs": 1.99,
+      "compileMs": 1.95,
+      "pr": 376,
+      "status": "Ready",
+      "loop": 33,
+      "pct": -87.51733703190014,
+      "delta": -631
+    },
+    {
+      "file": "tests/test_provider_attempt_ledger.py",
+      "short": "test_provider_attempt_ledger.py",
+      "before": 714,
+      "after": 90,
+      "parseMs": 2.48,
+      "compileMs": 1.86,
+      "pr": 377,
+      "status": "Ready",
+      "loop": 34,
+      "pct": -87.39495798319328,
+      "delta": -624
+    },
+    {
+      "file": "tests/test_mcp_ui.py",
+      "short": "test_mcp_ui.py",
+      "before": 730,
+      "after": 90,
+      "parseMs": 2.93,
+      "compileMs": 2.07,
+      "pr": 378,
+      "status": "Ready",
+      "loop": 35,
+      "pct": -87.67123287671232,
+      "delta": -640
+    },
+    {
+      "file": "tests/test_observability.py",
+      "short": "test_observability.py",
+      "before": 712,
+      "after": 90,
+      "parseMs": 2.51,
+      "compileMs": 2.13,
+      "pr": 379,
+      "status": "Ready",
+      "loop": 36,
+      "pct": -87.35955056179775,
+      "delta": -622
+    },
+    {
+      "file": "tests/test_migrations.py",
+      "short": "test_migrations.py",
+      "before": 696,
+      "after": 90,
+      "parseMs": 2.38,
+      "compileMs": 1.59,
+      "pr": 380,
+      "status": "Ready",
+      "loop": 37,
+      "pct": -87.06896551724138,
+      "delta": -606
+    },
+    {
+      "file": "src/workspace_memory.py",
+      "short": "workspace_memory.py",
+      "before": 668,
+      "after": 100,
+      "parseMs": 3.19,
+      "compileMs": 2.47,
+      "pr": 381,
+      "status": "Ready",
+      "loop": 38,
+      "pct": -85.02994011976048,
+      "delta": -568
+    },
+    {
+      "file": "evals/runner.py",
+      "short": "runner.py",
+      "before": 659,
+      "after": 100,
+      "parseMs": 3.25,
+      "compileMs": 2.63,
+      "pr": 382,
+      "status": "Ready",
+      "loop": 39,
+      "pct": -84.82549317147192,
+      "delta": -559
+    },
+    {
+      "file": "evals/.../provider_adapters.py",
+      "short": "provider_adapters.py",
+      "before": 623,
+      "after": 80,
+      "parseMs": 2.46,
+      "compileMs": 1.69,
+      "pr": 383,
+      "status": "Ready",
+      "loop": 40,
+      "pct": -87.1589085072231,
+      "delta": -543
+    },
+    {
+      "file": "tests/campaigns/.../test_attempt_ledger_safety.py",
+      "short": "test_attempt_ledger_safety.py",
+      "before": 612,
+      "after": 80,
+      "parseMs": 2.4,
+      "compileMs": 1.88,
+      "pr": 384,
+      "status": "Ready",
+      "loop": 41,
+      "pct": -86.9281045751634,
+      "delta": -532
+    },
+    {
+      "file": "src/swarm/engine.py",
+      "short": "engine.py",
+      "before": 570,
+      "after": 80,
+      "parseMs": 2.33,
+      "compileMs": 1.62,
+      "pr": 385,
+      "status": "Ready",
+      "loop": 42,
+      "pct": -85.96491228070175,
+      "delta": -490
+    },
+    {
+      "file": "tests/test_phase5.py",
+      "short": "test_phase5.py",
+      "before": 798,
+      "after": 90,
+      "parseMs": 2.98,
+      "compileMs": 2.19,
+      "pr": 386,
+      "status": "Ready",
+      "loop": 43,
+      "pct": -88.7218045112782,
+      "delta": -708
+    },
+    {
+      "file": "tests/test_service_workspace_boundary.py",
+      "short": "test_service_workspace_boundary.py",
+      "before": 580,
+      "after": 80,
+      "parseMs": 2.28,
+      "compileMs": 1.73,
+      "pr": 387,
+      "status": "Ready",
+      "loop": 44,
+      "pct": -86.20689655172413,
+      "delta": -500
+    },
+    {
+      "file": "evals/.../role_schemas.py",
+      "short": "role_schemas.py",
+      "before": 559,
+      "after": 70,
+      "parseMs": 2.08,
+      "compileMs": 1.48,
+      "pr": 388,
+      "status": "Ready",
+      "loop": 45,
+      "pct": -87.47763864042933,
+      "delta": -489
+    },
+    {
+      "file": "evals/.../schemas.py",
+      "short": "schemas.py",
+      "before": 558,
+      "after": 70,
+      "parseMs": 1.65,
+      "compileMs": 1.41,
+      "pr": 389,
+      "status": "Ready",
+      "loop": 46,
+      "pct": -87.45519713261649,
+      "delta": -488
+    }
+  ],
+  "overallPct": -91.1,
+  "avgPct": -88.9
+}
+-->
+</body>
+</html>
