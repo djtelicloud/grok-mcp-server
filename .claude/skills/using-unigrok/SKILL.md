@@ -42,6 +42,16 @@ points to the expected UniGrok endpoint before approving or using its tools.
 - `model`: pin only when asked; pins validate against the live catalog. An
   explicit `plane=cli|api` should pair with `fallback_policy="same_plane"`
   when billing planes must not cross.
+- **Deliver-or-fail opinions** (`reasoning`/`thinking`): by design the default
+  `cross_plane` policy may recover a rejected non-answer on the *other* plane —
+  a `thinking`/`reasoning` run that the reflection gate rejects can be answered
+  by a CLI completion instead, returned with `finish_reason="fallback"` (this is
+  intentional; see `tests/test_utils.py`). That recovery can be a weaker, non-
+  reflected completion. When you want the API reasoning loop to **deliver or
+  fail** rather than soften to a CLI recovery — e.g. a high-stakes peer review —
+  pin `plane=api` with `fallback_policy="same_plane"`. Accept the tradeoff: you
+  may get a hard error/empty result instead of a softer CLI answer. That is the
+  point.
 
 Every result returns `response` plus `model`, `route`, `plane`, `why`,
 `degraded`, `cost_usd`, `tokens`, `latency_sec`, and `citations` when search
@@ -50,7 +60,9 @@ grounding ran. Surface `cost_usd` when the user cares about spend.
 ## Claude Code patterns
 
 - **Second opinion before handoff**: send the branch diff via
-  `workspace_context` with `mode=reasoning` for a Grok peer review.
+  `workspace_context` with `mode=reasoning` for a Grok peer review. For a
+  deliver-or-fail API opinion, add `plane=api` + `fallback_policy=same_plane`
+  (see the `model`/plane note above).
 - **Long calls should not block the turn**: `research` and `thinking` runs can
   take minutes; wrap them in a background subagent (Agent tool) and keep
   working, then relay the result.

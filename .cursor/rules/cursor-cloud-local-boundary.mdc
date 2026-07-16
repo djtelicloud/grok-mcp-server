@@ -1,0 +1,29 @@
+---
+description: Cloud Agents vs local Cursor UniGrok boundary (fail-closed Cloud)
+alwaysApply: true
+---
+
+# Cursor Cloud vs local UniGrok boundary
+
+Cursor’s dual surface: **local IDE** (Composer + Automations + hybrid MCP) and
+**Cloud Agents**. Keep them fail-closed apart.
+
+- **Local Cursor plane** owns hybrid UniGrok MCP (`X-Client-ID: cursor` /
+  `cursor-forge`), Automations / Bugbot, and Composer Grok 4.5 edit loops on
+  the laptop.
+- **Cloud Agents stay fail-closed:** no laptop secrets, no local tunnels, no
+  dependence on `http://localhost:4765` (or `:4766`) from Cloud.
+- Do **not** pull home MCP JSON, bearer tokens, CLI OAuth/`auth.json`, or
+  subscription state into Cloud Agents.
+- **Contributor path:** local Ready packets; **Live** land remains
+  supervisor / Codex — Cloud does not bypass that gate.
+- If Cloud needs Grok: use remote / API-plane paths with explicit dual-plane
+  honesty only. Never invent bare `http:anon` as a healthy *local* Cursor path.
+- **Modes reminder (local):** Composer Grok 4.5 = IDE-native edit loop;
+  UniGrok `agent` modes (`fast` / `reasoning` / `thinking` / `research`) =
+  shared dual-plane peer path — not interchangeable billing planes.
+- Pointers only: routing → `cursor-unigrok-routing.mdc`; Autofix →
+  `cursor-bugbot-autofix.mdc`; Automations law →
+  `cursor-automations-single-pass.mdc`. Do not re-essay them here.
+- Leave `docs/ide-setup.md`, repo-root `.mcp.json`, and peer brand packets
+  untouched from this rule.
