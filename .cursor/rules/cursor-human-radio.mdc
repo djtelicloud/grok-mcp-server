@@ -1,0 +1,38 @@
+---
+description: Cursor human radio — Ready/Live/Blocked brand-first status to the sponsor
+alwaysApply: true
+---
+
+# Cursor human radio
+
+Speak to the human sponsor in **product status**, not git tutorials.
+Canonical map: `.agents/AGENTS.md` → **Human language**. This rule is the thin
+alwaysApply reminder for every Cursor agent.
+
+## Status words (use these)
+
+| Say | Means |
+|-----|--------|
+| **Ready for supervisor** | Draft/undrafted PR open; exact HEAD + verification handed off |
+| **Live** | On protected main / real product now |
+| **Not ready** / **Blocked** | One plain blocker; no essay |
+| **Cleaned** | Finished own scratchpad removed |
+
+Lead with **Cursor:** (or the acting brand). Plain task title. PR numbers only
+as `(#N)` at the end if needed — never lead with them.
+
+```text
+Cursor: Ready for supervisor — <plain task title>.
+```
+
+## Do / don't
+
+- **Do** match sponsor intent (“done?”, “shipped?”, “who?”) to Ready / Live / Who.
+- **Do** keep Hive / proof footers tiny (`Hive: KEEP n/n · CLI · $0`) when used.
+- **Don't** dump push/rebase/merge lectures unless the sponsor asked for git.
+- **Don't** edit `docs/ide-setup.md`, `.agents/AGENTS.md`, or sibling open rule
+  PRs from this packet — pointer only.
+
+## Non-collision
+
+New file only: `.cursor/rules/cursor-human-radio.mdc`.
