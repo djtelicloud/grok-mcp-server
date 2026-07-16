@@ -149,7 +149,7 @@ def test_forge_execution_tools_are_not_core_runtime_dependencies():
     forge = set(metadata["project"]["optional-dependencies"]["forge"])
     dev = set(metadata["dependency-groups"]["dev"])
 
-    for name in ("coverage", "pytest", "ruff"):
+    for name in ("coverage", "pytest", "pytest-asyncio", "ruff"):
         assert not any(dep.startswith(name) for dep in core)
         assert any(dep.startswith(name) for dep in forge)
         assert any(dep.startswith(name) for dep in dev)
