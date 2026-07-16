@@ -86,7 +86,7 @@ uv run python main.py init        # bootstrap .env and print IDE configs
 docker compose up --build -d      # start shared service on :4765
 curl -s http://localhost:4765/healthz
 uv run pytest -q                  # full test suite
-./scripts/land                    # test and land committed task work to main
+./scripts/land                    # fail-closed while trusted external landing is rebuilt
 ```
 
 Local Control Center: `http://localhost:4765/ui/`.
@@ -113,10 +113,11 @@ Every draft PR or handoff must name the full commit SHA, changed paths, tests,
 risks, human sponsor, and canonical provider/model provenance from
 [docs/agent-attribution.md](docs/agent-attribution.md). Material work uses
 `Agent-Assisted-By:` and advisory review uses `Agent-Reviewed-By:`. A Codex/project-admin
-session reviews the exact current head, binds approval to that head, alone runs
-`./scripts/land` from a `codex/*` integration branch, completes the protected
-merge, and synchronizes local `main`. Contributor agents must not push shared
-`main`, land, merge, release, or deploy unless explicitly acting in that
+session reviews the exact current head, binds approval to that head, completes
+the protected GitHub merge, and synchronizes local `main`. Local
+`./scripts/land` is temporarily fail-closed: candidate code and shared Git
+metadata are not a trusted verification boundary. Contributor agents must not
+push shared `main`, land, merge, release, or deploy unless explicitly acting in that
 integration role. Exception: a contributor may remove only its own finished
 disposable scratchpad (see `.agents/AGENTS.md` Worktree lifecycle); never delete
 peers’ live trees or the primary main checkout. Passing tests, committing, pushing, or opening

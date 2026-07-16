@@ -53,7 +53,8 @@ COPY .grok/prompts/ ./.grok/prompts/
 # in the application bundle or an IDE project.
 RUN useradd --create-home --uid 1000 --shell /usr/sbin/nologin appuser \
     && mkdir -p /state /home/appuser/.grok \
-    && chown -R appuser:appuser /app /state /home/appuser/.grok
+    && chown -R appuser:appuser /state /home/appuser/.grok \
+    && chmod -R a-w /app
 USER appuser
 
 # The container command runs the current HTTP gateway on its internal port.
@@ -67,6 +68,7 @@ EXPOSE 8080
 # how the host publishes the port (docker-compose binds it to 127.0.0.1).
 ENV UNIGROK_HOST=0.0.0.0
 ENV PORT=8080
+ENV UNIGROK_STATE_DIR=/state
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
     CMD ["python", "-c", "import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:%s/healthz' % os.environ.get('PORT', '8080'), timeout=5)"]

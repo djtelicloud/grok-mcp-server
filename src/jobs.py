@@ -16,7 +16,7 @@ import uuid
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
-from .identity import get_active_caller, normalize_caller
+from .identity import get_active_caller, normalize_caller, scoped_session
 from .utils import (
     AGENTIC_TOOLS_SCHEMA,
     _DISTILL_SYS_PROMPT,
@@ -193,6 +193,9 @@ class JobManager:
         session_name = str(session or "").strip()
         if not session_name:
             return {"error": "Input Validation Error: session must not be empty."}
+        # Defense in depth with distill_session: always namespace under the
+        # bound principal/client before loading history or persisting source.
+        session_name = scoped_session(session_name) or session_name
         job_id = uuid.uuid4().hex
         model = await resolve_model("coding")
         caller = normalize_caller(caller) or get_active_caller()
