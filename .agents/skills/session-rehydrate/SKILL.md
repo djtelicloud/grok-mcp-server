@@ -56,10 +56,11 @@ so these rules load.
 
 ### 1. Product law
 
-Read (skim) when available:
+Read (skim) when available — **human-radio section first**:
 
-- `.agents/AGENTS.md` — multi-agent git, MCP endpoint, credentials boundary
-- Root `AGENTS.md` if present
+- `.agents/AGENTS.md` — **Talk to humans first**, Human language, then multi-agent
+  git / MCP endpoint / credentials boundary
+- Root `AGENTS.md` / brand roots (`CLAUDE.md`, `.gemini/GEMINI.md`, …) if present
 
 ### 2. Continuity (private brain)
 
