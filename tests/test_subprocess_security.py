@@ -34,6 +34,7 @@ def test_scrubbed_subprocess_env_rejects_named_and_unknown_secret_families():
             "LANG": "C.UTF-8",
             "GH_TOKEN": "github-secret",
             "AWS_SECRET_ACCESS_KEY": "aws-secret",
+            "FUTURE_CLOUD_ACCESS_KEY_ID": "future-access-key-id",
             "DATABASE_URL": "postgres://user:pass@example/db",
             "SSH_AUTH_SOCK": "/tmp/agent.sock",
             "FUTURE_PROVIDER_API_KEY": "future-secret",
@@ -116,6 +117,14 @@ def test_redact_secrets_removes_individual_gateway_keys(monkeypatch):
     )
 
     assert redact_secrets("failure: second-gateway-secret") == "failure: [REDACTED]"
+
+
+def test_redact_secrets_splits_gateway_keys_case_insensitively(monkeypatch):
+    monkeypatch.setenv(
+        "Unigrok_Api_Keys", "first-mixed-gateway, second-mixed-gateway"
+    )
+
+    assert redact_secrets("failure: second-mixed-gateway") == "failure: [REDACTED]"
 
 
 def test_redact_secrets_replaces_longer_prefix_keys_first(monkeypatch):

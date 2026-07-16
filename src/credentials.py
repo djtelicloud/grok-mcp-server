@@ -72,6 +72,7 @@ _SECRET_ENV_SUFFIXES = (
     "_API_KEY",
     "_PRIVATE_KEY",
     "_ACCESS_KEY",
+    "_ACCESS_KEY_ID",
     "_AUTH_SOCK",
     "_DSN",
 )

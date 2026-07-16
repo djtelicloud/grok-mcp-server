@@ -1291,7 +1291,7 @@ def redact_secrets(text: str) -> str:
     for name in secret_environment_names(os.environ):
         raw_value = os.environ.get(name, "")
         values = [raw_value.strip()]
-        if name == "UNIGROK_API_KEYS":
+        if name.upper() == "UNIGROK_API_KEYS":
             values.extend(part.strip() for part in raw_value.split(","))
         for value in values:
             if len(value) >= 8:
