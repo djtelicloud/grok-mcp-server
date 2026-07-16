@@ -5,18 +5,30 @@ from unittest.mock import AsyncMock
 import pytest
 
 from src.credentials import (
+    CLI_AUTH_NATIVE_SETUP_COMMAND,
     CLI_AUTH_SETUP_COMMAND,
     SERVER_OWNED_SECRET_ENV_NAMES,
     build_credential_plane_contract,
     credential_plane_policy,
+    default_cli_auth_setup_command,
 )
+
+
+def test_cli_auth_setup_prefers_compose_auth_profile():
+    assert CLI_AUTH_SETUP_COMMAND == "docker compose run --rm grok-cli-auth"
+    assert default_cli_auth_setup_command(containerized=True) == CLI_AUTH_SETUP_COMMAND
+    assert (
+        default_cli_auth_setup_command(containerized=False)
+        == CLI_AUTH_NATIVE_SETUP_COMMAND
+    )
 
 
 def test_cli_auth_setup_scrubs_server_credentials_but_keeps_oauth_path():
     for name in SERVER_OWNED_SECRET_ENV_NAMES:
-        assert f"-u {name}" in CLI_AUTH_SETUP_COMMAND
-    assert "-u GROK_AUTH_PATH" not in CLI_AUTH_SETUP_COMMAND
-    assert "-u GOOGLE_CLOUD_PROJECT" not in CLI_AUTH_SETUP_COMMAND
+        assert f"-u {name}" in CLI_AUTH_NATIVE_SETUP_COMMAND
+    assert "-u GROK_AUTH_PATH" not in CLI_AUTH_NATIVE_SETUP_COMMAND
+    assert "-u GOOGLE_CLOUD_PROJECT" not in CLI_AUTH_NATIVE_SETUP_COMMAND
+    assert "grok login --device-auth" in CLI_AUTH_NATIVE_SETUP_COMMAND
 
 
 def test_compose_cli_auth_scrubs_every_canonical_server_credential():
@@ -89,19 +101,35 @@ def test_missing_cli_auth_prompts_for_device_flow(monkeypatch):
     assert action["command"] == "docker exec auth"
 
 
-def test_default_cli_auth_action_repairs_volume_then_drops_privileges():
+def test_default_cli_auth_action_uses_compose_auth_profile():
     contract = build_credential_plane_contract(
         api_configured=True,
         cli_status={
             "state": "needs_auth", "ready": False, "binary": True,
             "auth": "missing",
         },
+        containerized=True,
     )
     command = contract["cli"]["action"]["command"]
     assert command == CLI_AUTH_SETUP_COMMAND
-    assert "docker exec -u 0 -it grok-mcp-server" in command
-    assert "chown -R 1000:1000 /home/appuser/.grok" in command
-    assert "setpriv --reuid=1000 --regid=1000 --clear-groups" in command
+    assert command == "docker compose run --rm grok-cli-auth"
+    assert "docker exec" not in command
+
+
+def test_host_native_cli_auth_action_scrubs_server_secrets():
+    contract = build_credential_plane_contract(
+        api_configured=True,
+        cli_status={
+            "state": "needs_auth", "ready": False, "binary": True,
+            "auth": "missing",
+        },
+        containerized=False,
+    )
+    command = contract["cli"]["action"]["command"]
+    assert command == CLI_AUTH_NATIVE_SETUP_COMMAND
+    assert "docker" not in command
+    for name in SERVER_OWNED_SECRET_ENV_NAMES:
+        assert f"-u {name}" in command
 
 
 def test_missing_api_prompts_once_but_does_not_block_when_cli_can_serve(monkeypatch):

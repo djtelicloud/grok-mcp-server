@@ -42,6 +42,7 @@ from .credentials import (
     SERVER_OWNED_SECRET_ENV_NAMES,
     build_credential_plane_contract,
     credential_plane_policy,
+    default_cli_auth_setup_command,
 )
 from .xai_credentials import (
     XAIManagementKeyState,
@@ -337,7 +338,9 @@ def grok_cli_plane_status(
     turn.  The probe always strips API-key variables so an API-backed CLI can
     never masquerade as the independent subscription plane.
     """
-    setup = CLI_AUTH_SETUP_COMMAND
+    setup = default_cli_auth_setup_command(
+        containerized=Path("/.dockerenv").exists()
+    )
     if is_cloudrun_runtime():
         return {
             "state": "disabled",

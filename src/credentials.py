@@ -36,15 +36,23 @@ SERVER_OWNED_SECRET_ENV_NAMES = (
 _CLI_AUTH_ENV_UNSETS = " ".join(
     f"-u {name}" for name in SERVER_OWNED_SECRET_ENV_NAMES
 )
-CLI_AUTH_SETUP_COMMAND = (
-    "docker exec -u 0 -it grok-mcp-server sh -lc "
-    "'chown -R 1000:1000 /home/appuser/.grok && exec setpriv "
-    "--reuid=1000 --regid=1000 --clear-groups env "
-    f"{_CLI_AUTH_ENV_UNSETS} grok login --device-auth'"
+# Documented operator path: one-shot auth profile (volume + privilege drop live
+# in docker-compose.yml). Prefer this over `docker exec -u 0` into the live
+# service container.
+CLI_AUTH_SETUP_COMMAND = "docker compose run --rm grok-cli-auth"
+# Host-native HTTP/dev path: scrub server-owned secrets, then device-auth.
+CLI_AUTH_NATIVE_SETUP_COMMAND = (
+    f"env {_CLI_AUTH_ENV_UNSETS} grok login --device-auth"
 )
 CLI_DOCKER_REBUILD_COMMAND = "docker compose up --build -d grok-mcp"
 CLI_NATIVE_INSTALL_COMMAND = "curl -fsSL https://x.ai/cli/install.sh | bash"
 SERVICE_RECREATE_COMMAND = "docker compose up -d --force-recreate grok-mcp"
+
+
+def default_cli_auth_setup_command(*, containerized: bool = True) -> str:
+    """Return the operator-facing device-auth command for this runtime."""
+
+    return CLI_AUTH_SETUP_COMMAND if containerized else CLI_AUTH_NATIVE_SETUP_COMMAND
 
 
 def credential_plane_policy(*, cloudrun: bool = False) -> str:
@@ -108,7 +116,10 @@ def _cli_action(cli: Dict[str, Any], *, containerized: bool) -> Dict[str, Any]:
             "requires_user_approval": True,
             "requires_user_secret": False,
             "interactive": True,
-            "command": str(cli.get("setup_command") or CLI_AUTH_SETUP_COMMAND),
+            "command": str(
+                cli.get("setup_command")
+                or default_cli_auth_setup_command(containerized=containerized)
+            ),
             "instructions": (
                 "Ask permission to run the device-auth command, then let the user "
                 "complete the browser/device confirmation. Recheck plane health afterward."
