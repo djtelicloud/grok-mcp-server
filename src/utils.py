@@ -1291,6 +1291,7 @@ def redact_secrets(text: str) -> str:
     # Exact-value redaction catches credentials whose format is not covered by
     # the pattern guard below. Ignore short values to avoid destructive false
     # positives in ordinary output.
+    exact_values: set[str] = set()
     for name in SERVER_OWNED_SECRET_ENV_NAMES:
         raw_value = os.environ.get(name, "")
         values = [raw_value.strip()]
@@ -1298,7 +1299,9 @@ def redact_secrets(text: str) -> str:
             values.extend(part.strip() for part in raw_value.split(","))
         for value in values:
             if len(value) >= 8:
-                redacted = redacted.replace(value, "[REDACTED]")
+                exact_values.add(value)
+    for value in sorted(exact_values, key=len, reverse=True):
+        redacted = redacted.replace(value, "[REDACTED]")
 
     if "xai-" not in redacted and "sk-" not in redacted:
         # This guard must remain a conservative superset of the two

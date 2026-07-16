@@ -78,3 +78,13 @@ def test_redact_secrets_removes_individual_gateway_keys(monkeypatch):
     )
 
     assert redact_secrets("failure: second-gateway-secret") == "failure: [REDACTED]"
+
+
+def test_redact_secrets_replaces_longer_prefix_keys_first(monkeypatch):
+    monkeypatch.setenv(
+        "UNIGROK_API_KEYS", "shared-prefix-key,shared-prefix-key-with-suffix"
+    )
+
+    assert redact_secrets("failure: shared-prefix-key-with-suffix") == (
+        "failure: [REDACTED]"
+    )
