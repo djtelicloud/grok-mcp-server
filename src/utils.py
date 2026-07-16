@@ -1871,16 +1871,30 @@ async def discover_grok_cli_models(timeout_sec: float = 5.0) -> Dict[str, Any]:
             warnings.append(
                 "Grok CLI reported API-key authentication; subscription plane is not independent."
             )
+        # Match grok_cli_plane_status: catalog "available" requires verified
+        # grok.com OAuth, not merely a zero exit with parseable model ids.
+        oauth_verified = "logged in with grok.com" in normalized_output
+        if proc.returncode == 0 and not oauth_verified and not api_key_conflict:
+            warnings.append(
+                "Grok CLI model listing succeeded without verified grok.com OAuth; "
+                "treating the subscription catalog as unavailable."
+            )
         if proc.returncode != 0:
             warnings.append(f"`grok models` exited with code {proc.returncode}.")
         if not parsed["models"]:
             warnings.append("Grok CLI model discovery returned no parseable models; using fallback CLI model ids.")
 
         default_model = parsed["default_model"] or model_ids[0]
+        available = (
+            proc.returncode == 0
+            and bool(parsed["models"])
+            and oauth_verified
+            and not api_key_conflict
+        )
         return {
             "models": [{"id": model_id, "default": model_id == default_model} for model_id in model_ids],
             "default_model": default_model,
-            "available": proc.returncode == 0 and bool(parsed["models"]) and not api_key_conflict,
+            "available": available,
             "warnings": _dedupe_preserve_order(warnings),
             "source": "grok_cli",
         }
