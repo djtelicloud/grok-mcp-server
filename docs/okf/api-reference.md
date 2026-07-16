@@ -4035,6 +4035,21 @@ def credential_plane_contract(cli_status: Optional[Dict[str, Any]]=None) -> Dict
 
 Return the shared non-secret plane health and action contract.
 
+### Function: `request_credential_plane_contract` {#utils-request_credential_plane_contract}
+
+```python
+def request_credential_plane_contract(cli_status: Optional[Dict[str, Any]]=None) -> Dict[str, Any]
+```
+
+**Keywords:** request, credential, plane, contract
+
+Return credential availability for the active request principal.
+
+Service diagnostics intentionally use :func:`credential_plane_contract`,
+where any valid principal mapping makes the API plane service-available.
+Execution preflight must instead require the current caller's effective
+key so an unmapped OAuth principal cannot pass on another insider's key.
+
 ### Function: `get_runtime_stats` {#utils-get_runtime_stats}
 
 ```python

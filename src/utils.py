@@ -469,6 +469,25 @@ def credential_plane_contract(
     )
 
 
+def request_credential_plane_contract(
+    cli_status: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Return credential availability for the active request principal.
+
+    Service diagnostics intentionally use :func:`credential_plane_contract`,
+    where any valid principal mapping makes the API plane service-available.
+    Execution preflight must instead require the current caller's effective
+    key so an unmapped OAuth principal cannot pass on another insider's key.
+    """
+
+    return build_credential_plane_contract(
+        api_configured=xai_api_key_configured(),
+        cli_status=cli_status if cli_status is not None else grok_cli_plane_status(),
+        cloudrun=is_cloudrun_runtime(),
+        containerized=Path("/.dockerenv").exists(),
+    )
+
+
 def local_context_enabled() -> bool:
     if PathResolver.get_workspace_root() is None:
         return False
@@ -13331,7 +13350,7 @@ async def run_agent_turn(
             "auth": "probe_failed",
             "setup_command": CLI_AUTH_SETUP_COMMAND,
         }
-    credentials = credential_plane_contract(cli_status)
+    credentials = request_credential_plane_contract(cli_status)
     if not credentials["service_usable"]:
         return await _persist_preflight_failure(MetaLayer(
             generation=(
@@ -13452,16 +13471,18 @@ async def run_agent_turn(
                     "prompt_user": True,
                     "prompt_when": "now",
                     "message": (
-                        "This request requires the xAI API plane, but XAI_API_KEY is "
-                        "missing from the global UniGrok service environment. Ask permission "
-                        "to help configure it securely; never request the key in chat."
+                        "This request requires the xAI API plane, but no effective "
+                        "xAI key is configured for the authenticated principal. Ask "
+                        "permission to help configure the owner default or canonical "
+                        "principal mapping securely; never request the key in chat."
                     ),
                 })
         return await _persist_preflight_failure(MetaLayer(
             generation=(
-                "This request requires the xAI API plane, but XAI_API_KEY is not configured. "
-                "Inspect `credentials.api.action`, ask permission to help with the global "
-                "service `.env`, and never request or echo the key in chat."
+                "This request requires the xAI API plane, but no effective xAI key is "
+                "configured for the authenticated principal. Inspect "
+                "`credentials.api.action`, ask permission to help with the owner default "
+                "or canonical principal mapping, and never request or echo the key in chat."
             ),
             finish_reason="error",
             route="credential-setup",
