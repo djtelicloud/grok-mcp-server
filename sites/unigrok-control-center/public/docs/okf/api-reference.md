@@ -3405,6 +3405,24 @@ status incl. staleness override, target, focus node, generations run,
 spend). The Playground's task picker consumes this — read-only, no gate:
 on a service that never ran a swarm it simply returns [].
 
+### Function: `plan_swarm_campaign` {#tools-swarm-plan_swarm_campaign}
+
+```python
+async def plan_swarm_campaign(target_paths: List[str], test_roots: List[str]=['tests'], max_targets: int=5) -> Dict[str, Any]
+```
+
+**Keywords:** plan, swarm, campaign
+
+Perform a wide-pass analysis to find swarmable hotspot functions.
+
+Deterministically maps files/functions to available tests and categorizes
+them into a campaign plan without executing any code.
+
+Args:
+    target_paths: Workspace-relative paths to files or directories to scan.
+    test_roots: Workspace-relative paths where tests live (default: ["tests"]).
+    max_targets: Maximum number of swarm-ready targets to rank and return.
+
 ## tools/system.py {#tools-system}
 
 ### Function: `grok_mcp_status` {#tools-system-grok_mcp_status}
