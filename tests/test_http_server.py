@@ -1033,6 +1033,82 @@ def test_direct_xai_model_proxies(monkeypatch):
     mock_post.assert_awaited_once()
 
 
+def test_budgeted_raw_model_proxy_fails_closed_before_provider_lookup(monkeypatch):
+    monkeypatch.delenv("UNIGROK_RUNTIME", raising=False)
+    monkeypatch.delenv("UNIGROK_API_KEYS", raising=False)
+    monkeypatch.setenv("UNIGROK_CALLER_BUDGETS", '{"http:anon": 1.0}')
+    model_lookup = AsyncMock(
+        side_effect=AssertionError("blocked raw proxy must not query provider models")
+    )
+    monkeypatch.setattr("src.http_server.get_xai_model_ids", model_lookup)
+
+    with TestClient(create_app()) as client:
+        nonstream = client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "grok-4.3",
+                "messages": [{"role": "user", "content": "hello"}],
+            },
+        )
+        stream = client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "grok-4.3",
+                "stream": True,
+                "messages": [{"role": "user", "content": "hello"}],
+            },
+        )
+
+    assert nonstream.status_code == 403
+    assert stream.status_code == 403
+    assert nonstream.json()["error"]["code"] == "budget_enforcement_required"
+    assert stream.json()["error"]["code"] == "budget_enforcement_required"
+    model_lookup.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_raw_proxy_defense_blocks_direct_stream_and_nonstream(monkeypatch):
+    from src.http_server import post_xai_chat
+
+    monkeypatch.setenv("UNIGROK_CALLER_BUDGETS", '{"http:anon": 1.0}')
+    monkeypatch.setenv("XAI_API_KEY", "server-key")
+
+    nonstream = await post_xai_chat({"model": "grok-4.3", "messages": []})
+    chunks = [
+        chunk
+        async for chunk in stream_xai_chat(
+            {"model": "grok-4.3", "stream": True, "messages": []}
+        )
+    ]
+
+    assert nonstream.status_code == 403
+    body = b"".join(chunks).decode("utf-8")
+    assert "budget_enforcement_required" in body
+    assert body.endswith("data: [DONE]\n\n")
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"model": "grok-4.3", "messages": [], "n": 2},
+        {"model": "grok-4.3", "messages": [], "max_tokens": 32_769},
+        {"model": "grok-4.3", "messages": [], "tools": [{}] * 33},
+    ],
+)
+@pytest.mark.asyncio
+async def test_raw_proxy_request_effects_are_bounded(monkeypatch, payload):
+    from src.http_server import post_xai_chat
+
+    monkeypatch.delenv("UNIGROK_CALLER_BUDGETS", raising=False)
+    monkeypatch.setenv("UNIGROK_RAW_PROXY_MAX_TOKENS", "32768")
+    monkeypatch.setenv("XAI_API_KEY", "server-key")
+
+    response = await post_xai_chat(payload)
+
+    assert response.status_code == 400
+    assert json.loads(response.body)["error"]["code"] == "invalid_request"
+
+
 @pytest.mark.asyncio
 async def test_direct_xai_streaming_success_passes_through(monkeypatch):
     monkeypatch.setenv("XAI_API_KEY", "server-key")

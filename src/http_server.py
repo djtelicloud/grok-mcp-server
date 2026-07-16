@@ -1881,10 +1881,73 @@ def _xai_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         "tools",
         "tool_choice",
     }
-    return {key: value for key, value in payload.items() if key in allowed}
+    upstream = {key: value for key, value in payload.items() if key in allowed}
+    # Raw proxy calls are deliberately single-completion and carry a bounded
+    # output ceiling even when the client omits both fields. This limits one
+    # unbudgeted request independently of the caller-budget policy below.
+    upstream.setdefault("n", 1)
+    upstream.setdefault(
+        "max_tokens",
+        _bounded_env_int("UNIGROK_RAW_PROXY_MAX_TOKENS", 32_768, 1, 131_072),
+    )
+    return upstream
+
+
+def _raw_proxy_policy_violation(
+    payload: Dict[str, Any],
+) -> Optional[tuple[str, str, int]]:
+    """Fail closed while raw proxy spend cannot be reserved and settled."""
+    if os.environ.get("UNIGROK_CALLER_BUDGETS", "").strip():
+        return (
+            "Raw model proxy is unavailable while caller budgets are configured.",
+            "budget_enforcement_required",
+            403,
+        )
+
+    n = payload.get("n", 1)
+    if isinstance(n, bool) or not isinstance(n, int) or n != 1:
+        return ("Raw model proxy requires n=1.", "invalid_request", 400)
+
+    max_tokens = payload.get(
+        "max_tokens",
+        _bounded_env_int("UNIGROK_RAW_PROXY_MAX_TOKENS", 32_768, 1, 131_072),
+    )
+    max_allowed = _bounded_env_int(
+        "UNIGROK_RAW_PROXY_MAX_TOKENS", 32_768, 1, 131_072
+    )
+    if (
+        isinstance(max_tokens, bool)
+        or not isinstance(max_tokens, int)
+        or not 1 <= max_tokens <= max_allowed
+    ):
+        return (
+            f"Raw model proxy max_tokens must be 1..{max_allowed}.",
+            "invalid_request",
+            400,
+        )
+
+    tools = payload.get("tools", [])
+    if not isinstance(tools, list) or len(tools) > 32:
+        return (
+            "Raw model proxy accepts at most 32 tool definitions.",
+            "invalid_request",
+            400,
+        )
+    return None
+
+
+def _raw_proxy_policy_error(payload: Dict[str, Any]) -> Optional[Response]:
+    violation = _raw_proxy_policy_violation(payload)
+    if violation is None:
+        return None
+    message, code, status_code = violation
+    return _json_error(message, status_code=status_code, code=code)
 
 
 async def post_xai_chat(payload: Dict[str, Any]) -> Response:
+    policy_error = _raw_proxy_policy_error(payload)
+    if policy_error is not None:
+        return policy_error
     if not os.environ.get("XAI_API_KEY"):
         return _json_error("XAI_API_KEY is not configured.", status_code=503, code="service_unavailable")
     url = _xai_chat_completions_url()
@@ -1923,6 +1986,12 @@ async def post_xai_chat(payload: Dict[str, Any]) -> Response:
 
 
 async def stream_xai_chat(payload: Dict[str, Any]) -> AsyncIterator[bytes]:
+    violation = _raw_proxy_policy_violation(payload)
+    if violation is not None:
+        message, code, status_code = violation
+        yield _sse_error(message, code, status_code)
+        yield b"data: [DONE]\n\n"
+        return
     if not os.environ.get("XAI_API_KEY"):
         yield _sse_error("XAI_API_KEY is not configured.", "service_unavailable")
         yield b"data: [DONE]\n\n"
@@ -1998,6 +2067,10 @@ async def chat_completions(request: Request) -> Response:
                 status_code=500,
                 code="server_error",
             )
+
+    policy_error = _raw_proxy_policy_error(payload)
+    if policy_error is not None:
+        return policy_error
 
     known_models = set(await get_xai_model_ids())
     if model not in known_models:
