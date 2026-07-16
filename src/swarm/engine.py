@@ -60,6 +60,7 @@ class EngineConfig:
     ruff_filter: bool = True
     search_strategy: str = "baseline_batch"
     primary_goal: str = "balanced"
+    model_providers: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -232,14 +233,24 @@ class SwarmEngine:
         system = build_system_prompt()
         generator = self.generator or generate_mutation
         remaining = max(0.0, self.config.budget_usd - self._spent)
-        result = await generator(prompt, system, remaining_budget_usd=remaining)
+        provider = pick.get("model_provider")
+        
+        # Determine if we should pass model_provider to generator
+        import inspect
+        sig = inspect.signature(generator)
+        kwargs = {"remaining_budget_usd": remaining}
+        if "model_provider" in sig.parameters:
+            kwargs["model_provider"] = provider
+            
+        result = await generator(prompt, system, **kwargs)
         self._spent += self._validated_generation_cost(result)
         text = parse_mutation_output(getattr(result, "text", ""))
         if text is None:
             # One heal retry, restating the contract.
             remaining = max(0.0, self.config.budget_usd - self._spent)
+            kwargs["remaining_budget_usd"] = remaining
             healed = await generator(
-                prompt + HEAL_SUFFIX, system, remaining_budget_usd=remaining
+                prompt + HEAL_SUFFIX, system, **kwargs
             )
             self._spent += self._validated_generation_cost(healed)
             text = parse_mutation_output(getattr(healed, "text", ""))
@@ -435,11 +446,17 @@ class SwarmEngine:
         parent_reason: Optional[str] = None,
     ) -> Dict[str, Any]:
         decorated = dict(pick)
+        
+        provider = None
+        if self.config.model_providers:
+            provider = self.config.model_providers[(slot - 1) % len(self.config.model_providers)]
+            
         decorated.update(
             {
                 "slot": slot,
                 "origin": "llm",
                 "transform": None,
+                "model_provider": provider,
                 "parent_id": parent.get("id") if parent else None,
                 "parent_code_hash": parent.get("code_hash") if parent else None,
                 "parent_code": parent.get("code") if parent else None,
@@ -451,6 +468,7 @@ class SwarmEngine:
                 "origin": "llm",
                 "role": role,
                 "slot": slot,
+                "model_provider": provider,
                 "parent_id": decorated["parent_id"],
                 "parent_policy": parent_reason,
             }
