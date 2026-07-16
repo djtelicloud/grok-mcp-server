@@ -1,6 +1,6 @@
 # Codex Active Work
 
-Last updated: 2026-07-16T17:52:41Z
+Last updated: 2026-07-16T18:00:05Z
 Owner: Codex integration coordinator
 Status: Current critical repairs are merged and Live; the security queue remains active.
 
@@ -57,6 +57,9 @@ credentials, OAuth codes, tokens, or private keys here.
   Grok's new unconditional keep-`src` commit is narrower than #476 and is not
   the approved repair. Its final scoreboard reclassification is accepted as
   honest bookkeeping: 0 measured wins, 1 held target, 77 plans, 133 skips.
+  Independent reproduction also found the routing task's benchmark omits
+  required keyword-only `reason_score`; its minimally corrected fixture has a
+  19.37% noise floor. After CONTINUE, retry only the held Pareto target first.
 - Draft #476 repairs that Forge import-provenance bug. Codex's focused suite
   passed 27 tests and the full suite passed 2,204 tests. Normal Codex must
   independently review and land it, then refresh the Forge runtime before

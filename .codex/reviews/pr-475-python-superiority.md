@@ -48,6 +48,14 @@ tests or generated API mirror update. Codex's draft #476 instead detects
 `src/__init__.py` inside the sandbox, covers both layouts, and passed the full
 2,204-test suite. #476 supersedes the #475 repair for normal-Codex integration.
 
+Codex also reproduced both task fixtures against #476. The held Pareto target
+passes real sandbox preflight as `src.swarm.pareto` with 86.7% focus coverage,
+a stable 0.258419 ms median, and 984-byte peak memory. The routing task's exact
+benchmark instead omits required keyword-only `reason_score`; after adding the
+minimal fixture value only for diagnosis, it passes as `src.routing` but has a
+19.37% latency noise floor. Therefore the routing task is not retry-ready, and
+the Pareto target must remain the first and only candidate after CONTINUE.
+
 ## Quantitative plan audit
 
 The 69 files in #475 contain 69 unique target paths. Their stated source LOC
@@ -127,6 +135,8 @@ completion.
    memory; never sum or average per-file percentages.
 7. Submit at most one implementation candidate at a time. Codex independently
    reproduces its oracle and benchmark and writes a separate review report.
+8. Do not retry `extract_routing_features` until its required keyword fixture
+   and high-noise benchmark are replaced with a stable, reviewable oracle.
 
 ## Approval boundary
 
