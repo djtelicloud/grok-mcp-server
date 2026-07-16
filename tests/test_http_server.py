@@ -1945,3 +1945,81 @@ def test_credential_bearing_httpx_clients_disable_proxy_env():
                 f"{path.name}:{node.lineno} AsyncClient missing follow_redirects=False"
             )
     assert found >= 5, f"expected ≥5 credential-bearing AsyncClient sites, found {found}"
+
+
+def test_xai_chat_completions_url_defaults_and_rejects_unsafe_overrides(monkeypatch):
+    from src.http_server import XAI_BASE_URL, _xai_chat_completions_url
+
+    monkeypatch.delenv("XAI_API_BASE_URL", raising=False)
+    assert _xai_chat_completions_url() == f"{XAI_BASE_URL.rstrip('/')}/chat/completions"
+
+    monkeypatch.setenv("XAI_API_BASE_URL", "https://api.x.ai/v1")
+    assert _xai_chat_completions_url() == "https://api.x.ai/v1/chat/completions"
+
+    for unsafe in (
+        "http://api.x.ai/v1",
+        "https://169.254.169.254/v1",
+        "https://evil.internal/v1",
+        "https://localhost/v1",
+    ):
+        monkeypatch.setenv("XAI_API_BASE_URL", unsafe)
+        assert _xai_chat_completions_url() is None, unsafe
+
+
+@pytest.mark.asyncio
+async def test_post_xai_chat_rejects_unsafe_base_url_without_calling_out(monkeypatch):
+    from src.http_server import post_xai_chat
+    import json
+
+    called = {"post": False}
+
+    class ForbiddenClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, *args, **kwargs):
+            called["post"] = True
+            raise AssertionError("unsafe XAI_API_BASE_URL must not call out")
+
+    monkeypatch.setenv("XAI_API_KEY", "dummy-key")
+    monkeypatch.setenv("XAI_API_BASE_URL", "http://169.254.169.254/v1")
+    monkeypatch.setattr("src.http_server.httpx.AsyncClient", lambda **kwargs: ForbiddenClient())
+
+    res = await post_xai_chat({"model": "grok-4.3", "messages": []})
+    assert res.status_code == 503
+    body = json.loads(res.body.decode())
+    assert body["error"]["code"] == "service_unavailable"
+    assert "XAI_API_BASE_URL" in body["error"]["message"]
+    assert not called["post"]
+
+
+@pytest.mark.asyncio
+async def test_stream_xai_chat_rejects_unsafe_base_url_without_calling_out(monkeypatch):
+    called = {"stream": False}
+
+    class ForbiddenClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        def stream(self, *args, **kwargs):
+            called["stream"] = True
+            raise AssertionError("unsafe XAI_API_BASE_URL must not call out")
+
+    monkeypatch.setenv("XAI_API_KEY", "dummy-key")
+    monkeypatch.setenv("XAI_API_BASE_URL", "http://169.254.169.254/v1")
+    monkeypatch.setattr("src.http_server.httpx.AsyncClient", lambda **kwargs: ForbiddenClient())
+
+    chunks = [
+        chunk
+        async for chunk in stream_xai_chat({"model": "grok-4.3", "messages": []})
+    ]
+    body = b"".join(chunks).decode("utf-8")
+    assert "XAI_API_BASE_URL is not a public HTTPS endpoint." in body
+    assert body.endswith("data: [DONE]\n\n")
+    assert called["stream"] is False
