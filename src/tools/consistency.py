@@ -2,13 +2,11 @@
 # Consistency Radar tool for detecting architectural drift.
 
 import logging
-import asyncio
 from typing import Any, Dict, List, Optional
 
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import ToolAnnotations
 
-from ..identity import caller_from_mcp_context
 from ..utils import PathResolver, validate_local_input
 from .chats import agent
 

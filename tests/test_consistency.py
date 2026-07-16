@@ -1,7 +1,6 @@
 # tests/test_consistency.py
 import pytest
 from unittest.mock import patch, AsyncMock
-from pathlib import Path
 from src.tools.consistency import architecture_consistency_sweep
 
 @pytest.fixture
