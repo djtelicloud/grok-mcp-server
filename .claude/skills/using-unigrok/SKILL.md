@@ -120,6 +120,13 @@ secret values):
 
 Then one cheap verification: `agent` with `mode=fast` or `grok_mcp_status`.
 
+## Status language (vibe apps vs UniGrok product)
+
+- **Foreign apps / stable MCP only:** Done / Blocked / plain English — not
+  multi-agent **Ready for supervisor** land radio unless shipping UniGrok itself.
+- When `can_mutate_workspace` / `can_use_swarm` are false, contributor workflows
+  are disabled (no land, Forge, Swarm, or product rehydrate).
+
 ## Safety
 
 - Never request `XAI_API_KEY` in chat or write it into any IDE config; the
