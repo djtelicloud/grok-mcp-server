@@ -630,16 +630,36 @@ def _origin_is_allowed(origin: Optional[str]) -> bool:
     return host in _LOOPBACK_HOSTS
 
 
-# Every surface that can reach the agent backend is origin-guarded; health
-# probes stay open (probes send no Origin, so they pass regardless).
-_ORIGIN_GUARDED_PREFIXES = ("/mcp", "/v1")
+# Agent backend plus local operator recon/UI surfaces are origin-guarded.
+# Health/readiness and well-known probes stay open (probes send no Origin).
+_ORIGIN_GUARDED_PREFIXES = (
+    "/mcp",
+    "/v1",
+    "/runtimez",
+    "/ui",
+    "/docs",
+    "/metrics",
+)
+
+
+def _path_is_origin_guarded(path: str) -> bool:
+    """True when path is exactly a guarded prefix or a nested path under one.
+
+    Boundary-aware so ``/ui`` does not match ``/uix`` and ``/docs`` does not
+    match ``/docsish``.
+    """
+    for prefix in _ORIGIN_GUARDED_PREFIXES:
+        if path == prefix or path.startswith(prefix + "/"):
+            return True
+    return False
 
 
 class MCPOriginMiddleware:
-    """Origin validation on /mcp and /v1 (MCP-spec DNS-rebinding protection).
+    """Origin validation on agent + operator surfaces (DNS-rebinding protection).
 
     /v1/chat/completions reaches the same agent backend as /mcp, so a rebound
-    browser page must not be able to drive it either.
+    browser page must not be able to drive it. /runtimez, /ui, /docs, and
+    /metrics expose operator recon/UI and are guarded the same way.
 
     Pure ASGI for the same SSE-disconnect reason as GatewayAuthMiddleware.
     Loopback origins and the UNIGROK_ALLOWED_ORIGINS allowlist pass; any other
@@ -650,7 +670,7 @@ class MCPOriginMiddleware:
         self.app = app
 
     async def __call__(self, scope, receive, send):
-        if scope["type"] == "http" and scope.get("path", "").startswith(_ORIGIN_GUARDED_PREFIXES):
+        if scope["type"] == "http" and _path_is_origin_guarded(scope.get("path", "")):
             if not _origin_is_allowed(_scope_header(scope, b"origin")):
                 response = _json_error("Origin not allowed.", status_code=403, code="forbidden")
                 await response(scope, receive, send)

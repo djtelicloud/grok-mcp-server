@@ -1323,6 +1323,38 @@ def test_origin_check_covers_v1_surface(monkeypatch):
     assert health.status_code == 200
 
 
+def test_origin_check_covers_operator_surfaces(monkeypatch):
+    """Local operator recon/UI must not answer a rebound browser Origin either."""
+    from src.http_server import _path_is_origin_guarded
+
+    monkeypatch.delenv("UNIGROK_RUNTIME", raising=False)
+    monkeypatch.delenv("UNIGROK_API_KEYS", raising=False)
+    monkeypatch.delenv("UNIGROK_ALLOWED_ORIGINS", raising=False)
+
+    assert _path_is_origin_guarded("/runtimez")
+    assert _path_is_origin_guarded("/ui/")
+    assert _path_is_origin_guarded("/docs/okf/faq.md")
+    assert _path_is_origin_guarded("/metrics")
+    assert not _path_is_origin_guarded("/uix")
+    assert not _path_is_origin_guarded("/docsish/thing")
+    assert not _path_is_origin_guarded("/healthz")
+    assert not _path_is_origin_guarded("/readyz")
+
+    with TestClient(create_app()) as client:
+        runtimez = client.get("/runtimez", headers={"Origin": "http://evil.example"})
+        ui = client.get("/ui/", headers={"Origin": "http://evil.example"})
+        metrics = client.get("/metrics", headers={"Origin": "http://evil.example"})
+        health = client.get("/healthz", headers={"Origin": "http://evil.example"})
+        # Non-browser clients (no Origin) still reach operator surfaces.
+        runtimez_ok = client.get("/runtimez")
+
+    assert runtimez.status_code == 403
+    assert ui.status_code == 403
+    assert metrics.status_code == 403
+    assert health.status_code == 200
+    assert runtimez_ok.status_code == 200
+
+
 def test_resolve_bind_host_defaults_to_loopback(monkeypatch, caplog):
     """Local/unset runtime binds 127.0.0.1 so `python main.py --http` does not
     expose an unauthenticated agent to the whole LAN."""
