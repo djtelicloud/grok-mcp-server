@@ -16,9 +16,15 @@ import uuid
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
-from .identity import get_active_caller, normalize_caller, scoped_session
+from .identity import (
+    get_active_caller,
+    get_active_principal,
+    normalize_caller,
+    scoped_session,
+)
 from .utils import (
     AGENTIC_TOOLS_SCHEMA,
+    CallerBudgetExceeded,
     _DISTILL_SYS_PROMPT,
     FactList,
     _bounded_redacted,
@@ -26,6 +32,7 @@ from .utils import (
     _env_timeout,
     _parse_structured,
     check_circuit_breaker,
+    enforce_caller_budget,
     get_xai_client,
     record_xai_success,
     redact_secrets,
@@ -95,6 +102,44 @@ class JobManager:
         # Concurrency gate for the defer calls (see _max_concurrent_jobs).
         self._defer_slots = asyncio.Semaphore(_max_concurrent_jobs())
 
+    async def _enforce_job_budget(self, caller: Optional[str]) -> Optional[Dict[str, Any]]:
+        """Deny submit when UNIGROK_CALLER_BUDGETS is exhausted for the principal."""
+        budget_principal = get_active_principal() or caller
+        try:
+            await enforce_caller_budget(self._store, budget_principal)
+        except CallerBudgetExceeded as exc:
+            return {"error": str(exc)}
+        return None
+
+    async def _record_job_telemetry(
+        self,
+        *,
+        intent: str,
+        route: str,
+        cost_usd: float,
+        model: str,
+        caller: Optional[str],
+    ) -> None:
+        """Settle job spend into telemetry so caller budgets see deferred work."""
+        if float(cost_usd or 0.0) <= 0.0:
+            return
+        try:
+            await self._store.save_telemetry(
+                (intent or route)[:100],
+                "API",
+                1,
+                0.0,
+                float(cost_usd),
+                caller=caller,
+                model=model,
+                tokens=0,
+                token_kind="provider_exact",
+                billing_source="xai_response_exact",
+                routing={"route": route, "plane": "API"},
+            )
+        except Exception as exc:
+            logger.warning("Job telemetry settle failed for %s: %s", route, exc)
+
     async def submit(
         self,
         prompt: str,
@@ -107,11 +152,16 @@ class JobManager:
         caller (the submitting agent's identity) is persisted on the row —
         explicit param first, else whatever the transport bound to the
         current async context; None stays None."""
-        job_id = uuid.uuid4().hex
         resolved = (model or "").strip() or await resolve_model("planning")
         caller = normalize_caller(caller) or get_active_caller()
+        denied = await self._enforce_job_budget(caller)
+        if denied is not None:
+            return denied
+        job_id = uuid.uuid4().hex
         await self._store.create_job(job_id, prompt=prompt, model=resolved, caller=caller)
-        task = asyncio.create_task(self._run_job(job_id, prompt, resolved, agent_count))
+        task = asyncio.create_task(
+            self._run_job(job_id, prompt, resolved, agent_count, caller=caller)
+        )
         self._tasks[job_id] = task
         task.add_done_callback(lambda _t, jid=job_id: self._tasks.pop(jid, None))
         return {"job_id": job_id, "status": "queued", "model": resolved}
@@ -122,6 +172,8 @@ class JobManager:
         prompt: str,
         model: str,
         agent_count: Optional[int],
+        *,
+        caller: Optional[str] = None,
     ) -> None:
         timeout = _job_timeout_sec()
         try:
@@ -163,6 +215,13 @@ class JobManager:
                 ),
                 cost=cost,
             )
+            await self._record_job_telemetry(
+                intent=(prompt or "research-job")[:100],
+                route="research-job",
+                cost_usd=cost,
+                model=model,
+                caller=caller,
+            )
         except Exception as exc:
             logger.warning(f"Research job {job_id} failed: {exc}")
             try:
@@ -196,21 +255,33 @@ class JobManager:
         # Defense in depth with distill_session: always namespace under the
         # bound principal/client before loading history or persisting source.
         session_name = scoped_session(session_name) or session_name
-        job_id = uuid.uuid4().hex
         model = await resolve_model("coding")
         caller = normalize_caller(caller) or get_active_caller()
+        denied = await self._enforce_job_budget(caller)
+        if denied is not None:
+            return denied
+        job_id = uuid.uuid4().hex
         await self._store.create_job(
             job_id,
             prompt=f"[distill] session:{session_name}",
             model=model,
             caller=caller,
         )
-        task = asyncio.create_task(self._run_distill_job(job_id, session_name, model))
+        task = asyncio.create_task(
+            self._run_distill_job(job_id, session_name, model, caller=caller)
+        )
         self._tasks[job_id] = task
         task.add_done_callback(lambda _t, jid=job_id: self._tasks.pop(jid, None))
         return {"job_id": job_id, "status": "queued", "model": model, "kind": "distill"}
 
-    async def _run_distill_job(self, job_id: str, session: str, model: str) -> None:
+    async def _run_distill_job(
+        self,
+        job_id: str,
+        session: str,
+        model: str,
+        *,
+        caller: Optional[str] = None,
+    ) -> None:
         try:
             async with self._defer_slots:
                 await self._store.update_job(job_id, status="running")
@@ -271,6 +342,13 @@ class JobManager:
                     status="done",
                     result=f"Distilled {len(saved_ids)} facts from session '{session}'.",
                     cost=cost,
+                )
+                await self._record_job_telemetry(
+                    intent=f"[distill] session:{session}"[:100],
+                    route="distill-job",
+                    cost_usd=float(cost or 0.0),
+                    model=model,
+                    caller=caller,
                 )
         except Exception as exc:
             logger.warning(f"Distill job {job_id} failed: {exc}")
