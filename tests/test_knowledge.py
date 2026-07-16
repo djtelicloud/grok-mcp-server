@@ -435,6 +435,29 @@ class TestDistillJob:
         res = await manager.submit_distill("  ")
         assert "Input Validation Error" in res["error"]
 
+    @pytest.mark.asyncio
+    async def test_submit_distill_scopes_session_defense_in_depth(
+        self, kstore, monkeypatch
+    ):
+        from src.identity import (
+            _ACTIVE_CLIENT_ID,
+            reset_active_principal,
+            set_active_principal,
+        )
+
+        monkeypatch.setattr(JobManager, "_run_distill_job", AsyncMock(return_value=None))
+        manager = JobManager(job_store=kstore)
+        principal = set_active_principal("http:anon")
+        client = _ACTIVE_CLIENT_ID.set("cursor")
+        try:
+            view = await manager.submit_distill("sess-scoped")
+        finally:
+            _ACTIVE_CLIENT_ID.reset(client)
+            reset_active_principal(principal)
+        await manager.wait(view["job_id"])
+        row = await kstore.get_job(view["job_id"])
+        assert row["prompt"] == "[distill] session:http%3Aanon:cursor:sess-scoped"
+
 
 class TestAutoDistill:
     @pytest.mark.asyncio
@@ -778,6 +801,60 @@ class TestKnowledgeTools:
         )
         await distill_session("my-session", ctx=ctx)
         assert manager.submit_distill.call_args.kwargs["caller"] == "claude-code"
+
+    @pytest.mark.asyncio
+    async def test_distill_session_scopes_short_name_to_principal_client(
+        self, monkeypatch
+    ):
+        """agent/chat store under principal:client:name; distill must match."""
+        from src.identity import (
+            _ACTIVE_CLIENT_ID,
+            reset_active_principal,
+            set_active_principal,
+        )
+
+        manager = MagicMock()
+        manager.submit_distill = AsyncMock(
+            return_value={"job_id": "j-scope", "status": "queued", "kind": "distill"}
+        )
+        monkeypatch.setattr("src.tools.knowledge.get_job_manager", lambda: manager)
+        principal = set_active_principal("http:anon")
+        client = _ACTIVE_CLIENT_ID.set("cursor")
+        try:
+            await distill_session("my-session")
+        finally:
+            _ACTIVE_CLIENT_ID.reset(client)
+            reset_active_principal(principal)
+        manager.submit_distill.assert_awaited_once_with(
+            "http%3Aanon:cursor:my-session", caller=None
+        )
+
+    @pytest.mark.asyncio
+    async def test_distill_session_reprefixes_foreign_fully_qualified_name(
+        self, monkeypatch
+    ):
+        """A peer client's FQ session name must not be readable as-is."""
+        from src.identity import (
+            _ACTIVE_CLIENT_ID,
+            reset_active_principal,
+            set_active_principal,
+        )
+
+        manager = MagicMock()
+        manager.submit_distill = AsyncMock(
+            return_value={"job_id": "j-iso", "status": "queued", "kind": "distill"}
+        )
+        monkeypatch.setattr("src.tools.knowledge.get_job_manager", lambda: manager)
+        principal = set_active_principal("http:anon")
+        client = _ACTIVE_CLIENT_ID.set("vscode")
+        try:
+            await distill_session("http%3Aanon:cursor:peer-secret")
+        finally:
+            _ACTIVE_CLIENT_ID.reset(client)
+            reset_active_principal(principal)
+        submitted = manager.submit_distill.call_args.args[0]
+        assert submitted.startswith("http%3Aanon:vscode:")
+        assert submitted != "http%3Aanon:cursor:peer-secret"
 
     @pytest.mark.asyncio
     async def test_distill_session_ctx_hidden_from_schema(self):
