@@ -30,6 +30,10 @@ services:
       - PORT=8080
       - UNIGROK_SERVICE_MODE=contributor
       - UNIGROK_CONTRIBUTOR_MODE=1
+      # Workspace mutation is intentionally unavailable while the host checkout
+      # is mounted read-only; a future isolated writer must opt in explicitly.
+      - UNIGROK_SWARM=off
+      - ENABLE_GIT_WRITE=0
       - UNIGROK_SERVICE_ROOT=/app
       - WORKSPACE_ROOT=/workspace
       - UNIGROK_STATE_DIR=/state
