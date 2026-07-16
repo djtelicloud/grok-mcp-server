@@ -67,6 +67,18 @@ class FakeAsyncClient:
         return self.response
 
 
+def _set_static_keys(monkeypatch, raw: str) -> None:
+    records = {
+        f"key-{index}": secret
+        for index, secret in enumerate(
+            (part.strip() for part in raw.split(",") if part.strip()), start=1
+        )
+    }
+    monkeypatch.delenv("UNIGROK_API_KEYS", raising=False)
+    monkeypatch.delenv("UNIGROK_API_KEY_LEGACY_IDS", raising=False)
+    monkeypatch.setenv("UNIGROK_API_KEY_RECORDS", json.dumps(records))
+
+
 def test_healthz_is_open(monkeypatch):
     monkeypatch.delenv("UNIGROK_RUNTIME", raising=False)
     monkeypatch.delenv("UNIGROK_API_KEYS", raising=False)
@@ -106,7 +118,7 @@ def test_public_discovery_is_sanitized_in_cloudrun(monkeypatch):
     client_secret = "gateway-must-never-appear"
     monkeypatch.setenv("UNIGROK_RUNTIME", "cloudrun")
     monkeypatch.setenv("XAI_API_KEY", xai_secret)
-    monkeypatch.setenv("UNIGROK_API_KEYS", client_secret)
+    _set_static_keys(monkeypatch, client_secret)
 
     with TestClient(create_app(), base_url="https://mcp.grokmcp.org") as client:
         response = client.get("/.well-known/unigrok")
@@ -139,7 +151,7 @@ def test_public_discovery_is_sanitized_in_cloudrun(monkeypatch):
 )
 def test_oauth_protected_resource_metadata_is_active(monkeypatch, public_mcp_url):
     monkeypatch.setenv("UNIGROK_RUNTIME", "cloudrun")
-    monkeypatch.setenv("UNIGROK_API_KEYS", "client-secret")
+    _set_static_keys(monkeypatch, "client-secret")
     monkeypatch.setenv("UNIGROK_PUBLIC_MCP_URL", public_mcp_url)
     monkeypatch.setenv(
         "UNIGROK_OAUTH_AUTHORIZATION_SERVERS",
@@ -189,7 +201,7 @@ def test_oauth_metadata_fails_closed_until_validly_configured(
     monkeypatch, resource, authorization_servers
 ):
     monkeypatch.setenv("UNIGROK_RUNTIME", "cloudrun")
-    monkeypatch.setenv("UNIGROK_API_KEYS", "client-secret")
+    _set_static_keys(monkeypatch, "client-secret")
     monkeypatch.setenv("UNIGROK_PUBLIC_MCP_URL", resource)
     monkeypatch.setenv("UNIGROK_OAUTH_AUTHORIZATION_SERVERS", authorization_servers)
 
@@ -205,7 +217,7 @@ def test_oauth_metadata_fails_closed_until_validly_configured(
 @pytest.mark.parametrize("scope", ["bad scope", "bad\nscope", "x" * 129, "\""])
 def test_oauth_metadata_rejects_malformed_scopes(monkeypatch, scope):
     monkeypatch.setenv("UNIGROK_RUNTIME", "cloudrun")
-    monkeypatch.setenv("UNIGROK_API_KEYS", "client-secret")
+    _set_static_keys(monkeypatch, "client-secret")
     monkeypatch.setenv("UNIGROK_PUBLIC_MCP_URL", "https://mcp.grokmcp.org/mcp")
     monkeypatch.setenv(
         "UNIGROK_OAUTH_AUTHORIZATION_SERVERS", "https://auth.grokmcp.org"
@@ -256,8 +268,175 @@ def test_cloudrun_requires_api_keys(monkeypatch):
     monkeypatch.delenv("UNIGROK_ALLOW_UNAUTHENTICATED", raising=False)
     monkeypatch.delenv("UNIGROK_OAUTH_INTROSPECTION_URL", raising=False)
 
-    with pytest.raises(RuntimeError, match="UNIGROK_API_KEYS"):
+    with pytest.raises(RuntimeError, match="UNIGROK_API_KEY_RECORDS"):
         create_app()
+
+
+def test_production_rejects_position_only_static_keys(monkeypatch):
+    monkeypatch.setenv("UNI_GROK_TESTING", "0")
+    monkeypatch.delenv("UNIGROK_API_KEY_RECORDS", raising=False)
+    monkeypatch.setenv("UNIGROK_API_KEYS", "legacy-secret")
+
+    with pytest.raises(RuntimeError, match="position-dependent"):
+        create_app()
+
+
+@pytest.mark.parametrize(
+    "records",
+    (
+        "not-json",
+        "[]",
+        '{"UPPER":"long-enough-secret"}',
+        '{"one":"short"}',
+        '{"one":" secret "}',
+        '{"one":"shared-secret","two":"shared-secret"}',
+        '{"one":"first-secret","one":"second-secret"}',
+    ),
+)
+def test_static_key_records_fail_closed_when_ambiguous(monkeypatch, records):
+    monkeypatch.delenv("UNIGROK_API_KEYS", raising=False)
+    monkeypatch.setenv("UNIGROK_API_KEY_RECORDS", records)
+
+    with pytest.raises(RuntimeError, match="UNIGROK_API_KEY_RECORDS"):
+        create_app()
+
+
+def test_stable_static_key_record_authenticates(monkeypatch):
+    monkeypatch.delenv("UNIGROK_API_KEYS", raising=False)
+    monkeypatch.setenv(
+        "UNIGROK_API_KEY_RECORDS", '{"owner":"stable-owner-secret"}'
+    )
+
+    with TestClient(create_app()) as client:
+        denied = client.get("/runtimez")
+        allowed = client.get(
+            "/runtimez",
+            headers={"Authorization": "Bearer stable-owner-secret"},
+        )
+
+    assert denied.status_code == 401
+    assert allowed.status_code == 200
+
+
+def test_http_budget_config_requires_canonical_stable_principals(monkeypatch):
+    monkeypatch.setenv("UNI_GROK_TESTING", "0")
+    monkeypatch.delenv("UNIGROK_API_KEYS", raising=False)
+    monkeypatch.setenv(
+        "UNIGROK_API_KEY_RECORDS", '{"owner":"stable-owner-secret"}'
+    )
+    monkeypatch.setenv(
+        "UNIGROK_OAUTH_AUTHORIZATION_SERVERS", "https://auth.grokmcp.org"
+    )
+    monkeypatch.setenv(
+        "UNIGROK_CALLER_BUDGETS",
+        json.dumps(
+            {
+                "http:key:owner": 5,
+                "oauth:https%3A%2F%2Fauth.grokmcp.org:github%3A42": 3,
+            }
+        ),
+    )
+
+    create_app()
+
+    monkeypatch.setenv(
+        "UNIGROK_CALLER_BUDGETS", json.dumps({"oauth-subject-123": 5})
+    )
+    with pytest.raises(RuntimeError, match="canonical issuer-bound"):
+        create_app()
+
+    monkeypatch.setenv(
+        "UNIGROK_CALLER_BUDGETS", json.dumps({"http:key:missing": 5})
+    )
+    with pytest.raises(RuntimeError, match="unknown static key id"):
+        create_app()
+
+
+@pytest.mark.asyncio
+async def test_oauth_introspection_binds_issuer_and_audience(monkeypatch):
+    import httpx
+    from src.http_server import _introspect_oauth_token
+
+    monkeypatch.setenv(
+        "UNIGROK_OAUTH_INTROSPECTION_URL",
+        "https://control.grokmcp.org/oauth/introspect",
+    )
+    monkeypatch.setenv(
+        "UNIGROK_OAUTH_AUTHORIZATION_SERVERS", "https://auth.grokmcp.org"
+    )
+    monkeypatch.setenv("UNIGROK_PUBLIC_MCP_URL", "https://mcp.grokmcp.org/mcp")
+    payload = {
+        "active": True,
+        "scope": "unigrok:connect unigrok:invoke",
+        "sub": "github:42",
+        "iss": "https://auth.grokmcp.org",
+        "aud": ["https://other.example/resource", "https://mcp.grokmcp.org/mcp"],
+    }
+
+    class Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def post(self, *_args, **_kwargs):
+            return httpx.Response(200, json=payload)
+
+    monkeypatch.setattr("src.http_server.httpx.AsyncClient", lambda **_kwargs: Client())
+
+    claims = await _introspect_oauth_token(
+        "oauth-token", "unigrok:connect unigrok:invoke"
+    )
+    assert claims == payload
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "override",
+    (
+        {"iss": None},
+        {"iss": "https://other-issuer.example"},
+        {"iss": "https://auth.grokmcp.org/"},
+        {"aud": None},
+        {"aud": "https://wrong-resource.example/mcp"},
+        {"aud": ["https://wrong-resource.example/mcp"]},
+    ),
+)
+async def test_oauth_introspection_rejects_unbound_identity(monkeypatch, override):
+    import httpx
+    from src.http_server import _introspect_oauth_token
+
+    monkeypatch.setenv(
+        "UNIGROK_OAUTH_INTROSPECTION_URL",
+        "https://control.grokmcp.org/oauth/introspect",
+    )
+    monkeypatch.setenv(
+        "UNIGROK_OAUTH_AUTHORIZATION_SERVERS", "https://auth.grokmcp.org"
+    )
+    monkeypatch.setenv("UNIGROK_PUBLIC_MCP_URL", "https://mcp.grokmcp.org/mcp")
+    payload = {
+        "active": True,
+        "scope": "unigrok:invoke",
+        "sub": "github:42",
+        "iss": "https://auth.grokmcp.org",
+        "aud": "https://mcp.grokmcp.org/mcp",
+        **override,
+    }
+
+    class Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def post(self, *_args, **_kwargs):
+            return httpx.Response(200, json=payload)
+
+    monkeypatch.setattr("src.http_server.httpx.AsyncClient", lambda **_kwargs: Client())
+
+    assert await _introspect_oauth_token("oauth-token", "unigrok:invoke") is None
 
 
 def test_cloudrun_accepts_oauth_introspection_without_static_keys(monkeypatch):
@@ -461,15 +640,20 @@ def test_oauth_subject_cannot_evade_budget_attribution_with_client_headers():
             (b"x-client-id", b"rotating-client"),
             (b"x-caller", b"spoofed-caller"),
         ],
-        "unigrok.oauth": {"sub": "github:42"},
+        "unigrok.oauth": {
+            "sub": "github:42",
+            "iss": "https://auth.grokmcp.org",
+        },
     }
 
-    assert _derive_http_caller(scope) == "oauth:github:42|rotating-client"
+    assert _derive_http_caller(scope) == (
+        "oauth:https%3A%2F%2Fauth.grokmcp.org:github%3A42|rotating-client"
+    )
 
 
 def test_cloudrun_forbids_unauthenticated_override(monkeypatch):
     monkeypatch.setenv("UNIGROK_RUNTIME", "cloudrun")
-    monkeypatch.setenv("UNIGROK_API_KEYS", "client-secret")
+    _set_static_keys(monkeypatch, "client-secret")
     monkeypatch.setenv("UNIGROK_ALLOW_UNAUTHENTICATED", "1")
 
     with pytest.raises(RuntimeError, match="forbidden in Cloud Run"):
@@ -479,7 +663,7 @@ def test_cloudrun_forbids_unauthenticated_override(monkeypatch):
 def test_cloudrun_rejects_missing_auth(monkeypatch):
     """A missing bearer token gets 401 plus the RFC 6750 challenge header."""
     monkeypatch.setenv("UNIGROK_RUNTIME", "cloudrun")
-    monkeypatch.setenv("UNIGROK_API_KEYS", "client-secret")
+    _set_static_keys(monkeypatch, "client-secret")
 
     with TestClient(create_app()) as client:
         res = client.get("/v1/models")
@@ -505,7 +689,7 @@ def test_local_okf_manifest_and_generated_api_reference_are_served(monkeypatch):
 def test_cloudrun_protects_mcp_inference_and_operator_surfaces(monkeypatch):
     """Remote clients never inherit the localhost UI/runtime exemptions."""
     monkeypatch.setenv("UNIGROK_RUNTIME", "cloudrun")
-    monkeypatch.setenv("UNIGROK_API_KEYS", "client-secret")
+    _set_static_keys(monkeypatch, "client-secret")
     monkeypatch.delenv("UNIGROK_ALLOW_UNAUTHENTICATED", raising=False)
 
     with TestClient(create_app(), base_url="https://mcp.grokmcp.org") as client:
@@ -524,7 +708,7 @@ def test_cloudrun_protects_mcp_inference_and_operator_surfaces(monkeypatch):
 
 def test_cloudrun_well_known_allowlist_is_exact(monkeypatch):
     monkeypatch.setenv("UNIGROK_RUNTIME", "cloudrun")
-    monkeypatch.setenv("UNIGROK_API_KEYS", "client-secret")
+    _set_static_keys(monkeypatch, "client-secret")
 
     with TestClient(create_app(), base_url="https://mcp.grokmcp.org") as client:
         known = client.get("/.well-known/unigrok")
@@ -542,7 +726,7 @@ def test_health_probes_are_exempt_from_auth(monkeypatch, tmp_path):
     """/healthz and /readyz stay reachable without credentials so load
     balancers work before any client key is provisioned."""
     monkeypatch.setenv("UNIGROK_RUNTIME", "cloudrun")
-    monkeypatch.setenv("UNIGROK_API_KEYS", "client-secret")
+    _set_static_keys(monkeypatch, "client-secret")
     monkeypatch.setenv("UNIGROK_STATE_DIR", str(tmp_path))
 
     with TestClient(create_app()) as client:
@@ -628,7 +812,7 @@ def test_runtimez_reports_the_current_phoneword_dial(monkeypatch):
 
 def test_runtimez_requires_auth_on_localhost_when_keys_set(monkeypatch):
     monkeypatch.delenv("UNIGROK_RUNTIME", raising=False)
-    monkeypatch.setenv("UNIGROK_API_KEYS", "client-secret")
+    _set_static_keys(monkeypatch, "client-secret")
 
     with TestClient(
         create_app(),
@@ -646,7 +830,7 @@ def test_runtimez_requires_auth_on_localhost_when_keys_set(monkeypatch):
 
 def test_local_unauthenticated_override_does_not_open_sensitive_status(monkeypatch):
     monkeypatch.setenv("UNIGROK_RUNTIME", "local")
-    monkeypatch.setenv("UNIGROK_API_KEYS", "client-secret")
+    _set_static_keys(monkeypatch, "client-secret")
     monkeypatch.setenv("UNIGROK_ALLOW_UNAUTHENTICATED", "1")
 
     with TestClient(
@@ -670,7 +854,7 @@ def test_local_unauthenticated_override_does_not_open_sensitive_status(monkeypat
 
 def test_spoofed_localhost_host_does_not_bypass_remote_auth(monkeypatch):
     monkeypatch.setenv("UNIGROK_RUNTIME", "local")
-    monkeypatch.setenv("UNIGROK_API_KEYS", "client-secret")
+    _set_static_keys(monkeypatch, "client-secret")
     monkeypatch.setenv("UNIGROK_ALLOW_UNAUTHENTICATED", "1")
     monkeypatch.delenv("UNIGROK_TRUSTED_LOOPBACK_PROXY", raising=False)
 
@@ -691,7 +875,7 @@ def test_spoofed_localhost_host_does_not_bypass_remote_auth(monkeypatch):
 def test_nonloopback_bind_disables_direct_local_operator_exemption(monkeypatch):
     """A same-host reverse proxy is not implicitly a local Control Center."""
     monkeypatch.setenv("UNIGROK_RUNTIME", "local")
-    monkeypatch.setenv("UNIGROK_API_KEYS", "client-secret")
+    _set_static_keys(monkeypatch, "client-secret")
     monkeypatch.delenv("UNIGROK_TRUSTED_LOOPBACK_PROXY", raising=False)
 
     with TestClient(
@@ -708,7 +892,7 @@ def test_nonloopback_bind_disables_direct_local_operator_exemption(monkeypatch):
 
 def test_trusted_compose_proxy_never_bypasses_inference_auth(monkeypatch):
     monkeypatch.setenv("UNIGROK_RUNTIME", "http")
-    monkeypatch.setenv("UNIGROK_API_KEYS", "client-secret")
+    _set_static_keys(monkeypatch, "client-secret")
     monkeypatch.setenv("UNIGROK_ALLOW_UNAUTHENTICATED", "1")
     monkeypatch.setenv("UNIGROK_TRUSTED_LOOPBACK_PROXY", "1")
 
@@ -780,7 +964,7 @@ def test_readyz_body_stays_boolean_on_failure(monkeypatch):
 def test_upstream_provider_secret_is_not_client_auth(monkeypatch, secret_env):
     monkeypatch.setenv("UNIGROK_RUNTIME", "cloudrun")
     monkeypatch.setenv(secret_env, "upstream-secret")
-    monkeypatch.setenv("UNIGROK_API_KEYS", "client-secret,upstream-secret")
+    _set_static_keys(monkeypatch, "client-secret,upstream-secret")
 
     with TestClient(create_app()) as client:
         res = client.get(
@@ -826,7 +1010,7 @@ def test_distinct_gateway_key_remains_valid_with_upstream_secrets(monkeypatch):
     monkeypatch.setenv("UNIGROK_RUNTIME", "cloudrun")
     for index, env_name in enumerate(UPSTREAM_PROVIDER_SECRET_ENV_NAMES):
         monkeypatch.setenv(env_name, f"upstream-secret-{index}")
-    monkeypatch.setenv("UNIGROK_API_KEYS", "gateway-client-secret")
+    _set_static_keys(monkeypatch, "gateway-client-secret")
     monkeypatch.setattr(
         "src.http_server.get_xai_model_ids",
         AsyncMock(return_value=["unigrok-agent"]),
@@ -844,7 +1028,7 @@ def test_distinct_gateway_key_remains_valid_with_upstream_secrets(monkeypatch):
 def test_upstream_secret_alias_rejection_normalizes_provider_whitespace(monkeypatch):
     monkeypatch.setenv("UNIGROK_RUNTIME", "cloudrun")
     monkeypatch.setenv("OPENAI_API_KEY", "  upstream-secret  ")
-    monkeypatch.setenv("UNIGROK_API_KEYS", "gateway-client-secret,upstream-secret")
+    _set_static_keys(monkeypatch, "gateway-client-secret,upstream-secret")
 
     with TestClient(create_app()) as client:
         res = client.get(
@@ -859,7 +1043,7 @@ def test_non_ascii_bearer_token_gets_401_not_500(monkeypatch):
     compares bytes: a hostile token with a byte >= 0x80 must get a clean 401."""
     monkeypatch.setenv("UNIGROK_RUNTIME", "cloudrun")
     monkeypatch.setenv("XAI_API_KEY", "xai-secret")
-    monkeypatch.setenv("UNIGROK_API_KEYS", "client-secret")
+    _set_static_keys(monkeypatch, "client-secret")
 
     with TestClient(create_app()) as client:
         # Raw latin-1 bytes, as a hostile curl client would send them.
@@ -872,7 +1056,7 @@ def test_non_ascii_bearer_token_gets_401_not_500(monkeypatch):
 def test_non_ascii_configured_key_still_authenticates(monkeypatch):
     """An operator-configured non-ASCII key must keep working (byte compare)."""
     monkeypatch.setenv("UNIGROK_RUNTIME", "cloudrun")
-    monkeypatch.setenv("UNIGROK_API_KEYS", "t\xf6ken-secret")
+    _set_static_keys(monkeypatch, "t\xf6ken-secret")
     monkeypatch.setattr("src.http_server.get_xai_model_ids", AsyncMock(return_value=["unigrok-agent"]))
 
     with TestClient(create_app()) as client:
@@ -1228,7 +1412,7 @@ def test_mcp_streamable_http_mount_exists(monkeypatch):
 
 def test_review_tool_returns_the_hosted_broker_structured_shape(monkeypatch):
     monkeypatch.delenv("UNIGROK_RUNTIME", raising=False)
-    monkeypatch.setenv("UNIGROK_API_KEYS", "client-secret")
+    _set_static_keys(monkeypatch, "client-secret")
     result = type(
         "Result",
         (),
@@ -1437,7 +1621,7 @@ def test_run_http_server_rejects_exposed_without_auth(monkeypatch):
     monkeypatch.delenv("UNIGROK_TRUSTED_LOOPBACK_PROXY", raising=False)
     monkeypatch.setattr(uvicorn, "run", lambda *args, **kwargs: None)
 
-    with pytest.raises(RuntimeError, match="UNIGROK_API_KEYS"):
+    with pytest.raises(RuntimeError, match="UNIGROK_API_KEY_RECORDS"):
         run_http_server(host="0.0.0.0")
 
 
@@ -1451,7 +1635,7 @@ def test_run_http_server_ignores_unauthenticated_override_for_exposed_bind(monke
     monkeypatch.delenv("UNIGROK_TRUSTED_LOOPBACK_PROXY", raising=False)
     monkeypatch.setattr(uvicorn, "run", lambda *args, **kwargs: None)
 
-    with pytest.raises(RuntimeError, match="UNIGROK_API_KEYS"):
+    with pytest.raises(RuntimeError, match="UNIGROK_API_KEY_RECORDS"):
         run_http_server(host="0.0.0.0")
 
 
@@ -1460,7 +1644,7 @@ def test_run_http_server_allows_authenticated_exposure(monkeypatch):
     import uvicorn
 
     monkeypatch.delenv("UNIGROK_RUNTIME", raising=False)
-    monkeypatch.setenv("UNIGROK_API_KEYS", "client-secret")
+    _set_static_keys(monkeypatch, "client-secret")
     monkeypatch.delenv("UNIGROK_TRUSTED_LOOPBACK_PROXY", raising=False)
     monkeypatch.setattr(uvicorn, "run", lambda *args, **kwargs: None)
 
@@ -1899,7 +2083,7 @@ def test_agent_stream_error_still_terminates_with_done(monkeypatch):
 def test_metrics_is_verified_local_operator_only(monkeypatch):
     """Bearer authentication alone never grants global metrics access."""
     monkeypatch.setenv("UNIGROK_RUNTIME", "local")
-    monkeypatch.setenv("UNIGROK_API_KEYS", "metrics-secret")
+    _set_static_keys(monkeypatch, "metrics-secret")
     monkeypatch.delenv("UNIGROK_ALLOW_UNAUTHENTICATED", raising=False)
 
     with TestClient(

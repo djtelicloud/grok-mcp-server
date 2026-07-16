@@ -127,6 +127,17 @@ def test_redact_secrets_splits_gateway_keys_case_insensitively(monkeypatch):
     assert redact_secrets("failure: second-mixed-gateway") == "failure: [REDACTED]"
 
 
+def test_redact_secrets_splits_stable_gateway_key_records(monkeypatch):
+    monkeypatch.setenv(
+        "UNIGROK_API_KEY_RECORDS",
+        '{"owner":"stable-owner-secret","reviewer":"stable-reviewer-secret"}',
+    )
+
+    assert redact_secrets("failure: stable-reviewer-secret") == (
+        "failure: [REDACTED]"
+    )
+
+
 def test_redact_secrets_replaces_longer_prefix_keys_first(monkeypatch):
     monkeypatch.setenv(
         "UNIGROK_API_KEYS", "shared-prefix-key,shared-prefix-key-with-suffix"

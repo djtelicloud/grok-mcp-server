@@ -33,9 +33,11 @@ storage, MCP client configuration, logs, workspace files, or model prompts.
 
 HTTP requests have an authenticated principal and optional client labels:
 
-1. An active introspected OAuth subject becomes `oauth:<sub>`.
-2. Otherwise a matched configured gateway key becomes a server-derived
-   `http:key-<n>` alias.
+1. An active introspected OAuth identity becomes
+   `oauth:<percent-encoded-issuer>:<percent-encoded-sub>` after exact issuer
+   and audience validation.
+2. Otherwise a matched configured gateway record becomes the explicit stable
+   `http:key:<id>` identity from `UNIGROK_API_KEY_RECORDS`.
 3. The deliberately unauthenticated loopback deployment uses the single
    `http:anon` trust domain.
 
@@ -46,10 +48,10 @@ the principal; changing a label cannot select another budget or another
 principal's session. Stdio has no HTTP principal and uses MCP `clientInfo` for
 local attribution and optional budget policy.
 
-Possession of the same static gateway key means possession of the same
-principal. Static keys are therefore suitable for a person/service identity,
-not for distinguishing multiple mutually untrusted users. Use OAuth when
-individual revocation, membership, scopes, or per-user isolation matters.
+Possession of the same static gateway record means possession of the same
+principal. Record IDs survive secret rotation and JSON reordering, but must
+never be reassigned to another person or service. Use OAuth when individual
+revocation, membership, scopes, or per-user isolation matters.
 
 ## Main threats and controls
 

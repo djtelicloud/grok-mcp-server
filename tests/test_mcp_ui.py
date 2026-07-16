@@ -334,7 +334,10 @@ def test_mcp_ui_layout_engine_is_local_and_ide_first():
 
 def test_mcp_ui_loads_without_exposing_mcp_when_auth_is_active(monkeypatch):
     monkeypatch.delenv("UNIGROK_RUNTIME", raising=False)
-    monkeypatch.setenv("UNIGROK_API_KEYS", "client-secret")
+    monkeypatch.delenv("UNIGROK_API_KEYS", raising=False)
+    monkeypatch.setenv(
+        "UNIGROK_API_KEY_RECORDS", '{"ui-client":"client-secret"}'
+    )
     monkeypatch.delenv("UNIGROK_ALLOW_UNAUTHENTICATED", raising=False)
 
     with TestClient(

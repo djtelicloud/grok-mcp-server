@@ -1317,6 +1317,15 @@ def redact_secrets(text: str) -> str:
                 # The complete raw JSON remains an exact redaction candidate.
                 # Invalid configuration is handled fail-closed at inference.
                 pass
+        elif name.upper() == "UNIGROK_API_KEY_RECORDS":
+            try:
+                records = json.loads(raw_value)
+            except (TypeError, ValueError):
+                records = None
+            if isinstance(records, dict):
+                values.extend(
+                    str(value).strip() for value in records.values()
+                )
         for value in values:
             if len(value) >= 8:
                 exact_values.add(value)

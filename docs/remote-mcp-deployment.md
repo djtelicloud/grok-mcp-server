@@ -54,14 +54,15 @@ Deploy the repository `Dockerfile` to a dedicated Cloud Run service and set:
 | `UNIGROK_OAUTH_INTROSPECTION_URL` | `https://control.grokmcp.org/oauth/introspect` |
 | `UNIGROK_OAUTH_SCOPES` | `unigrok:connect,unigrok:invoke,unigrok:review,unigrok:chat,unigrok:status` |
 | `UNIGROK_ALLOWED_ORIGINS` | Exact reviewed browser origins only; omit when no browser client is approved |
-| `UNIGROK_CALLER_BUDGETS` | JSON daily cost caps keyed by the full gateway principal, for example `oauth:github:123` |
+| `UNIGROK_CALLER_BUDGETS` | JSON daily cost caps keyed by the full issuer-bound OAuth principal published by runtime attribution |
 | `UNIGROK_STATE_DIR` | `/tmp/uni-grok` unless a durable store is deliberately attached |
 
 Inject the **owner** `XAI_API_KEY` from a version-pinned Secret Manager resource
-— this is the cloud twin **default** spend path. Do not set `UNIGROK_API_KEYS`
-on the production OAuth service; a static bearer must not become a hidden
-bypass around membership revocation. The service account needs only access to
-that xAI secret and the normal logging/metrics permissions.
+— this is the cloud twin **default** spend path. Do not set
+`UNIGROK_API_KEY_RECORDS` or legacy `UNIGROK_API_KEYS` on the production OAuth
+service; a static bearer must not become a hidden bypass around membership
+revocation. The service account needs only access to that xAI secret and the
+normal logging/metrics permissions.
 
 Optional **per-insider** cloud credentials (write+ OAuth principal) may bind
 their own xAI API key without replacing the owner default:
@@ -75,16 +76,17 @@ Example map (store the whole JSON as one Secret Manager secret; never commit):
 
 ```json
 {
-  "oauth:github:123456": "xai-teammate-key",
-  "github:123456": "xai-teammate-key"
+  "oauth:https%3A%2F%2Fcontrol.grokmcp.org:github%3A123456": "xai-teammate-key"
 }
 ```
 
 Rules:
 
 - Only principals with kind `oauth:` use the map; `http:anon` and labels never do.
-- Every map key must be the full canonical `oauth:<sub>` principal emitted by
-  the gateway. Bare subjects and client labels are rejected fail-closed.
+- Every map key must be the full canonical
+  `oauth:<percent-encoded-issuer>:<percent-encoded-sub>` principal emitted by
+  the gateway. Bare subjects, unbound subjects, and client labels are rejected
+  fail-closed.
 - Missing map entry → **owner default**.
 - A configured map that is malformed, oversized, duplicated, or contains an
   invalid entry fails closed instead of silently shifting spend to the owner.

@@ -3206,9 +3206,11 @@ class TestSymmetricXaiPlaneFailover:
         monkeypatch.setenv("XAI_API_KEY", "xai-owner-default")
         monkeypatch.setenv(
             "UNIGROK_PRINCIPAL_XAI_KEYS_JSON",
-            '{"oauth:github|user:42":"xai-personal"}',
+            '{"oauth:https%3A%2F%2Fcontrol.grokmcp.org:github%3A42":"xai-personal"}',
         )
-        token = set_active_principal("oauth:github|user:42")
+        token = set_active_principal(
+            "oauth:https%3A%2F%2Fcontrol.grokmcp.org:github%3A42"
+        )
         try:
             api_attempt = _xai_execution_attempt_receipt(
                 1,
@@ -5373,7 +5375,7 @@ class TestUtilsQuickWins:
             "GOOGLE_APPLICATION_CREDENTIALS": "/private/vertex-adc.json",
             "UNIGROK_API_KEYS": "gateway-client-secret",
             "UNIGROK_PRINCIPAL_XAI_KEYS_JSON": (
-                '{"oauth:github|user:1":"teammate-xai-key"}'
+                '{"oauth:https%3A%2F%2Fcontrol.grokmcp.org:github%3A1":"teammate-xai-key"}'
             ),
         }
         for name, value in server_secrets.items():

@@ -4,13 +4,14 @@ import hmac
 import ipaddress
 import json
 import logging
+import math
 import os
 import re
 import time
 import uuid
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator, Dict, List, Literal, Optional
-from urllib.parse import quote, urlsplit
+from urllib.parse import quote, unquote, urlsplit
 from .models.results import AgentResult
 from .metrics import build_metrics_snapshot, fetch_provider_api_usage
 from .semantic_evals import get_semantic_eval_stats
@@ -192,9 +193,94 @@ def _validate_chat_payload(payload: Any) -> Optional[JSONResponse]:
     return None
 
 
+_API_KEY_ID_RE = re.compile(r"^[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$")
+
+
+def _api_key_records() -> tuple[tuple[str, str], ...]:
+    """Return stable static bearer identities as ``(id, secret)`` records.
+
+    Position-only keys require an explicit index-to-ID migration map because
+    list reordering can otherwise transfer durable state between principals.
+    """
+
+    raw_records = os.environ.get("UNIGROK_API_KEY_RECORDS", "").strip()
+    raw_legacy = os.environ.get("UNIGROK_API_KEYS", "").strip()
+    raw_legacy_ids = os.environ.get("UNIGROK_API_KEY_LEGACY_IDS", "").strip()
+    if raw_records and raw_legacy:
+        raise RuntimeError(
+            "Configure UNIGROK_API_KEY_RECORDS only; legacy UNIGROK_API_KEYS "
+            "cannot be combined with stable identities."
+        )
+    if raw_records:
+        def reject_duplicate_pairs(pairs):
+            result = {}
+            for key, value in pairs:
+                if key in result:
+                    raise ValueError("duplicate key id")
+                result[key] = value
+            return result
+
+        try:
+            parsed = json.loads(raw_records, object_pairs_hook=reject_duplicate_pairs)
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError("UNIGROK_API_KEY_RECORDS must be a JSON object.") from exc
+        if not isinstance(parsed, dict) or len(parsed) > 64:
+            raise RuntimeError(
+                "UNIGROK_API_KEY_RECORDS must contain at most 64 id-to-secret records."
+            )
+        records: list[tuple[str, str]] = []
+        seen_secrets: set[str] = set()
+        for key_id, secret in parsed.items():
+            if not isinstance(key_id, str) or not _API_KEY_ID_RE.fullmatch(key_id):
+                raise RuntimeError(
+                    "UNIGROK_API_KEY_RECORDS ids must be lowercase stable slugs."
+                )
+            if (
+                not isinstance(secret, str)
+                or not 8 <= len(secret) <= 8_192
+                or any(char.isspace() or ord(char) == 127 for char in secret)
+            ):
+                raise RuntimeError(
+                    "UNIGROK_API_KEY_RECORDS secrets must be 8..8192 "
+                    "non-whitespace characters."
+                )
+            if secret in seen_secrets:
+                raise RuntimeError(
+                    "UNIGROK_API_KEY_RECORDS cannot assign one secret to multiple ids."
+                )
+            seen_secrets.add(secret)
+            records.append((key_id, secret))
+        return tuple(records)
+    if raw_legacy:
+        secrets = tuple(
+            dict.fromkeys(
+                part.strip() for part in raw_legacy.split(",") if part.strip()
+            )
+        )
+        key_ids = tuple(
+            part.strip() for part in raw_legacy_ids.split(",") if part.strip()
+        )
+        if (
+            not key_ids
+            or len(key_ids) != len(secrets)
+            or len(set(key_ids)) != len(key_ids)
+            or any(not _API_KEY_ID_RE.fullmatch(key_id) for key_id in key_ids)
+        ):
+            raise RuntimeError(
+                "Legacy UNIGROK_API_KEYS is position-dependent and disabled. "
+                "Migrate to UNIGROK_API_KEY_RECORDS, or provide an exact "
+                "UNIGROK_API_KEY_LEGACY_IDS index-to-id mapping for migration."
+            )
+        return tuple(zip(key_ids, secrets))
+    if raw_legacy_ids:
+        raise RuntimeError(
+            "UNIGROK_API_KEY_LEGACY_IDS requires matching legacy UNIGROK_API_KEYS."
+        )
+    return ()
+
+
 def _api_keys() -> tuple[str, ...]:
-    raw = os.environ.get("UNIGROK_API_KEYS", "")
-    return tuple(dict.fromkeys(part.strip() for part in raw.split(",") if part.strip()))
+    return tuple(secret for _, secret in _api_key_records())
 
 
 def _auth_is_active() -> bool:
@@ -272,8 +358,29 @@ async def _introspect_oauth_token(token: str, required_scope: str) -> Optional[D
     scopes = payload.get("scope", "")
     scope_set = set(scopes.split()) if isinstance(scopes, str) else set()
     subject = payload.get("sub")
+    issuer = payload.get("iss")
+    audience = payload.get("aud")
     required_scopes = set(required_scope.split())
     if not required_scopes.issubset(scope_set) or not isinstance(subject, str) or not subject:
+        return None
+    authorization_servers = _oauth_authorization_servers()
+    # OAuth issuer identifiers are exact strings, not origins to normalize at
+    # token-validation time. Trailing-slash/case variants are distinct and
+    # fail closed unless configured and minted identically by the AS.
+    if not isinstance(issuer, str) or issuer not in authorization_servers:
+        return None
+    resource = _public_mcp_resource()
+    if isinstance(audience, str):
+        audiences = (audience,)
+    elif (
+        isinstance(audience, list)
+        and len(audience) <= 16
+        and all(isinstance(item, str) and len(item) <= 2_048 for item in audience)
+    ):
+        audiences = tuple(audience)
+    else:
+        return None
+    if resource is None or resource not in audiences:
         return None
     return payload
 
@@ -365,7 +472,7 @@ def _token_is_allowed(token: Optional[str]) -> bool:
         upstream_secret = os.environ.get(env_name, "").strip()
         if upstream_secret and _tokens_match(token, upstream_secret):
             return False
-    return any(_tokens_match(token, key) for key in _api_keys())
+    return any(_tokens_match(token, secret) for _, secret in _api_key_records())
 
 
 def _scope_header(scope: Dict[str, Any], name: bytes) -> Optional[str]:
@@ -668,16 +775,24 @@ class MCPOriginMiddleware:
 
 
 def _caller_key_alias(token: Optional[str]) -> Optional[str]:
-    """Stable alias for the configured API key a bearer token matched:
-    ``key-`` plus its one-based position in ``UNIGROK_API_KEYS``. Keeps per-key
-    attribution without deriving telemetry identifiers from secret material.
-    None when the token matches no configured key."""
+    """Stable configured ID for the static bearer token that matched."""
     if not token:
         return None
-    for index, key in enumerate(_api_keys(), start=1):
-        if _tokens_match(token, key):
-            return f"key-{index}"
+    for key_id, secret in _api_key_records():
+        if _tokens_match(token, secret):
+            return key_id
     return None
+
+
+def _canonical_oauth_principal(issuer: Any, subject: Any) -> Optional[str]:
+    normalized_subject = normalize_principal(subject)
+    if not isinstance(issuer, str) or not issuer or not normalized_subject:
+        return None
+    return (
+        "oauth:"
+        f"{quote(issuer, safe='-._~')}:"
+        f"{quote(normalized_subject, safe='-._~')}"
+    )
 
 
 def _derive_client_id(scope: Dict[str, Any]) -> Optional[str]:
@@ -691,18 +806,20 @@ def _derive_client_id(scope: Dict[str, Any]) -> Optional[str]:
 def _derive_http_principal(scope: Dict[str, Any]) -> str:
     """Authenticated namespace/budget owner for one gateway request.
 
-    OAuth subject wins. A configured static bearer maps to a server-derived
-    key alias. An unauthenticated request is the single local/anonymous trust
+    Issuer-bound OAuth identity wins. A configured static bearer maps to its
+    explicit stable key ID. An unauthenticated request is the single local/anonymous trust
     domain allowed by the loopback deployment contract. Caller-controlled
     identity headers are deliberately excluded.
     """
     oauth = scope.get("unigrok.oauth")
     if isinstance(oauth, dict):
-        subject = normalize_principal(oauth.get("sub"))
-        if subject:
-            return f"oauth:{subject}"
+        principal = _canonical_oauth_principal(oauth.get("iss"), oauth.get("sub"))
+        if principal:
+            return principal
     alias = _caller_key_alias(_extract_bearer_token(_scope_header(scope, b"authorization")))
-    return f"http:{alias}" if alias else "http:anon"
+    if alias:
+        return f"http:key:{alias}"
+    return "http:anon"
 
 
 def _derive_http_caller(scope: Dict[str, Any]) -> str:
@@ -1038,6 +1155,63 @@ def _oauth_authorization_servers() -> List[str]:
     if any(item is None for item in validated):
         return []
     return list(dict.fromkeys(item for item in validated if item is not None))
+
+
+def _validate_http_budget_principals() -> None:
+    """Reject HTTP budget entries that cannot match a canonical principal."""
+
+    raw = os.environ.get("UNIGROK_CALLER_BUDGETS", "").strip()
+    if not raw or os.environ.get("UNI_GROK_TESTING") == "1":
+        return
+    try:
+        configured = json.loads(raw)
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError(
+            "UNIGROK_CALLER_BUDGETS must be a canonical principal-to-USD object."
+        ) from exc
+    if not isinstance(configured, dict):
+        raise RuntimeError(
+            "UNIGROK_CALLER_BUDGETS must be a canonical principal-to-USD object."
+        )
+    static_ids = {key_id for key_id, _ in _api_key_records()}
+    authorization_servers = set(_oauth_authorization_servers())
+    for principal, raw_limit in configured.items():
+        if not isinstance(principal, str) or not principal:
+            raise RuntimeError(
+                "UNIGROK_CALLER_BUDGETS contains an invalid principal."
+            )
+        try:
+            limit = float(raw_limit)
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError(
+                "UNIGROK_CALLER_BUDGETS limits must be finite non-negative USD values."
+            ) from exc
+        if not math.isfinite(limit) or limit < 0:
+            raise RuntimeError(
+                "UNIGROK_CALLER_BUDGETS limits must be finite non-negative USD values."
+            )
+        if principal == "http:anon":
+            continue
+        if principal.startswith("http:key:"):
+            if principal.removeprefix("http:key:") not in static_ids:
+                raise RuntimeError(
+                    "UNIGROK_CALLER_BUDGETS references an unknown static key id."
+                )
+            continue
+        if principal.startswith("oauth:"):
+            parts = principal.split(":", 2)
+            if len(parts) == 3:
+                issuer = unquote(parts[1])
+                subject = unquote(parts[2])
+                if (
+                    issuer in authorization_servers
+                    and _canonical_oauth_principal(issuer, subject) == principal
+                ):
+                    continue
+        raise RuntimeError(
+            "UNIGROK_CALLER_BUDGETS keys must be canonical issuer-bound OAuth "
+            "principals or configured http:key:<id> principals."
+        )
 
 
 _OAUTH_SCOPE_RE = re.compile(r'^[\x21\x23-\x5B\x5D-\x7E]{1,128}$')
@@ -2530,13 +2704,17 @@ async def webmcp_manifest(_: Request) -> JSONResponse:
 
 
 def create_app(*, bound_host: Optional[str] = None) -> Starlette:
+    # Parse once during startup so malformed or legacy position-only static
+    # identities fail before the gateway accepts any request.
+    _api_key_records()
+    _validate_http_budget_principals()
     if is_cloudrun_runtime() and _allow_unauthenticated():
         raise RuntimeError(
             "UNIGROK_ALLOW_UNAUTHENTICATED is forbidden in Cloud Run runtime."
         )
     if is_cloudrun_runtime() and not (_api_keys() or _oauth_introspection_url()):
         raise RuntimeError(
-            "UNIGROK_API_KEYS or UNIGROK_OAUTH_INTROSPECTION_URL must be set in Cloud Run runtime."
+            "UNIGROK_API_KEY_RECORDS or UNIGROK_OAUTH_INTROSPECTION_URL must be set in Cloud Run runtime."
         )
 
     public_mcp = create_public_mcp()
@@ -2674,7 +2852,7 @@ def run_http_server(host: Optional[str] = None, port: Optional[int] = None):
     ):
         raise RuntimeError(
             f"HTTP gateway bind host '{selected_host}' is not loopback and "
-            "UNIGROK_API_KEYS is not configured. Set client keys before "
+            "UNIGROK_API_KEY_RECORDS is not configured. Set stable client records before "
             "exposing the gateway, or explicitly declare a loopback-only "
             "container proxy with UNIGROK_TRUSTED_LOOPBACK_PROXY=1."
         )

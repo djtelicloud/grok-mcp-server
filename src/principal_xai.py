@@ -22,6 +22,7 @@ _PLACEHOLDER = "your_xai_api_key_here"
 _PRINCIPAL_KEYS_ENV = "UNIGROK_PRINCIPAL_XAI_KEYS_JSON"
 _MAX_PRINCIPAL_KEY_MAP_BYTES = 65_536
 _MAX_PRINCIPAL_KEY_MAP_ENTRIES = 256
+_CANONICAL_OAUTH_PRINCIPAL = re.compile(r"^oauth:[^:]+:[^:]+$")
 _CREDENTIAL_GENERATIONS: Dict[str, Tuple[str, str]] = {}
 _CREDENTIAL_GENERATIONS_LOCK = threading.Lock()
 
@@ -77,8 +78,7 @@ def _parse_principal_key_table(raw: str) -> Dict[str, str]:
             not norm_key
             or len(norm_key) > 240
             or norm_key != key
-            or not norm_key.startswith("oauth:")
-            or not norm_key[len("oauth:") :]
+            or _CANONICAL_OAUTH_PRINCIPAL.fullmatch(norm_key) is None
         ):
             raise PrincipalXAIConfigurationError("invalid_principal")
         secret = normalize_xai_api_key(value if isinstance(value, str) else None)

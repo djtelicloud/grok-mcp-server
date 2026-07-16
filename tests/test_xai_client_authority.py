@@ -61,16 +61,18 @@ def test_principal_key_rotation_keeps_old_generation_until_shutdown(monkeypatch)
 
     from src.identity import reset_active_principal, set_active_principal
 
-    token = set_active_principal("oauth:github|user:42")
+    token = set_active_principal(
+        "oauth:https%3A%2F%2Fcontrol.grokmcp.org:github%3A42"
+    )
     try:
         monkeypatch.setenv(
             "UNIGROK_PRINCIPAL_XAI_KEYS_JSON",
-            '{"oauth:github|user:42":"xai-first"}',
+            '{"oauth:https%3A%2F%2Fcontrol.grokmcp.org:github%3A42":"xai-first"}',
         )
         first = utils.get_xai_inference_client()
         monkeypatch.setenv(
             "UNIGROK_PRINCIPAL_XAI_KEYS_JSON",
-            '{"oauth:github|user:42":"xai-second"}',
+            '{"oauth:https%3A%2F%2Fcontrol.grokmcp.org:github%3A42":"xai-second"}',
         )
         second = utils.get_xai_inference_client()
     finally:
@@ -103,14 +105,16 @@ def test_principal_client_cache_is_thread_safe(monkeypatch):
     monkeypatch.setenv("XAI_API_KEY", "xai-owner-default")
     monkeypatch.setenv(
         "UNIGROK_PRINCIPAL_XAI_KEYS_JSON",
-        '{"oauth:github|user:42":"xai-personal"}',
+        '{"oauth:https%3A%2F%2Fcontrol.grokmcp.org:github%3A42":"xai-personal"}',
     )
     utils._clients.clear()
 
     from src.identity import reset_active_principal, set_active_principal
 
     def load_client(_index):
-        token = set_active_principal("oauth:github|user:42")
+        token = set_active_principal(
+            "oauth:https%3A%2F%2Fcontrol.grokmcp.org:github%3A42"
+        )
         try:
             return utils.get_xai_inference_client()
         finally:
@@ -170,13 +174,15 @@ async def test_blocking_client_factory_keeps_principal_only_key(monkeypatch):
     monkeypatch.delenv("XAI_API_KEY", raising=False)
     monkeypatch.setenv(
         "UNIGROK_PRINCIPAL_XAI_KEYS_JSON",
-        '{"oauth:github:42":"xai-principal-only"}',
+        '{"oauth:https%3A%2F%2Fcontrol.grokmcp.org:github%3A42":"xai-principal-only"}',
     )
     utils._clients.clear()
 
     from src.identity import reset_active_principal, set_active_principal
 
-    token = set_active_principal("oauth:github:42")
+    token = set_active_principal(
+        "oauth:https%3A%2F%2Fcontrol.grokmcp.org:github%3A42"
+    )
     try:
         client = await utils.run_blocking(
             utils.get_xai_inference_client,

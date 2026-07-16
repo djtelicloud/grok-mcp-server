@@ -104,8 +104,8 @@ calls during outages:
 - The status resets to **Closed** after error rates recover.
 
 ## Billing Spending Budgets
-Spending limits are enforced against the authenticated principal: OAuth
-subject remotely, static-key alias for keyed gateways, and MCP client identity
+Spending limits are enforced against the authenticated principal: issuer-bound
+OAuth identity remotely, stable static-key ID for keyed gateways, and MCP client identity
 only as the stdio fallback. `X-Client-ID` remains a reporting/session label and
-cannot change an OAuth subject's budget. Once a matching principal reaches its
+cannot change an OAuth identity's budget. Once a matching principal reaches its
 daily `UNIGROK_CALLER_BUDGETS` limit, model work fails before execution.

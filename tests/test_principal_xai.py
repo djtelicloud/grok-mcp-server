@@ -36,9 +36,16 @@ def test_oauth_principal_override(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("XAI_API_KEY", "xai-owner-default")
     monkeypatch.setenv(
         "UNIGROK_PRINCIPAL_XAI_KEYS_JSON",
-        json.dumps({"oauth:github|user:42": "xai-teammate"}),
+        json.dumps(
+            {
+                "oauth:https%3A%2F%2Fcontrol.grokmcp.org:github%3A42":
+                "xai-teammate"
+            }
+        ),
     )
-    token = set_active_principal("oauth:github|user:42")
+    token = set_active_principal(
+        "oauth:https%3A%2F%2Fcontrol.grokmcp.org:github%3A42"
+    )
     try:
         key, source = resolve_xai_api_key()
         assert key == "xai-teammate"
@@ -60,7 +67,9 @@ def test_oauth_principal_bare_map_key_is_rejected(monkeypatch: pytest.MonkeyPatc
         json.dumps({"github|user:99": "xai-bare"}),
     )
     with pytest.raises(PrincipalXAIConfigurationError) as raised:
-        effective_xai_api_key(principal="oauth:github|user:99")
+        effective_xai_api_key(
+            principal="oauth:https%3A%2F%2Fcontrol.grokmcp.org:github%3A99"
+        )
     assert raised.value.code == "invalid_principal"
 
 
@@ -68,9 +77,13 @@ def test_unknown_oauth_falls_back_to_owner(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setenv("XAI_API_KEY", "xai-owner-default")
     monkeypatch.setenv(
         "UNIGROK_PRINCIPAL_XAI_KEYS_JSON",
-        json.dumps({"oauth:other": "xai-other"}),
+        json.dumps(
+            {"oauth:https%3A%2F%2Fcontrol.grokmcp.org:other": "xai-other"}
+        ),
     )
-    token = set_active_principal("oauth:github|user:nope")
+    token = set_active_principal(
+        "oauth:https%3A%2F%2Fcontrol.grokmcp.org:github%3Anope"
+    )
     try:
         key, source = resolve_xai_api_key()
         assert key == "xai-owner-default"
@@ -83,7 +96,7 @@ def test_anon_ignores_principal_map(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("XAI_API_KEY", "xai-owner-default")
     monkeypatch.setenv(
         "UNIGROK_PRINCIPAL_XAI_KEYS_JSON",
-        json.dumps({"oauth:x": "xai-x"}),
+        json.dumps({"oauth:https%3A%2F%2Fcontrol.grokmcp.org:x": "xai-x"}),
     )
     token = set_active_principal("http:anon")
     try:
@@ -99,9 +112,13 @@ def test_client_id_cannot_select_key(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("XAI_API_KEY", "xai-owner-default")
     monkeypatch.setenv(
         "UNIGROK_PRINCIPAL_XAI_KEYS_JSON",
-        json.dumps({"oauth:real": "xai-real"}),
+        json.dumps(
+            {"oauth:https%3A%2F%2Fcontrol.grokmcp.org:real": "xai-real"}
+        ),
     )
-    token = set_active_principal("oauth:real")
+    token = set_active_principal(
+        "oauth:https%3A%2F%2Fcontrol.grokmcp.org:real"
+    )
     try:
         assert effective_xai_api_key() == "xai-real"
     finally:
@@ -116,11 +133,15 @@ def test_client_id_cannot_select_key(monkeypatch: pytest.MonkeyPatch) -> None:
     [
         ("{", "invalid_json"),
         ("[]", "not_object"),
-        ('{"oauth:a":""}', "invalid_key"),
+        ('{"oauth:https%3A%2F%2Fcontrol.grokmcp.org:a":""}', "invalid_key"),
         ('{" oauth:a":"xai-a"}', "invalid_principal"),
         ('{"cursor":"xai-a"}', "invalid_principal"),
         ('{"oauth:":"xai-a"}', "invalid_principal"),
-        ('{"oauth:a":"xai-a","oauth:a":"xai-b"}', "duplicate_principal"),
+        (
+            '{"oauth:https%3A%2F%2Fcontrol.grokmcp.org:a":"xai-a",'
+            '"oauth:https%3A%2F%2Fcontrol.grokmcp.org:a":"xai-b"}',
+            "duplicate_principal",
+        ),
     ],
 )
 def test_invalid_principal_map_fails_closed_without_secret_output(
@@ -130,7 +151,9 @@ def test_invalid_principal_map_fails_closed_without_secret_output(
 ) -> None:
     monkeypatch.setenv("XAI_API_KEY", "xai-owner-default")
     monkeypatch.setenv("UNIGROK_PRINCIPAL_XAI_KEYS_JSON", raw)
-    token = set_active_principal("oauth:a")
+    token = set_active_principal(
+        "oauth:https%3A%2F%2Fcontrol.grokmcp.org:a"
+    )
     try:
         with pytest.raises(PrincipalXAIConfigurationError) as raised:
             resolve_xai_api_key()
@@ -157,9 +180,20 @@ def test_invalid_principal_map_fails_closed_without_secret_output(
 @pytest.mark.parametrize(
     ("raw", "code"),
     [
-        ('{"oauth:a":"' + ("x" * 65_536) + '"}', "too_large"),
         (
-            json.dumps({f"oauth:user:{index}": f"key-{index}" for index in range(257)}),
+            '{"oauth:https%3A%2F%2Fcontrol.grokmcp.org:a":"'
+            + ("x" * 65_536)
+            + '"}',
+            "too_large",
+        ),
+        (
+            json.dumps(
+                {
+                    f"oauth:https%3A%2F%2Fcontrol.grokmcp.org:user%3A{index}":
+                    f"key-{index}"
+                    for index in range(257)
+                }
+            ),
             "too_many_entries",
         ),
     ],
@@ -172,7 +206,9 @@ def test_principal_map_bounds_fail_closed(
 ) -> None:
     monkeypatch.setenv("UNIGROK_PRINCIPAL_XAI_KEYS_JSON", raw)
     with pytest.raises(PrincipalXAIConfigurationError) as raised:
-        resolve_xai_api_key(principal="oauth:user:1")
+        resolve_xai_api_key(
+            principal="oauth:https%3A%2F%2Fcontrol.grokmcp.org:user%3A1"
+        )
     assert raised.value.code == code
 
 
@@ -182,9 +218,11 @@ def test_service_availability_is_not_request_principal_dependent(
     monkeypatch.delenv("XAI_API_KEY", raising=False)
     monkeypatch.setenv(
         "UNIGROK_PRINCIPAL_XAI_KEYS_JSON",
-        '{"oauth:github:42":"xai-principal-only"}',
+        '{"oauth:https%3A%2F%2Fcontrol.grokmcp.org:github%3A42":"xai-principal-only"}',
     )
-    token = set_active_principal("oauth:github:99")
+    token = set_active_principal(
+        "oauth:https%3A%2F%2Fcontrol.grokmcp.org:github%3A99"
+    )
     try:
         assert xai_api_service_configured() is True
         assert effective_xai_api_key() == ""
@@ -211,23 +249,38 @@ def test_rotation_changes_generation_but_not_principal_cache_slot(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("XAI_API_KEY", "xai-owner-default")
-    token = set_active_principal("oauth:github|user:42")
+    token = set_active_principal(
+        "oauth:https%3A%2F%2Fcontrol.grokmcp.org:github%3A42"
+    )
     try:
         monkeypatch.setenv(
             "UNIGROK_PRINCIPAL_XAI_KEYS_JSON",
-            json.dumps({"oauth:github|user:42": "xai-first"}),
+            json.dumps(
+                {
+                    "oauth:https%3A%2F%2Fcontrol.grokmcp.org:github%3A42":
+                    "xai-first"
+                }
+            ),
         )
         first = resolve_inference_credential()
         monkeypatch.setenv(
             "UNIGROK_PRINCIPAL_XAI_KEYS_JSON",
-            json.dumps({"oauth:github|user:42": "xai-second"}),
+            json.dumps(
+                {
+                    "oauth:https%3A%2F%2Fcontrol.grokmcp.org:github%3A42":
+                    "xai-second"
+                }
+            ),
         )
         second = resolve_inference_credential()
     finally:
         reset_active_principal(token)
 
-    assert first[:3] == ("xai-first", "principal", "principal:oauth:github|user:42")
-    assert second[:3] == ("xai-second", "principal", "principal:oauth:github|user:42")
+    expected_slot = (
+        "principal:oauth:https%3A%2F%2Fcontrol.grokmcp.org:github%3A42"
+    )
+    assert first[:3] == ("xai-first", "principal", expected_slot)
+    assert second[:3] == ("xai-second", "principal", expected_slot)
     assert first[3] != second[3]
     assert "xai-first" not in first[3]
     assert "xai-second" not in second[3]
@@ -241,10 +294,12 @@ async def test_run_blocking_preserves_principal_context(
     from src.identity import get_active_principal
     from src.utils import run_blocking
 
-    token = set_active_principal("oauth:github|user:42")
+    token = set_active_principal(
+        "oauth:https%3A%2F%2Fcontrol.grokmcp.org:github%3A42"
+    )
     try:
         assert await run_blocking(get_active_principal, timeout=timeout) == (
-            "oauth:github|user:42"
+            "oauth:https%3A%2F%2Fcontrol.grokmcp.org:github%3A42"
         )
     finally:
         reset_active_principal(token)
