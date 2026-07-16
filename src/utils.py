@@ -520,6 +520,7 @@ def _local_executor() -> concurrent.futures.ThreadPoolExecutor:
 _TIMED_THREADS_LOCK = threading.Lock()
 _TIMED_THREADS_IN_FLIGHT = 0
 _TIMED_THREADS_PEAK = 0
+_TIMED_THREADS_ORPHANED = 0
 
 
 def _max_timed_threads() -> int:
@@ -535,6 +536,7 @@ def get_runtime_stats() -> Dict[str, int]:
         return {
             "timed_threads_in_flight": _TIMED_THREADS_IN_FLIGHT,
             "timed_threads_peak": _TIMED_THREADS_PEAK,
+            "timed_threads_orphaned": _TIMED_THREADS_ORPHANED,
         }
 
 
@@ -591,7 +593,16 @@ async def run_blocking(fn: Callable, *args, timeout: Optional[float] = None, **k
             with _TIMED_THREADS_LOCK:
                 _TIMED_THREADS_IN_FLIGHT -= 1
             raise
-        return await asyncio.wait_for(future, timeout=timeout)
+        try:
+            return await asyncio.wait_for(future, timeout=timeout)
+        except (asyncio.TimeoutError, asyncio.CancelledError):
+            # Delivery is already fail-closed (_resolve no-ops when future is
+            # done). Count the stranded daemon thread so operators can see
+            # cancel/timeout pressure that still burns timed-thread capacity.
+            global _TIMED_THREADS_ORPHANED
+            with _TIMED_THREADS_LOCK:
+                _TIMED_THREADS_ORPHANED += 1
+            raise
     return await loop.run_in_executor(_local_executor(), call)
 
 
