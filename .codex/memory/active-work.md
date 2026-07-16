@@ -40,7 +40,7 @@ credentials, OAuth codes, tokens, or private keys here.
   process-free, clean, and zero commits ahead of main.
 - Preserve the current detached coordinator worktree and the locked protected
   `main` checkout.
-- Preserve `/Users/djtelicloud/Documents/agentixai/grok-mcp-server`: it has
+- Preserve the sponsor's primary Documents checkout of this repo: it has
   active processes and uncommitted contributor work.
 - Provider IDEs may automatically rehydrate clean scratchpads. Before removing
   any candidate, re-check task state, process ownership, dirty state, unique
