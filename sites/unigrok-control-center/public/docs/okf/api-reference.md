@@ -165,6 +165,16 @@ mandatory wherever semantic completion matters.
 
 ## credentials.py {#credentials}
 
+### Function: `default_cli_auth_setup_command` {#credentials-default_cli_auth_setup_command}
+
+```python
+def default_cli_auth_setup_command(*, containerized: bool=True) -> str
+```
+
+**Keywords:** default, cli, auth, setup, command
+
+Return the operator-facing device-auth command for this runtime.
+
 ### Function: `credential_plane_policy` {#credentials-credential_plane_policy}
 
 ```python
