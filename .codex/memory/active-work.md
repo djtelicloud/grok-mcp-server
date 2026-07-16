@@ -1,6 +1,6 @@
 # Codex Active Work
 
-Last updated: 2026-07-16T18:23:07Z
+Last updated: 2026-07-16
 Owner: Codex integration coordinator
 Status: Current critical repairs are merged and Live; the security queue remains active.
 
@@ -47,45 +47,6 @@ credentials, OAuth codes, tokens, or private keys here.
   found on the new Cloud Run revisions after rollout.
 
 ## Active queue and safety posture
-
-- Python-superiority campaign PR #475 is held at exact head
-  `42de419afe5073b82ea7a00e00e3444cf7880758`. Its contributor baseline at the
-  prior head passed 2,202 tests, but two Forge tasks
-  (`f29b306130e945f8a34eaa44b91fcb39` and
-  `eca231fdad094aab9e909728f13035df`) failed before candidate generation
-  because preflight stripped the repository's required `src.` package prefix.
-  Grok's new unconditional keep-`src` commit is narrower than #476 and is not
-  the approved repair. Its final scoreboard reclassification is accepted as
-  honest bookkeeping: 0 measured wins, 1 held target, 77 plans, 133 skips.
-  Independent reproduction also found the routing task's benchmark omits
-  required keyword-only `reason_score`; its minimally corrected fixture has a
-  19.37% noise floor. After CONTINUE, retry only the held Pareto target first.
-  Sponsor permits Grok to improve the experiment method before rerun. Freeze
-  that method on a clean current-main task branch before any production change
-  or baseline capture, then apply it unchanged to original and candidate.
-  Team/hive generation followed by Swarm refinement is allowed, but the harness
-  must call the exact original implementation and approval compares original
-  only with the final combined candidate; intermediate output is diagnostic.
-  The first staged harness passed 12 target tests and showed 3.48% latency range
-  across 10 isolated runs, but it bypasses normal import provenance, has only a
-  `front0_size` oracle, and conflates latency with memory tracing. Grok may
-  revise only the prep harness/test/doc while execution stays held; Codex must
-  re-review normal import, full oracle, raw samples/noise floor, provenance
-  hashes, and separate latency/memory measurement before CONTINUE.
-  The H1-H6 revision then passed 21 combined tests but still accepted wrong
-  later fronts, zero-work receipts, and target-omitting bundles. Its committed
-  ORIGINAL JSON also normalizes paths after capture. That receipt is explicitly
-  diagnostic/superseded; H7-H10 plus re-review are required before CONTINUE.
-- Draft #476 repairs that Forge import-provenance bug. Codex's focused suite
-  passed 27 tests and the full suite passed 2,204 tests. Normal Codex must
-  independently review and land it, then refresh the Forge runtime before
-  Grok receives an explicit `CONTINUE` comment on #475. Grok was told to hold
-  its exact head and not open more plan PRs meanwhile.
-- Draft #422 contains the durable campaign gate plus the separate Codex
-  disposition for #475. Public results remain held. Any one-file-to-many-file
-  candidate is one replacement bundle: compare the same public operation and
-  report total bundle LOC, end-to-end latency, and peak memory; never aggregate
-  per-file percentages into a result.
 
 - Stable identity prerequisites are Live, but principal-storage publication
   remains blocked on its owner-scoped schema/migration, legacy-row quarantine,
