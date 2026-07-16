@@ -11,7 +11,12 @@ from pathlib import Path
 import pytest
 
 from src.swarm.ast_utils import extract_node_span, span_line_range
-from src.swarm.preflight import PreflightError, noise_floor_pct, run_preflight
+from src.swarm.preflight import (
+    PreflightError,
+    module_name_for,
+    noise_floor_pct,
+    run_preflight,
+)
 from src.swarm.sandbox import SandboxError, SwarmSandbox, parse_bench_line
 
 FIXTURE = Path(__file__).parent / "fixtures" / "swarm_target"
@@ -184,6 +189,26 @@ class TestSandbox:
 # ─────────────────────────────────────────────────────────────────────────────
 
 class TestPreflight:
+    def test_src_package_keeps_src_in_module_name(self, tmp_path):
+        (tmp_path / "src").mkdir()
+        (tmp_path / "src" / "__init__.py").write_text("")
+
+        assert module_name_for("src/swarm/pareto.py", tmp_path) == "src.swarm.pareto"
+
+    def test_conventional_src_layout_drops_src_from_module_name(self, tmp_path):
+        (tmp_path / "src" / "swarm").mkdir(parents=True)
+
+        assert module_name_for("src/swarm/pareto.py", tmp_path) == "swarm.pareto"
+
+    def test_windows_separators_are_normalized_for_both_src_layouts(self, tmp_path):
+        (tmp_path / "src").mkdir()
+        (tmp_path / "src" / "__init__.py").write_text("")
+        target = r"src\swarm\pareto.py"
+
+        assert module_name_for(target, tmp_path) == "src.swarm.pareto"
+        (tmp_path / "src" / "__init__.py").unlink()
+        assert module_name_for(target, tmp_path) == "swarm.pareto"
+
     @pytest.mark.asyncio
     async def test_happy_path(self, sandbox):
         oracle = await _preflight(sandbox)

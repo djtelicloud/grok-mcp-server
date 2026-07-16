@@ -58,7 +58,7 @@
       "version": "v0",
       "title": "Rehydrate with brand next steps",
       "summary": "Boot summary table plus 1–2 brand-strength next smartest tasks; table-only rehydrate is incomplete.",
-      "audience": "public_and_contributor",
+      "audience": "contributor",
       "body_path": "docs/public-intelligence/packs/v0-rehydrate-brand-next-steps.md",
       "source_gym": "Multi-brand rehydrate sessions where Gemini/Antigravity and Copilot/Kimi stopped at the status table while Claude/Cursor/Grok offered real next work.",
       "promoted_from": [
@@ -92,6 +92,33 @@
         ".agents/AGENTS.md",
         "docs/public-intelligence/packs/v0-human-radio-and-cloud-boundary.md",
         "Grok user-guide theming (md_* slots)"
+      ],
+      "scrub": {
+        "secrets": true,
+        "private_paths": true,
+        "raw_memory": true,
+        "unreviewed_logs": true
+      },
+      "never_includes": [
+        "API keys or OAuth secrets",
+        "Private unigrok-intelligence playbooks",
+        "Session or task-RAG database dumps",
+        "Contributor workspace memory rows"
+      ]
+    },
+    {
+      "pack_id": "public-vs-insider-agent-law",
+      "version": "v0",
+      "title": "Public vs insider agent law",
+      "summary": "Stable MCP clients stay on 4765 + using-unigrok; product rehydrate and Ready-for-supervisor land radio are insider-only.",
+      "audience": "public",
+      "body_path": "docs/public-intelligence/packs/v0-public-vs-insider-agent-law.md",
+      "source_gym": "Audience-split deep dive: vibe users on stable Docker MCP loading full AGENTS land culture.",
+      "promoted_from": [
+        "AGENTS.md",
+        ".agents/AGENTS.md",
+        "skills/using-unigrok/SKILL.md",
+        ".agents/skills/session-rehydrate/SKILL.md"
       ],
       "scrub": {
         "secrets": true,

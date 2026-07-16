@@ -1,5 +1,16 @@
 # Workspace Rules
 
+## Audience first (stable MCP client vs this repository)
+
+**Stable MCP / vibe coder (foreign apps + `http://localhost:4765/mcp` only):**
+
+- Do **not** invent **4766**, Forge, Swarm, land, or dual-runtime for ordinary installs.
+- Prefer `using-unigrok`. Honor `discover_self` gates (`can_mutate_workspace`, `can_use_swarm`).
+- Do **not** run product **session-rehydrate** outside a UniGrok product checkout.
+- Status language for their apps: Done / Blocked / plain English — **not** the multi-agent "Ready for supervisor" land pipeline unless they are shipping *this* product.
+
+**This repository / write+ insiders:** full multi-agent law in this file applies (worktrees, draft PRs, land gates, rehydrate).
+
 ## Talk to humans first (mandatory — all brands)
 
 New users and sponsors are **not** git operators. Many readers (including people
@@ -60,6 +71,7 @@ and blocking questions are explicit exceptions.
 ## Human language (user-facing — mandatory)
 
 The sponsor is **not** a git operator. Match **intent**, not literal VCS vocabulary.
+**Ready for supervisor** maps multi-agent UniGrok product shipping — not a vibe user's unrelated app (use Done/Blocked/plain English there).
 Dyslexia-hostile jargon in answers is a product failure.
 
 ### Intent map (user words → agent duty)

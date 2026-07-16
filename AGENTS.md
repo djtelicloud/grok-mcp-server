@@ -1,5 +1,19 @@
 # AGENTS.md
 
+## Audience first (stable MCP client vs this repository)
+
+**If you only help a user run UniGrok as a stable MCP client**
+(`http://localhost:4765/mcp` in *their* apps — not developing this repo):
+
+- Use **port 4765 only**. Do **not** invent **4766**, Forge, Swarm, land, or dual-runtime.
+- Prefer the **`using-unigrok`** skill. Call `grok_mcp_discover_self` first.
+- Do **not** run product **session-rehydrate** or multi-agent land pipelines.
+- User status language: Done / Blocked / plain English — **not** "Ready for
+  supervisor" unless they are shipping *this* product as a collaborator.
+
+**If you are developing UniGrok itself** (this checkout / write+ insider work):
+full multi-agent law below applies.
+
 ## Talk to humans first
 
 Before anything else: **short plain answers**. Brand + status + what it is.
@@ -7,6 +21,8 @@ No diffs, logs, or git lectures unless the human asked. Full law:
 [.agents/AGENTS.md](.agents/AGENTS.md) → **Talk to humans first** / **Human language**.
 
 ---
+
+## Insider / this repository only
 
 Guidance for Codex working in **uni-grok-mcp**. Shared multi-agent rules
 (git coordination, endpoint, credentials boundary) live in

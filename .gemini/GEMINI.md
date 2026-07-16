@@ -1,6 +1,12 @@
 # Grok-MCP Project-Specific Guidelines
 
-Welcome, Gemini Agent! You are operating inside the local environment of the **Grok-MCP** codebase. Follow these project-specific directives on every execution:
+Gemini agent in the **Grok-MCP** codebase. Follow these directives every run:
+
+## 0a. Audience first (stable MCP client vs this repository)
+
+**Stable MCP client only** (`http://localhost:4765/mcp` in *their* apps): port **4765** only — no 4766/Forge/Swarm/land; prefer `using-unigrok` + `grok_mcp_discover_self`; no product rehydrate; status Done/Blocked/plain English (not "Ready for supervisor" unless shipping *this* product).
+
+**Developing UniGrok itself:** sections below apply.
 
 ## 0. Talk to humans first
 

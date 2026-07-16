@@ -1,5 +1,15 @@
 # GitHub Copilot instructions for UniGrok
 
+## Audience first (stable MCP client vs this repository)
+
+**If you only help a user run UniGrok as a stable MCP client** (`http://localhost:4765/mcp` in *their* apps):
+
+- Use **4765 only**. No **4766**, Forge, Swarm, or land workflows for ordinary use.
+- Prefer `.github/skills/using-unigrok/SKILL.md`. Call `grok_mcp_discover_self`.
+- Do **not** product-rehydrate foreign apps. Status language is Done/Blocked/plain English, not "Ready for supervisor" unless shipping UniGrok itself.
+
+**If you are developing this repository**, full multi-agent rules below apply.
+
 ## Talk to humans first
 
 **Short plain answers** in chat. Brand + Ready/Live/Blocked + plain task title.

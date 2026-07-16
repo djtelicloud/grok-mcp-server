@@ -1,10 +1,15 @@
 # Public pack v0 — Rehydrate with brand next steps
 
-**Audience:** public installers and contributor agents  
+**Audience:** contributor agents developing UniGrok (product checkout)
 **Pack id:** `rehydrate-brand-next-steps` · **version:** `v0`
 
 Distilled from multi-brand UniGrok gym work. Safe to ship: no secrets, no private
 memory, no competitive process IP.
+
+**Product-cwd gate:** full product rehydrate is for a UniGrok checkout (or
+explicit “product rehydrate”). Foreign apps on stable MCP should use
+`using-unigrok` + `discover_self` instead — see pack
+`public-vs-insider-agent-law`.
 
 ## Problem this pack solves
 
