@@ -63,6 +63,32 @@ def test_exact_head_codex_approval_is_a_safe_cursor_fallback():
     assert decision.description == "exact-head Codex Approval"
 
 
+def test_codex_fallback_ignores_failed_cursor_approver():
+    checks = _checks(cursor=False)
+    checks["Cursor Approval Agent: Pull Request Router and Approver"] = "failure"
+    decision = decide_gate(
+        declared="medium",
+        inferred="medium",
+        checks=checks,
+        statuses={"Codex Approval": "success"},
+    )
+    assert decision.state == "success"
+    assert decision.description == "exact-head Codex Approval"
+
+
+def test_codex_fallback_ignores_in_progress_cursor_approver():
+    checks = _checks(cursor=False)
+    checks["Cursor Approval Agent: Pull Request Router and Approver"] = "in_progress"
+    decision = decide_gate(
+        declared="low",
+        inferred="low",
+        checks=checks,
+        statuses={"Codex Approval": "success"},
+    )
+    assert decision.state == "success"
+    assert decision.description == "exact-head Codex Approval"
+
+
 def test_low_medium_codex_fallback_still_requires_ci():
     decision = decide_gate(
         declared="low",
