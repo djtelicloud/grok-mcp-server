@@ -1839,3 +1839,52 @@ async def test_post_xai_chat_502_bad_gateway_on_errors(monkeypatch):
     body_json = json.loads(res_json.body.decode())
     assert body_json["error"]["type"] == "bad_gateway"
     assert body_json["error"]["message"].startswith("Upstream returned invalid JSON.")
+
+
+def test_xai_chat_completions_url_defaults_and_rejects_unsafe_overrides(monkeypatch):
+    from src.http_server import XAI_BASE_URL, _xai_chat_completions_url
+
+    monkeypatch.delenv("XAI_API_BASE_URL", raising=False)
+    assert _xai_chat_completions_url() == f"{XAI_BASE_URL.rstrip('/')}/chat/completions"
+
+    monkeypatch.setenv("XAI_API_BASE_URL", "https://api.x.ai/v1")
+    assert _xai_chat_completions_url() == "https://api.x.ai/v1/chat/completions"
+
+    for unsafe in (
+        "http://api.x.ai/v1",
+        "https://169.254.169.254/v1",
+        "https://evil.internal/v1",
+        "https://localhost/v1",
+    ):
+        monkeypatch.setenv("XAI_API_BASE_URL", unsafe)
+        assert _xai_chat_completions_url() is None, unsafe
+
+
+@pytest.mark.asyncio
+async def test_post_xai_chat_rejects_unsafe_base_url_without_calling_out(monkeypatch):
+    from src.http_server import post_xai_chat
+    import json
+
+    called = {"post": False}
+
+    class ForbiddenClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, *args, **kwargs):
+            called["post"] = True
+            raise AssertionError("unsafe XAI_API_BASE_URL must not call out")
+
+    monkeypatch.setenv("XAI_API_KEY", "dummy-key")
+    monkeypatch.setenv("XAI_API_BASE_URL", "http://169.254.169.254/v1")
+    monkeypatch.setattr("src.http_server.httpx.AsyncClient", lambda **kwargs: ForbiddenClient())
+
+    res = await post_xai_chat({"model": "grok-4.3", "messages": []})
+    assert res.status_code == 503
+    body = json.loads(res.body.decode())
+    assert body["error"]["code"] == "service_unavailable"
+    assert "XAI_API_BASE_URL" in body["error"]["message"]
+    assert called["post"] is False
