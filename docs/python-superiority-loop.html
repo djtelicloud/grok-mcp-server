@@ -45,7 +45,7 @@ h1{font-size:clamp(1.7rem,4.5vw,2.6rem); font-weight:650; letter-spacing:-.03em;
 .progress{margin:0 0 1.75rem; background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:1rem 1.15rem}
 .progress-head{display:flex; justify-content:space-between; gap:1rem; font-family:var(--mono); font-size:12px; color:var(--ink-soft); margin-bottom:.55rem}
 .track{height:10px; border-radius:999px; background:rgba(255,255,255,.06); overflow:hidden}
-.fill{height:100%; width:36.2%; background:linear-gradient(90deg, var(--cyan), var(--teal)); box-shadow:var(--glow-teal)}
+.fill{height:100%; width:95.7%; background:linear-gradient(90deg, var(--cyan), var(--teal)); box-shadow:var(--glow-teal)}
 h2{font-size:1.15rem; margin:1.75rem 0 .85rem}
 .wins{display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:.7rem}
 .win{background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:.9rem}
@@ -88,27 +88,27 @@ a{color:var(--cyan); text-decoration:none} a:hover{text-decoration:underline}
 <div class="wrap">
   <div class="eyebrow">Cursor × UniGrok · Python superiority loop</div>
   <h1>Projected LOC cut — live % board</h1>
-  <p class="lede">Before → after facade/shim projections from Ready draft PRs.
+  <p class="lede">Before → after facade/shim projections from Ready draft PRs and in-tree plans.
   Green = reduction. Codex Sol High can watch Ready drafts; merge stays the normal Codex land path.
-  Loop still in progress (76/210).</p>
+  Inventory pending = 0 · full done set (201/210).</p>
   <div class="meta">
-    <span class="chip">Snapshot <strong>2026-07-16T17:12:45Z</strong></span>
-    <span class="chip">Ready PRs <strong>#342–#420</strong> (skip #408 docs)</span>
-    <span class="chip">Next <strong>tests/test_supervisor_approval.py (~301 LOC)</strong></span>
+    <span class="chip">Snapshot <strong>2026-07-16T17:28:04Z</strong></span>
+    <span class="chip">Ready PRs <strong>#342–#474</strong> (skip #408 docs) · <strong>75</strong> in-tree</span>
+    <span class="chip">Next <strong>none</strong> · pending 0</span>
     <span class="chip"><a href="python-superiority-loop.md">Markdown table</a></span>
   </div>
   <div class="hero">
-    <div class="big">-90.5%</div>
-    <div class="sub">OVERALL PROJECTED LOC REDUCTION · 86,509 → 8,180 LINES</div>
+    <div class="big">-88.2%</div>
+    <div class="sub">OVERALL PROJECTED LOC REDUCTION · 101,328 → 11,985 LINES</div>
   </div>
   <div class="kpis">
-    <div class="kpi"><div class="v">-90.5%</div><div class="l">Overall LOC reduction</div></div>
-    <div class="kpi"><div class="v">-88.3%</div><div class="l">Avg file % cut</div></div>
-    <div class="kpi"><div class="v">76 / 210</div><div class="l">Files with plans</div></div>
-    <div class="kpi"><div class="v">76</div><div class="l">Ready draft PRs</div></div>
+    <div class="kpi"><div class="v">-88.2%</div><div class="l">Overall LOC reduction</div></div>
+    <div class="kpi"><div class="v">-29.5%</div><div class="l">Avg file % cut</div></div>
+    <div class="kpi"><div class="v">201 / 210</div><div class="l">Files with plans</div></div>
+    <div class="kpi"><div class="v">126</div><div class="l">Ready draft PRs</div></div>
   </div>
   <div class="progress">
-    <div class="progress-head"><span>76 plans Ready</span><span>134 pending · 210 total · 36%</span></div>
+    <div class="progress-head"><span>201 plans done</span><span>0 pending · 9 skipped · 210 total · 96%</span></div>
     <div class="track"><div class="fill"></div></div>
   </div>
   <h2>Biggest % wins</h2>
@@ -122,23 +122,29 @@ a{color:var(--cyan); text-decoration:none} a:hover{text-decoration:underline}
   <div class="table-wrap">
     <table>
       <thead><tr><th>Loop</th><th>File</th><th>Before</th><th>After</th><th>Δ LOC</th><th>Δ%</th><th>Latency</th><th>PR</th><th>Status</th></tr></thead>
-      <tbody><tr><td>2</td><td><code>tests/test_utils.py</code></td><td class="num">7,848</td><td class="num">200</td><td class="num">-7,648</td><td class="pct">-97.5%</td><td class="muted">parse 29.0ms / compile 26.0ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/345">#345</a></td><td><span class="pill">Ready</span></td></tr><tr><td>3</td><td><code>tests/test_provider_broker.py</code></td><td class="num">4,707</td><td class="num">150</td><td class="num">-4,557</td><td class="pct">-96.8%</td><td class="muted">parse 17.0ms / compile 14.0ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/346">#346</a></td><td><span class="pill">Ready</span></td></tr><tr><td>1</td><td><code>src/utils.py</code></td><td class="num">13,830</td><td class="num">800</td><td class="num">-13,030</td><td class="pct">-94.2%</td><td class="muted">parse 53.0ms / compile 42.0ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/342">#342</a></td><td><span class="pill">Ready</span></td></tr><tr><td>6</td><td><code>tests/test_http_server.py</code></td><td class="num">2,371</td><td class="num">150</td><td class="num">-2,221</td><td class="pct">-93.7%</td><td class="muted">parse 10.0ms / compile 7.0ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/349">#349</a></td><td><span class="pill">Ready</span></td></tr><tr><td>7</td><td><code>src/intelligence_payloads.py</code></td><td class="num">1,749</td><td class="num">120</td><td class="num">-1,629</td><td class="pct">-93.1%</td><td class="muted">parse 8.0ms / compile 5.0ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/350">#350</a></td><td><span class="pill">Ready</span></td></tr><tr><td>14</td><td><code>tests/test_intelligence_payloads.py</code></td><td class="num">1,278</td><td class="num">100</td><td class="num">-1,178</td><td class="pct">-92.2%</td><td class="muted">parse 5.0ms / compile 4.0ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/357">#357</a></td><td><span class="pill">Ready</span></td></tr><tr><td>9</td><td><code>src/tools/system.py</code></td><td class="num">1,525</td><td class="num">120</td><td class="num">-1,405</td><td class="pct">-92.1%</td><td class="muted">parse 6.0ms / compile 5.0ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/352">#352</a></td><td><span class="pill">Ready</span></td></tr><tr><td>15</td><td><code>tests/test_subscription_transports.py</code></td><td class="num">1,235</td><td class="num">100</td><td class="num">-1,135</td><td class="pct">-91.9%</td><td class="muted">parse 4.0ms / compile 3.0ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/358">#358</a></td><td><span class="pill">Ready</span></td></tr><tr><td>16</td><td><code>tests/test_task_rag.py</code></td><td class="num">1,201</td><td class="num">100</td><td class="num">-1,101</td><td class="pct">-91.7%</td><td class="muted">parse 5.0ms / compile 4.0ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/359">#359</a></td><td><span class="pill">Ready</span></td></tr><tr><td>17</td><td><code>tests/test_provider_harvest.py</code></td><td class="num">1,188</td><td class="num">100</td><td class="num">-1,088</td><td class="pct">-91.6%</td><td class="muted">parse 5.28ms / compile 4.75ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/360">#360</a></td><td><span class="pill">Ready</span></td></tr><tr><td>11</td><td><code>tests/test_mcp_session_guard.py</code></td><td class="num">1,397</td><td class="num">120</td><td class="num">-1,277</td><td class="pct">-91.4%</td><td class="muted">parse 6.0ms / compile 5.0ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/354">#354</a></td><td><span class="pill">Ready</span></td></tr><tr><td>12</td><td><code>tests/test_mcp_sampling_bridge.py</code></td><td class="num">1,379</td><td class="num">120</td><td class="num">-1,259</td><td class="pct">-91.3%</td><td class="muted">parse 5.0ms / compile 4.0ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/355">#355</a></td><td><span class="pill">Ready</span></td></tr><tr><td>20</td><td><code>tests/test_server.py</code></td><td class="num">1,110</td><td class="num">100</td><td class="num">-1,010</td><td class="pct">-91.0%</td><td class="muted">parse 3.86ms / compile 3.92ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/363">#363</a></td><td><span class="pill">Ready</span></td></tr><tr><td>22</td><td><code>tests/test_multiagent.py</code></td><td class="num">1,102</td><td class="num">100</td><td class="num">-1,002</td><td class="pct">-90.9%</td><td class="muted">parse 4.4ms / compile 3.52ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/365">#365</a></td><td><span class="pill">Ready</span></td></tr><tr><td>21</td><td><code>tests/test_provider_adapters.py</code></td><td class="num">1,061</td><td class="num">100</td><td class="num">-961</td><td class="pct">-90.6%</td><td class="muted">parse 4.49ms / compile 2.88ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/364">#364</a></td><td><span class="pill">Ready</span></td></tr><tr><td>25</td><td><code>tests/test_knowledge.py</code></td><td class="num">1,021</td><td class="num">100</td><td class="num">-921</td><td class="pct">-90.2%</td><td class="muted">parse 4.53ms / compile 3.34ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/368">#368</a></td><td><span class="pill">Ready</span></td></tr><tr><td>18</td><td><code>src/tools/swarm.py</code></td><td class="num">1,155</td><td class="num">120</td><td class="num">-1,035</td><td class="pct">-89.6%</td><td class="muted">parse 5.21ms / compile 4.12ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/361">#361</a></td><td><span class="pill">Ready</span></td></tr><tr><td>10</td><td><code>src/providers/subscription.py</code></td><td class="num">1,427</td><td class="num">150</td><td class="num">-1,277</td><td class="pct">-89.5%</td><td class="muted">parse 5.0ms / compile 3.0ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/353">#353</a></td><td><span class="pill">Ready</span></td></tr><tr><td>57</td><td><code>evals/.../validators.py</code></td><td class="num">465</td><td class="num">50</td><td class="num">-415</td><td class="pct">-89.2%</td><td class="muted">parse 1.46ms / compile 1.61ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/400">#400</a></td><td><span class="pill">Ready</span></td></tr><tr><td>26</td><td><code>tests/test_evals.py</code></td><td class="num">926</td><td class="num">100</td><td class="num">-826</td><td class="pct">-89.2%</td><td class="muted">parse 3.66ms / compile 3.19ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/369">#369</a></td><td><span class="pill">Ready</span></td></tr><tr><td>19</td><td><code>src/mcp_session_guard.py</code></td><td class="num">1,105</td><td class="num">120</td><td class="num">-985</td><td class="pct">-89.1%</td><td class="muted">parse 4.25ms / compile 3.02ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/362">#362</a></td><td><span class="pill">Ready</span></td></tr><tr><td>43</td><td><code>tests/test_phase5.py</code></td><td class="num">798</td><td class="num">90</td><td class="num">-708</td><td class="pct">-88.7%</td><td class="muted">parse 2.98ms / compile 2.19ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/386">#386</a></td><td><span class="pill">Ready</span></td></tr><tr><td>27</td><td><code>src/providers/contracts.py</code></td><td class="num">877</td><td class="num">100</td><td class="num">-777</td><td class="pct">-88.6%</td><td class="muted">parse 3.35ms / compile 2.42ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/370">#370</a></td><td><span class="pill">Ready</span></td></tr><tr><td>73</td><td><code>tests/test_land_workflow.py</code></td><td class="num">388</td><td class="num">45</td><td class="num">-343</td><td class="pct">-88.4%</td><td class="muted">parse 2.01ms / compile 1.7ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/417">#417</a></td><td><span class="pill">Ready</span></td></tr><tr><td>75</td><td><code>src/storage.py</code></td><td class="num">342</td><td class="num">40</td><td class="num">-302</td><td class="pct">-88.3%</td><td class="muted">parse 1.27ms / compile 0.98ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/419">#419</a></td><td><span class="pill">Ready</span></td></tr><tr><td>72</td><td><code>src/jobs.py</code></td><td class="num">381</td><td class="num">45</td><td class="num">-336</td><td class="pct">-88.2%</td><td class="muted">parse 1.23ms / compile 1.5ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/416">#416</a></td><td><span class="pill">Ready</span></td></tr><tr><td>68</td><td><code>src/providers/base.py</code></td><td class="num">380</td><td class="num">45</td><td class="num">-335</td><td class="pct">-88.2%</td><td class="muted">parse 1.11ms / compile 1.05ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/412">#412</a></td><td><span class="pill">Ready</span></td></tr><tr><td>8</td><td><code>evals/.../stage1_harness.py</code></td><td class="num">1,644</td><td class="num">200</td><td class="num">-1,444</td><td class="pct">-87.8%</td><td class="muted">parse 5.0ms / compile 5.0ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/351">#351</a></td><td><span class="pill">Ready</span></td></tr><tr><td>24</td><td><code>src/providers/mcp_sampling.py</code></td><td class="num">986</td><td class="num">120</td><td class="num">-866</td><td class="pct">-87.8%</td><td class="muted">parse 3.13ms / compile 2.66ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/367">#367</a></td><td><span class="pill">Ready</span></td></tr><tr><td>69</td><td><code>scripts/check_agent_attribution.py</code></td><td class="num">369</td><td class="num">45</td><td class="num">-324</td><td class="pct">-87.8%</td><td class="muted">parse 1.69ms / compile 1.54ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/413">#413</a></td><td><span class="pill">Ready</span></td></tr><tr><td>51</td><td><code>evals/.../provider_smoke.py</code></td><td class="num">491</td><td class="num">60</td><td class="num">-431</td><td class="pct">-87.8%</td><td class="muted">parse 1.91ms / compile 1.43ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/394">#394</a></td><td><span class="pill">Ready</span></td></tr><tr><td>32</td><td><code>tests/test_completion_envelope.py</code></td><td class="num">733</td><td class="num">90</td><td class="num">-643</td><td class="pct">-87.7%</td><td class="muted">parse 2.48ms / compile 1.83ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/375">#375</a></td><td><span class="pill">Ready</span></td></tr><tr><td>64</td><td><code>tests/.../test_provider_smoke.py</code></td><td class="num">407</td><td class="num">50</td><td class="num">-357</td><td class="pct">-87.7%</td><td class="muted">parse 1.36ms / compile 1.09ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/407">#407</a></td><td><span class="pill">Ready</span></td></tr><tr><td>35</td><td><code>tests/test_mcp_ui.py</code></td><td class="num">730</td><td class="num">90</td><td class="num">-640</td><td class="pct">-87.7%</td><td class="muted">parse 2.93ms / compile 2.07ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/378">#378</a></td><td><span class="pill">Ready</span></td></tr><tr><td>70</td><td><code>tests/test_workspace_memory.py</code></td><td class="num">365</td><td class="num">45</td><td class="num">-320</td><td class="pct">-87.7%</td><td class="muted">parse 1.75ms / compile 1.14ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/414">#414</a></td><td><span class="pill">Ready</span></td></tr><tr><td>59</td><td><code>tests/test_github_review_integration.py</code></td><td class="num">484</td><td class="num">60</td><td class="num">-424</td><td class="pct">-87.6%</td><td class="muted">parse 1.57ms / compile 1.25ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/402">#402</a></td><td><span class="pill">Ready</span></td></tr><tr><td>29</td><td><code>tests/test_credentials.py</code></td><td class="num">804</td><td class="num">100</td><td class="num">-704</td><td class="pct">-87.6%</td><td class="muted">parse 2.67ms / compile 2.27ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/372">#372</a></td><td><span class="pill">Ready</span></td></tr><tr><td>60</td><td><code>tests/test_semantic_evals.py</code></td><td class="num">441</td><td class="num">55</td><td class="num">-386</td><td class="pct">-87.5%</td><td class="muted">parse 1.75ms / compile 1.31ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/403">#403</a></td><td><span class="pill">Ready</span></td></tr><tr><td>52</td><td><code>tests/test_swarm_engine.py</code></td><td class="num">481</td><td class="num">60</td><td class="num">-421</td><td class="pct">-87.5%</td><td class="muted">parse 2.27ms / compile 1.52ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/395">#395</a></td><td><span class="pill">Ready</span></td></tr><tr><td>33</td><td><code>tests/.../test_stage1_schema_safety.py</code></td><td class="num">721</td><td class="num">90</td><td class="num">-631</td><td class="pct">-87.5%</td><td class="muted">parse 1.99ms / compile 1.95ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/376">#376</a></td><td><span class="pill">Ready</span></td></tr><tr><td>30</td><td><code>src/tools/chats.py</code></td><td class="num">800</td><td class="num">100</td><td class="num">-700</td><td class="pct">-87.5%</td><td class="muted">parse 2.35ms / compile 2.0ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/373">#373</a></td><td><span class="pill">Ready</span></td></tr><tr><td>45</td><td><code>evals/.../role_schemas.py</code></td><td class="num">559</td><td class="num">70</td><td class="num">-489</td><td class="pct">-87.5%</td><td class="muted">parse 2.08ms / compile 1.48ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/388">#388</a></td><td><span class="pill">Ready</span></td></tr><tr><td>46</td><td><code>evals/.../schemas.py</code></td><td class="num">558</td><td class="num">70</td><td class="num">-488</td><td class="pct">-87.5%</td><td class="muted">parse 1.65ms / compile 1.41ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/389">#389</a></td><td><span class="pill">Ready</span></td></tr><tr><td>53</td><td><code>scripts/install_unigrok_theme.py</code></td><td class="num">478</td><td class="num">60</td><td class="num">-418</td><td class="pct">-87.4%</td><td class="muted">parse 1.81ms / compile 1.36ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/396">#396</a></td><td><span class="pill">Ready</span></td></tr><tr><td>54</td><td><code>tests/.../test_stage1_mock_harness.py</code></td><td class="num">477</td><td class="num">60</td><td class="num">-417</td><td class="pct">-87.4%</td><td class="muted">parse 2.22ms / compile 1.5ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/397">#397</a></td><td><span class="pill">Ready</span></td></tr><tr><td>34</td><td><code>tests/test_provider_attempt_ledger.py</code></td><td class="num">714</td><td class="num">90</td><td class="num">-624</td><td class="pct">-87.4%</td><td class="muted">parse 2.48ms / compile 1.86ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/377">#377</a></td><td><span class="pill">Ready</span></td></tr><tr><td>36</td><td><code>tests/test_observability.py</code></td><td class="num">712</td><td class="num">90</td><td class="num">-622</td><td class="pct">-87.4%</td><td class="muted">parse 2.51ms / compile 2.13ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/379">#379</a></td><td><span class="pill">Ready</span></td></tr><tr><td>31</td><td><code>src/completion_envelope.py</code></td><td class="num">791</td><td class="num">100</td><td class="num">-691</td><td class="pct">-87.4%</td><td class="muted">parse 2.98ms / compile 2.04ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/374">#374</a></td><td><span class="pill">Ready</span></td></tr><tr><td>61</td><td><code>scripts/bootstrap_intelligence_refs.py</code></td><td class="num">435</td><td class="num">55</td><td class="num">-380</td><td class="pct">-87.4%</td><td class="muted">parse 1.84ms / compile 1.28ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/404">#404</a></td><td><span class="pill">Ready</span></td></tr><tr><td>65</td><td><code>tests/test_install_unigrok_theme.py</code></td><td class="num">395</td><td class="num">50</td><td class="num">-345</td><td class="pct">-87.3%</td><td class="muted">parse 1.25ms / compile 0.87ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/409">#409</a></td><td><span class="pill">Ready</span></td></tr><tr><td>62</td><td><code>scripts/supervisor_approval.py</code></td><td class="num">394</td><td class="num">50</td><td class="num">-344</td><td class="pct">-87.3%</td><td class="muted">parse 1.65ms / compile 1.75ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/405">#405</a></td><td><span class="pill">Ready</span></td></tr><tr><td>50</td><td><code>tests/test_intelligence_upgrade.py</code></td><td class="num">549</td><td class="num">70</td><td class="num">-479</td><td class="pct">-87.2%</td><td class="muted">parse 1.49ms / compile 1.41ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/393">#393</a></td><td><span class="pill">Ready</span></td></tr><tr><td>56</td><td><code>tests/test_release_hygiene.py</code></td><td class="num">468</td><td class="num">60</td><td class="num">-408</td><td class="pct">-87.2%</td><td class="muted">parse 2.13ms / compile 1.46ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/399">#399</a></td><td><span class="pill">Ready</span></td></tr><tr><td>76</td><td><code>tests/test_swarm_storage.py</code></td><td class="num">312</td><td class="num">40</td><td class="num">-272</td><td class="pct">-87.2%</td><td class="muted">parse 1.32ms / compile 1.1ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/420">#420</a></td><td><span class="pill">Ready</span></td></tr><tr><td>40</td><td><code>evals/.../provider_adapters.py</code></td><td class="num">623</td><td class="num">80</td><td class="num">-543</td><td class="pct">-87.2%</td><td class="muted">parse 2.46ms / compile 1.69ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/383">#383</a></td><td><span class="pill">Ready</span></td></tr><tr><td>66</td><td><code>tests/test_intelligence_refs_bootstrap.py</code></td><td class="num">389</td><td class="num">50</td><td class="num">-339</td><td class="pct">-87.1%</td><td class="muted">parse 1.5ms / compile 1.39ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/410">#410</a></td><td><span class="pill">Ready</span></td></tr><tr><td>71</td><td><code>scripts/github-grok-review.py</code></td><td class="num">350</td><td class="num">45</td><td class="num">-305</td><td class="pct">-87.1%</td><td class="muted">parse 1.61ms / compile 1.46ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/415">#415</a></td><td><span class="pill">Ready</span></td></tr><tr><td>67</td><td><code>tests/test_metrics.py</code></td><td class="num">388</td><td class="num">50</td><td class="num">-338</td><td class="pct">-87.1%</td><td class="muted">parse 1.93ms / compile 1.26ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/411">#411</a></td><td><span class="pill">Ready</span></td></tr><tr><td>37</td><td><code>tests/test_migrations.py</code></td><td class="num">696</td><td class="num">90</td><td class="num">-606</td><td class="pct">-87.1%</td><td class="muted">parse 2.38ms / compile 1.59ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/380">#380</a></td><td><span class="pill">Ready</span></td></tr><tr><td>58</td><td><code>src/semantic_evals.py</code></td><td class="num">463</td><td class="num">60</td><td class="num">-403</td><td class="pct">-87.0%</td><td class="muted">parse 1.18ms / compile 1.14ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/401">#401</a></td><td><span class="pill">Ready</span></td></tr><tr><td>47</td><td><code>tests/test_swarm_tools.py</code></td><td class="num">539</td><td class="num">70</td><td class="num">-469</td><td class="pct">-87.0%</td><td class="muted">parse 2.5ms / compile 1.65ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/390">#390</a></td><td><span class="pill">Ready</span></td></tr><tr><td>48</td><td><code>src/intelligence_capsule.py</code></td><td class="num">539</td><td class="num">70</td><td class="num">-469</td><td class="pct">-87.0%</td><td class="muted">parse 2.2ms / compile 1.81ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/391">#391</a></td><td><span class="pill">Ready</span></td></tr><tr><td>63</td><td><code>src/metrics.py</code></td><td class="num">422</td><td class="num">55</td><td class="num">-367</td><td class="pct">-87.0%</td><td class="muted">parse 1.64ms / compile 1.46ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/406">#406</a></td><td><span class="pill">Ready</span></td></tr><tr><td>41</td><td><code>tests/.../test_attempt_ledger_safety.py</code></td><td class="num">612</td><td class="num">80</td><td class="num">-532</td><td class="pct">-86.9%</td><td class="muted">parse 2.4ms / compile 1.88ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/384">#384</a></td><td><span class="pill">Ready</span></td></tr><tr><td>49</td><td><code>tests/.../test_provider_contract.py</code></td><td class="num">533</td><td class="num">70</td><td class="num">-463</td><td class="pct">-86.9%</td><td class="muted">parse 1.94ms / compile 1.39ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/392">#392</a></td><td><span class="pill">Ready</span></td></tr><tr><td>74</td><td><code>tests/test_xai_client_authority.py</code></td><td class="num">334</td><td class="num">45</td><td class="num">-289</td><td class="pct">-86.5%</td><td class="muted">parse 1.13ms / compile 1.02ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/418">#418</a></td><td><span class="pill">Ready</span></td></tr><tr><td>44</td><td><code>tests/test_service_workspace_boundary.py</code></td><td class="num">580</td><td class="num">80</td><td class="num">-500</td><td class="pct">-86.2%</td><td class="muted">parse 2.28ms / compile 1.73ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/387">#387</a></td><td><span class="pill">Ready</span></td></tr><tr><td>5</td><td><code>src/http_server.py</code></td><td class="num">2,874</td><td class="num">400</td><td class="num">-2,474</td><td class="pct">-86.1%</td><td class="muted">parse 11.0ms / compile 9.0ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/348">#348</a></td><td><span class="pill">Ready</span></td></tr><tr><td>42</td><td><code>src/swarm/engine.py</code></td><td class="num">570</td><td class="num">80</td><td class="num">-490</td><td class="pct">-86.0%</td><td class="muted">parse 2.33ms / compile 1.62ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/385">#385</a></td><td><span class="pill">Ready</span></td></tr><tr><td>55</td><td><code>scripts/land.py</code></td><td class="num">489</td><td class="num">70</td><td class="num">-419</td><td class="pct">-85.7%</td><td class="muted">parse 1.84ms / compile 1.53ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/398">#398</a></td><td><span class="pill">Ready</span></td></tr><tr><td>28</td><td><code>src/provider_harvest.py</code></td><td class="num">816</td><td class="num">120</td><td class="num">-696</td><td class="pct">-85.3%</td><td class="muted">parse 2.54ms / compile 2.14ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/371">#371</a></td><td><span class="pill">Ready</span></td></tr><tr><td>38</td><td><code>src/workspace_memory.py</code></td><td class="num">668</td><td class="num">100</td><td class="num">-568</td><td class="pct">-85.0%</td><td class="muted">parse 3.19ms / compile 2.47ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/381">#381</a></td><td><span class="pill">Ready</span></td></tr><tr><td>23</td><td><code>src/rag.py</code></td><td class="num">1,001</td><td class="num">150</td><td class="num">-851</td><td class="pct">-85.0%</td><td class="muted">parse 3.37ms / compile 3.01ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/366">#366</a></td><td><span class="pill">Ready</span></td></tr><tr><td>39</td><td><code>evals/runner.py</code></td><td class="num">659</td><td class="num">100</td><td class="num">-559</td><td class="pct">-84.8%</td><td class="muted">parse 3.25ms / compile 2.63ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/382">#382</a></td><td><span class="pill">Ready</span></td></tr><tr><td>13</td><td><code>evals/.../attempt_ledger.py</code></td><td class="num">1,298</td><td class="num">200</td><td class="num">-1,098</td><td class="pct">-84.6%</td><td class="muted">parse 4.0ms / compile 4.0ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/356">#356</a></td><td><span class="pill">Ready</span></td></tr><tr><td>4</td><td><code>src/providers/broker.py</code></td><td class="num">3,122</td><td class="num">600</td><td class="num">-2,522</td><td class="pct">-80.8%</td><td class="muted">parse 9.0ms / compile 8.0ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/347">#347</a></td><td><span class="pill">Ready</span></td></tr></tbody>
+      <tbody><tr><td>2</td><td><code>tests/test_utils.py</code></td><td class="num">7,848</td><td class="num">200</td><td class="num">-7,648</td><td class="pct">-97.5%</td><td class="muted">parse 29.0ms / compile 26.0ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/345">#345</a></td><td><span class="pill">Ready</span></td></tr><tr><td>3</td><td><code>tests/test_provider_broker.py</code></td><td class="num">4,707</td><td class="num">150</td><td class="num">-4,557</td><td class="pct">-96.8%</td><td class="muted">parse 17.0ms / compile 14.0ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/346">#346</a></td><td><span class="pill">Ready</span></td></tr><tr><td>1</td><td><code>src/utils.py</code></td><td class="num">13,830</td><td class="num">800</td><td class="num">-13,030</td><td class="pct">-94.2%</td><td class="muted">parse 53.0ms / compile 42.0ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/342">#342</a></td><td><span class="pill">Ready</span></td></tr><tr><td>6</td><td><code>tests/test_http_server.py</code></td><td class="num">2,371</td><td class="num">150</td><td class="num">-2,221</td><td class="pct">-93.7%</td><td class="muted">parse 10.0ms / compile 7.0ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/349">#349</a></td><td><span class="pill">Ready</span></td></tr><tr><td>7</td><td><code>src/intelligence_payloads.py</code></td><td class="num">1,749</td><td class="num">120</td><td class="num">-1,629</td><td class="pct">-93.1%</td><td class="muted">parse 8.0ms / compile 5.0ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/350">#350</a></td><td><span class="pill">Ready</span></td></tr><tr><td>14</td><td><code>tests/test_intelligence_payloads.py</code></td><td class="num">1,278</td><td class="num">100</td><td class="num">-1,178</td><td class="pct">-92.2%</td><td class="muted">parse 5.0ms / compile 4.0ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/357">#357</a></td><td><span class="pill">Ready</span></td></tr><tr><td>9</td><td><code>src/tools/system.py</code></td><td class="num">1,525</td><td class="num">120</td><td class="num">-1,405</td><td class="pct">-92.1%</td><td class="muted">parse 6.0ms / compile 5.0ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/352">#352</a></td><td><span class="pill">Ready</span></td></tr><tr><td>15</td><td><code>tests/test_subscription_transports.py</code></td><td class="num">1,235</td><td class="num">100</td><td class="num">-1,135</td><td class="pct">-91.9%</td><td class="muted">parse 4.0ms / compile 3.0ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/358">#358</a></td><td><span class="pill">Ready</span></td></tr><tr><td>16</td><td><code>tests/test_task_rag.py</code></td><td class="num">1,201</td><td class="num">100</td><td class="num">-1,101</td><td class="pct">-91.7%</td><td class="muted">parse 5.0ms / compile 4.0ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/359">#359</a></td><td><span class="pill">Ready</span></td></tr><tr><td>17</td><td><code>tests/test_provider_harvest.py</code></td><td class="num">1,188</td><td class="num">100</td><td class="num">-1,088</td><td class="pct">-91.6%</td><td class="muted">parse 5.28ms / compile 4.75ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/360">#360</a></td><td><span class="pill">Ready</span></td></tr><tr><td>11</td><td><code>tests/test_mcp_session_guard.py</code></td><td class="num">1,397</td><td class="num">120</td><td class="num">-1,277</td><td class="pct">-91.4%</td><td class="muted">parse 6.0ms / compile 5.0ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/354">#354</a></td><td><span class="pill">Ready</span></td></tr><tr><td>12</td><td><code>tests/test_mcp_sampling_bridge.py</code></td><td class="num">1,379</td><td class="num">120</td><td class="num">-1,259</td><td class="pct">-91.3%</td><td class="muted">parse 5.0ms / compile 4.0ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/355">#355</a></td><td><span class="pill">Ready</span></td></tr><tr><td>20</td><td><code>tests/test_server.py</code></td><td class="num">1,110</td><td class="num">100</td><td class="num">-1,010</td><td class="pct">-91.0%</td><td class="muted">parse 3.86ms / compile 3.92ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/363">#363</a></td><td><span class="pill">Ready</span></td></tr><tr><td>22</td><td><code>tests/test_multiagent.py</code></td><td class="num">1,102</td><td class="num">100</td><td class="num">-1,002</td><td class="pct">-90.9%</td><td class="muted">parse 4.4ms / compile 3.52ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/365">#365</a></td><td><span class="pill">Ready</span></td></tr><tr><td>21</td><td><code>tests/test_provider_adapters.py</code></td><td class="num">1,061</td><td class="num">100</td><td class="num">-961</td><td class="pct">-90.6%</td><td class="muted">parse 4.49ms / compile 2.88ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/364">#364</a></td><td><span class="pill">Ready</span></td></tr><tr><td>25</td><td><code>tests/test_knowledge.py</code></td><td class="num">1,021</td><td class="num">100</td><td class="num">-921</td><td class="pct">-90.2%</td><td class="muted">parse 4.53ms / compile 3.34ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/368">#368</a></td><td><span class="pill">Ready</span></td></tr><tr><td>18</td><td><code>src/tools/swarm.py</code></td><td class="num">1,155</td><td class="num">120</td><td class="num">-1,035</td><td class="pct">-89.6%</td><td class="muted">parse 5.21ms / compile 4.12ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/361">#361</a></td><td><span class="pill">Ready</span></td></tr><tr><td>10</td><td><code>src/providers/subscription.py</code></td><td class="num">1,427</td><td class="num">150</td><td class="num">-1,277</td><td class="pct">-89.5%</td><td class="muted">parse 5.0ms / compile 3.0ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/353">#353</a></td><td><span class="pill">Ready</span></td></tr><tr><td>57</td><td><code>evals/.../validators.py</code></td><td class="num">465</td><td class="num">50</td><td class="num">-415</td><td class="pct">-89.2%</td><td class="muted">parse 1.46ms / compile 1.61ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/400">#400</a></td><td><span class="pill">Ready</span></td></tr><tr><td>26</td><td><code>tests/test_evals.py</code></td><td class="num">926</td><td class="num">100</td><td class="num">-826</td><td class="pct">-89.2%</td><td class="muted">parse 3.66ms / compile 3.19ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/369">#369</a></td><td><span class="pill">Ready</span></td></tr><tr><td>19</td><td><code>src/mcp_session_guard.py</code></td><td class="num">1,105</td><td class="num">120</td><td class="num">-985</td><td class="pct">-89.1%</td><td class="muted">parse 4.25ms / compile 3.02ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/362">#362</a></td><td><span class="pill">Ready</span></td></tr><tr><td>43</td><td><code>tests/test_phase5.py</code></td><td class="num">798</td><td class="num">90</td><td class="num">-708</td><td class="pct">-88.7%</td><td class="muted">parse 2.98ms / compile 2.19ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/386">#386</a></td><td><span class="pill">Ready</span></td></tr><tr><td>27</td><td><code>src/providers/contracts.py</code></td><td class="num">877</td><td class="num">100</td><td class="num">-777</td><td class="pct">-88.6%</td><td class="muted">parse 3.35ms / compile 2.42ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/370">#370</a></td><td><span class="pill">Ready</span></td></tr><tr><td>73</td><td><code>tests/test_land_workflow.py</code></td><td class="num">388</td><td class="num">45</td><td class="num">-343</td><td class="pct">-88.4%</td><td class="muted">parse 2.01ms / compile 1.7ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/417">#417</a></td><td><span class="pill">Ready</span></td></tr><tr><td>75</td><td><code>src/storage.py</code></td><td class="num">342</td><td class="num">40</td><td class="num">-302</td><td class="pct">-88.3%</td><td class="muted">parse 1.27ms / compile 0.98ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/419">#419</a></td><td><span class="pill">Ready</span></td></tr><tr><td>72</td><td><code>src/jobs.py</code></td><td class="num">381</td><td class="num">45</td><td class="num">-336</td><td class="pct">-88.2%</td><td class="muted">parse 1.23ms / compile 1.5ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/416">#416</a></td><td><span class="pill">Ready</span></td></tr><tr><td>80</td><td><code>src/swarm/sandbox.py</code></td><td class="num">296</td><td class="num">35</td><td class="num">-261</td><td class="pct">-88.2%</td><td class="muted">parse 1.06ms / compile 0.9ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/425">#425</a></td><td><span class="pill">Ready</span></td></tr><tr><td>68</td><td><code>src/providers/base.py</code></td><td class="num">380</td><td class="num">45</td><td class="num">-335</td><td class="pct">-88.2%</td><td class="muted">parse 1.11ms / compile 1.05ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/412">#412</a></td><td><span class="pill">Ready</span></td></tr><tr><td>81</td><td><code>src/tools/media.py</code></td><td class="num">290</td><td class="num">35</td><td class="num">-255</td><td class="pct">-87.9%</td><td class="muted">parse 1.0ms / compile 0.85ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/426">#426</a></td><td><span class="pill">Ready</span></td></tr><tr><td>8</td><td><code>evals/.../stage1_harness.py</code></td><td class="num">1,644</td><td class="num">200</td><td class="num">-1,444</td><td class="pct">-87.8%</td><td class="muted">parse 5.0ms / compile 5.0ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/351">#351</a></td><td><span class="pill">Ready</span></td></tr><tr><td>24</td><td><code>src/providers/mcp_sampling.py</code></td><td class="num">986</td><td class="num">120</td><td class="num">-866</td><td class="pct">-87.8%</td><td class="muted">parse 3.13ms / compile 2.66ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/367">#367</a></td><td><span class="pill">Ready</span></td></tr><tr><td>69</td><td><code>scripts/check_agent_attribution.py</code></td><td class="num">369</td><td class="num">45</td><td class="num">-324</td><td class="pct">-87.8%</td><td class="muted">parse 1.69ms / compile 1.54ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/413">#413</a></td><td><span class="pill">Ready</span></td></tr><tr><td>51</td><td><code>evals/.../provider_smoke.py</code></td><td class="num">491</td><td class="num">60</td><td class="num">-431</td><td class="pct">-87.8%</td><td class="muted">parse 1.91ms / compile 1.43ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/394">#394</a></td><td><span class="pill">Ready</span></td></tr><tr><td>82</td><td><code>scripts/run_swarm_evals.py</code></td><td class="num">286</td><td class="num">35</td><td class="num">-251</td><td class="pct">-87.8%</td><td class="muted">parse 1.43ms / compile 1.08ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/427">#427</a></td><td><span class="pill">Ready</span></td></tr><tr><td>77</td><td><code>tests/test_supervisor_approval.py</code></td><td class="num">326</td><td class="num">40</td><td class="num">-286</td><td class="pct">-87.7%</td><td class="muted">parse 0.99ms / compile 0.7ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/421">#421</a></td><td><span class="pill">Ready</span></td></tr><tr><td>32</td><td><code>tests/test_completion_envelope.py</code></td><td class="num">733</td><td class="num">90</td><td class="num">-643</td><td class="pct">-87.7%</td><td class="muted">parse 2.48ms / compile 1.83ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/375">#375</a></td><td><span class="pill">Ready</span></td></tr><tr><td>102</td><td><code>src/credentials.py</code></td><td class="num">285</td><td class="num">35</td><td class="num">-250</td><td class="pct">-87.7%</td><td class="muted">parse 0.87ms / compile 0.68ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/447">#447</a></td><td><span class="pill">Ready</span></td></tr><tr><td>64</td><td><code>tests/.../test_provider_smoke.py</code></td><td class="num">407</td><td class="num">50</td><td class="num">-357</td><td class="pct">-87.7%</td><td class="muted">parse 1.36ms / compile 1.09ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/407">#407</a></td><td><span class="pill">Ready</span></td></tr><tr><td>35</td><td><code>tests/test_mcp_ui.py</code></td><td class="num">730</td><td class="num">90</td><td class="num">-640</td><td class="pct">-87.7%</td><td class="muted">parse 2.93ms / compile 2.07ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/378">#378</a></td><td><span class="pill">Ready</span></td></tr><tr><td>70</td><td><code>tests/test_workspace_memory.py</code></td><td class="num">365</td><td class="num">45</td><td class="num">-320</td><td class="pct">-87.7%</td><td class="muted">parse 1.75ms / compile 1.14ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/414">#414</a></td><td><span class="pill">Ready</span></td></tr><tr><td>59</td><td><code>tests/test_github_review_integration.py</code></td><td class="num">484</td><td class="num">60</td><td class="num">-424</td><td class="pct">-87.6%</td><td class="muted">parse 1.57ms / compile 1.25ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/402">#402</a></td><td><span class="pill">Ready</span></td></tr><tr><td>29</td><td><code>tests/test_credentials.py</code></td><td class="num">804</td><td class="num">100</td><td class="num">-704</td><td class="pct">-87.6%</td><td class="muted">parse 2.67ms / compile 2.27ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/372">#372</a></td><td><span class="pill">Ready</span></td></tr><tr><td>60</td><td><code>tests/test_semantic_evals.py</code></td><td class="num">441</td><td class="num">55</td><td class="num">-386</td><td class="pct">-87.5%</td><td class="muted">parse 1.75ms / compile 1.31ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/403">#403</a></td><td><span class="pill">Ready</span></td></tr><tr><td>52</td><td><code>tests/test_swarm_engine.py</code></td><td class="num">481</td><td class="num">60</td><td class="num">-421</td><td class="pct">-87.5%</td><td class="muted">parse 2.27ms / compile 1.52ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/395">#395</a></td><td><span class="pill">Ready</span></td></tr><tr><td>33</td><td><code>tests/.../test_stage1_schema_safety.py</code></td><td class="num">721</td><td class="num">90</td><td class="num">-631</td><td class="pct">-87.5%</td><td class="muted">parse 1.99ms / compile 1.95ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/376">#376</a></td><td><span class="pill">Ready</span></td></tr><tr><td>30</td><td><code>src/tools/chats.py</code></td><td class="num">800</td><td class="num">100</td><td class="num">-700</td><td class="pct">-87.5%</td><td class="muted">parse 2.35ms / compile 2.0ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/373">#373</a></td><td><span class="pill">Ready</span></td></tr><tr><td>45</td><td><code>evals/.../role_schemas.py</code></td><td class="num">559</td><td class="num">70</td><td class="num">-489</td><td class="pct">-87.5%</td><td class="muted">parse 2.08ms / compile 1.48ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/388">#388</a></td><td><span class="pill">Ready</span></td></tr><tr><td>46</td><td><code>evals/.../schemas.py</code></td><td class="num">558</td><td class="num">70</td><td class="num">-488</td><td class="pct">-87.5%</td><td class="muted">parse 1.65ms / compile 1.41ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/389">#389</a></td><td><span class="pill">Ready</span></td></tr><tr><td>53</td><td><code>scripts/install_unigrok_theme.py</code></td><td class="num">478</td><td class="num">60</td><td class="num">-418</td><td class="pct">-87.4%</td><td class="muted">parse 1.81ms / compile 1.36ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/396">#396</a></td><td><span class="pill">Ready</span></td></tr><tr><td>54</td><td><code>tests/.../test_stage1_mock_harness.py</code></td><td class="num">477</td><td class="num">60</td><td class="num">-417</td><td class="pct">-87.4%</td><td class="muted">parse 2.22ms / compile 1.5ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/397">#397</a></td><td><span class="pill">Ready</span></td></tr><tr><td>34</td><td><code>tests/test_provider_attempt_ledger.py</code></td><td class="num">714</td><td class="num">90</td><td class="num">-624</td><td class="pct">-87.4%</td><td class="muted">parse 2.48ms / compile 1.86ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/377">#377</a></td><td><span class="pill">Ready</span></td></tr><tr><td>83</td><td><code>tests/test_routing.py</code></td><td class="num">277</td><td class="num">35</td><td class="num">-242</td><td class="pct">-87.4%</td><td class="muted">parse 0.95ms / compile 0.79ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/428">#428</a></td><td><span class="pill">Ready</span></td></tr><tr><td>36</td><td><code>tests/test_observability.py</code></td><td class="num">712</td><td class="num">90</td><td class="num">-622</td><td class="pct">-87.4%</td><td class="muted">parse 2.51ms / compile 2.13ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/379">#379</a></td><td><span class="pill">Ready</span></td></tr><tr><td>31</td><td><code>src/completion_envelope.py</code></td><td class="num">791</td><td class="num">100</td><td class="num">-691</td><td class="pct">-87.4%</td><td class="muted">parse 2.98ms / compile 2.04ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/374">#374</a></td><td><span class="pill">Ready</span></td></tr><tr><td>61</td><td><code>scripts/bootstrap_intelligence_refs.py</code></td><td class="num">435</td><td class="num">55</td><td class="num">-380</td><td class="pct">-87.4%</td><td class="muted">parse 1.84ms / compile 1.28ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/404">#404</a></td><td><span class="pill">Ready</span></td></tr><tr><td>65</td><td><code>tests/test_install_unigrok_theme.py</code></td><td class="num">395</td><td class="num">50</td><td class="num">-345</td><td class="pct">-87.3%</td><td class="muted">parse 1.25ms / compile 0.87ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/409">#409</a></td><td><span class="pill">Ready</span></td></tr><tr><td>62</td><td><code>scripts/supervisor_approval.py</code></td><td class="num">394</td><td class="num">50</td><td class="num">-344</td><td class="pct">-87.3%</td><td class="muted">parse 1.65ms / compile 1.75ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/405">#405</a></td><td><span class="pill">Ready</span></td></tr><tr><td>50</td><td><code>tests/test_intelligence_upgrade.py</code></td><td class="num">549</td><td class="num">70</td><td class="num">-479</td><td class="pct">-87.2%</td><td class="muted">parse 1.49ms / compile 1.41ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/393">#393</a></td><td><span class="pill">Ready</span></td></tr><tr><td>56</td><td><code>tests/test_release_hygiene.py</code></td><td class="num">468</td><td class="num">60</td><td class="num">-408</td><td class="pct">-87.2%</td><td class="muted">parse 2.13ms / compile 1.46ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/399">#399</a></td><td><span class="pill">Ready</span></td></tr><tr><td>76</td><td><code>tests/test_swarm_storage.py</code></td><td class="num">312</td><td class="num">40</td><td class="num">-272</td><td class="pct">-87.2%</td><td class="muted">parse 1.32ms / compile 1.1ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/420">#420</a></td><td><span class="pill">Ready</span></td></tr><tr><td>84</td><td><code>evals/.../provider_transports.py</code></td><td class="num">273</td><td class="num">35</td><td class="num">-238</td><td class="pct">-87.2%</td><td class="muted">parse 0.86ms / compile 1.13ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/429">#429</a></td><td><span class="pill">Ready</span></td></tr><tr><td>40</td><td><code>evals/.../provider_adapters.py</code></td><td class="num">623</td><td class="num">80</td><td class="num">-543</td><td class="pct">-87.2%</td><td class="muted">parse 2.46ms / compile 1.69ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/383">#383</a></td><td><span class="pill">Ready</span></td></tr><tr><td>66</td><td><code>tests/test_intelligence_refs_bootstrap.py</code></td><td class="num">389</td><td class="num">50</td><td class="num">-339</td><td class="pct">-87.1%</td><td class="muted">parse 1.5ms / compile 1.39ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/410">#410</a></td><td><span class="pill">Ready</span></td></tr><tr><td>71</td><td><code>scripts/github-grok-review.py</code></td><td class="num">350</td><td class="num">45</td><td class="num">-305</td><td class="pct">-87.1%</td><td class="muted">parse 1.61ms / compile 1.46ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/415">#415</a></td><td><span class="pill">Ready</span></td></tr><tr><td>85</td><td><code>src/routing.py</code></td><td class="num">272</td><td class="num">35</td><td class="num">-237</td><td class="pct">-87.1%</td><td class="muted">parse 1.3ms / compile 0.9ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/430">#430</a></td><td><span class="pill">Ready</span></td></tr><tr><td>67</td><td><code>tests/test_metrics.py</code></td><td class="num">388</td><td class="num">50</td><td class="num">-338</td><td class="pct">-87.1%</td><td class="muted">parse 1.93ms / compile 1.26ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/411">#411</a></td><td><span class="pill">Ready</span></td></tr><tr><td>37</td><td><code>tests/test_migrations.py</code></td><td class="num">696</td><td class="num">90</td><td class="num">-606</td><td class="pct">-87.1%</td><td class="muted">parse 2.38ms / compile 1.59ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/380">#380</a></td><td><span class="pill">Ready</span></td></tr><tr><td>58</td><td><code>src/semantic_evals.py</code></td><td class="num">463</td><td class="num">60</td><td class="num">-403</td><td class="pct">-87.0%</td><td class="muted">parse 1.18ms / compile 1.14ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/401">#401</a></td><td><span class="pill">Ready</span></td></tr><tr><td>47</td><td><code>tests/test_swarm_tools.py</code></td><td class="num">539</td><td class="num">70</td><td class="num">-469</td><td class="pct">-87.0%</td><td class="muted">parse 2.5ms / compile 1.65ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/390">#390</a></td><td><span class="pill">Ready</span></td></tr><tr><td>48</td><td><code>src/intelligence_capsule.py</code></td><td class="num">539</td><td class="num">70</td><td class="num">-469</td><td class="pct">-87.0%</td><td class="muted">parse 2.2ms / compile 1.81ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/391">#391</a></td><td><span class="pill">Ready</span></td></tr><tr><td>63</td><td><code>src/metrics.py</code></td><td class="num">422</td><td class="num">55</td><td class="num">-367</td><td class="pct">-87.0%</td><td class="muted">parse 1.64ms / compile 1.46ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/406">#406</a></td><td><span class="pill">Ready</span></td></tr><tr><td>111</td><td><code>src/cli.py</code></td><td class="num">268</td><td class="num">35</td><td class="num">-233</td><td class="pct">-86.9%</td><td class="muted">parse 1.24ms / compile 0.83ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/456">#456</a></td><td><span class="pill">Ready</span></td></tr><tr><td>41</td><td><code>tests/.../test_attempt_ledger_safety.py</code></td><td class="num">612</td><td class="num">80</td><td class="num">-532</td><td class="pct">-86.9%</td><td class="muted">parse 2.4ms / compile 1.88ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/384">#384</a></td><td><span class="pill">Ready</span></td></tr><tr><td>49</td><td><code>tests/.../test_provider_contract.py</code></td><td class="num">533</td><td class="num">70</td><td class="num">-463</td><td class="pct">-86.9%</td><td class="muted">parse 1.94ms / compile 1.39ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/392">#392</a></td><td><span class="pill">Ready</span></td></tr><tr><td>86</td><td><code>src/tools/resources.py</code></td><td class="num">266</td><td class="num">35</td><td class="num">-231</td><td class="pct">-86.8%</td><td class="muted">parse 0.82ms / compile 0.68ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/431">#431</a></td><td><span class="pill">Ready</span></td></tr><tr><td>78</td><td><code>src/swarm/analytics.py</code></td><td class="num">299</td><td class="num">40</td><td class="num">-259</td><td class="pct">-86.6%</td><td class="muted">parse 1.85ms / compile 1.15ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/423">#423</a></td><td><span class="pill">Ready</span></td></tr><tr><td>79</td><td><code>evals/.../stage1_oracles.py</code></td><td class="num">297</td><td class="num">40</td><td class="num">-257</td><td class="pct">-86.5%</td><td class="muted">parse 1.05ms / compile 0.78ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/424">#424</a></td><td><span class="pill">Ready</span></td></tr><tr><td>74</td><td><code>tests/test_xai_client_authority.py</code></td><td class="num">334</td><td class="num">45</td><td class="num">-289</td><td class="pct">-86.5%</td><td class="muted">parse 1.13ms / compile 1.02ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/418">#418</a></td><td><span class="pill">Ready</span></td></tr><tr><td>87</td><td><code>src/tools/git.py</code></td><td class="num">258</td><td class="num">35</td><td class="num">-223</td><td class="pct">-86.4%</td><td class="muted">parse 1.36ms / compile 0.97ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/432">#432</a></td><td><span class="pill">Ready</span></td></tr><tr><td>44</td><td><code>tests/test_service_workspace_boundary.py</code></td><td class="num">580</td><td class="num">80</td><td class="num">-500</td><td class="pct">-86.2%</td><td class="muted">parse 2.28ms / compile 1.73ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/387">#387</a></td><td><span class="pill">Ready</span></td></tr><tr><td>88</td><td><code>src/faq.py</code></td><td class="num">253</td><td class="num">35</td><td class="num">-218</td><td class="pct">-86.2%</td><td class="muted">parse 0.99ms / compile 0.96ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/433">#433</a></td><td><span class="pill">Ready</span></td></tr><tr><td>5</td><td><code>src/http_server.py</code></td><td class="num">2,874</td><td class="num">400</td><td class="num">-2,474</td><td class="pct">-86.1%</td><td class="muted">parse 11.0ms / compile 9.0ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/348">#348</a></td><td><span class="pill">Ready</span></td></tr><tr><td>89</td><td><code>tests/test_swarm_static_gate.py</code></td><td class="num">250</td><td class="num">35</td><td class="num">-215</td><td class="pct">-86.0%</td><td class="muted">parse 0.96ms / compile 0.82ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/434">#434</a></td><td><span class="pill">Ready</span></td></tr><tr><td>42</td><td><code>src/swarm/engine.py</code></td><td class="num">570</td><td class="num">80</td><td class="num">-490</td><td class="pct">-86.0%</td><td class="muted">parse 2.33ms / compile 1.62ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/385">#385</a></td><td><span class="pill">Ready</span></td></tr><tr><td>90</td><td><code>tests/test_agent_attribution.py</code></td><td class="num">247</td><td class="num">35</td><td class="num">-212</td><td class="pct">-85.8%</td><td class="muted">parse 1.01ms / compile 0.52ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/435">#435</a></td><td><span class="pill">Ready</span></td></tr><tr><td>55</td><td><code>scripts/land.py</code></td><td class="num">489</td><td class="num">70</td><td class="num">-419</td><td class="pct">-85.7%</td><td class="muted">parse 1.84ms / compile 1.53ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/398">#398</a></td><td><span class="pill">Ready</span></td></tr><tr><td>91</td><td><code>tests/test_swarm_sandbox.py</code></td><td class="num">243</td><td class="num">35</td><td class="num">-208</td><td class="pct">-85.6%</td><td class="muted">parse 0.95ms / compile 0.86ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/436">#436</a></td><td><span class="pill">Ready</span></td></tr><tr><td>92</td><td><code>scripts/generate_okf.py</code></td><td class="num">240</td><td class="num">35</td><td class="num">-205</td><td class="pct">-85.4%</td><td class="muted">parse 1.33ms / compile 1.0ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/437">#437</a></td><td><span class="pill">Ready</span></td></tr><tr><td>28</td><td><code>src/provider_harvest.py</code></td><td class="num">816</td><td class="num">120</td><td class="num">-696</td><td class="pct">-85.3%</td><td class="muted">parse 2.54ms / compile 2.14ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/371">#371</a></td><td><span class="pill">Ready</span></td></tr><tr><td>93</td><td><code>evals/fakes.py</code></td><td class="num">235</td><td class="num">35</td><td class="num">-200</td><td class="pct">-85.1%</td><td class="muted">parse 0.79ms / compile 0.69ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/438">#438</a></td><td><span class="pill">Ready</span></td></tr><tr><td>94</td><td><code>scripts/publish_okf_wiki_mirror.py</code></td><td class="num">234</td><td class="num">35</td><td class="num">-199</td><td class="pct">-85.0%</td><td class="muted">parse 0.92ms / compile 0.79ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/439">#439</a></td><td><span class="pill">Ready</span></td></tr><tr><td>38</td><td><code>src/workspace_memory.py</code></td><td class="num">668</td><td class="num">100</td><td class="num">-568</td><td class="pct">-85.0%</td><td class="muted">parse 3.19ms / compile 2.47ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/381">#381</a></td><td><span class="pill">Ready</span></td></tr><tr><td>23</td><td><code>src/rag.py</code></td><td class="num">1,001</td><td class="num">150</td><td class="num">-851</td><td class="pct">-85.0%</td><td class="muted">parse 3.37ms / compile 3.01ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/366">#366</a></td><td><span class="pill">Ready</span></td></tr><tr><td>95</td><td><code>evals/.../stage1_artifacts.py</code></td><td class="num">231</td><td class="num">35</td><td class="num">-196</td><td class="pct">-84.8%</td><td class="muted">parse 0.99ms / compile 0.66ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/440">#440</a></td><td><span class="pill">Ready</span></td></tr><tr><td>98</td><td><code>tests/test_harness.py</code></td><td class="num">231</td><td class="num">35</td><td class="num">-196</td><td class="pct">-84.8%</td><td class="muted">parse 0.83ms / compile 0.67ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/443">#443</a></td><td><span class="pill">Ready</span></td></tr><tr><td>39</td><td><code>evals/runner.py</code></td><td class="num">659</td><td class="num">100</td><td class="num">-559</td><td class="pct">-84.8%</td><td class="muted">parse 3.25ms / compile 2.63ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/382">#382</a></td><td><span class="pill">Ready</span></td></tr><tr><td>96</td><td><code>src/swarm/runner.py</code></td><td class="num">228</td><td class="num">35</td><td class="num">-193</td><td class="pct">-84.6%</td><td class="muted">parse 0.78ms / compile 0.68ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/441">#441</a></td><td><span class="pill">Ready</span></td></tr><tr><td>97</td><td><code>scripts/mint_mcp_service_token.py</code></td><td class="num">228</td><td class="num">35</td><td class="num">-193</td><td class="pct">-84.6%</td><td class="muted">parse 0.92ms / compile 0.66ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/442">#442</a></td><td><span class="pill">Ready</span></td></tr><tr><td>13</td><td><code>evals/.../attempt_ledger.py</code></td><td class="num">1,298</td><td class="num">200</td><td class="num">-1,098</td><td class="pct">-84.6%</td><td class="muted">parse 4.0ms / compile 4.0ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/356">#356</a></td><td><span class="pill">Ready</span></td></tr><tr><td>99</td><td><code>src/providers/vertex.py</code></td><td class="num">224</td><td class="num">35</td><td class="num">-189</td><td class="pct">-84.4%</td><td class="muted">parse 0.95ms / compile 0.63ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/444">#444</a></td><td><span class="pill">Ready</span></td></tr><tr><td>100</td><td><code>tests/test_markdown_renderer.py</code></td><td class="num">213</td><td class="num">35</td><td class="num">-178</td><td class="pct">-83.6%</td><td class="muted">parse 0.57ms / compile 0.49ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/445">#445</a></td><td><span class="pill">Ready</span></td></tr><tr><td>101</td><td><code>src/swarm/ast_utils.py</code></td><td class="num">213</td><td class="num">35</td><td class="num">-178</td><td class="pct">-83.6%</td><td class="muted">parse 1.06ms / compile 0.7ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/446">#446</a></td><td><span class="pill">Ready</span></td></tr><tr><td>103</td><td><code>tests/test_agent_mode_plane_contract.py</code></td><td class="num">209</td><td class="num">35</td><td class="num">-174</td><td class="pct">-83.3%</td><td class="muted">parse 0.79ms / compile 0.84ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/448">#448</a></td><td><span class="pill">Ready</span></td></tr><tr><td>150</td><td><code>tests/test_cli.py</code></td><td class="num">208</td><td class="num">35</td><td class="num">-173</td><td class="pct">-83.2%</td><td class="muted">parse 0.96ms / compile 0.79ms</td><td><code>in-tree:75cd0b8152c2</code></td><td><span class="pill">in-tree</span></td></tr><tr><td>104</td><td><code>src/swarm/preflight.py</code></td><td class="num">203</td><td class="num">35</td><td class="num">-168</td><td class="pct">-82.8%</td><td class="muted">parse 0.8ms / compile 0.61ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/449">#449</a></td><td><span class="pill">Ready</span></td></tr><tr><td>105</td><td><code>tests/test_intelligence_capsule.py</code></td><td class="num">200</td><td class="num">35</td><td class="num">-165</td><td class="pct">-82.5%</td><td class="muted">parse 0.64ms / compile 0.64ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/450">#450</a></td><td><span class="pill">Ready</span></td></tr><tr><td>106</td><td><code>tests/.../test_stage0_mechanical.py</code></td><td class="num">194</td><td class="num">35</td><td class="num">-159</td><td class="pct">-82.0%</td><td class="muted">parse 0.5ms / compile 0.42ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/451">#451</a></td><td><span class="pill">Ready</span></td></tr><tr><td>107</td><td><code>src/hydration.py</code></td><td class="num">194</td><td class="num">35</td><td class="num">-159</td><td class="pct">-82.0%</td><td class="muted">parse 0.88ms / compile 0.7ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/452">#452</a></td><td><span class="pill">Ready</span></td></tr><tr><td>108</td><td><code>src/swarm/transforms.py</code></td><td class="num">193</td><td class="num">35</td><td class="num">-158</td><td class="pct">-81.9%</td><td class="muted">parse 0.77ms / compile 0.68ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/453">#453</a></td><td><span class="pill">Ready</span></td></tr><tr><td>109</td><td><code>evals/__main__.py</code></td><td class="num">193</td><td class="num">35</td><td class="num">-158</td><td class="pct">-81.9%</td><td class="muted">parse 0.82ms / compile 0.56ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/454">#454</a></td><td><span class="pill">Ready</span></td></tr><tr><td>110</td><td><code>tests/test_dual_plane_model_discipline.py</code></td><td class="num">186</td><td class="num">35</td><td class="num">-151</td><td class="pct">-81.2%</td><td class="muted">parse 0.72ms / compile 0.65ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/455">#455</a></td><td><span class="pill">Ready</span></td></tr><tr><td>4</td><td><code>src/providers/broker.py</code></td><td class="num">3,122</td><td class="num">600</td><td class="num">-2,522</td><td class="pct">-80.8%</td><td class="muted">parse 9.0ms / compile 8.0ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/347">#347</a></td><td><span class="pill">Ready</span></td></tr><tr><td>112</td><td><code>tests/test_mint_mcp_service_token.py</code></td><td class="num">174</td><td class="num">35</td><td class="num">-139</td><td class="pct">-79.9%</td><td class="muted">parse 0.79ms / compile 0.6ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/457">#457</a></td><td><span class="pill">Ready</span></td></tr><tr><td>113</td><td><code>src/server.py</code></td><td class="num">171</td><td class="num">35</td><td class="num">-136</td><td class="pct">-79.5%</td><td class="muted">parse 0.39ms / compile 0.26ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/458">#458</a></td><td><span class="pill">Ready</span></td></tr><tr><td>114</td><td><code>src/providers/__init__.py</code></td><td class="num">170</td><td class="num">35</td><td class="num">-135</td><td class="pct">-79.4%</td><td class="muted">parse 0.24ms / compile 0.2ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/459">#459</a></td><td><span class="pill">Ready</span></td></tr><tr><td>115</td><td><code>src/swarm/pareto.py</code></td><td class="num">169</td><td class="num">35</td><td class="num">-134</td><td class="pct">-79.3%</td><td class="muted">parse 0.77ms / compile 0.72ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/460">#460</a></td><td><span class="pill">Ready</span></td></tr><tr><td>116</td><td><code>src/identity.py</code></td><td class="num">165</td><td class="num">35</td><td class="num">-130</td><td class="pct">-78.8%</td><td class="muted">parse 0.51ms / compile 0.42ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/461">#461</a></td><td><span class="pill">Ready</span></td></tr><tr><td>117</td><td><code>src/swarm/mutators.py</code></td><td class="num">160</td><td class="num">35</td><td class="num">-125</td><td class="pct">-78.1%</td><td class="muted">parse 0.54ms / compile 0.34ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/462">#462</a></td><td><span class="pill">Ready</span></td></tr><tr><td>118</td><td><code>src/swarm/config.py</code></td><td class="num">156</td><td class="num">35</td><td class="num">-121</td><td class="pct">-77.6%</td><td class="muted">parse 0.4ms / compile 0.38ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/463">#463</a></td><td><span class="pill">Ready</span></td></tr><tr><td>119</td><td><code>src/providers/openai.py</code></td><td class="num">154</td><td class="num">35</td><td class="num">-119</td><td class="pct">-77.3%</td><td class="muted">parse 0.49ms / compile 0.43ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/464">#464</a></td><td><span class="pill">Ready</span></td></tr><tr><td>120</td><td><code>src/tools/workspace_memory.py</code></td><td class="num">151</td><td class="num">35</td><td class="num">-116</td><td class="pct">-76.8%</td><td class="muted">parse 0.41ms / compile 0.37ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/465">#465</a></td><td><span class="pill">Ready</span></td></tr><tr><td>121</td><td><code>src/providers/anthropic.py</code></td><td class="num">151</td><td class="num">35</td><td class="num">-116</td><td class="pct">-76.8%</td><td class="muted">parse 0.43ms / compile 0.45ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/466">#466</a></td><td><span class="pill">Ready</span></td></tr><tr><td>122</td><td><code>evals/cassettes.py</code></td><td class="num">151</td><td class="num">35</td><td class="num">-116</td><td class="pct">-76.8%</td><td class="muted">parse 0.77ms / compile 0.55ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/470">#470</a></td><td><span class="pill">Ready</span></td></tr><tr><td>123</td><td><code>tests/test_swarm_eval_script.py</code></td><td class="num">150</td><td class="num">35</td><td class="num">-115</td><td class="pct">-76.7%</td><td class="muted">parse 0.51ms / compile 0.47ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/471">#471</a></td><td><span class="pill">Ready</span></td></tr><tr><td>124</td><td><code>tests/test_git_tools.py</code></td><td class="num">148</td><td class="num">35</td><td class="num">-113</td><td class="pct">-76.4%</td><td class="muted">parse 0.51ms / compile 0.48ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/472">#472</a></td><td><span class="pill">Ready</span></td></tr><tr><td>125</td><td><code>src/tools/knowledge.py</code></td><td class="num">148</td><td class="num">35</td><td class="num">-113</td><td class="pct">-76.4%</td><td class="muted">parse 0.44ms / compile 0.37ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/473">#473</a></td><td><span class="pill">Ready</span></td></tr><tr><td>126</td><td><code>tests/test_hydration.py</code></td><td class="num">137</td><td class="num">35</td><td class="num">-102</td><td class="pct">-74.5%</td><td class="muted">parse 0.37ms / compile 0.32ms</td><td><a href="https://github.com/djtelicloud/grok-mcp-server/pull/474">#474</a></td><td><span class="pill">Ready</span></td></tr><tr><td>127</td><td><code>tests/test_swarm_pareto.py</code></td><td class="num">134</td><td class="num">35</td><td class="num">-99</td><td class="pct">-73.9%</td><td class="muted">parse 0.86ms / compile 0.71ms</td><td><code>in-tree:9fbaa2e44a53</code></td><td><span class="pill">in-tree</span></td></tr><tr><td>128</td><td><code>tests/test_swarm_ast.py</code></td><td class="num">128</td><td class="num">35</td><td class="num">-93</td><td class="pct">-72.7%</td><td class="muted">parse 0.61ms / compile 0.5ms</td><td><code>in-tree:8eef324330b2</code></td><td><span class="pill">in-tree</span></td></tr><tr><td>129</td><td><code>evals/.../mechanical_mutators.py</code></td><td class="num">124</td><td class="num">35</td><td class="num">-89</td><td class="pct">-71.8%</td><td class="muted">parse 0.53ms / compile 0.33ms</td><td><code>in-tree:174ebdc2a16e</code></td><td><span class="pill">in-tree</span></td></tr><tr><td>130</td><td><code>tests/.../test_stage1_artifacts.py</code></td><td class="num">119</td><td class="num">35</td><td class="num">-84</td><td class="pct">-70.6%</td><td class="muted">parse 0.75ms / compile 0.51ms</td><td><code>in-tree:249927d7259c</code></td><td><span class="pill">in-tree</span></td></tr><tr><td>131</td><td><code>src/providers/gemini.py</code></td><td class="num">119</td><td class="num">35</td><td class="num">-84</td><td class="pct">-70.6%</td><td class="muted">parse 0.44ms / compile 0.3ms</td><td><code>in-tree:89ae6efbf89d</code></td><td><span class="pill">in-tree</span></td></tr><tr><td>132</td><td><code>tests/test_subagent_surface_contract.py</code></td><td class="num">118</td><td class="num">35</td><td class="num">-83</td><td class="pct">-70.3%</td><td class="muted">parse 0.53ms / compile 0.45ms</td><td><code>in-tree:90f46e92039f</code></td><td><span class="pill">in-tree</span></td></tr><tr><td>133</td><td><code>src/providers/config.py</code></td><td class="num">118</td><td class="num">35</td><td class="num">-83</td><td class="pct">-70.3%</td><td class="muted">parse 0.52ms / compile 0.34ms</td><td><code>in-tree:e75eb511c863</code></td><td><span class="pill">in-tree</span></td></tr><tr><td>134</td><td><code>src/swarm/router.py</code></td><td class="num">116</td><td class="num">35</td><td class="num">-81</td><td class="pct">-69.8%</td><td class="muted">parse 0.52ms / compile 0.45ms</td><td><code>in-tree:76f9ee3357f1</code></td><td><span class="pill">in-tree</span></td></tr><tr><td>135</td><td><code>tests/test_phase4.py</code></td><td class="num">114</td><td class="num">35</td><td class="num">-79</td><td class="pct">-69.3%</td><td class="muted">parse 0.53ms / compile 0.39ms</td><td><code>in-tree:589cda906ebd</code></td><td><span class="pill">in-tree</span></td></tr><tr><td>136</td><td><code>tests/test_faq.py</code></td><td class="num">111</td><td class="num">35</td><td class="num">-76</td><td class="pct">-68.5%</td><td class="muted">parse 0.4ms / compile 0.3ms</td><td><code>in-tree:aa1386cc99a7</code></td><td><span class="pill">in-tree</span></td></tr><tr><td>146</td><td><code>src/tools/research.py</code></td><td class="num">108</td><td class="num">35</td><td class="num">-73</td><td class="pct">-67.6%</td><td class="muted">parse 0.41ms / compile 0.27ms</td><td><code>in-tree:9c3becda4adc</code></td><td><span class="pill">in-tree</span></td></tr><tr><td>137</td><td><code>tests/test_export_pr.py</code></td><td class="num">107</td><td class="num">35</td><td class="num">-72</td><td class="pct">-67.3%</td><td class="muted">parse 0.52ms / compile 0.33ms</td><td><code>in-tree:5dbe898ffe20</code></td><td><span class="pill">in-tree</span></td></tr><tr><td>138</td><td><code>evals/graders.py</code></td><td class="num">102</td><td class="num">35</td><td class="num">-67</td><td class="pct">-65.7%</td><td class="muted">parse 0.81ms / compile 0.5ms</td><td><code>in-tree:22afc119170b</code></td><td><span class="pill">in-tree</span></td></tr><tr><td>139</td><td><code>src/providers/google_common.py</code></td><td class="num">101</td><td class="num">35</td><td class="num">-66</td><td class="pct">-65.3%</td><td class="muted">parse 0.48ms / compile 0.35ms</td><td><code>in-tree:7547193af176</code></td><td><span class="pill">in-tree</span></td></tr><tr><td>140</td><td><code>src/swarm/static_gate.py</code></td><td class="num">99</td><td class="num">35</td><td class="num">-64</td><td class="pct">-64.6%</td><td class="muted">parse 0.36ms / compile 0.27ms</td><td><code>in-tree:38e6510976f2</code></td><td><span class="pill">in-tree</span></td></tr><tr><td>141</td><td><code>src/tools/consistency.py</code></td><td class="num">98</td><td class="num">35</td><td class="num">-63</td><td class="pct">-64.3%</td><td class="muted">parse 0.42ms / compile 0.32ms</td><td><code>in-tree:9d4ccaa4a97c</code></td><td><span class="pill">in-tree</span></td></tr><tr><td>142</td><td><code>tests/test_swarm_router.py</code></td><td class="num">94</td><td class="num">35</td><td class="num">-59</td><td class="pct">-62.8%</td><td class="muted">parse 0.6ms / compile 0.43ms</td><td><code>in-tree:e4e0277dec35</code></td><td><span class="pill">in-tree</span></td></tr><tr><td>143</td><td><code>tests/test_generate_okf.py</code></td><td class="num">92</td><td class="num">35</td><td class="num">-57</td><td class="pct">-62.0%</td><td class="muted">parse 0.38ms / compile 0.23ms</td><td><code>in-tree:d354ee1abe72</code></td><td><span class="pill">in-tree</span></td></tr><tr><td>144</td><td><code>tests/test_publish_okf_wiki_mirror.py</code></td><td class="num">89</td><td class="num">35</td><td class="num">-54</td><td class="pct">-60.7%</td><td class="muted">parse 0.55ms / compile 0.42ms</td><td><code>in-tree:3086f3c0eb4e</code></td><td><span class="pill">in-tree</span></td></tr><tr><td>145</td><td><code>scripts/land-status.py</code></td><td class="num">87</td><td class="num">35</td><td class="num">-52</td><td class="pct">-59.8%</td><td class="muted">parse 0.53ms / compile 0.37ms</td><td><code>in-tree:c8b01cde5c3e</code></td><td><span class="pill">in-tree</span></td></tr><tr><td>147</td><td><code>src/swarm/fold.py</code></td><td class="num">84</td><td class="num">35</td><td class="num">-49</td><td class="pct">-58.3%</td><td class="muted">parse 0.47ms / compile 0.28ms</td><td><code>in-tree:7e088b970bb7</code></td><td><span class="pill">in-tree</span></td></tr><tr><td>148</td><td><code>src/swarm/generate.py</code></td><td class="num">83</td><td class="num">35</td><td class="num">-48</td><td class="pct">-57.8%</td><td class="muted">parse 0.36ms / compile 0.24ms</td><td><code>in-tree:1162a515fc2a</code></td><td><span class="pill">in-tree</span></td></tr><tr><td>149</td><td><code>tests/test_swarm_analytics.py</code></td><td class="num">81</td><td class="num">35</td><td class="num">-46</td><td class="pct">-56.8%</td><td class="muted">parse 0.42ms / compile 0.28ms</td><td><code>in-tree:dc71110a82d0</code></td><td><span class="pill">in-tree</span></td></tr><tr><td>151</td><td><code>src/tools/faq.py</code></td><td class="num">77</td><td class="num">35</td><td class="num">-42</td><td class="pct">-54.5%</td><td class="muted">parse 0.26ms / compile 0.18ms</td><td><code>in-tree:3cba81e288a7</code></td><td><span class="pill">in-tree</span></td></tr><tr><td>152</td><td><code>src/models/results.py</code></td><td class="num">70</td><td class="num">35</td><td class="num">-35</td><td class="pct">-50.0%</td><td class="muted">parse 0.53ms / compile 0.36ms</td><td><code>in-tree:7518266f0888</code></td><td><span class="pill">in-tree</span></td></tr><tr><td>162</td><td><code>tests/test_swarm_runner.py</code></td><td class="num">40</td><td class="num">20</td><td class="num">-20</td><td class="pct">-50.0%</td><td class="muted">parse 0.38ms / compile 0.19ms</td><td><code>in-tree:e3108c60b013</code></td><td><span class="pill">in-tree</span></td></tr><tr><td>163</td><td><code>src/providers/errors.py</code></td><td class="num">39</td><td class="num">20</td><td class="num">-19</td><td class="pct">-48.7%</td><td class="muted">parse 0.22ms / compile 0.13ms</td><td><code>in-tree:aad393a5f31f</code></td><td><span class="pill">in-tree</span></td></tr><tr><td>164</td><td><code>.cursor/hooks/before-unigrok-agent.py</code></td><td class="num">39</td><td class="num">20</td><td class="num">-19</td><td class="pct">-48.7%</td><td class="muted">parse 0.19ms / compile 0.11ms</td><td><code>in-tree:9fb19b379835</code></td><td><span class="pill">in-tree</span></td></tr><tr><td>165</td><td><code>src/provider_redaction.py</code></td><td class="num">37</td><td class="num">20</td><td class="num">-17</td><td class="pct">-45.9%</td><td class="muted">parse 0.21ms / compile 0.14ms</td><td><code>in-tree:31faf0b2089b</code></td><td><span class="pill">in-tree</span></td></tr><tr><td>153</td><td><code>tests/test_public_intelligence_packs.py</code></td><td class="num">64</td><td class="num">35</td><td class="num">-29</td><td class="pct">-45.3%</td><td class="muted">parse 0.39ms / compile 0.26ms</td><td><code>in-tree:06d02b0228da</code></td><td><span class="pill">in-tree</span></td></tr><tr><td>154</td><td><code>scripts/swarm_bench.py</code></td><td class="num">62</td><td class="num">35</td><td class="num">-27</td><td class="pct">-43.5%</td><td class="muted">parse 0.35ms / compile 0.23ms</td><td><code>in-tree:731c1d079d85</code></td><td><span class="pill">in-tree</span></td></tr><tr><td>166</td><td><code>tests/test_namespace_human_radio_roots.py</code></td><td class="num">35</td><td class="num">20</td><td class="num">-15</td><td class="pct">-42.9%</td><td class="muted">parse 0.22ms / compile 0.13ms</td><td><code>in-tree:620ff189f855</code></td><td><span class="pill">in-tree</span></td></tr><tr><td>167</td><td><code>.cursor/hooks/session-unigrok-env.py</code></td><td class="num">35</td><td class="num">20</td><td class="num">-15</td><td class="pct">-42.9%</td><td class="muted">parse 0.16ms / compile 0.1ms</td><td><code>in-tree:b4a7f83a5a29</code></td><td><span class="pill">in-tree</span></td></tr><tr><td>168</td><td><code>tests/fixtures/swarm_target/slow_mod.py</code></td><td class="num">34</td><td class="num">20</td><td class="num">-14</td><td class="pct">-41.2%</td><td class="muted">parse 0.24ms / compile 0.13ms</td><td><code>in-tree:94ca0493bd62</code></td><td><span class="pill">in-tree</span></td></tr><tr><td>155</td><td><code>src/xai_credentials.py</code></td><td class="num">59</td><td class="num">35</td><td class="num">-24</td><td class="pct">-40.7%</td><td class="muted">parse 0.26ms / compile 0.17ms</td><td><code>in-tree:9efbf11253a8</code></td><td><span class="pill">in-tree</span></td></tr><tr><td>169</td><td><code>tests/test_codeql_contracts.py</code></td><td class="num">33</td><td class="num">20</td><td class="num">-13</td><td class="pct">-39.4%</td><td class="muted">parse 0.22ms / compile 0.13ms</td><td><code>in-tree:fc7288947e75</code></td><td><span class="pill">in-tree</span></td></tr><tr><td>170</td><td><code>tests/test_okf_vscode_guidance.py</code></td><td class="num">32</td><td class="num">20</td><td class="num">-12</td><td class="pct">-37.5%</td><td class="muted">parse 0.21ms / compile 0.12ms</td><td><code>in-tree:1c812462c432</code></td><td><span class="pill">in-tree</span></td></tr><tr><td>171</td><td><code>tests/test_okf_copilot_playbook.py</code></td><td class="num">30</td><td class="num">20</td><td class="num">-10</td><td class="pct">-33.3%</td><td class="muted">parse 0.18ms / compile 0.12ms</td><td><code>in-tree:e6000ec7c726</code></td><td><span class="pill">in-tree</span></td></tr><tr><td>157</td><td><code>tests/test_consistency.py</code></td><td class="num">52</td><td class="num">35</td><td class="num">-17</td><td class="pct">-32.7%</td><td class="muted">parse 0.36ms / compile 0.18ms</td><td><code>in-tree:17327cfa2db6</code></td><td><span class="pill">in-tree</span></td></tr><tr><td>156</td><td><code>tests/test_swarm_transforms.py</code></td><td class="num">51</td><td class="num">35</td><td class="num">-16</td><td class="pct">-31.4%</td><td class="muted">parse 0.21ms / compile 0.14ms</td><td><code>in-tree:ac20d505e963</code></td><td><span class="pill">in-tree</span></td></tr><tr><td>158</td><td><code>tests/test_codex_desktop_session_contract.py</code></td><td class="num">51</td><td class="num">35</td><td class="num">-16</td><td class="pct">-31.4%</td><td class="muted">parse 0.9ms / compile 0.16ms</td><td><code>in-tree:655fcc93b0cb</code></td><td><span class="pill">in-tree</span></td></tr><tr><td>172</td><td><code>tests/test_okf_team_check.py</code></td><td class="num">29</td><td class="num">20</td><td class="num">-9</td><td class="pct">-31.0%</td><td class="muted">parse 0.23ms / compile 0.12ms</td><td><code>in-tree:995967d6f0ac</code></td><td><span class="pill">in-tree</span></td></tr><tr><td>159</td><td><code>src/providers/registry.py</code></td><td class="num">49</td><td class="num">35</td><td class="num">-14</td><td class="pct">-28.6%</td><td class="muted">parse 0.2ms / compile 0.14ms</td><td><code>in-tree:a295ff8c3f77</code></td><td><span class="pill">in-tree</span></td></tr><tr><td>175</td><td><code>tests/test_public_mcp_transport_security.py</code></td><td class="num">45</td><td class="num">35</td><td class="num">-10</td><td class="pct">-22.2%</td><td class="muted">parse 0.24ms / compile 0.24ms</td><td><code>in-tree:b1a5fcd3729f</code></td><td><span class="pill">in-tree</span></td></tr><tr><td>173</td><td><code>tests/test_campaign.py</code></td><td class="num">25</td><td class="num">20</td><td class="num">-5</td><td class="pct">-20.0%</td><td class="muted">parse 0.29ms / compile 0.15ms</td><td><code>in-tree:bfe42f4d9b9f</code></td><td><span class="pill">in-tree</span></td></tr><tr><td>160</td><td><code>evals/tasks/swarm_targets/nsquared_dedup/test_dedup.py</code></td><td class="num">43</td><td class="num">35</td><td class="num">-8</td><td class="pct">-18.6%</td><td class="muted">parse 0.24ms / compile 0.21ms</td><td><code>in-tree:e2e7fa2476ef</code></td><td><span class="pill">in-tree</span></td></tr><tr><td>161</td><td><code>tests/conftest.py</code></td><td class="num">42</td><td class="num">35</td><td class="num">-7</td><td class="pct">-16.7%</td><td class="muted">parse 0.26ms / compile 0.18ms</td><td><code>in-tree:668855c76789</code></td><td><span class="pill">in-tree</span></td></tr><tr><td>174</td><td><code>evals/tasks/swarm_targets/slow_loop_optimize/bench_loop_opt.py</code></td><td class="num">24</td><td class="num">20</td><td class="num">-4</td><td class="pct">-16.7%</td><td class="muted">parse 0.19ms / compile 0.1ms</td><td><code>in-tree:084a56bf6174</code></td><td><span class="pill">in-tree</span></td></tr><tr><td>176</td><td><code>evals/tasks/swarm_targets/nsquared_dedup/bench_dedup.py</code></td><td class="num">20</td><td class="num">20</td><td class="num">+0</td><td class="pct">0.0%</td><td class="muted">parse 0.22ms / compile 0.13ms</td><td><code>in-tree:7d8b8d55eae1</code></td><td><span class="pill">in-tree</span></td></tr><tr><td>198</td><td><code>tests/.../__init__.py</code></td><td class="num">0</td><td class="num">20</td><td class="num">+20</td><td class="pct">0.0%</td><td class="muted">parse 0.02ms / compile 0.01ms</td><td><code>in-tree:84cb7076262a</code></td><td><span class="pill">in-tree</span></td></tr><tr><td>199</td><td><code>tests/campaigns/__init__.py</code></td><td class="num">0</td><td class="num">20</td><td class="num">+20</td><td class="pct">0.0%</td><td class="muted">parse 0.02ms / compile 0.01ms</td><td><code>in-tree:d66c36ad11c7</code></td><td><span class="pill">in-tree</span></td></tr><tr><td>200</td><td><code>evals/.../__init__.py</code></td><td class="num">0</td><td class="num">20</td><td class="num">+20</td><td class="pct">0.0%</td><td class="muted">parse 0.03ms / compile 0.02ms</td><td><code>in-tree:ae4437932cb7</code></td><td><span class="pill">in-tree</span></td></tr><tr><td>201</td><td><code>evals/campaigns/__init__.py</code></td><td class="num">0</td><td class="num">20</td><td class="num">+20</td><td class="pct">0.0%</td><td class="muted">parse 0.02ms / compile 0.02ms</td><td><code>in-tree:bda882ffbf6e</code></td><td><span class="pill">in-tree</span></td></tr><tr><td>177</td><td><code>evals/tasks/swarm_targets/slow_loop_optimize/test_loop_opt.py</code></td><td class="num">19</td><td class="num">20</td><td class="num">+1</td><td class="pct">+5.3%</td><td class="muted">parse 0.14ms / compile 0.07ms</td><td><code>in-tree:1f5bedf5e704</code></td><td><span class="pill">in-tree</span></td></tr><tr><td>178</td><td><code>tests/fixtures/swarm_target/test_slow.py</code></td><td class="num">16</td><td class="num">20</td><td class="num">+4</td><td class="pct">+25.0%</td><td class="muted">parse 0.18ms / compile 0.09ms</td><td><code>in-tree:d0d72f857110</code></td><td><span class="pill">in-tree</span></td></tr><tr><td>179</td><td><code>tests/test_claude_md_runtime_contract.py</code></td><td class="num">15</td><td class="num">20</td><td class="num">+5</td><td class="pct">+33.3%</td><td class="muted">parse 0.13ms / compile 0.07ms</td><td><code>in-tree:e03288150c59</code></td><td><span class="pill">in-tree</span></td></tr><tr><td>180</td><td><code>evals/tasks/swarm_targets/slow_loop_optimize/loop_opt.py</code></td><td class="num">15</td><td class="num">20</td><td class="num">+5</td><td class="pct">+33.3%</td><td class="muted">parse 0.13ms / compile 0.05ms</td><td><code>in-tree:62c1e9bdd4d0</code></td><td><span class="pill">in-tree</span></td></tr><tr><td>181</td><td><code>evals/tasks/swarm_targets/nsquared_dedup/dedup.py</code></td><td class="num">11</td><td class="num">20</td><td class="num">+9</td><td class="pct">+81.8%</td><td class="muted">parse 0.09ms / compile 0.05ms</td><td><code>in-tree:86376bf61eac</code></td><td><span class="pill">in-tree</span></td></tr><tr><td>182</td><td><code>tests/fixtures/swarm_target/bench_unstable.py</code></td><td class="num">10</td><td class="num">20</td><td class="num">+10</td><td class="pct">+100.0%</td><td class="muted">parse 0.13ms / compile 0.07ms</td><td><code>in-tree:8b119a6d34ef</code></td><td><span class="pill">in-tree</span></td></tr><tr><td>183</td><td><code>tests/fixtures/swarm_target/bench_slow.py</code></td><td class="num">10</td><td class="num">20</td><td class="num">+10</td><td class="pct">+100.0%</td><td class="muted">parse 0.12ms / compile 0.05ms</td><td><code>in-tree:f8a4f6026238</code></td><td><span class="pill">in-tree</span></td></tr><tr><td>184</td><td><code>src/version.py</code></td><td class="num">10</td><td class="num">20</td><td class="num">+10</td><td class="pct">+100.0%</td><td class="muted">parse 0.06ms / compile 0.03ms</td><td><code>in-tree:633a08e9d8cf</code></td><td><span class="pill">in-tree</span></td></tr><tr><td>185</td><td><code>tests/fixtures/swarm_target/test_slow_suite.py</code></td><td class="num">9</td><td class="num">20</td><td class="num">+11</td><td class="pct">+122.2%</td><td class="muted">parse 0.13ms / compile 0.06ms</td><td><code>in-tree:310bd927c397</code></td><td><span class="pill">in-tree</span></td></tr><tr><td>186</td><td><code>tests/fixtures/multifile_pkg/test_policy.py</code></td><td class="num">9</td><td class="num">20</td><td class="num">+11</td><td class="pct">+122.2%</td><td class="muted">parse 0.1ms / compile 0.05ms</td><td><code>in-tree:5bfadb9fb2aa</code></td><td><span class="pill">in-tree</span></td></tr><tr><td>187</td><td><code>src/__init__.py</code></td><td class="num">9</td><td class="num">20</td><td class="num">+11</td><td class="pct">+122.2%</td><td class="muted">parse 0.1ms / compile 0.04ms</td><td><code>in-tree:6560dd876355</code></td><td><span class="pill">in-tree</span></td></tr><tr><td>188</td><td><code>tests/fixtures/multifile_pkg/policy.py</code></td><td class="num">7</td><td class="num">20</td><td class="num">+13</td><td class="pct">+185.7%</td><td class="muted">parse 0.11ms / compile 0.05ms</td><td><code>in-tree:87862797d2b9</code></td><td><span class="pill">in-tree</span></td></tr><tr><td>189</td><td><code>tests/fixtures/multifile_pkg/constants.py</code></td><td class="num">7</td><td class="num">20</td><td class="num">+13</td><td class="pct">+185.7%</td><td class="muted">parse 0.09ms / compile 0.03ms</td><td><code>in-tree:a410f99766ec</code></td><td><span class="pill">in-tree</span></td></tr><tr><td>190</td><td><code>src/swarm/__init__.py</code></td><td class="num">7</td><td class="num">20</td><td class="num">+13</td><td class="pct">+185.7%</td><td class="muted">parse 0.05ms / compile 0.02ms</td><td><code>in-tree:e9c5657754ef</code></td><td><span class="pill">in-tree</span></td></tr><tr><td>191</td><td><code>evals/__init__.py</code></td><td class="num">7</td><td class="num">20</td><td class="num">+13</td><td class="pct">+185.7%</td><td class="muted">parse 0.03ms / compile 0.02ms</td><td><code>in-tree:be4d9df1acd1</code></td><td><span class="pill">in-tree</span></td></tr><tr><td>192</td><td><code>tests/fixtures/multifile_pkg/__init__.py</code></td><td class="num">5</td><td class="num">20</td><td class="num">+15</td><td class="pct">+300.0%</td><td class="muted">parse 0.07ms / compile 0.03ms</td><td><code>in-tree:4705ce414b8c</code></td><td><span class="pill">in-tree</span></td></tr><tr><td>193</td><td><code>main.py</code></td><td class="num">5</td><td class="num">20</td><td class="num">+15</td><td class="pct">+300.0%</td><td class="muted">parse 0.11ms / compile 0.04ms</td><td><code>in-tree:0074ddbccc12</code></td><td><span class="pill">in-tree</span></td></tr><tr><td>194</td><td><code>tests/fixtures/swarm_target/test_nocov.py</code></td><td class="num">3</td><td class="num">20</td><td class="num">+17</td><td class="pct">+566.7%</td><td class="muted">parse 0.1ms / compile 0.03ms</td><td><code>in-tree:0a0afa6d10c4</code></td><td><span class="pill">in-tree</span></td></tr><tr><td>195</td><td><code>src/tools/__init__.py</code></td><td class="num">2</td><td class="num">20</td><td class="num">+18</td><td class="pct">+900.0%</td><td class="muted">parse 0.04ms / compile 0.02ms</td><td><code>in-tree:dbeb7893fec2</code></td><td><span class="pill">in-tree</span></td></tr><tr><td>196</td><td><code>tests/__init__.py</code></td><td class="num">1</td><td class="num">20</td><td class="num">+19</td><td class="pct">+1900.0%</td><td class="muted">parse 0.04ms / compile 0.02ms</td><td><code>in-tree:14aa89fbd841</code></td><td><span class="pill">in-tree</span></td></tr><tr><td>197</td><td><code>scripts/__init__.py</code></td><td class="num">1</td><td class="num">20</td><td class="num">+19</td><td class="pct">+1900.0%</td><td class="muted">parse 0.06ms / compile 0.02ms</td><td><code>in-tree:bb47f0d18f01</code></td><td><span class="pill">in-tree</span></td></tr></tbody>
     </table>
   </div>
   <div class="callout">
     <strong style="color:var(--ink)">Watcher handoff.</strong>
-    76 Ready refactor_plan drafts (#342–#420, excluding docs #408) are queued for Codex Sol High review.
-    Land/merge remains the normal Codex supervisor path — this board is visibility only.
+    126 Ready refactor_plan drafts (#342–#474, excluding docs #408) plus 75 in-tree plans are queued for Codex Sol High review.
+    Land/merge remains the normal Codex supervisor path — this board is visibility only. Pending: 0.
   </div>
   <p class="foot">Public share surface · IDE canvas is a local companion only · source snapshot in docs/snapshots/</p>
 </div>
 <!-- EMBEDDED_METRICS_JSON
 {
-  "snapshot": "2026-07-16T17:12:45Z",
+  "snapshot": "2026-07-16T17:28:04Z",
   "totalInventory": 210,
-  "done": 76,
-  "overallPct": -90.5,
-  "avgPct": -88.3,
+  "done": 201,
+  "pending": 0,
+  "skipped": 9,
+  "readyDraftPrs": 126,
+  "inTreePlans": 75,
+  "overallPct": -88.2,
+  "avgPct": -29.5,
+  "locBefore": 101328,
+  "locAfter": 11985,
   "files": [
     {
       "file": "src/utils.py",
@@ -975,6 +981,1456 @@ a{color:var(--cyan); text-decoration:none} a:hover{text-decoration:underline}
       "pr": 420,
       "status": "Ready",
       "loop": 76
+    },
+    {
+      "file": "tests/test_supervisor_approval.py",
+      "short": "test_supervisor_approval.py",
+      "before": 326,
+      "after": 40,
+      "parseMs": 0.99,
+      "compileMs": 0.7,
+      "pr": 421,
+      "status": "Ready",
+      "loop": 77
+    },
+    {
+      "file": "src/swarm/analytics.py",
+      "short": "analytics.py",
+      "before": 299,
+      "after": 40,
+      "parseMs": 1.85,
+      "compileMs": 1.15,
+      "pr": 423,
+      "status": "Ready",
+      "loop": 78
+    },
+    {
+      "file": "evals/.../stage1_oracles.py",
+      "short": "stage1_oracles.py",
+      "before": 297,
+      "after": 40,
+      "parseMs": 1.05,
+      "compileMs": 0.78,
+      "pr": 424,
+      "status": "Ready",
+      "loop": 79
+    },
+    {
+      "file": "src/swarm/sandbox.py",
+      "short": "sandbox.py",
+      "before": 296,
+      "after": 35,
+      "parseMs": 1.06,
+      "compileMs": 0.9,
+      "pr": 425,
+      "status": "Ready",
+      "loop": 80
+    },
+    {
+      "file": "src/tools/media.py",
+      "short": "media.py",
+      "before": 290,
+      "after": 35,
+      "parseMs": 1.0,
+      "compileMs": 0.85,
+      "pr": 426,
+      "status": "Ready",
+      "loop": 81
+    },
+    {
+      "file": "scripts/run_swarm_evals.py",
+      "short": "run_swarm_evals.py",
+      "before": 286,
+      "after": 35,
+      "parseMs": 1.43,
+      "compileMs": 1.08,
+      "pr": 427,
+      "status": "Ready",
+      "loop": 82
+    },
+    {
+      "file": "tests/test_routing.py",
+      "short": "test_routing.py",
+      "before": 277,
+      "after": 35,
+      "parseMs": 0.95,
+      "compileMs": 0.79,
+      "pr": 428,
+      "status": "Ready",
+      "loop": 83
+    },
+    {
+      "file": "evals/.../provider_transports.py",
+      "short": "provider_transports.py",
+      "before": 273,
+      "after": 35,
+      "parseMs": 0.86,
+      "compileMs": 1.13,
+      "pr": 429,
+      "status": "Ready",
+      "loop": 84
+    },
+    {
+      "file": "src/routing.py",
+      "short": "routing.py",
+      "before": 272,
+      "after": 35,
+      "parseMs": 1.3,
+      "compileMs": 0.9,
+      "pr": 430,
+      "status": "Ready",
+      "loop": 85
+    },
+    {
+      "file": "src/tools/resources.py",
+      "short": "resources.py",
+      "before": 266,
+      "after": 35,
+      "parseMs": 0.82,
+      "compileMs": 0.68,
+      "pr": 431,
+      "status": "Ready",
+      "loop": 86
+    },
+    {
+      "file": "src/tools/git.py",
+      "short": "git.py",
+      "before": 258,
+      "after": 35,
+      "parseMs": 1.36,
+      "compileMs": 0.97,
+      "pr": 432,
+      "status": "Ready",
+      "loop": 87
+    },
+    {
+      "file": "src/faq.py",
+      "short": "faq.py",
+      "before": 253,
+      "after": 35,
+      "parseMs": 0.99,
+      "compileMs": 0.96,
+      "pr": 433,
+      "status": "Ready",
+      "loop": 88
+    },
+    {
+      "file": "tests/test_swarm_static_gate.py",
+      "short": "test_swarm_static_gate.py",
+      "before": 250,
+      "after": 35,
+      "parseMs": 0.96,
+      "compileMs": 0.82,
+      "pr": 434,
+      "status": "Ready",
+      "loop": 89
+    },
+    {
+      "file": "tests/test_agent_attribution.py",
+      "short": "test_agent_attribution.py",
+      "before": 247,
+      "after": 35,
+      "parseMs": 1.01,
+      "compileMs": 0.52,
+      "pr": 435,
+      "status": "Ready",
+      "loop": 90
+    },
+    {
+      "file": "tests/test_swarm_sandbox.py",
+      "short": "test_swarm_sandbox.py",
+      "before": 243,
+      "after": 35,
+      "parseMs": 0.95,
+      "compileMs": 0.86,
+      "pr": 436,
+      "status": "Ready",
+      "loop": 91
+    },
+    {
+      "file": "scripts/generate_okf.py",
+      "short": "generate_okf.py",
+      "before": 240,
+      "after": 35,
+      "parseMs": 1.33,
+      "compileMs": 1.0,
+      "pr": 437,
+      "status": "Ready",
+      "loop": 92
+    },
+    {
+      "file": "evals/fakes.py",
+      "short": "fakes.py",
+      "before": 235,
+      "after": 35,
+      "parseMs": 0.79,
+      "compileMs": 0.69,
+      "pr": 438,
+      "status": "Ready",
+      "loop": 93
+    },
+    {
+      "file": "scripts/publish_okf_wiki_mirror.py",
+      "short": "publish_okf_wiki_mirror.py",
+      "before": 234,
+      "after": 35,
+      "parseMs": 0.92,
+      "compileMs": 0.79,
+      "pr": 439,
+      "status": "Ready",
+      "loop": 94
+    },
+    {
+      "file": "evals/.../stage1_artifacts.py",
+      "short": "stage1_artifacts.py",
+      "before": 231,
+      "after": 35,
+      "parseMs": 0.99,
+      "compileMs": 0.66,
+      "pr": 440,
+      "status": "Ready",
+      "loop": 95
+    },
+    {
+      "file": "src/swarm/runner.py",
+      "short": "runner.py",
+      "before": 228,
+      "after": 35,
+      "parseMs": 0.78,
+      "compileMs": 0.68,
+      "pr": 441,
+      "status": "Ready",
+      "loop": 96
+    },
+    {
+      "file": "scripts/mint_mcp_service_token.py",
+      "short": "mint_mcp_service_token.py",
+      "before": 228,
+      "after": 35,
+      "parseMs": 0.92,
+      "compileMs": 0.66,
+      "pr": 442,
+      "status": "Ready",
+      "loop": 97
+    },
+    {
+      "file": "tests/test_harness.py",
+      "short": "test_harness.py",
+      "before": 231,
+      "after": 35,
+      "parseMs": 0.83,
+      "compileMs": 0.67,
+      "pr": 443,
+      "status": "Ready",
+      "loop": 98
+    },
+    {
+      "file": "src/providers/vertex.py",
+      "short": "vertex.py",
+      "before": 224,
+      "after": 35,
+      "parseMs": 0.95,
+      "compileMs": 0.63,
+      "pr": 444,
+      "status": "Ready",
+      "loop": 99
+    },
+    {
+      "file": "tests/test_markdown_renderer.py",
+      "short": "test_markdown_renderer.py",
+      "before": 213,
+      "after": 35,
+      "parseMs": 0.57,
+      "compileMs": 0.49,
+      "pr": 445,
+      "status": "Ready",
+      "loop": 100
+    },
+    {
+      "file": "src/swarm/ast_utils.py",
+      "short": "ast_utils.py",
+      "before": 213,
+      "after": 35,
+      "parseMs": 1.06,
+      "compileMs": 0.7,
+      "pr": 446,
+      "status": "Ready",
+      "loop": 101
+    },
+    {
+      "file": "src/credentials.py",
+      "short": "credentials.py",
+      "before": 285,
+      "after": 35,
+      "parseMs": 0.87,
+      "compileMs": 0.68,
+      "pr": 447,
+      "status": "Ready",
+      "loop": 102
+    },
+    {
+      "file": "tests/test_agent_mode_plane_contract.py",
+      "short": "test_agent_mode_plane_contract.py",
+      "before": 209,
+      "after": 35,
+      "parseMs": 0.79,
+      "compileMs": 0.84,
+      "pr": 448,
+      "status": "Ready",
+      "loop": 103
+    },
+    {
+      "file": "src/swarm/preflight.py",
+      "short": "preflight.py",
+      "before": 203,
+      "after": 35,
+      "parseMs": 0.8,
+      "compileMs": 0.61,
+      "pr": 449,
+      "status": "Ready",
+      "loop": 104
+    },
+    {
+      "file": "tests/test_intelligence_capsule.py",
+      "short": "test_intelligence_capsule.py",
+      "before": 200,
+      "after": 35,
+      "parseMs": 0.64,
+      "compileMs": 0.64,
+      "pr": 450,
+      "status": "Ready",
+      "loop": 105
+    },
+    {
+      "file": "tests/.../test_stage0_mechanical.py",
+      "short": "test_stage0_mechanical.py",
+      "before": 194,
+      "after": 35,
+      "parseMs": 0.5,
+      "compileMs": 0.42,
+      "pr": 451,
+      "status": "Ready",
+      "loop": 106
+    },
+    {
+      "file": "src/hydration.py",
+      "short": "hydration.py",
+      "before": 194,
+      "after": 35,
+      "parseMs": 0.88,
+      "compileMs": 0.7,
+      "pr": 452,
+      "status": "Ready",
+      "loop": 107
+    },
+    {
+      "file": "src/swarm/transforms.py",
+      "short": "transforms.py",
+      "before": 193,
+      "after": 35,
+      "parseMs": 0.77,
+      "compileMs": 0.68,
+      "pr": 453,
+      "status": "Ready",
+      "loop": 108
+    },
+    {
+      "file": "evals/__main__.py",
+      "short": "__main__.py",
+      "before": 193,
+      "after": 35,
+      "parseMs": 0.82,
+      "compileMs": 0.56,
+      "pr": 454,
+      "status": "Ready",
+      "loop": 109
+    },
+    {
+      "file": "tests/test_dual_plane_model_discipline.py",
+      "short": "test_dual_plane_model_discipline.py",
+      "before": 186,
+      "after": 35,
+      "parseMs": 0.72,
+      "compileMs": 0.65,
+      "pr": 455,
+      "status": "Ready",
+      "loop": 110
+    },
+    {
+      "file": "src/cli.py",
+      "short": "cli.py",
+      "before": 268,
+      "after": 35,
+      "parseMs": 1.24,
+      "compileMs": 0.83,
+      "pr": 456,
+      "status": "Ready",
+      "loop": 111
+    },
+    {
+      "file": "tests/test_mint_mcp_service_token.py",
+      "short": "test_mint_mcp_service_token.py",
+      "before": 174,
+      "after": 35,
+      "parseMs": 0.79,
+      "compileMs": 0.6,
+      "pr": 457,
+      "status": "Ready",
+      "loop": 112
+    },
+    {
+      "file": "src/server.py",
+      "short": "server.py",
+      "before": 171,
+      "after": 35,
+      "parseMs": 0.39,
+      "compileMs": 0.26,
+      "pr": 458,
+      "status": "Ready",
+      "loop": 113
+    },
+    {
+      "file": "src/providers/__init__.py",
+      "short": "__init__.py",
+      "before": 170,
+      "after": 35,
+      "parseMs": 0.24,
+      "compileMs": 0.2,
+      "pr": 459,
+      "status": "Ready",
+      "loop": 114
+    },
+    {
+      "file": "src/swarm/pareto.py",
+      "short": "pareto.py",
+      "before": 169,
+      "after": 35,
+      "parseMs": 0.77,
+      "compileMs": 0.72,
+      "pr": 460,
+      "status": "Ready",
+      "loop": 115
+    },
+    {
+      "file": "src/identity.py",
+      "short": "identity.py",
+      "before": 165,
+      "after": 35,
+      "parseMs": 0.51,
+      "compileMs": 0.42,
+      "pr": 461,
+      "status": "Ready",
+      "loop": 116
+    },
+    {
+      "file": "src/swarm/mutators.py",
+      "short": "mutators.py",
+      "before": 160,
+      "after": 35,
+      "parseMs": 0.54,
+      "compileMs": 0.34,
+      "pr": 462,
+      "status": "Ready",
+      "loop": 117
+    },
+    {
+      "file": "src/swarm/config.py",
+      "short": "config.py",
+      "before": 156,
+      "after": 35,
+      "parseMs": 0.4,
+      "compileMs": 0.38,
+      "pr": 463,
+      "status": "Ready",
+      "loop": 118
+    },
+    {
+      "file": "src/providers/openai.py",
+      "short": "openai.py",
+      "before": 154,
+      "after": 35,
+      "parseMs": 0.49,
+      "compileMs": 0.43,
+      "pr": 464,
+      "status": "Ready",
+      "loop": 119
+    },
+    {
+      "file": "src/tools/workspace_memory.py",
+      "short": "workspace_memory.py",
+      "before": 151,
+      "after": 35,
+      "parseMs": 0.41,
+      "compileMs": 0.37,
+      "pr": 465,
+      "status": "Ready",
+      "loop": 120
+    },
+    {
+      "file": "src/providers/anthropic.py",
+      "short": "anthropic.py",
+      "before": 151,
+      "after": 35,
+      "parseMs": 0.43,
+      "compileMs": 0.45,
+      "pr": 466,
+      "status": "Ready",
+      "loop": 121
+    },
+    {
+      "file": "evals/cassettes.py",
+      "short": "cassettes.py",
+      "before": 151,
+      "after": 35,
+      "parseMs": 0.77,
+      "compileMs": 0.55,
+      "pr": 470,
+      "status": "Ready",
+      "loop": 122
+    },
+    {
+      "file": "tests/test_swarm_eval_script.py",
+      "short": "test_swarm_eval_script.py",
+      "before": 150,
+      "after": 35,
+      "parseMs": 0.51,
+      "compileMs": 0.47,
+      "pr": 471,
+      "status": "Ready",
+      "loop": 123
+    },
+    {
+      "file": "tests/test_git_tools.py",
+      "short": "test_git_tools.py",
+      "before": 148,
+      "after": 35,
+      "parseMs": 0.51,
+      "compileMs": 0.48,
+      "pr": 472,
+      "status": "Ready",
+      "loop": 124
+    },
+    {
+      "file": "src/tools/knowledge.py",
+      "short": "knowledge.py",
+      "before": 148,
+      "after": 35,
+      "parseMs": 0.44,
+      "compileMs": 0.37,
+      "pr": 473,
+      "status": "Ready",
+      "loop": 125
+    },
+    {
+      "file": "tests/test_hydration.py",
+      "short": "test_hydration.py",
+      "before": 137,
+      "after": 35,
+      "parseMs": 0.37,
+      "compileMs": 0.32,
+      "pr": 474,
+      "status": "Ready",
+      "loop": 126
+    },
+    {
+      "file": "tests/test_swarm_pareto.py",
+      "short": "test_swarm_pareto.py",
+      "before": 134,
+      "after": 35,
+      "parseMs": 0.86,
+      "compileMs": 0.71,
+      "pr": 0,
+      "status": "in-tree",
+      "loop": 127,
+      "inTree": "9fbaa2e44a53"
+    },
+    {
+      "file": "tests/test_swarm_ast.py",
+      "short": "test_swarm_ast.py",
+      "before": 128,
+      "after": 35,
+      "parseMs": 0.61,
+      "compileMs": 0.5,
+      "pr": 0,
+      "status": "in-tree",
+      "loop": 128,
+      "inTree": "8eef324330b2"
+    },
+    {
+      "file": "evals/.../mechanical_mutators.py",
+      "short": "mechanical_mutators.py",
+      "before": 124,
+      "after": 35,
+      "parseMs": 0.53,
+      "compileMs": 0.33,
+      "pr": 0,
+      "status": "in-tree",
+      "loop": 129,
+      "inTree": "174ebdc2a16e"
+    },
+    {
+      "file": "tests/.../test_stage1_artifacts.py",
+      "short": "test_stage1_artifacts.py",
+      "before": 119,
+      "after": 35,
+      "parseMs": 0.75,
+      "compileMs": 0.51,
+      "pr": 0,
+      "status": "in-tree",
+      "loop": 130,
+      "inTree": "249927d7259c"
+    },
+    {
+      "file": "src/providers/gemini.py",
+      "short": "gemini.py",
+      "before": 119,
+      "after": 35,
+      "parseMs": 0.44,
+      "compileMs": 0.3,
+      "pr": 0,
+      "status": "in-tree",
+      "loop": 131,
+      "inTree": "89ae6efbf89d"
+    },
+    {
+      "file": "tests/test_subagent_surface_contract.py",
+      "short": "test_subagent_surface_contract.py",
+      "before": 118,
+      "after": 35,
+      "parseMs": 0.53,
+      "compileMs": 0.45,
+      "pr": 0,
+      "status": "in-tree",
+      "loop": 132,
+      "inTree": "90f46e92039f"
+    },
+    {
+      "file": "src/providers/config.py",
+      "short": "config.py",
+      "before": 118,
+      "after": 35,
+      "parseMs": 0.52,
+      "compileMs": 0.34,
+      "pr": 0,
+      "status": "in-tree",
+      "loop": 133,
+      "inTree": "e75eb511c863"
+    },
+    {
+      "file": "src/swarm/router.py",
+      "short": "router.py",
+      "before": 116,
+      "after": 35,
+      "parseMs": 0.52,
+      "compileMs": 0.45,
+      "pr": 0,
+      "status": "in-tree",
+      "loop": 134,
+      "inTree": "76f9ee3357f1"
+    },
+    {
+      "file": "tests/test_phase4.py",
+      "short": "test_phase4.py",
+      "before": 114,
+      "after": 35,
+      "parseMs": 0.53,
+      "compileMs": 0.39,
+      "pr": 0,
+      "status": "in-tree",
+      "loop": 135,
+      "inTree": "589cda906ebd"
+    },
+    {
+      "file": "tests/test_faq.py",
+      "short": "test_faq.py",
+      "before": 111,
+      "after": 35,
+      "parseMs": 0.4,
+      "compileMs": 0.3,
+      "pr": 0,
+      "status": "in-tree",
+      "loop": 136,
+      "inTree": "aa1386cc99a7"
+    },
+    {
+      "file": "tests/test_export_pr.py",
+      "short": "test_export_pr.py",
+      "before": 107,
+      "after": 35,
+      "parseMs": 0.52,
+      "compileMs": 0.33,
+      "pr": 0,
+      "status": "in-tree",
+      "loop": 137,
+      "inTree": "5dbe898ffe20"
+    },
+    {
+      "file": "evals/graders.py",
+      "short": "graders.py",
+      "before": 102,
+      "after": 35,
+      "parseMs": 0.81,
+      "compileMs": 0.5,
+      "pr": 0,
+      "status": "in-tree",
+      "loop": 138,
+      "inTree": "22afc119170b"
+    },
+    {
+      "file": "src/providers/google_common.py",
+      "short": "google_common.py",
+      "before": 101,
+      "after": 35,
+      "parseMs": 0.48,
+      "compileMs": 0.35,
+      "pr": 0,
+      "status": "in-tree",
+      "loop": 139,
+      "inTree": "7547193af176"
+    },
+    {
+      "file": "src/swarm/static_gate.py",
+      "short": "static_gate.py",
+      "before": 99,
+      "after": 35,
+      "parseMs": 0.36,
+      "compileMs": 0.27,
+      "pr": 0,
+      "status": "in-tree",
+      "loop": 140,
+      "inTree": "38e6510976f2"
+    },
+    {
+      "file": "src/tools/consistency.py",
+      "short": "consistency.py",
+      "before": 98,
+      "after": 35,
+      "parseMs": 0.42,
+      "compileMs": 0.32,
+      "pr": 0,
+      "status": "in-tree",
+      "loop": 141,
+      "inTree": "9d4ccaa4a97c"
+    },
+    {
+      "file": "tests/test_swarm_router.py",
+      "short": "test_swarm_router.py",
+      "before": 94,
+      "after": 35,
+      "parseMs": 0.6,
+      "compileMs": 0.43,
+      "pr": 0,
+      "status": "in-tree",
+      "loop": 142,
+      "inTree": "e4e0277dec35"
+    },
+    {
+      "file": "tests/test_generate_okf.py",
+      "short": "test_generate_okf.py",
+      "before": 92,
+      "after": 35,
+      "parseMs": 0.38,
+      "compileMs": 0.23,
+      "pr": 0,
+      "status": "in-tree",
+      "loop": 143,
+      "inTree": "d354ee1abe72"
+    },
+    {
+      "file": "tests/test_publish_okf_wiki_mirror.py",
+      "short": "test_publish_okf_wiki_mirror.py",
+      "before": 89,
+      "after": 35,
+      "parseMs": 0.55,
+      "compileMs": 0.42,
+      "pr": 0,
+      "status": "in-tree",
+      "loop": 144,
+      "inTree": "3086f3c0eb4e"
+    },
+    {
+      "file": "scripts/land-status.py",
+      "short": "land-status.py",
+      "before": 87,
+      "after": 35,
+      "parseMs": 0.53,
+      "compileMs": 0.37,
+      "pr": 0,
+      "status": "in-tree",
+      "loop": 145,
+      "inTree": "c8b01cde5c3e"
+    },
+    {
+      "file": "src/tools/research.py",
+      "short": "research.py",
+      "before": 108,
+      "after": 35,
+      "parseMs": 0.41,
+      "compileMs": 0.27,
+      "pr": 0,
+      "status": "in-tree",
+      "loop": 146,
+      "inTree": "9c3becda4adc"
+    },
+    {
+      "file": "src/swarm/fold.py",
+      "short": "fold.py",
+      "before": 84,
+      "after": 35,
+      "parseMs": 0.47,
+      "compileMs": 0.28,
+      "pr": 0,
+      "status": "in-tree",
+      "loop": 147,
+      "inTree": "7e088b970bb7"
+    },
+    {
+      "file": "src/swarm/generate.py",
+      "short": "generate.py",
+      "before": 83,
+      "after": 35,
+      "parseMs": 0.36,
+      "compileMs": 0.24,
+      "pr": 0,
+      "status": "in-tree",
+      "loop": 148,
+      "inTree": "1162a515fc2a"
+    },
+    {
+      "file": "tests/test_swarm_analytics.py",
+      "short": "test_swarm_analytics.py",
+      "before": 81,
+      "after": 35,
+      "parseMs": 0.42,
+      "compileMs": 0.28,
+      "pr": 0,
+      "status": "in-tree",
+      "loop": 149,
+      "inTree": "dc71110a82d0"
+    },
+    {
+      "file": "tests/test_cli.py",
+      "short": "test_cli.py",
+      "before": 208,
+      "after": 35,
+      "parseMs": 0.96,
+      "compileMs": 0.79,
+      "pr": 0,
+      "status": "in-tree",
+      "loop": 150,
+      "inTree": "75cd0b8152c2"
+    },
+    {
+      "file": "src/tools/faq.py",
+      "short": "faq.py",
+      "before": 77,
+      "after": 35,
+      "parseMs": 0.26,
+      "compileMs": 0.18,
+      "pr": 0,
+      "status": "in-tree",
+      "loop": 151,
+      "inTree": "3cba81e288a7"
+    },
+    {
+      "file": "src/models/results.py",
+      "short": "results.py",
+      "before": 70,
+      "after": 35,
+      "parseMs": 0.53,
+      "compileMs": 0.36,
+      "pr": 0,
+      "status": "in-tree",
+      "loop": 152,
+      "inTree": "7518266f0888"
+    },
+    {
+      "file": "tests/test_public_intelligence_packs.py",
+      "short": "test_public_intelligence_packs.py",
+      "before": 64,
+      "after": 35,
+      "parseMs": 0.39,
+      "compileMs": 0.26,
+      "pr": 0,
+      "status": "in-tree",
+      "loop": 153,
+      "inTree": "06d02b0228da"
+    },
+    {
+      "file": "scripts/swarm_bench.py",
+      "short": "swarm_bench.py",
+      "before": 62,
+      "after": 35,
+      "parseMs": 0.35,
+      "compileMs": 0.23,
+      "pr": 0,
+      "status": "in-tree",
+      "loop": 154,
+      "inTree": "731c1d079d85"
+    },
+    {
+      "file": "src/xai_credentials.py",
+      "short": "xai_credentials.py",
+      "before": 59,
+      "after": 35,
+      "parseMs": 0.26,
+      "compileMs": 0.17,
+      "pr": 0,
+      "status": "in-tree",
+      "loop": 155,
+      "inTree": "9efbf11253a8"
+    },
+    {
+      "file": "tests/test_swarm_transforms.py",
+      "short": "test_swarm_transforms.py",
+      "before": 51,
+      "after": 35,
+      "parseMs": 0.21,
+      "compileMs": 0.14,
+      "pr": 0,
+      "status": "in-tree",
+      "loop": 156,
+      "inTree": "ac20d505e963"
+    },
+    {
+      "file": "tests/test_consistency.py",
+      "short": "test_consistency.py",
+      "before": 52,
+      "after": 35,
+      "parseMs": 0.36,
+      "compileMs": 0.18,
+      "pr": 0,
+      "status": "in-tree",
+      "loop": 157,
+      "inTree": "17327cfa2db6"
+    },
+    {
+      "file": "tests/test_codex_desktop_session_contract.py",
+      "short": "test_codex_desktop_session_contract.py",
+      "before": 51,
+      "after": 35,
+      "parseMs": 0.9,
+      "compileMs": 0.16,
+      "pr": 0,
+      "status": "in-tree",
+      "loop": 158,
+      "inTree": "655fcc93b0cb"
+    },
+    {
+      "file": "src/providers/registry.py",
+      "short": "registry.py",
+      "before": 49,
+      "after": 35,
+      "parseMs": 0.2,
+      "compileMs": 0.14,
+      "pr": 0,
+      "status": "in-tree",
+      "loop": 159,
+      "inTree": "a295ff8c3f77"
+    },
+    {
+      "file": "evals/tasks/swarm_targets/nsquared_dedup/test_dedup.py",
+      "short": "test_dedup.py",
+      "before": 43,
+      "after": 35,
+      "parseMs": 0.24,
+      "compileMs": 0.21,
+      "pr": 0,
+      "status": "in-tree",
+      "loop": 160,
+      "inTree": "e2e7fa2476ef"
+    },
+    {
+      "file": "tests/conftest.py",
+      "short": "conftest.py",
+      "before": 42,
+      "after": 35,
+      "parseMs": 0.26,
+      "compileMs": 0.18,
+      "pr": 0,
+      "status": "in-tree",
+      "loop": 161,
+      "inTree": "668855c76789"
+    },
+    {
+      "file": "tests/test_swarm_runner.py",
+      "short": "test_swarm_runner.py",
+      "before": 40,
+      "after": 20,
+      "parseMs": 0.38,
+      "compileMs": 0.19,
+      "pr": 0,
+      "status": "in-tree",
+      "loop": 162,
+      "inTree": "e3108c60b013"
+    },
+    {
+      "file": "src/providers/errors.py",
+      "short": "errors.py",
+      "before": 39,
+      "after": 20,
+      "parseMs": 0.22,
+      "compileMs": 0.13,
+      "pr": 0,
+      "status": "in-tree",
+      "loop": 163,
+      "inTree": "aad393a5f31f"
+    },
+    {
+      "file": ".cursor/hooks/before-unigrok-agent.py",
+      "short": "before-unigrok-agent.py",
+      "before": 39,
+      "after": 20,
+      "parseMs": 0.19,
+      "compileMs": 0.11,
+      "pr": 0,
+      "status": "in-tree",
+      "loop": 164,
+      "inTree": "9fb19b379835"
+    },
+    {
+      "file": "src/provider_redaction.py",
+      "short": "provider_redaction.py",
+      "before": 37,
+      "after": 20,
+      "parseMs": 0.21,
+      "compileMs": 0.14,
+      "pr": 0,
+      "status": "in-tree",
+      "loop": 165,
+      "inTree": "31faf0b2089b"
+    },
+    {
+      "file": "tests/test_namespace_human_radio_roots.py",
+      "short": "test_namespace_human_radio_roots.py",
+      "before": 35,
+      "after": 20,
+      "parseMs": 0.22,
+      "compileMs": 0.13,
+      "pr": 0,
+      "status": "in-tree",
+      "loop": 166,
+      "inTree": "620ff189f855"
+    },
+    {
+      "file": ".cursor/hooks/session-unigrok-env.py",
+      "short": "session-unigrok-env.py",
+      "before": 35,
+      "after": 20,
+      "parseMs": 0.16,
+      "compileMs": 0.1,
+      "pr": 0,
+      "status": "in-tree",
+      "loop": 167,
+      "inTree": "b4a7f83a5a29"
+    },
+    {
+      "file": "tests/fixtures/swarm_target/slow_mod.py",
+      "short": "slow_mod.py",
+      "before": 34,
+      "after": 20,
+      "parseMs": 0.24,
+      "compileMs": 0.13,
+      "pr": 0,
+      "status": "in-tree",
+      "loop": 168,
+      "inTree": "94ca0493bd62"
+    },
+    {
+      "file": "tests/test_codeql_contracts.py",
+      "short": "test_codeql_contracts.py",
+      "before": 33,
+      "after": 20,
+      "parseMs": 0.22,
+      "compileMs": 0.13,
+      "pr": 0,
+      "status": "in-tree",
+      "loop": 169,
+      "inTree": "fc7288947e75"
+    },
+    {
+      "file": "tests/test_okf_vscode_guidance.py",
+      "short": "test_okf_vscode_guidance.py",
+      "before": 32,
+      "after": 20,
+      "parseMs": 0.21,
+      "compileMs": 0.12,
+      "pr": 0,
+      "status": "in-tree",
+      "loop": 170,
+      "inTree": "1c812462c432"
+    },
+    {
+      "file": "tests/test_okf_copilot_playbook.py",
+      "short": "test_okf_copilot_playbook.py",
+      "before": 30,
+      "after": 20,
+      "parseMs": 0.18,
+      "compileMs": 0.12,
+      "pr": 0,
+      "status": "in-tree",
+      "loop": 171,
+      "inTree": "e6000ec7c726"
+    },
+    {
+      "file": "tests/test_okf_team_check.py",
+      "short": "test_okf_team_check.py",
+      "before": 29,
+      "after": 20,
+      "parseMs": 0.23,
+      "compileMs": 0.12,
+      "pr": 0,
+      "status": "in-tree",
+      "loop": 172,
+      "inTree": "995967d6f0ac"
+    },
+    {
+      "file": "tests/test_campaign.py",
+      "short": "test_campaign.py",
+      "before": 25,
+      "after": 20,
+      "parseMs": 0.29,
+      "compileMs": 0.15,
+      "pr": 0,
+      "status": "in-tree",
+      "loop": 173,
+      "inTree": "bfe42f4d9b9f"
+    },
+    {
+      "file": "evals/tasks/swarm_targets/slow_loop_optimize/bench_loop_opt.py",
+      "short": "bench_loop_opt.py",
+      "before": 24,
+      "after": 20,
+      "parseMs": 0.19,
+      "compileMs": 0.1,
+      "pr": 0,
+      "status": "in-tree",
+      "loop": 174,
+      "inTree": "084a56bf6174"
+    },
+    {
+      "file": "tests/test_public_mcp_transport_security.py",
+      "short": "test_public_mcp_transport_security.py",
+      "before": 45,
+      "after": 35,
+      "parseMs": 0.24,
+      "compileMs": 0.24,
+      "pr": 0,
+      "status": "in-tree",
+      "loop": 175,
+      "inTree": "b1a5fcd3729f"
+    },
+    {
+      "file": "evals/tasks/swarm_targets/nsquared_dedup/bench_dedup.py",
+      "short": "bench_dedup.py",
+      "before": 20,
+      "after": 20,
+      "parseMs": 0.22,
+      "compileMs": 0.13,
+      "pr": 0,
+      "status": "in-tree",
+      "loop": 176,
+      "inTree": "7d8b8d55eae1"
+    },
+    {
+      "file": "evals/tasks/swarm_targets/slow_loop_optimize/test_loop_opt.py",
+      "short": "test_loop_opt.py",
+      "before": 19,
+      "after": 20,
+      "parseMs": 0.14,
+      "compileMs": 0.07,
+      "pr": 0,
+      "status": "in-tree",
+      "loop": 177,
+      "inTree": "1f5bedf5e704"
+    },
+    {
+      "file": "tests/fixtures/swarm_target/test_slow.py",
+      "short": "test_slow.py",
+      "before": 16,
+      "after": 20,
+      "parseMs": 0.18,
+      "compileMs": 0.09,
+      "pr": 0,
+      "status": "in-tree",
+      "loop": 178,
+      "inTree": "d0d72f857110"
+    },
+    {
+      "file": "tests/test_claude_md_runtime_contract.py",
+      "short": "test_claude_md_runtime_contract.py",
+      "before": 15,
+      "after": 20,
+      "parseMs": 0.13,
+      "compileMs": 0.07,
+      "pr": 0,
+      "status": "in-tree",
+      "loop": 179,
+      "inTree": "e03288150c59"
+    },
+    {
+      "file": "evals/tasks/swarm_targets/slow_loop_optimize/loop_opt.py",
+      "short": "loop_opt.py",
+      "before": 15,
+      "after": 20,
+      "parseMs": 0.13,
+      "compileMs": 0.05,
+      "pr": 0,
+      "status": "in-tree",
+      "loop": 180,
+      "inTree": "62c1e9bdd4d0"
+    },
+    {
+      "file": "evals/tasks/swarm_targets/nsquared_dedup/dedup.py",
+      "short": "dedup.py",
+      "before": 11,
+      "after": 20,
+      "parseMs": 0.09,
+      "compileMs": 0.05,
+      "pr": 0,
+      "status": "in-tree",
+      "loop": 181,
+      "inTree": "86376bf61eac"
+    },
+    {
+      "file": "tests/fixtures/swarm_target/bench_unstable.py",
+      "short": "bench_unstable.py",
+      "before": 10,
+      "after": 20,
+      "parseMs": 0.13,
+      "compileMs": 0.07,
+      "pr": 0,
+      "status": "in-tree",
+      "loop": 182,
+      "inTree": "8b119a6d34ef"
+    },
+    {
+      "file": "tests/fixtures/swarm_target/bench_slow.py",
+      "short": "bench_slow.py",
+      "before": 10,
+      "after": 20,
+      "parseMs": 0.12,
+      "compileMs": 0.05,
+      "pr": 0,
+      "status": "in-tree",
+      "loop": 183,
+      "inTree": "f8a4f6026238"
+    },
+    {
+      "file": "src/version.py",
+      "short": "version.py",
+      "before": 10,
+      "after": 20,
+      "parseMs": 0.06,
+      "compileMs": 0.03,
+      "pr": 0,
+      "status": "in-tree",
+      "loop": 184,
+      "inTree": "633a08e9d8cf"
+    },
+    {
+      "file": "tests/fixtures/swarm_target/test_slow_suite.py",
+      "short": "test_slow_suite.py",
+      "before": 9,
+      "after": 20,
+      "parseMs": 0.13,
+      "compileMs": 0.06,
+      "pr": 0,
+      "status": "in-tree",
+      "loop": 185,
+      "inTree": "310bd927c397"
+    },
+    {
+      "file": "tests/fixtures/multifile_pkg/test_policy.py",
+      "short": "test_policy.py",
+      "before": 9,
+      "after": 20,
+      "parseMs": 0.1,
+      "compileMs": 0.05,
+      "pr": 0,
+      "status": "in-tree",
+      "loop": 186,
+      "inTree": "5bfadb9fb2aa"
+    },
+    {
+      "file": "src/__init__.py",
+      "short": "__init__.py",
+      "before": 9,
+      "after": 20,
+      "parseMs": 0.1,
+      "compileMs": 0.04,
+      "pr": 0,
+      "status": "in-tree",
+      "loop": 187,
+      "inTree": "6560dd876355"
+    },
+    {
+      "file": "tests/fixtures/multifile_pkg/policy.py",
+      "short": "policy.py",
+      "before": 7,
+      "after": 20,
+      "parseMs": 0.11,
+      "compileMs": 0.05,
+      "pr": 0,
+      "status": "in-tree",
+      "loop": 188,
+      "inTree": "87862797d2b9"
+    },
+    {
+      "file": "tests/fixtures/multifile_pkg/constants.py",
+      "short": "constants.py",
+      "before": 7,
+      "after": 20,
+      "parseMs": 0.09,
+      "compileMs": 0.03,
+      "pr": 0,
+      "status": "in-tree",
+      "loop": 189,
+      "inTree": "a410f99766ec"
+    },
+    {
+      "file": "src/swarm/__init__.py",
+      "short": "__init__.py",
+      "before": 7,
+      "after": 20,
+      "parseMs": 0.05,
+      "compileMs": 0.02,
+      "pr": 0,
+      "status": "in-tree",
+      "loop": 190,
+      "inTree": "e9c5657754ef"
+    },
+    {
+      "file": "evals/__init__.py",
+      "short": "__init__.py",
+      "before": 7,
+      "after": 20,
+      "parseMs": 0.03,
+      "compileMs": 0.02,
+      "pr": 0,
+      "status": "in-tree",
+      "loop": 191,
+      "inTree": "be4d9df1acd1"
+    },
+    {
+      "file": "tests/fixtures/multifile_pkg/__init__.py",
+      "short": "__init__.py",
+      "before": 5,
+      "after": 20,
+      "parseMs": 0.07,
+      "compileMs": 0.03,
+      "pr": 0,
+      "status": "in-tree",
+      "loop": 192,
+      "inTree": "4705ce414b8c"
+    },
+    {
+      "file": "main.py",
+      "short": "main.py",
+      "before": 5,
+      "after": 20,
+      "parseMs": 0.11,
+      "compileMs": 0.04,
+      "pr": 0,
+      "status": "in-tree",
+      "loop": 193,
+      "inTree": "0074ddbccc12"
+    },
+    {
+      "file": "tests/fixtures/swarm_target/test_nocov.py",
+      "short": "test_nocov.py",
+      "before": 3,
+      "after": 20,
+      "parseMs": 0.1,
+      "compileMs": 0.03,
+      "pr": 0,
+      "status": "in-tree",
+      "loop": 194,
+      "inTree": "0a0afa6d10c4"
+    },
+    {
+      "file": "src/tools/__init__.py",
+      "short": "__init__.py",
+      "before": 2,
+      "after": 20,
+      "parseMs": 0.04,
+      "compileMs": 0.02,
+      "pr": 0,
+      "status": "in-tree",
+      "loop": 195,
+      "inTree": "dbeb7893fec2"
+    },
+    {
+      "file": "tests/__init__.py",
+      "short": "__init__.py",
+      "before": 1,
+      "after": 20,
+      "parseMs": 0.04,
+      "compileMs": 0.02,
+      "pr": 0,
+      "status": "in-tree",
+      "loop": 196,
+      "inTree": "14aa89fbd841"
+    },
+    {
+      "file": "scripts/__init__.py",
+      "short": "__init__.py",
+      "before": 1,
+      "after": 20,
+      "parseMs": 0.06,
+      "compileMs": 0.02,
+      "pr": 0,
+      "status": "in-tree",
+      "loop": 197,
+      "inTree": "bb47f0d18f01"
+    },
+    {
+      "file": "tests/.../__init__.py",
+      "short": "__init__.py",
+      "before": 0,
+      "after": 20,
+      "parseMs": 0.02,
+      "compileMs": 0.01,
+      "pr": 0,
+      "status": "in-tree",
+      "loop": 198,
+      "inTree": "84cb7076262a"
+    },
+    {
+      "file": "tests/campaigns/__init__.py",
+      "short": "__init__.py",
+      "before": 0,
+      "after": 20,
+      "parseMs": 0.02,
+      "compileMs": 0.01,
+      "pr": 0,
+      "status": "in-tree",
+      "loop": 199,
+      "inTree": "d66c36ad11c7"
+    },
+    {
+      "file": "evals/.../__init__.py",
+      "short": "__init__.py",
+      "before": 0,
+      "after": 20,
+      "parseMs": 0.03,
+      "compileMs": 0.02,
+      "pr": 0,
+      "status": "in-tree",
+      "loop": 200,
+      "inTree": "ae4437932cb7"
+    },
+    {
+      "file": "evals/campaigns/__init__.py",
+      "short": "__init__.py",
+      "before": 0,
+      "after": 20,
+      "parseMs": 0.02,
+      "compileMs": 0.02,
+      "pr": 0,
+      "status": "in-tree",
+      "loop": 201,
+      "inTree": "bda882ffbf6e"
     }
   ]
 }
