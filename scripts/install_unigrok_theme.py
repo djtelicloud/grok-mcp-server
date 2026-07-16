@@ -130,6 +130,29 @@ def _sources(repo: Path) -> list[tuple[Path, str]]:
     ]
 
 
+def _is_inside_product(path: Path, repo: Path) -> bool:
+    """Whether ``path`` resolves inside the product checkout."""
+
+    try:
+        path.expanduser().resolve().relative_to(repo.expanduser().resolve())
+    except ValueError:
+        return False
+    return True
+
+
+def _reject_product_write_path(path: Path, *, repo: Path | None, label: str) -> int | None:
+    """Keep installer writes out of the product checkout, including via symlinks."""
+
+    if repo is None or not _is_inside_product(path, repo):
+        return None
+    print(
+        f"error: {label} must not resolve inside the product checkout; "
+        "use a user config directory such as ~/.grok",
+        file=sys.stderr,
+    )
+    return 2
+
+
 def _reject_git_home(grok_home: Path, *, repo: Path | None = None) -> int | None:
     """Refuse GROK_HOME that is a Git root or lives inside the product checkout."""
     home = grok_home.expanduser().resolve()
@@ -140,29 +163,22 @@ def _reject_git_home(grok_home: Path, *, repo: Path | None = None) -> int | None
             file=sys.stderr,
         )
         return 2
-    if repo is not None:
-        product = repo.expanduser().resolve()
-        try:
-            home.relative_to(product)
-        except ValueError:
-            pass
-        else:
-            print(
-                "error: --grok-home / GROK_HOME must not be inside the product "
-                "checkout; use a user config directory such as ~/.grok",
-                file=sys.stderr,
-            )
-            return 2
-    return None
+    return _reject_product_write_path(
+        home,
+        repo=repo,
+        label="--grok-home / GROK_HOME",
+    )
 
 
 def _ui_section_span(text: str) -> tuple[int, int] | None:
-    """Return [start, end) byte offsets of the [ui] table body, or None."""
+    """Return [start, end) character offsets of the [ui] table body, or None."""
     match = re.search(r"(?m)^\s*\[ui\]\s*(?:#.*)?$", text)
     if not match:
         return None
     start = match.end()
-    next_header = re.search(r"(?m)^\s*\[[^\]]+\]\s*(?:#.*)?$", text[start:])
+    next_header = re.search(
+        r"(?m)^\s*\[\[?[^\]]+\]?\]\s*(?:#.*)?$", text[start:]
+    )
     end = start + next_header.start() if next_header else len(text)
     return start, end
 
@@ -215,6 +231,19 @@ def install(
     rejected = _reject_git_home(grok_home, repo=repo)
     if rejected is not None:
         return rejected
+    rejected = _reject_product_write_path(
+        themes,
+        repo=repo,
+        label="theme directory",
+    )
+    if rejected is not None:
+        return rejected
+    if (themes.exists() or themes.is_symlink()) and not themes.is_dir():
+        print(
+            f"error: {themes} exists and is not a directory; remove it before installing",
+            file=sys.stderr,
+        )
+        return 3
 
     sources = _sources(repo)
     missing = [str(src) for src, _ in sources if not src.is_file()]
@@ -241,7 +270,14 @@ def install(
     # Preflight all destinations before copying so a mid-loop conflict abort
     # cannot leave a mixed partial install.
     for src, dest in planned:
-        if dest.exists() and not dest.is_file():
+        rejected = _reject_product_write_path(
+            dest,
+            repo=repo,
+            label="theme destination",
+        )
+        if rejected is not None:
+            return rejected
+        if (dest.exists() or dest.is_symlink()) and not dest.is_file():
             print(
                 f"error: {dest} exists and is not a regular file; "
                 "remove it before installing",
@@ -317,6 +353,13 @@ def enable_config(*, grok_home: Path, dry_run: bool, repo: Path | None = None) -
     if rejected is not None:
         return rejected
     config = grok_home / "config.toml"
+    rejected = _reject_product_write_path(
+        config,
+        repo=repo,
+        label="config.toml",
+    )
+    if rejected is not None:
+        return rejected
     if not config.is_file():
         print(f"error: {config} not found; create a Grok config first", file=sys.stderr)
         return 2
