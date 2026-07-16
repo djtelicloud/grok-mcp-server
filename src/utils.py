@@ -11058,6 +11058,22 @@ async def _save_task_memory_safe(
         logging.getLogger("GrokMCP").warning(f"Task memory save failed: {exc}")
 
 
+def _receipt_billing_class(
+    attempts: Optional[List[Any]],
+    *,
+    default: str = "subscription",
+) -> str:
+    """Top-level receipt billing class for a turn.
+
+    Any physical metered attempt means metered spend may have occurred, even
+    when recovery finished on the CLI subscription plane (CLI-Fallback).
+    """
+    for item in attempts or []:
+        if isinstance(item, dict) and item.get("billing_class") == "metered":
+            return "metered"
+    return default
+
+
 def _telemetry_usage_kwargs(
     *,
     plane: str,
@@ -12727,7 +12743,7 @@ async def orchestrate(
                 },
                 "resolved_plane": "CLI",
                 "fallback_occurred": True,
-                "billing_class": "subscription",
+                "billing_class": _receipt_billing_class(physical_attempts),
                 "fallback_selection": cli_selection_receipt,
                 "attempts": list(physical_attempts),
                 "failure": api_failure_evidence,
@@ -12792,7 +12808,7 @@ async def orchestrate(
                 },
                 "resolved_plane": "CLI",
                 "fallback_occurred": True,
-                "billing_class": "subscription",
+                "billing_class": _receipt_billing_class(physical_attempts),
                 "attempts": list(physical_attempts),
                 "failure": _routing_failure_evidence(e),
                 "fallback_failure": _routing_failure_evidence(cli_err),

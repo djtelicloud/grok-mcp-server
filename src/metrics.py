@@ -64,6 +64,22 @@ def _plane_name(value: Any) -> str:
     return text or "unknown"
 
 
+def _metered_cost_usd(row: Dict[str, Any]) -> Optional[float]:
+    """Exact/partial API spend visible on a telemetry row.
+
+    Pure API rows always contribute. CLI-Fallback rows may carry metered spend
+    from a failed API attempt before subscription recovery — only report when
+    the persisted cost is positive so pure-subscription zeros stay hidden.
+    """
+    plane = _plane_name(row.get("chosen_plane"))
+    cost = _safe_float(row.get("cost"))
+    if plane == "API":
+        return cost
+    if plane == "CLI-Fallback" and cost > 0:
+        return cost
+    return None
+
+
 def _is_auxiliary_telemetry(row: Dict[str, Any]) -> bool:
     return str(row.get("intent") or "").strip() in _AUXILIARY_TELEMETRY_INTENTS
 
@@ -93,9 +109,9 @@ def _aggregate(rows: List[Dict[str, Any]], plane: Optional[str] = None) -> Dict[
     verified = [row for row in outcome_rows if row.get("success") in (0, 1)]
     successes = sum(1 for row in verified if row.get("success") == 1)
     api_cost = sum(
-        _safe_float(row.get("cost"))
+        cost
         for row in selected
-        if _plane_name(row.get("chosen_plane")) == "API"
+        if (cost := _metered_cost_usd(row)) is not None
     )
     token_total = 0
     exact_token_rows = 0
@@ -196,7 +212,7 @@ def _recent_routes(rows: List[Dict[str, Any]], limit: int = 12) -> List[Dict[str
                 None if raw_success not in (0, 1) else raw_success == 1
             ),
             "latency_sec": _safe_float(row.get("latency")),
-            "cost_usd": _safe_float(row.get("cost")) if _plane_name(row.get("chosen_plane")) == "API" else None,
+            "cost_usd": _metered_cost_usd(row),
             "tokens": max(0, _safe_int(meta.get("tokens"))),
             "routing": routing,
         })

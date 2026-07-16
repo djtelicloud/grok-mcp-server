@@ -74,6 +74,41 @@ def test_structured_metrics_separate_api_billing_from_cli_subscription():
     assert snapshot["usage"]["data_quality"]["routing_receipt_rows"] == 1
 
 
+def test_cli_fallback_metered_spend_counts_in_api_cost():
+    """API→CLI recovery rows must not hide prior metered spend."""
+    now = datetime(2026, 7, 10, 12, 0, 0)
+    rows = [
+        _row(
+            created_at=now,
+            plane="CLI-Fallback",
+            latency=2.5,
+            cost=0.004,
+            metadata=(
+                '{"model":"grok-composer-2.5-fast","tokens":40,'
+                '"token_kind":"partial","billing_source":"partial","caller":"cursor",'
+                '"routing":{"billing_class":"metered","why_detail":"api_to_cli_fallback",'
+                '"attempts":[{"plane":"API","billing_class":"metered","cost_usd":0.004},'
+                '{"plane":"CLI","billing_class":"subscription","cost_usd":0.0}]}}'
+            ),
+        ),
+        _row(
+            created_at=now,
+            plane="CLI-Fallback",
+            latency=1.0,
+            cost=0.0,
+            metadata='{"model":"grok-composer-2.5-fast","billing_source":"subscription_unmetered","caller":"cursor"}',
+        ),
+    ]
+
+    snapshot = build_metrics_snapshot(rows, now=now)
+    today = snapshot["usage"]["today"]
+    assert today["summary"]["api_cost_usd"] == pytest.approx(0.004)
+    assert today["planes"]["CLI-Fallback"]["api_cost_usd"] == pytest.approx(0.004)
+    costly = next(r for r in today["recent_routes"] if r.get("cost_usd"))
+    assert costly["cost_usd"] == pytest.approx(0.004)
+    assert costly["plane"] == "CLI-Fallback"
+
+
 def test_structured_metrics_empty_period_is_null_not_fake_zero():
     now = datetime(2026, 7, 10, 12, 0, 0)
     snapshot = build_metrics_snapshot([], now=now)

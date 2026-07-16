@@ -2434,6 +2434,8 @@ class TestSymmetricXaiPlaneFailover:
         assert layer.plane == "CLI-Fallback"
         assert layer.finish_reason == "fallback"
         assert layer.routing_receipt["why_detail"] == "api_to_cli_fallback"
+        # Prior API attempt was metered even though recovery finished on CLI.
+        assert layer.routing_receipt["billing_class"] == "metered"
         assert [item["plane"] for item in layer.routing_receipt["attempts"]] == [
             "API",
             "CLI",
@@ -2442,6 +2444,7 @@ class TestSymmetricXaiPlaneFailover:
             "unknown_after_failure"
         )
         assert layer.routing_receipt["attempts"][0]["cost_usd"] is None
+        assert layer.routing_receipt["attempts"][0]["billing_class"] == "metered"
         assert layer.routing_receipt["attempts"][1]["billing_source"] == (
             "subscription_unmetered"
         )
