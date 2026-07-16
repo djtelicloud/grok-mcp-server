@@ -10,12 +10,16 @@ services:
       dockerfile: Dockerfile
     image: grok-mcp:dev
     container_name: grok-mcp-dev
-    working_dir: /workspace
-    command: ["/app/.venv/bin/python", "/workspace/main.py", "--http"]
+    working_dir: /app
+    command: ["/app/.venv/bin/python", "-P", "/app/main.py", "--http"]
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec
+      - /run:rw,nosuid,nodev,noexec
     ports:
       - "127.0.0.1:${UNIGROK_DEV_PORT:-4766}:8080"
     volumes:
-      - .:/workspace
+      - .:/workspace:ro
       - grok-mcp-dev-state:/state
       - grok-mcp-cli-auth:/home/appuser/.grok
     env_file:
@@ -26,11 +30,12 @@ services:
       - PORT=8080
       - UNIGROK_SERVICE_MODE=contributor
       - UNIGROK_CONTRIBUTOR_MODE=1
-      - UNIGROK_SERVICE_ROOT=/workspace
+      - UNIGROK_SERVICE_ROOT=/app
       - WORKSPACE_ROOT=/workspace
       - UNIGROK_STATE_DIR=/state
       - UNIGROK_TRUSTED_LOOPBACK_PROXY=1
-      - PYTHONPATH=/workspace
+      - PYTHONPATH=/app
+      - PYTHONDONTWRITEBYTECODE=1
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=5)"]
       interval: 30s

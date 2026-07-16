@@ -180,7 +180,7 @@ def runtime_action(paths: list[str]) -> str:
     if any(path in rebuild_names or path.startswith("docker/") for path in paths):
         return "rebuild"
     if any(path == "main.py" or path.startswith("src/") for path in paths):
-        return "restart"
+        return "rebuild"
     if any(path.startswith("mcp_ui/") or path.startswith("docs/okf/") for path in paths):
         return "smoke"
     return "none"
@@ -384,8 +384,21 @@ def runtime_changes(
         candidate = ""
     if candidate:
         valid = run(["git", "cat-file", "-e", f"{candidate}^{{commit}}"], cwd=repo, check=False)
-        ancestor = run(["git", "merge-base", "--is-ancestor", candidate, target], cwd=repo, check=False)
-        if valid.returncode == 0 and ancestor.returncode == 0:
+        target_ancestor = run(
+            ["git", "merge-base", "--is-ancestor", candidate, target],
+            cwd=repo,
+            check=False,
+        )
+        fallback_descendant = run(
+            ["git", "merge-base", "--is-ancestor", candidate, fallback],
+            cwd=repo,
+            check=False,
+        )
+        if (
+            valid.returncode == 0
+            and target_ancestor.returncode == 0
+            and fallback_descendant.returncode == 0
+        ):
             start = candidate
         else:
             marker.write_text(fallback + "\n", encoding="utf-8")
@@ -432,7 +445,7 @@ def land(repo: Path) -> str:
                 "main advanced while tests ran; rebase the reviewed branch onto current main, "
                 "publish the new head, and obtain exact-head review before landing"
             )
-        require_clean(main_path, include_untracked=False, label="shared main worktree")
+        require_clean(main_path, include_untracked=True, label="shared main worktree")
         run(["git", "merge", "--ff-only", tested_head], cwd=main_path, capture=False)
         if git(main_path, "rev-parse", "HEAD") != tested_head:
             raise LandError("shared main did not reach the tested commit")
@@ -460,13 +473,12 @@ def land(repo: Path) -> str:
 
 
 def main() -> int:
-    try:
-        head = land(Path.cwd())
-    except (LandError, OSError, ValueError, subprocess.SubprocessError) as exc:
-        print(f"NOT LANDED: {exc}", file=sys.stderr)
-        return 1
-    print(f"LANDED TO MAIN: {head}")
-    return 0
+    print(
+        "NOT LANDED: local landing is disabled until verification runs outside "
+        "candidate and shared Git control planes",
+        file=sys.stderr,
+    )
+    return 1
 
 
 if __name__ == "__main__":

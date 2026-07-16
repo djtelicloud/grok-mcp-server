@@ -95,7 +95,7 @@ def test_runtime_action_is_minimal():
     assert land.runtime_action(["README.md", "tests/test_x.py"]) == "none"
     assert land.runtime_action(["mcp_ui/index.html"]) == "smoke"
     assert land.runtime_action(["docs/okf/api-reference.md"]) == "smoke"
-    assert land.runtime_action(["src/server.py"]) == "restart"
+    assert land.runtime_action(["src/server.py"]) == "rebuild"
     assert land.runtime_action(["uv.lock"]) == "rebuild"
     assert land.runtime_action(["docker-compose.dev.yml"]) == "rebuild"
 
@@ -222,6 +222,58 @@ def test_land_refuses_dirty_visible_main(repo_with_agent, monkeypatch):
         land.land(agent)
 
     assert (main / "file.txt").read_text(encoding="utf-8") == "unsaved IDE edit\n"
+
+
+def test_land_refuses_untracked_visible_main(repo_with_agent, monkeypatch):
+    main, agent = repo_with_agent
+    commit(agent, "agent change\n")
+    write(main / "sitecustomize.py", "raise RuntimeError('must never execute')\n")
+    configure_fast_test(monkeypatch)
+
+    with pytest.raises(land.LandError, match="shared main worktree is dirty"):
+        land.land(agent)
+
+    assert git(main, "rev-parse", "HEAD") != git(agent, "rev-parse", "HEAD")
+
+
+def test_runtime_marker_must_be_ancestor_of_pre_land_main(repo_with_agent):
+    main, agent = repo_with_agent
+    baseline = git(main, "rev-parse", "HEAD")
+    target = commit(agent, "agent change\n")
+    git_dir = Path(git(main, "rev-parse", "--git-common-dir"))
+    if not git_dir.is_absolute():
+        git_dir = (main / git_dir).resolve()
+    marker = git_dir / "unigrok-land" / "runtime-head"
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text(target + "\n", encoding="utf-8")
+
+    paths, _, start = land.runtime_changes(
+        git_dir,
+        main,
+        fallback=baseline,
+        target=target,
+    )
+
+    assert start == baseline
+    assert paths == ["file.txt"]
+    assert marker.read_text(encoding="utf-8").strip() == baseline
+
+
+def test_local_land_entrypoint_is_fail_closed():
+    for command in (
+        [str(ROOT / "scripts" / "land")],
+        [sys.executable, str(ROOT / "scripts" / "land.py")],
+    ):
+        result = subprocess.run(
+            command,
+            cwd=ROOT,
+            check=False,
+            text=True,
+            capture_output=True,
+        )
+
+        assert result.returncode != 0
+        assert "local landing is disabled" in result.stderr
 
 
 def test_failed_runtime_reconciliation_is_retried_from_previous_main(repo_with_agent, monkeypatch):

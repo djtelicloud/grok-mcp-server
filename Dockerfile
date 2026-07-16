@@ -53,7 +53,8 @@ COPY .grok/prompts/ ./.grok/prompts/
 # in the application bundle or an IDE project.
 RUN useradd --create-home --uid 1000 --shell /usr/sbin/nologin appuser \
     && mkdir -p /state /home/appuser/.grok \
-    && chown -R appuser:appuser /app /state /home/appuser/.grok
+    && chown -R appuser:appuser /state /home/appuser/.grok \
+    && chmod -R a-w /app
 USER appuser
 
 # The container command runs the current HTTP gateway on its internal port.
