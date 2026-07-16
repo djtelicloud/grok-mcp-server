@@ -404,9 +404,10 @@ async def _grade_and_record(sample: TrajectorySample, store: Any, reservation: f
     actual_cost = 0.0
     try:
         model = _judge_model_override() or await resolve_model("coding")
-        if get_circuit_breaker_state().get(model, {}).get("open"):
+        # Judge traffic is API-plane; only the API breaker for this model matters.
+        if get_circuit_breaker_state().get(f"API:{model}", {}).get("open"):
             _record_stat("judge_failures")
-            logger.warning(f"Semantic eval skipped (breaker open for {model}).")
+            logger.warning(f"Semantic eval skipped (breaker open for API:{model}).")
             return
 
         # Floor the accumulator at the durable record, then re-check: a

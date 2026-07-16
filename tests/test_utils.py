@@ -4521,7 +4521,7 @@ class TestCircuitBreaker:
         with pytest.raises(CircuitBreakerOpenError, match="model-x"):
             check_circuit_breaker("model-x")
 
-        state = get_circuit_breaker_state()["model-x"]
+        state = get_circuit_breaker_state()["API:model-x"]
         assert state["open"] is True
         assert state["consecutive_failures"] == 3
         assert state["trips"] == 1
@@ -4540,7 +4540,7 @@ class TestCircuitBreaker:
         record_xai_failure("model-y")
         record_xai_success("model-y")
         check_circuit_breaker("model-y")  # must not raise
-        assert get_circuit_breaker_state()["model-y"]["consecutive_failures"] == 0
+        assert get_circuit_breaker_state()["API:model-y"]["consecutive_failures"] == 0
 
     def test_breaker_half_opens_after_cooldown(self, monkeypatch):
         import src.utils as utils_module
@@ -4549,13 +4549,13 @@ class TestCircuitBreaker:
         monkeypatch.setenv("UNIGROK_BREAKER_THRESHOLD", "1")
         record_xai_failure("model-z")
         # Rewind opened_at past the cool-down → next check half-opens (probe allowed)
-        utils_module._BREAKER_STATE["model-z"]["opened_at"] = time.time() - 10_000
+        utils_module._BREAKER_STATE["API:model-z"]["opened_at"] = time.time() - 10_000
         check_circuit_breaker("model-z")  # must not raise
-        assert get_circuit_breaker_state()["model-z"]["open"] is False
+        assert get_circuit_breaker_state()["API:model-z"]["open"] is False
         # A failing probe re-opens the breaker
         record_xai_failure("model-z")
-        assert get_circuit_breaker_state()["model-z"]["open"] is True
-        assert get_circuit_breaker_state()["model-z"]["trips"] == 2
+        assert get_circuit_breaker_state()["API:model-z"]["open"] is True
+        assert get_circuit_breaker_state()["API:model-z"]["trips"] == 2
 
     @pytest.mark.asyncio
     async def test_call_plane_fails_fast_when_breaker_open(self, monkeypatch):
@@ -4573,6 +4573,22 @@ class TestCircuitBreaker:
                 )
 
         mock_get_client.assert_not_called()
+
+    def test_cli_breaker_does_not_poison_api_plane(self, monkeypatch):
+        """CLI failures must not open the API breaker for the same model slug."""
+        from src.utils import (
+            CircuitBreakerOpenError,
+            check_circuit_breaker,
+            get_circuit_breaker_state,
+            record_xai_failure,
+        )
+
+        monkeypatch.setenv("UNIGROK_BREAKER_THRESHOLD", "1")
+        record_xai_failure("grok-4.3", plane="CLI")
+        assert get_circuit_breaker_state()["CLI:grok-4.3"]["open"] is True
+        check_circuit_breaker("grok-4.3", plane="API")  # must not raise
+        with pytest.raises(CircuitBreakerOpenError):
+            check_circuit_breaker("grok-4.3", plane="CLI")
 
     @pytest.mark.asyncio
     async def test_agentloop_fatal_error_raises_without_retries(self):
@@ -4674,7 +4690,7 @@ class TestCircuitBreaker:
                 await loop.run("test prompt")
 
         assert mock_chat.sample.call_count == 2
-        state = get_circuit_breaker_state()["grok-4.3"]
+        state = get_circuit_breaker_state()["API:grok-4.3"]
         assert state["open"] is True
         assert state["trips"] == 1
 
@@ -6494,7 +6510,7 @@ class TestCliPlaneV2:
 
         assert exc_info.value.partial_output == "receipt effect-7: edited file"
         assert "xai-123456789SECRET" not in str(exc_info.value)
-        assert utils._BREAKER_STATE["grok-composer-2.5-fast"]["consecutive_failures"] == 1
+        assert utils._BREAKER_STATE["CLI:grok-composer-2.5-fast"]["consecutive_failures"] == 1
 
 
 # ─────────────────────────────────────────────────────────────────────────────

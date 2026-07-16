@@ -2395,20 +2395,34 @@ def _breaker_cooldown_sec() -> float:
     return _env_timeout("UNIGROK_BREAKER_COOLDOWN_SEC", 60.0)
 
 
-# model → {"consecutive_failures": int, "opened_at": float|None, "trips": int}
+# "plane:model" → {"consecutive_failures": int, "opened_at": float|None, "trips": int}
+# Plane-scoped so a CLI subscription outage cannot fail-fast metered API (or
+# the reverse) for the same model slug.
 _BREAKER_STATE: Dict[str, Dict[str, Any]] = {}
 _BREAKER_LOCK = threading.Lock()
 
 
-def check_circuit_breaker(model: str):
-    """Fail fast with CircuitBreakerOpenError while a model's breaker is open.
+def _normalize_breaker_plane(plane: Optional[str] = None) -> str:
+    raw = str(plane or "API").strip().upper().replace("_", "-")
+    if raw in {"CLI", "COMPOSER", "CLI-FALLBACK"}:
+        return "CLI"
+    return "API"
+
+
+def _breaker_key(model: str, *, plane: Optional[str] = None) -> str:
+    return f"{_normalize_breaker_plane(plane)}:{model}"
+
+
+def check_circuit_breaker(model: str, *, plane: str = "API"):
+    """Fail fast with CircuitBreakerOpenError while a plane+model breaker is open.
 
     After the cool-down elapses the breaker half-opens: the next call is
     allowed through as a probe; its success closes the breaker, its failure
-    re-opens it via record_xai_failure.
+    re-opens it via record_xai_failure. CLI and API breakers are independent.
     """
+    key = _breaker_key(model, plane=plane)
     with _BREAKER_LOCK:
-        state = _BREAKER_STATE.get(model)
+        state = _BREAKER_STATE.get(key)
         if not state or not state.get("opened_at"):
             return
         elapsed = time.time() - state["opened_at"]
@@ -2417,49 +2431,54 @@ def check_circuit_breaker(model: str):
             state["opened_at"] = None  # Half-open: allow a probe call.
             return
         raise CircuitBreakerOpenError(
-            f"Circuit breaker open for model '{model}' after "
+            f"Circuit breaker open for {key} after "
             f"{state['consecutive_failures']} consecutive xAI failures; "
             f"retry in {cooldown - elapsed:.0f}s."
         )
 
 
-def record_xai_failure(model: str):
-    """Count a failed xAI call; open the breaker at the consecutive threshold."""
+def record_xai_failure(model: str, *, plane: str = "API"):
+    """Count a failed xAI call; open the plane+model breaker at threshold."""
+    key = _breaker_key(model, plane=plane)
     threshold = _breaker_threshold()
     with _BREAKER_LOCK:
         state = _BREAKER_STATE.setdefault(
-            model, {"consecutive_failures": 0, "opened_at": None, "trips": 0}
+            key, {"consecutive_failures": 0, "opened_at": None, "trips": 0}
         )
         state["consecutive_failures"] += 1
         if state["consecutive_failures"] >= threshold and not state.get("opened_at"):
             state["opened_at"] = time.time()
             state["trips"] += 1
             logging.getLogger("GrokMCP").warning(
-                f"Circuit breaker OPENED for model '{model}' after "
+                f"Circuit breaker OPENED for {key} after "
                 f"{state['consecutive_failures']} consecutive failures; "
                 f"cooling down for {_breaker_cooldown_sec():.0f}s."
             )
 
 
-def record_xai_success(model: str):
-    """Reset a model's breaker after any successful xAI call."""
+def record_xai_success(model: str, *, plane: str = "API"):
+    """Reset a plane+model breaker after any successful xAI call."""
+    key = _breaker_key(model, plane=plane)
     with _BREAKER_LOCK:
-        state = _BREAKER_STATE.get(model)
+        state = _BREAKER_STATE.get(key)
         if state:
             state["consecutive_failures"] = 0
             state["opened_at"] = None
 
 
 def get_circuit_breaker_state() -> Dict[str, Any]:
-    """Snapshot of per-model breaker state (consumed by grok_mcp_status)."""
+    """Snapshot of plane-scoped breaker state (consumed by grok_mcp_status).
+
+    Keys are ``API:<model>`` / ``CLI:<model>``.
+    """
     now = time.time()
     cooldown = _breaker_cooldown_sec()
     with _BREAKER_LOCK:
         snapshot = {}
-        for model, state in _BREAKER_STATE.items():
+        for key, state in _BREAKER_STATE.items():
             opened_at = state.get("opened_at")
             remaining = max(0.0, cooldown - (now - opened_at)) if opened_at else 0.0
-            snapshot[model] = {
+            snapshot[key] = {
                 "open": bool(opened_at and remaining > 0),
                 "consecutive_failures": int(state.get("consecutive_failures", 0)),
                 "cooldown_remaining_sec": round(remaining, 1),
@@ -10829,7 +10848,7 @@ async def _call_plane(
             raise RuntimeError("Grok CLI execution is disabled in Cloud Run runtime.")
 
         grok_path = PathResolver.get_grok_cli_path()
-        check_circuit_breaker(model_name)
+        check_circuit_breaker(model_name, plane="CLI")
         # Explicit message arrays are authoritative conversation state. They
         # use a self-contained prompt instead of mixing caller history with a
         # possibly unrelated native CLI transcript.
@@ -11092,10 +11111,10 @@ async def _call_plane(
                         )
         except RuntimeError as exc:
             if not _is_cli_session_in_use_error(str(exc)):
-                record_xai_failure(model_name)
+                record_xai_failure(model_name, plane="CLI")
             raise
 
-        record_xai_success(model_name)
+        record_xai_success(model_name, plane="CLI")
         # Subscription plane: the CLI exposes no token usage and has no
         # per-token price, so tokens/cost stay 0 by design.
         return text, 0, 0.0, True
@@ -11166,16 +11185,16 @@ async def _call_plane(
             res = grok.sample()
             return res
 
-        # Per-model circuit breaker: fail fast while open, and report the
+        # Per-plane+model circuit breaker: fail fast while open, and report the
         # outcome of every real upstream attempt.
-        check_circuit_breaker(model_name)
+        check_circuit_breaker(model_name, plane="API")
         try:
             response = await run_blocking(
                 _call_api,
                 timeout=_env_timeout("UNIGROK_API_CALL_TIMEOUT", 180.0),
             )
         except Exception as exc:
-            record_xai_failure(model_name)
+            record_xai_failure(model_name, plane="API")
             await _emit_physical_attempt(
                 attempt_recorder,
                 plane="API",
@@ -11185,7 +11204,7 @@ async def _call_plane(
                 error=exc,
             )
             raise
-        record_xai_success(model_name)
+        record_xai_success(model_name, plane="API")
         observed_tokens, observed_cost, usage_source = _provider_response_usage(
             response
         )

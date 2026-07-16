@@ -4216,36 +4216,36 @@ burn retries — retrying an auth failure only delays the real error.
 ### Function: `check_circuit_breaker` {#utils-check_circuit_breaker}
 
 ```python
-def check_circuit_breaker(model: str)
+def check_circuit_breaker(model: str, *, plane: str='API')
 ```
 
 **Keywords:** check, circuit, breaker
 
-Fail fast with CircuitBreakerOpenError while a model's breaker is open.
+Fail fast with CircuitBreakerOpenError while a plane+model breaker is open.
 
 After the cool-down elapses the breaker half-opens: the next call is
 allowed through as a probe; its success closes the breaker, its failure
-re-opens it via record_xai_failure.
+re-opens it via record_xai_failure. CLI and API breakers are independent.
 
 ### Function: `record_xai_failure` {#utils-record_xai_failure}
 
 ```python
-def record_xai_failure(model: str)
+def record_xai_failure(model: str, *, plane: str='API')
 ```
 
 **Keywords:** record, xai, failure
 
-Count a failed xAI call; open the breaker at the consecutive threshold.
+Count a failed xAI call; open the plane+model breaker at threshold.
 
 ### Function: `record_xai_success` {#utils-record_xai_success}
 
 ```python
-def record_xai_success(model: str)
+def record_xai_success(model: str, *, plane: str='API')
 ```
 
 **Keywords:** record, xai, success
 
-Reset a model's breaker after any successful xAI call.
+Reset a plane+model breaker after any successful xAI call.
 
 ### Function: `get_circuit_breaker_state` {#utils-get_circuit_breaker_state}
 
@@ -4255,7 +4255,9 @@ def get_circuit_breaker_state() -> Dict[str, Any]
 
 **Keywords:** get, circuit, breaker, state
 
-Snapshot of per-model breaker state (consumed by grok_mcp_status).
+Snapshot of plane-scoped breaker state (consumed by grok_mcp_status).
+
+Keys are ``API:<model>`` / ``CLI:<model>``.
 
 ### Class: `RequestContextLogFilter` {#utils-requestcontextlogfilter}
 

@@ -307,7 +307,7 @@ class TestGradeAndRecord:
         )
         monkeypatch.setattr(
             "src.semantic_evals.get_circuit_breaker_state",
-            MagicMock(return_value={"grok-test": {"open": True}}),
+            MagicMock(return_value={"API:grok-test": {"open": True}}),
         )
         parse_mock = AsyncMock()
         monkeypatch.setattr("src.semantic_evals._parse_structured", parse_mock)
@@ -329,7 +329,7 @@ class TestGradeAndRecord:
             "prompt", "API", 1, 1.0, 0.0, request_id="rid-semantic-test"
         )
         with U._BREAKER_LOCK:
-            U._BREAKER_STATE["grok-test"] = {
+            U._BREAKER_STATE["API:grok-test"] = {
                 "consecutive_failures": 2, "opened_at": None, "trips": 1,
             }
 
@@ -337,7 +337,7 @@ class TestGradeAndRecord:
 
         assert get_semantic_eval_stats()["graded"] == 1  # the judge did run
         with U._BREAKER_LOCK:
-            assert U._BREAKER_STATE["grok-test"] == {
+            assert U._BREAKER_STATE["API:grok-test"] == {
                 "consecutive_failures": 2, "opened_at": None, "trips": 1,
             }
 
