@@ -204,6 +204,37 @@ CLI-first selection uses the model ids returned by the authenticated live
 still exists; the current catalog's default is preferred for reasoning and its
 composer model for coding.
 
+## Why did thinking or research fail on the CLI plane? {#api-only-modes}
+
+**Keywords:** thinking, research, vision, api-only, same_plane, cli plane,
+cli-incompatible, same_plane_capability_incompatible, deep think
+
+`mode="thinking"`, multi-agent `mode="research"`, and vision routes are
+**API-native**. They need the metered xAI API plane (and a configured
+`XAI_API_KEY` on the server), not the SuperGrok CLI subscription alone.
+
+If you call `agent` with `plane="cli"` and `fallback_policy="same_plane"` while
+requesting one of those capabilities, UniGrok **fails closed** before spend.
+The receipt looks like:
+
+- `finish_reason`: `error`
+- `model`: `cli-incompatible`
+- `routing.why_detail`: `same_plane_capability_incompatible`
+- message telling you to choose `plane="api"` or `plane="auto"`
+
+What to do:
+
+1. For deep-think / reflection: `mode="thinking"` with `plane="api"` (or
+   `plane="auto"` when the API key is configured so routing may land on API).
+2. For citation-backed research: `mode="research"` the same way — still
+   API-native.
+3. For subscription-only work: stay on CLI with `mode="fast"`, `mode="auto"`,
+   or `mode="reasoning"` (planning on the live CLI catalog). Do not pin
+   thinking/research to CLI under `same_plane`.
+
+This is not a CLI outage. Compatible CLI chat can still be Ready while
+API-only modes correctly refuse a CLI-only pin.
+
 ## What should an IDE agent do when a credential plane is unavailable? {#credential-plane-actions}
 
 **Keywords:** credentials, missing api key, cli auth, install cli, permission
