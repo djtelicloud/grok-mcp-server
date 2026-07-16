@@ -4000,8 +4000,9 @@ entry (unset env returns before any parsing — zero hot-path cost by
 default). Spend is today's telemetry cost across every caller matching
 the entry's substring (the entry IS the shared pot), read via one
 created_at-indexed query and cached ~60s per entry. At/over budget raises
-CallerBudgetExceeded. A failing store read degrades open by default, or
-fails closed when ``UNIGROK_BUDGET_FAIL_CLOSED=1``.
+CallerBudgetExceeded. Once a caller matches a configured budget, a failing
+spend-ledger read rejects the request so accounting loss cannot re-arm the
+cap.
 
 ### Function: `new_request_id` {#utils-new_request_id}
 

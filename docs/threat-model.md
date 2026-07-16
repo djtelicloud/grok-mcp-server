@@ -57,7 +57,7 @@ individual revocation, membership, scopes, or per-user isolation matters.
 | --- | --- | --- |
 | Provider credential theft | Server-only credentials, CLI environment scrubbing, secret redaction | Host/container compromise can still expose process credentials |
 | Cross-user session access | OAuth subject or key alias in every HTTP session namespace | Parties sharing one static key share one principal by definition |
-| Budget evasion by spoofed headers | HTTP budget owner comes from authenticated principal | Budget storage failure currently degrades open and is logged |
+| Budget evasion by spoofed headers or ledger failure | HTTP budget owner comes from authenticated principal; configured caller caps fail closed when spend cannot be read | Durable atomic multi-instance reservations remain required for hosted hard caps |
 | Unauthorized remote invocation | Fail-closed non-loopback configuration, OAuth introspection/scopes or gateway keys, TLS proxy | Proxy or introspection misconfiguration can weaken deployment |
 | DNS rebinding/browser abuse | Host/origin validation, exact allowed origins, CSP | Operators can deliberately broaden origin policy |
 | SSRF through public resources | Destination validation rejects private, loopback, and unsafe targets | Provider-side fetch behavior remains outside local enforcement |

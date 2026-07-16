@@ -777,8 +777,9 @@ async def enforce_caller_budget(store_param: Any, caller: Optional[str]) -> None
     default). Spend is today's telemetry cost across every caller matching
     the entry's substring (the entry IS the shared pot), read via one
     created_at-indexed query and cached ~60s per entry. At/over budget raises
-    CallerBudgetExceeded. A failing store read degrades open by default, or
-    fails closed when ``UNIGROK_BUDGET_FAIL_CLOSED=1``.
+    CallerBudgetExceeded. Once a caller matches a configured budget, a failing
+    spend-ledger read rejects the request so accounting loss cannot re-arm the
+    cap.
     """
     if not caller or not os.environ.get("UNIGROK_CALLER_BUDGETS", "").strip():
         return
@@ -805,19 +806,13 @@ async def enforce_caller_budget(store_param: Any, caller: Optional[str]) -> None
         try:
             spent = float(await active_store.get_caller_cost_today(entry))
         except Exception as exc:
-            if os.environ.get("UNIGROK_BUDGET_FAIL_CLOSED", "").strip() == "1":
-                logging.getLogger("GrokMCP").warning(
-                    "Caller budget check unavailable; rejecting the request because "
-                    "UNIGROK_BUDGET_FAIL_CLOSED is enabled: %s",
-                    exc,
-                )
-                raise CallerBudgetExceeded(
-                    "daily budget check unavailable; fail-closed policy is enabled"
-                ) from None
             logging.getLogger("GrokMCP").warning(
-                f"Caller budget check unavailable (degrading open): {exc}"
+                "Caller budget check unavailable; rejecting the budgeted request: %s",
+                exc,
             )
-            return
+            raise CallerBudgetExceeded(
+                "daily budget check unavailable; configured cap is fail-closed"
+            ) from None
         _CALLER_SPEND_CACHE[entry] = (spent, now)
     if spent >= limit_usd:
         raise CallerBudgetExceeded(

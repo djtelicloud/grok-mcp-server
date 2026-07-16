@@ -481,18 +481,8 @@ class TestBudgetEnforcement:
         assert counting_store.get_caller_cost_today.await_count == 2
 
     @pytest.mark.asyncio
-    async def test_store_failure_degrades_open(self, monkeypatch):
+    async def test_store_failure_fails_closed_for_budgeted_caller(self, monkeypatch):
         monkeypatch.setenv("UNIGROK_CALLER_BUDGETS", json.dumps({"codex-cli": 1.0}))
-        monkeypatch.delenv("UNIGROK_BUDGET_FAIL_CLOSED", raising=False)
-        broken_store = MagicMock()
-        broken_store.get_caller_cost_today = AsyncMock(side_effect=RuntimeError("db gone"))
-
-        await enforce_caller_budget(broken_store, "codex-cli")  # no raise
-
-    @pytest.mark.asyncio
-    async def test_store_failure_can_fail_closed(self, monkeypatch):
-        monkeypatch.setenv("UNIGROK_CALLER_BUDGETS", json.dumps({"codex-cli": 1.0}))
-        monkeypatch.setenv("UNIGROK_BUDGET_FAIL_CLOSED", "1")
         broken_store = MagicMock()
         broken_store.get_caller_cost_today = AsyncMock(side_effect=RuntimeError("db gone"))
 
@@ -500,7 +490,7 @@ class TestBudgetEnforcement:
             await enforce_caller_budget(broken_store, "codex-cli")
 
         assert str(raised.value) == (
-            "daily budget check unavailable; fail-closed policy is enabled"
+            "daily budget check unavailable; configured cap is fail-closed"
         )
         assert "db gone" not in str(raised.value)
 
