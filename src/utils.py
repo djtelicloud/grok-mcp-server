@@ -1293,6 +1293,15 @@ def redact_secrets(text: str) -> str:
         values = [raw_value.strip()]
         if name.upper() == "UNIGROK_API_KEYS":
             values.extend(part.strip() for part in raw_value.split(","))
+        elif name.upper() == "UNIGROK_API_KEY_RECORDS":
+            try:
+                records = json.loads(raw_value)
+            except (TypeError, ValueError):
+                records = None
+            if isinstance(records, dict):
+                values.extend(
+                    str(value).strip() for value in records.values()
+                )
         for value in values:
             if len(value) >= 8:
                 exact_values.add(value)

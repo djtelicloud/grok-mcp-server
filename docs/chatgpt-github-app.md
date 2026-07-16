@@ -31,7 +31,7 @@ development, an HTTPS tunnel may forward to `http://127.0.0.1:4765`.
    `https://<trusted-host>/mcp`.
 4. For the private remote service, configure the app through UniGrok's OAuth
    discovery flow. For a temporary local tunnel protected by
-   `UNIGROK_API_KEYS`, send only that narrowly scoped gateway client token.
+   `UNIGROK_API_KEY_RECORDS`, send only that narrowly scoped gateway record secret.
 5. Scan tools and confirm `review_pull_request` is read-only.
 6. Refresh the app after tool metadata or widget URI changes.
 

@@ -49,7 +49,7 @@ mutable data in a Docker volume mounted at `/state`, and publishes
 `127.0.0.1:4765`. It does not mount the UniGrok checkout or an IDE project.
 Compose declares that this is a trusted loopback-only host publication so the
 local service can run without a client token. Any direct non-loopback bind must
-enable authentication: static deployments use `UNIGROK_API_KEYS`; the private
+enable authentication: static deployments use stable `UNIGROK_API_KEY_RECORDS`; the private
 Cloud Run deployment instead uses `UNIGROK_OAUTH_INTROSPECTION_URL` and the
 associated OAuth discovery settings. Remove the
 `UNIGROK_TRUSTED_LOOPBACK_PROXY` declaration and configure one of those
@@ -111,8 +111,10 @@ even if both assert `X-Client-ID: vscode`. Budgets bind to the authenticated
 principal. Omitting the header shares that principal's client-neutral
 namespace.
 
-If the local/static gateway sets `UNIGROK_API_KEYS`, also add
-`"Authorization": "Bearer <one-of-those-keys>"` to each config's headers.
+If the local/static gateway sets stable `UNIGROK_API_KEY_RECORDS`, also add
+`"Authorization": "Bearer <that-record-secret>"` to each config's headers.
+Record IDs are durable principals; never reuse one ID for another person or
+service during secret rotation.
 OAuth-protected remote clients obtain a scoped access token through the
 published RFC 9728 metadata; they do not reuse an xAI key or a local static
 gateway token.
