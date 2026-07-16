@@ -58,6 +58,7 @@ from .utils import (
     grok_cli_plane_status,
     credential_plane_contract,
     is_cloudrun_runtime,
+    xai_api_key_configured,
     new_request_id,
     reset_request_id,
     redact_secrets,
@@ -1128,9 +1129,9 @@ async def readyz(_: Request) -> JSONResponse:
         cli_plane = {"ready": False}
     checks: Dict[str, bool] = {
         # Compatibility note: this public key predates the dual-plane runtime.
-        # API credentials are checked for presence only; the CLI branch is a
-        # live OAuth probe.
-        "model_auth": bool(os.environ.get("XAI_API_KEY", "").strip())
+        # API credentials use the usable-key gate (placeholder sentinels are
+        # not configured); the CLI branch is a live OAuth probe.
+        "model_auth": xai_api_key_configured()
         or bool(cli_plane.get("ready")),
         "state_dir_writable": False,
         "database": False,
@@ -1193,7 +1194,7 @@ async def runtimez(request: Request) -> JSONResponse:
                 ),
             },
             "api_plane": {
-                "xai_api_key": bool(os.environ.get("XAI_API_KEY", "").strip()),
+                "xai_api_key": xai_api_key_configured(),
             },
             "gateway_auth": {
                 "enabled": _auth_is_active() and not _request_may_bypass_auth(request.scope),

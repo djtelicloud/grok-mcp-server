@@ -718,6 +718,50 @@ def test_readyz_accepts_cli_auth_without_xai_api_key(monkeypatch, tmp_path):
     assert res.json()["checks"]["model_auth"] is True
 
 
+def test_readyz_rejects_placeholder_xai_api_key_without_cli(monkeypatch, tmp_path):
+    """Placeholder sentinel is non-empty but unusable — do not report ready."""
+    monkeypatch.delenv("UNIGROK_RUNTIME", raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("XAI_API_KEY", "your_xai_api_key_here")
+    monkeypatch.setattr(
+        "src.http_server.grok_cli_plane_status",
+        lambda **_: {
+            "state": "missing_binary",
+            "ready": False,
+            "binary": False,
+            "auth": "unknown",
+            "setup_command": "grok login",
+        },
+    )
+
+    with TestClient(create_app()) as client:
+        res = client.get("/readyz")
+
+    assert res.status_code == 503
+    assert res.json()["checks"]["model_auth"] is False
+
+
+def test_runtimez_reports_placeholder_xai_api_key_as_absent(monkeypatch):
+    monkeypatch.delenv("UNIGROK_RUNTIME", raising=False)
+    monkeypatch.setenv("XAI_API_KEY", "your_xai_api_key_here")
+    monkeypatch.setattr(
+        "src.http_server.grok_cli_plane_status",
+        lambda **_: {
+            "state": "missing_binary",
+            "ready": False,
+            "binary": False,
+            "auth": "unknown",
+            "setup_command": "grok login",
+        },
+    )
+
+    with TestClient(create_app()) as client:
+        res = client.get("/runtimez")
+
+    assert res.status_code == 200
+    assert res.json()["api_plane"]["xai_api_key"] is False
+
+
 def test_readyz_body_stays_boolean_on_failure(monkeypatch):
     """The auth-exempt probe must not disclose exception text or filesystem
     paths; failures are logged server-side and the body carries booleans only."""
