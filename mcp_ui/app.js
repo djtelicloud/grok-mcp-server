@@ -1,9 +1,9 @@
-import { parseMarkdown, sanitizeHref } from "./markdown.js?v=grok-v0.6.0-r10";
+import { parseMarkdown, sanitizeHref } from "./markdown.js?v=grok-v0.6.0-r11";
 
 // Must match the <meta name="unigrok-ui-version"> baked into index.html and
 // src/version.py UI_ASSET_VERSION; a mismatch means the browser paired a
 // cached page with a different script build (the stale-skew failure class).
-const UI_ASSET_VERSION = "grok-v0.6.0-r10";
+const UI_ASSET_VERSION = "grok-v0.6.0-r11";
 
 const LAYOUT_KEY = "unigrok.mcp.console.layout.v2";
 
@@ -1896,17 +1896,25 @@ function renderFactsPane(method, response, elapsed) {
     return;
   }
 
-  // A FastMCP tool exception arrives as result.isError with the message in
-  // content[0].text — that is a failed run, never a SUCCESS receipt.
-  if (response.result?.isError) {
-    const status = setText("factStatus", "TOOL ERROR");
-    if (status) status.style.color = "var(--red)";
-  } else {
-    const status = setText("factStatus", "SUCCESS");
-    if (status) status.style.color = "var(--teal)";
-  }
-
   const payload = extractToolPayload(response);
+  // Status must reflect AgentResult.finish_reason too: credential/plane
+  // failures return a normal tools/call payload (not result.isError), so a
+  // green SUCCESS receipt would lie about the outcome.
+  let statusLabel = "SUCCESS";
+  let statusColor = "var(--teal)";
+  if (response.result?.isError) {
+    statusLabel = "TOOL ERROR";
+    statusColor = "var(--red)";
+  } else if (payload.finish_reason === "error") {
+    statusLabel = "FAILED";
+    statusColor = "var(--red)";
+  } else if (payload.finish_reason === "fallback" || payload.degraded === true) {
+    statusLabel = "DEGRADED";
+    statusColor = "var(--orange)";
+  }
+  const status = setText("factStatus", statusLabel);
+  if (status) status.style.color = statusColor;
+
   setText("factTokens", payload.tokens || "-");
   // The wire may deliver cost as a number or a serialized string; only a
   // finite value renders as currency.
@@ -1967,8 +1975,14 @@ async function callAgent(prompt) {
       addMessageBubble("error", `Tool error: ${payload.response || payload.text || "unknown tool failure"}`);
       return;
     }
-
     const answer = payload.text || payload.response || "No response field returned.";
+    // finish_reason=error is a completed tools/call with a failed agent turn
+    // (e.g. credential-setup) — show it as an error bubble, not an agent answer.
+    if (payload.finish_reason === "error") {
+      addMessageBubble("error", answer);
+      return;
+    }
+
     addMessageBubble("agent", answer);
     renderCitations(payload.citations);
   } catch (err) {
