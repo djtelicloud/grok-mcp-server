@@ -1,5 +1,11 @@
 # GitHub Copilot instructions for UniGrok
 
+## Talk to humans first
+
+**Short plain answers** in chat. Brand + Ready/Live/Blocked + plain task title.
+No diffs, tool dumps, or git lectures unless the human asked. Full law:
+`.agents/AGENTS.md` → **Talk to humans first** / **Human language**.
+
 Read `AGENTS.md` and `.agents/AGENTS.md` before changing this repository. Their
 shared rules are authoritative.
 

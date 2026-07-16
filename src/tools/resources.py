@@ -38,7 +38,9 @@ def _to_json(payload: Any) -> str:
 # session listing, and the assembled document as a whole.
 # Keep enough headroom for the shared rules' coordination sections while the
 # total resource clamp still bounds the payload sent to every connected agent.
-_WORKSPACE_DOC_LIMIT = 8000
+# Talk-to-humans banner sits above Multi-Agent Git Coordination; 12k keeps
+# that section inside the per-file clamp after the mandatory top block grew.
+_WORKSPACE_DOC_LIMIT = 12000
 _WORKSPACE_TOTAL_LIMIT = 24000
 _WORKSPACE_SESSION_LIMIT = 20
 _WORKSPACE_GIT_TTL_SEC = 30.0
