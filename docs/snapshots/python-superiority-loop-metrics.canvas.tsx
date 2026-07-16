@@ -2,7 +2,7 @@
  * SNAPSHOT ONLY — repo history mirror of the IDE canvas.
  * Public share surface: docs/python-superiority-loop.md + .html
  * Live IDE canvas: ~/.cursor/projects/.../canvases/python-superiority-loop-metrics.canvas.tsx
- * Snapshot: 2026-07-16T17:06:47Z · 46/210 Ready plans
+ * Snapshot: 2026-07-16T17:12:45Z · 76/210 Ready plans (#342–#420)
  */
 import {
   BarChart,
@@ -41,7 +41,7 @@ type FileMetric = {
   loop: number;
 };
 
-/** Embedded from unigrok-intelligence tracker · 2026-07-16T17:08:42Z */
+/** Embedded from unigrok-intelligence tracker · 2026-07-16T17:12:45Z */
 const FILES: FileMetric[] = [
   {
     file: "src/utils.py",
@@ -368,7 +368,7 @@ const FILES: FileMetric[] = [
     before: 800,
     after: 100,
     parseMs: 2.35,
-    compileMs: 2.0,
+    compileMs: 2,
     pr: 373,
     status: "Ready",
     loop: 30,
@@ -396,7 +396,7 @@ const FILES: FileMetric[] = [
     loop: 32,
   },
   {
-    file: "tests/campaigns/.../test_stage1_schema_safety.py",
+    file: "tests/.../test_stage1_schema_safety.py",
     short: "test_stage1_schema_safety.py",
     before: 721,
     after: 90,
@@ -484,7 +484,7 @@ const FILES: FileMetric[] = [
     loop: 40,
   },
   {
-    file: "tests/campaigns/.../test_attempt_ledger_safety.py",
+    file: "tests/.../test_attempt_ledger_safety.py",
     short: "test_attempt_ledger_safety.py",
     before: 612,
     after: 80,
@@ -572,7 +572,7 @@ const FILES: FileMetric[] = [
     loop: 48,
   },
   {
-    file: "tests/campaigns/.../test_provider_contract.py",
+    file: "tests/.../test_provider_contract.py",
     short: "test_provider_contract.py",
     before: 533,
     after: 70,
@@ -627,7 +627,7 @@ const FILES: FileMetric[] = [
     loop: 53,
   },
   {
-    file: "tests/campaigns/.../test_stage1_mock_harness.py",
+    file: "tests/.../test_stage1_mock_harness.py",
     short: "test_stage1_mock_harness.py",
     before: 477,
     after: 60,
@@ -659,10 +659,230 @@ const FILES: FileMetric[] = [
     status: "Ready",
     loop: 56,
   },
+  {
+    file: "evals/.../validators.py",
+    short: "validators.py",
+    before: 465,
+    after: 50,
+    parseMs: 1.46,
+    compileMs: 1.61,
+    pr: 400,
+    status: "Ready",
+    loop: 57,
+  },
+  {
+    file: "src/semantic_evals.py",
+    short: "semantic_evals.py",
+    before: 463,
+    after: 60,
+    parseMs: 1.18,
+    compileMs: 1.14,
+    pr: 401,
+    status: "Ready",
+    loop: 58,
+  },
+  {
+    file: "tests/test_github_review_integration.py",
+    short: "test_github_review_integration.py",
+    before: 484,
+    after: 60,
+    parseMs: 1.57,
+    compileMs: 1.25,
+    pr: 402,
+    status: "Ready",
+    loop: 59,
+  },
+  {
+    file: "tests/test_semantic_evals.py",
+    short: "test_semantic_evals.py",
+    before: 441,
+    after: 55,
+    parseMs: 1.75,
+    compileMs: 1.31,
+    pr: 403,
+    status: "Ready",
+    loop: 60,
+  },
+  {
+    file: "scripts/bootstrap_intelligence_refs.py",
+    short: "bootstrap_intelligence_refs.py",
+    before: 435,
+    after: 55,
+    parseMs: 1.84,
+    compileMs: 1.28,
+    pr: 404,
+    status: "Ready",
+    loop: 61,
+  },
+  {
+    file: "scripts/supervisor_approval.py",
+    short: "supervisor_approval.py",
+    before: 394,
+    after: 50,
+    parseMs: 1.65,
+    compileMs: 1.75,
+    pr: 405,
+    status: "Ready",
+    loop: 62,
+  },
+  {
+    file: "src/metrics.py",
+    short: "metrics.py",
+    before: 422,
+    after: 55,
+    parseMs: 1.64,
+    compileMs: 1.46,
+    pr: 406,
+    status: "Ready",
+    loop: 63,
+  },
+  {
+    file: "tests/.../test_provider_smoke.py",
+    short: "test_provider_smoke.py",
+    before: 407,
+    after: 50,
+    parseMs: 1.36,
+    compileMs: 1.09,
+    pr: 407,
+    status: "Ready",
+    loop: 64,
+  },
+  {
+    file: "tests/test_install_unigrok_theme.py",
+    short: "test_install_unigrok_theme.py",
+    before: 395,
+    after: 50,
+    parseMs: 1.25,
+    compileMs: 0.87,
+    pr: 409,
+    status: "Ready",
+    loop: 65,
+  },
+  {
+    file: "tests/test_intelligence_refs_bootstrap.py",
+    short: "test_intelligence_refs_bootstrap.py",
+    before: 389,
+    after: 50,
+    parseMs: 1.5,
+    compileMs: 1.39,
+    pr: 410,
+    status: "Ready",
+    loop: 66,
+  },
+  {
+    file: "tests/test_metrics.py",
+    short: "test_metrics.py",
+    before: 388,
+    after: 50,
+    parseMs: 1.93,
+    compileMs: 1.26,
+    pr: 411,
+    status: "Ready",
+    loop: 67,
+  },
+  {
+    file: "src/providers/base.py",
+    short: "base.py",
+    before: 380,
+    after: 45,
+    parseMs: 1.11,
+    compileMs: 1.05,
+    pr: 412,
+    status: "Ready",
+    loop: 68,
+  },
+  {
+    file: "scripts/check_agent_attribution.py",
+    short: "check_agent_attribution.py",
+    before: 369,
+    after: 45,
+    parseMs: 1.69,
+    compileMs: 1.54,
+    pr: 413,
+    status: "Ready",
+    loop: 69,
+  },
+  {
+    file: "tests/test_workspace_memory.py",
+    short: "test_workspace_memory.py",
+    before: 365,
+    after: 45,
+    parseMs: 1.75,
+    compileMs: 1.14,
+    pr: 414,
+    status: "Ready",
+    loop: 70,
+  },
+  {
+    file: "scripts/github-grok-review.py",
+    short: "github-grok-review.py",
+    before: 350,
+    after: 45,
+    parseMs: 1.61,
+    compileMs: 1.46,
+    pr: 415,
+    status: "Ready",
+    loop: 71,
+  },
+  {
+    file: "src/jobs.py",
+    short: "jobs.py",
+    before: 381,
+    after: 45,
+    parseMs: 1.23,
+    compileMs: 1.5,
+    pr: 416,
+    status: "Ready",
+    loop: 72,
+  },
+  {
+    file: "tests/test_land_workflow.py",
+    short: "test_land_workflow.py",
+    before: 388,
+    after: 45,
+    parseMs: 2.01,
+    compileMs: 1.7,
+    pr: 417,
+    status: "Ready",
+    loop: 73,
+  },
+  {
+    file: "tests/test_xai_client_authority.py",
+    short: "test_xai_client_authority.py",
+    before: 334,
+    after: 45,
+    parseMs: 1.13,
+    compileMs: 1.02,
+    pr: 418,
+    status: "Ready",
+    loop: 74,
+  },
+  {
+    file: "src/storage.py",
+    short: "storage.py",
+    before: 342,
+    after: 40,
+    parseMs: 1.27,
+    compileMs: 0.98,
+    pr: 419,
+    status: "Ready",
+    loop: 75,
+  },
+  {
+    file: "tests/test_swarm_storage.py",
+    short: "test_swarm_storage.py",
+    before: 312,
+    after: 40,
+    parseMs: 1.32,
+    compileMs: 1.1,
+    pr: 420,
+    status: "Ready",
+    loop: 76,
+  },
 ];
 
 const TOTAL_INVENTORY = 210;
-const SNAPSHOT = "Tracker 2026-07-16T17:08:42Z · projected facade/shim LOC";
+const SNAPSHOT = "Tracker 2026-07-16T17:12:45Z · projected facade/shim LOC";
 
 function pctChange(before: number, after: number): number {
   if (before <= 0) return 0;
@@ -816,8 +1036,7 @@ export default function PythonSuperiorityLoopMetrics() {
                 {fmtLoc(totalAfter - totalBefore)} lines)
               </Text>
               <Text size="small" tone="tertiary">
-                Next pending: evals/.../validators.py (~465 LOC)
-              </Text>
+                Next pending: tests/test_supervisor_approval.py (~301 LOC)</Text>
             </Row>
           </Stack>
         </CardBody>
