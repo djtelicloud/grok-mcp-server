@@ -146,17 +146,44 @@ def test_enable_config_rejects_git_checkout(tmp_path: Path) -> None:
         check=False,
     )
     assert result.returncode == 2
-    assert "not inside a Git checkout" in result.stderr or "not a Git checkout" in result.stderr
+    assert "not a Git checkout" in result.stderr
     assert 'theme = "tokyonight"' in config.read_text(encoding="utf-8")
     assert not (grok_home / "config.toml.unigrok-theme-bak").exists()
 
 
 @pytest.mark.skipif(not DESIGN_TOML.is_file(), reason="theme design artifacts not on this checkout")
-def test_reject_nested_path_inside_git_worktree(tmp_path: Path) -> None:
-    root = tmp_path / "repo"
-    nested = root / ".grok"
-    nested.mkdir(parents=True)
-    (root / ".git").mkdir()
+def test_reject_nested_path_inside_product_checkout(tmp_path: Path) -> None:
+    nested = REPO / ".grok-theme-install-test"
+    nested.mkdir(parents=True, exist_ok=True)
+    try:
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPT),
+                "--repo",
+                str(REPO),
+                "--grok-home",
+                str(nested),
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 2
+        assert "inside the product checkout" in result.stderr
+        assert not (nested / "themes").exists()
+    finally:
+        if nested.exists():
+            nested.rmdir()
+
+
+@pytest.mark.skipif(not DESIGN_TOML.is_file(), reason="theme design artifacts not on this checkout")
+def test_allow_grok_home_under_unrelated_git_root(tmp_path: Path) -> None:
+    """A Git root at $HOME must not block a normal ~/.grok-style config dir."""
+    home_git = tmp_path / "home"
+    grok_home = home_git / ".grok"
+    grok_home.mkdir(parents=True)
+    (home_git / ".git").mkdir()
 
     result = subprocess.run(
         [
@@ -165,15 +192,14 @@ def test_reject_nested_path_inside_git_worktree(tmp_path: Path) -> None:
             "--repo",
             str(REPO),
             "--grok-home",
-            str(nested),
+            str(grok_home),
         ],
         capture_output=True,
         text=True,
         check=False,
     )
-    assert result.returncode == 2
-    assert "Git checkout" in result.stderr
-    assert not (nested / "themes").exists()
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert (grok_home / "themes" / "unigrok.toml").is_file()
 
 
 @pytest.mark.skipif(not DESIGN_TOML.is_file(), reason="theme design artifacts not on this checkout")

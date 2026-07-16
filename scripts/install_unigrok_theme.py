@@ -130,14 +130,26 @@ def _sources(repo: Path) -> list[tuple[Path, str]]:
     ]
 
 
-def _reject_git_home(grok_home: Path) -> int | None:
-    """Refuse paths inside a Git work tree (user config dir only)."""
-    cur = grok_home.expanduser().resolve()
-    for candidate in (cur, *cur.parents):
-        if (candidate / ".git").exists():
+def _reject_git_home(grok_home: Path, *, repo: Path | None = None) -> int | None:
+    """Refuse GROK_HOME that is a Git root or lives inside the product checkout."""
+    home = grok_home.expanduser().resolve()
+    if (home / ".git").exists():
+        print(
+            "error: --grok-home / GROK_HOME must be a user config directory, "
+            "not a Git checkout",
+            file=sys.stderr,
+        )
+        return 2
+    if repo is not None:
+        product = repo.expanduser().resolve()
+        try:
+            home.relative_to(product)
+        except ValueError:
+            pass
+        else:
             print(
-                "error: --grok-home / GROK_HOME must be a user config directory, "
-                "not inside a Git checkout",
+                "error: --grok-home / GROK_HOME must not be inside the product "
+                "checkout; use a user config directory such as ~/.grok",
                 file=sys.stderr,
             )
             return 2
@@ -200,7 +212,7 @@ def install(
     force: bool,
 ) -> int:
     themes = grok_home / "themes"
-    rejected = _reject_git_home(grok_home)
+    rejected = _reject_git_home(grok_home, repo=repo)
     if rejected is not None:
         return rejected
 
@@ -292,9 +304,9 @@ def check(*, repo: Path, grok_home: Path) -> int:
     return 1
 
 
-def enable_config(*, grok_home: Path, dry_run: bool) -> int:
+def enable_config(*, grok_home: Path, dry_run: bool, repo: Path | None = None) -> int:
     """Best-effort write [ui] theme = unigrok. Does not promise Grok 0.2.x loads it."""
-    rejected = _reject_git_home(grok_home)
+    rejected = _reject_git_home(grok_home, repo=repo)
     if rejected is not None:
         return rejected
     config = grok_home / "config.toml"
@@ -371,7 +383,7 @@ def main(argv: list[str] | None = None) -> int:
         if code != 0:
             return code
         if args.enable_config:
-            return enable_config(grok_home=grok_home, dry_run=args.dry_run)
+            return enable_config(grok_home=grok_home, dry_run=args.dry_run, repo=repo)
         return 0
 
     code = install(
@@ -383,7 +395,7 @@ def main(argv: list[str] | None = None) -> int:
     if code != 0:
         return code
     if args.enable_config:
-        return enable_config(grok_home=grok_home, dry_run=args.dry_run)
+        return enable_config(grok_home=grok_home, dry_run=args.dry_run, repo=repo)
     return 0
 
 
