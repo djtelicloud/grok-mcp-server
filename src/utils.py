@@ -48,7 +48,7 @@ from .xai_credentials import (
     _require_xai_management_key,
     _xai_management_key_state,
 )
-from .identity import (
+from .identity import (  # noqa: F401
     _ACTIVE_CALLER,
     _ACTIVE_CLIENT_ID,
     _ACTIVE_PRINCIPAL,
