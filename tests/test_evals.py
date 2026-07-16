@@ -612,13 +612,24 @@ class TestRoutingAdvisorCalibration:
 # UNIGROK_EVAL_RECORD tap
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _seed_inference_client(utils, monkeypatch, raw, *, api_key: str = "eval-test-key") -> None:
+    """Put a fake client in the fingerprint cache for the active key."""
+    from src.principal_xai import xai_api_key_fingerprint
+
+    monkeypatch.setenv("XAI_API_KEY", api_key)
+    monkeypatch.delenv("UNIGROK_PRINCIPAL_XAI_KEYS_JSON", raising=False)
+    monkeypatch.setattr(utils, "XAI_API_KEY", api_key)
+    utils._clients.clear()
+    utils._clients[xai_api_key_fingerprint(api_key)] = raw
+
+
 class TestEvalRecordingTap:
     def test_off_by_default_returns_raw_client(self, monkeypatch):
         import src.utils as utils
 
         monkeypatch.delenv("UNIGROK_EVAL_RECORD", raising=False)
         raw = FakeClient(responses=[make_response(content="hi")])
-        monkeypatch.setattr(utils, "_client", raw)
+        _seed_inference_client(utils, monkeypatch, raw)
         assert get_xai_client() is raw
 
     def test_on_records_sample_events(self, tmp_path, monkeypatch):
@@ -628,7 +639,7 @@ class TestEvalRecordingTap:
         monkeypatch.setenv("UNIGROK_EVAL_RECORD", "1")
         monkeypatch.setenv("UNIGROK_EVAL_RECORD_FILE", str(record_file))
         raw = FakeClient(responses=[make_response(content="recorded answer", cost_usd=0.007)])
-        monkeypatch.setattr(utils, "_client", raw)
+        _seed_inference_client(utils, monkeypatch, raw)
 
         client = get_xai_client()
         assert isinstance(client, _EvalRecordingClient)
@@ -659,7 +670,7 @@ class TestEvalRecordingTap:
         monkeypatch.setenv("UNIGROK_EVAL_RECORD_FILE", str(record_file))
         leaked = "the key is XAI_API_KEY=xai-recordedsecret1234 as configured"
         raw = FakeClient(responses=[make_response(content=leaked)])
-        monkeypatch.setattr(utils, "_client", raw)
+        _seed_inference_client(utils, monkeypatch, raw)
 
         client = get_xai_client()
         chat = client.chat.create(model="grok-4.3")
@@ -687,7 +698,7 @@ class TestEvalRecordingTap:
                 return make_response(content="x")
 
         raw = SimpleNamespace(chat=SimpleNamespace(create=lambda **kw: _ParselessChat()))
-        monkeypatch.setattr(utils, "_client", raw)
+        _seed_inference_client(utils, monkeypatch, raw)
         chat = get_xai_client().chat.create(model="m")
         assert not hasattr(chat, "parse")
         assert hasattr(FakeChat(responses=[]), "parse")
