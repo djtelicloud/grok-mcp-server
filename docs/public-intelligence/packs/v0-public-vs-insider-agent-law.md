@@ -1,6 +1,6 @@
 # Public pack — Public vs insider agent law
 
-**Audience:** public installers and any agent connected only to stable MCP  
+**Audience:** public installers and any agent connected only to stable MCP
 **Pack id:** `public-vs-insider-agent-law` · **version:** `v0`
 
 Distilled from multi-brand gym work on audience split. Safe to ship: no secrets,

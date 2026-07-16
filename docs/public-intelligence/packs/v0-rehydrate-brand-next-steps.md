@@ -1,6 +1,6 @@
 # Public pack v0 — Rehydrate with brand next steps
 
-**Audience:** contributor agents developing UniGrok (product checkout)  
+**Audience:** contributor agents developing UniGrok (product checkout)
 **Pack id:** `rehydrate-brand-next-steps` · **version:** `v0`
 
 Distilled from multi-brand UniGrok gym work. Safe to ship: no secrets, no private
