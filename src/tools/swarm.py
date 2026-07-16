@@ -920,8 +920,123 @@ async def _reverify(task: Dict[str, Any], target: Path, original: bytes) -> tupl
     return passed, output
 
 
+async def plan_swarm_campaign(
+    target_paths: List[str],
+    test_roots: List[str] = ["tests"],
+    max_targets: int = 5,
+) -> Dict[str, Any]:
+    """Perform a wide-pass analysis to find swarmable hotspot functions.
+    
+    Deterministically maps files/functions to available tests and categorizes
+    them into a campaign plan without executing any code.
+    
+    Args:
+        target_paths: Workspace-relative paths to files or directories to scan.
+        test_roots: Workspace-relative paths where tests live (default: ["tests"]).
+        max_targets: Maximum number of swarm-ready targets to rank and return.
+    """
+    workspace = PathResolver.get_workspace_root()
+    if workspace is None:
+        return {"error": "A workspace must be attached to plan a campaign."}
+        
+    resolved_targets: List[Path] = []
+    for tp in target_paths:
+        try:
+            rp = _resolve_workspace_input(tp, "target_paths element")
+            if rp.is_file() and rp.suffix == ".py":
+                resolved_targets.append(rp)
+            elif rp.is_dir():
+                resolved_targets.extend([p for p in rp.rglob("*.py") if p.is_file()])
+        except Exception as e:
+            logger.warning(f"Skipping {tp}: {e}")
+            
+    # Remove duplicates
+    resolved_targets = list({p.resolve(): p for p in resolved_targets}.values())
+    
+    candidates = []
+    non_swarm = []
+    
+    for rp in resolved_targets:
+        try:
+            source = rp.read_text(encoding="utf-8")
+            analytics = await analyze_python_source_full(source)
+            if not analytics.get("parse_ok"):
+                continue
+                
+            rel_path = str(rp.relative_to(workspace))
+            
+            for func in analytics.get("functions", []):
+                focus_node = func.get("focus_node")
+                loc = func.get("loc", 0)
+                complexity = func.get("cyclomatic_complexity", 0)
+                
+                # Filter trivial spans
+                if loc < 15 or complexity <= 3:
+                    non_swarm.append({
+                        "path": rel_path,
+                        "focus_node": focus_node,
+                        "reason": f"trivial span (loc={loc}, complexity={complexity}) -> ide_edit_not_swarm"
+                    })
+                    continue
+                    
+                # Heuristic oracle binding
+                base_name = rp.stem
+                test_file_candidates = []
+                for tr in test_roots:
+                    try:
+                        tr_path = _resolve_workspace_input(tr, "test_root")
+                        if tr_path.is_dir():
+                            # Check tests/test_{base_name}.py
+                            guess = tr_path / f"test_{base_name}.py"
+                            if guess.is_file():
+                                test_file_candidates.append(str(guess.relative_to(workspace)))
+                    except Exception:
+                        pass
+                        
+                if not test_file_candidates:
+                    candidates.append({
+                        "target_path": rel_path,
+                        "focus_node": focus_node,
+                        "searchability": "blocked",
+                        "blockers": ["missing_tests"],
+                        "signals": {"loc": loc, "complexity": complexity}
+                    })
+                else:
+                    # found tests
+                    candidates.append({
+                        "target_path": rel_path,
+                        "focus_node": focus_node,
+                        "searchability": "ready",
+                        "blockers": [],
+                        "suggested_launch": {
+                            "test_target": test_file_candidates[0]
+                        },
+                        "signals": {"loc": loc, "complexity": complexity}
+                    })
+        except Exception as e:
+            logger.warning(f"Failed to analyze {rp}: {e}")
+            
+    # Rank ready candidates by complexity * loc
+    ready = [c for c in candidates if c["searchability"] == "ready"]
+    ready.sort(key=lambda x: x["signals"]["complexity"] * x["signals"]["loc"], reverse=True)
+    ready = ready[:max_targets]
+    
+    # Assign ranks
+    for i, c in enumerate(ready):
+        c["rank"] = i + 1
+        
+    blocked = [c for c in candidates if c["searchability"] == "blocked"]
+    
+    return {
+        "format": "unigrok-swarm-campaign-plan-v1",
+        "candidates": ready + blocked,
+        "non_swarm": non_swarm
+    }
+
+
 def register_swarm_tools(mcp: FastMCP) -> None:
     mcp.add_tool(analyze_code_for_swarm, annotations=READONLY_TOOL)
+    mcp.add_tool(plan_swarm_campaign, annotations=READONLY_TOOL)
     mcp.add_tool(start_code_swarm)
     mcp.add_tool(start_paste_swarm)
     mcp.add_tool(get_swarm_status, annotations=READONLY_TOOL)
@@ -931,6 +1046,7 @@ def register_swarm_tools(mcp: FastMCP) -> None:
 
 
 register_internal_tool("analyze_code_for_swarm", analyze_code_for_swarm)
+register_internal_tool("plan_swarm_campaign", plan_swarm_campaign)
 register_internal_tool("start_code_swarm", start_code_swarm)
 register_internal_tool("start_paste_swarm", start_paste_swarm)
 register_internal_tool("get_swarm_status", get_swarm_status)
