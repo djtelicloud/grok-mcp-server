@@ -6863,12 +6863,23 @@ class GrokSessionStore:
                 return dict(row) if row else None
 
     @_with_read_retry_async
-    async def list_jobs(self, limit: int = 20) -> List[Dict[str, Any]]:
+    async def list_jobs(
+        self, limit: int = 20, caller: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
         await self._ensure_initialized()
         bounded = max(1, min(int(limit or 20), 100))
         async with self._read_conn() as conn:
+            if caller:
+                async with conn.execute(
+                    "SELECT * FROM jobs WHERE caller = ? "
+                    "ORDER BY created_at DESC, id DESC LIMIT ?",
+                    (caller, bounded),
+                ) as cursor:
+                    rows = await cursor.fetchall()
+                    return [dict(row) for row in rows]
             async with conn.execute(
-                "SELECT * FROM jobs ORDER BY created_at DESC, id DESC LIMIT ?", (bounded,)
+                "SELECT * FROM jobs ORDER BY created_at DESC, id DESC LIMIT ?",
+                (bounded,),
             ) as cursor:
                 rows = await cursor.fetchall()
                 return [dict(row) for row in rows]
