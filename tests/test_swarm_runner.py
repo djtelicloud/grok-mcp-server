@@ -5,9 +5,7 @@
 
 from datetime import datetime, timedelta
 
-import pytest
 
-import src.swarm.config as swarm_config
 from src.swarm.runner import effective_status, is_stale
 
 

@@ -2,13 +2,11 @@
 # Decomposed Media generation tools for UniGrok MCP
 
 import logging
-from pathlib import Path
-from typing import Any, Dict, Optional, List
+from typing import Optional, List
 from mcp.server.fastmcp import FastMCP
 from ..models.results import MediaResult
 
 from ..utils import (
-    store,
     get_xai_client,
     encode_image_to_base64,
     encode_video_to_base64,
