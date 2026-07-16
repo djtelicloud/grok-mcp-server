@@ -4606,6 +4606,16 @@ Replaces the old delete-then-reinsert save_history flow: a crash mid-way
 can no longer leave a session with partially rewritten history. The
 session row itself (cli_session_id/api_thread_id/model) is preserved.
 
+### Method: `GrokSessionStore.count_messages` {#utils-groksessionstore-count_messages}
+
+```python
+async def GrokSessionStore.count_messages(self, session_name: str) -> int
+```
+
+**Keywords:** grok, session, store, count, messages
+
+Number of persisted messages for a session (compaction drift checks).
+
 ### Method: `GrokSessionStore.create_job` {#utils-groksessionstore-create_job}
 
 ```python
