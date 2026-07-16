@@ -310,10 +310,11 @@ class MCPOriginMiddleware
 
 **Keywords:** mcp, origin, middleware
 
-Origin validation on /mcp and /v1 (MCP-spec DNS-rebinding protection).
+Origin validation on agent + operator surfaces (DNS-rebinding protection).
 
 /v1/chat/completions reaches the same agent backend as /mcp, so a rebound
-browser page must not be able to drive it either.
+browser page must not be able to drive it. /runtimez, /ui, /docs, and
+/metrics expose operator recon/UI and are guarded the same way.
 
 Pure ASGI for the same SSE-disconnect reason as GatewayAuthMiddleware.
 Loopback origins and the UNIGROK_ALLOWED_ORIGINS allowlist pass; any other
