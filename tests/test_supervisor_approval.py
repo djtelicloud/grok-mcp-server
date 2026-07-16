@@ -1,4 +1,9 @@
+from pathlib import Path
+
 from scripts.supervisor_approval import decide_gate, declared_risk, inferred_risk
+
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def _checks(*, cursor=True):
@@ -63,3 +68,10 @@ def test_risk_declaration_is_unambiguous():
     assert declared_risk("risk: low\nrisk: high", []) is None
     assert inferred_risk(["src/utils.py"]) == "medium"
     assert inferred_risk(["scripts/land"]) == "high"
+
+
+def test_supervisor_status_event_does_not_retrigger_its_own_workflow():
+    workflow = (ROOT / ".github" / "workflows" / "supervisor-approval.yml").read_text(
+        encoding="utf-8"
+    )
+    assert "github.event.context != 'Supervisor Approval'" in workflow
