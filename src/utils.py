@@ -3533,19 +3533,27 @@ class GrokSessionStore:
             if version < 18:
                 # Knowledge rows record the saving caller so forget_fact can
                 # refuse foreign deletes when a requester identity is bound.
+                # Tolerate legacy fixtures that stamped v7+ without the table.
                 await self._conn.execute("BEGIN IMMEDIATE;")
                 try:
-                    try:
+                    async with self._conn.execute(
+                        "SELECT 1 FROM sqlite_master "
+                        "WHERE type = 'table' AND name = 'knowledge'"
+                    ) as cursor:
+                        has_knowledge = await cursor.fetchone() is not None
+                    if has_knowledge:
+                        try:
+                            await self._conn.execute(
+                                "ALTER TABLE knowledge ADD COLUMN caller "
+                                "TEXT DEFAULT NULL;"
+                            )
+                        except aiosqlite.OperationalError as ddl_err:
+                            if "duplicate column" not in str(ddl_err).lower():
+                                raise
                         await self._conn.execute(
-                            "ALTER TABLE knowledge ADD COLUMN caller TEXT DEFAULT NULL;"
+                            "CREATE INDEX IF NOT EXISTS idx_knowledge_caller_id "
+                            "ON knowledge(caller, id DESC);"
                         )
-                    except aiosqlite.OperationalError as ddl_err:
-                        if "duplicate column" not in str(ddl_err).lower():
-                            raise
-                    await self._conn.execute(
-                        "CREATE INDEX IF NOT EXISTS idx_knowledge_caller_id "
-                        "ON knowledge(caller, id DESC);"
-                    )
                     await self._conn.execute("PRAGMA user_version = 18;")
                     await self._conn.commit()
                 except Exception:

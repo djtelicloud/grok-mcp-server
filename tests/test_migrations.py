@@ -428,7 +428,7 @@ class TestV16TelemetryAttempts:
         store = GrokSessionStore(db_path=db_path)
         try:
             await store._ensure_initialized()
-            assert await _fetch_version(store) == 17
+            assert await _fetch_version(store) == SCHEMA_HEAD
             assert await _fetch_columns(store, "telemetry_attempts") == {
                 "id",
                 "telemetry_id",
@@ -493,7 +493,7 @@ class TestV17ProviderAttemptCertification:
         try:
             with pytest.raises(RuntimeError, match="v17 columns"):
                 await store._ensure_initialized()
-            assert await _fetch_version(store) == 17
+            assert await _fetch_version(store) == SCHEMA_HEAD
         finally:
             await store.close()
 
@@ -514,7 +514,7 @@ class TestV17ProviderAttemptCertification:
         try:
             with pytest.raises(RuntimeError, match="v17 columns"):
                 await store._ensure_initialized()
-            assert await _fetch_version(store) == 17
+            assert await _fetch_version(store) == SCHEMA_HEAD
         finally:
             await store.close()
 
@@ -560,7 +560,7 @@ class TestV17ProviderAttemptCertification:
             await store.close()
         conn = sqlite3.connect(db_path)
         try:
-            assert conn.execute("PRAGMA user_version;").fetchone()[0] == 17
+            assert conn.execute("PRAGMA user_version;").fetchone()[0] == SCHEMA_HEAD
             assert (
                 conn.execute(
                     "SELECT sql FROM sqlite_master "
