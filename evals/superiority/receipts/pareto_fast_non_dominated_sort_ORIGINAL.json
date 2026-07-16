@@ -1,0 +1,151 @@
+{
+  "bundle": {
+    "files": [
+      "src/swarm/pareto.py"
+    ],
+    "loc_by_file": {
+      "src/swarm/pareto.py": 169
+    },
+    "total_loc": 169
+  },
+  "capture_note": "Paths normalized to repo-relative for commit; SHAs and metrics are from live ORIGINAL capture.",
+  "entry_point": "src.swarm.pareto:fast_non_dominated_sort",
+  "fixture_sha256": "89efceacbcbf87834b45fdcbafc4cf8399188067682c1c2d628c4d797521f14e",
+  "frozen_inputs": {
+    "points": [
+      [
+        1.0,
+        3.0
+      ],
+      [
+        2.0,
+        2.0
+      ],
+      [
+        3.0,
+        1.0
+      ],
+      [
+        1.5,
+        2.5
+      ],
+      [
+        2.5,
+        1.5
+      ],
+      [
+        0.5,
+        4.0
+      ],
+      [
+        4.0,
+        0.5
+      ],
+      [
+        2.0,
+        3.0
+      ],
+      [
+        3.0,
+        2.0
+      ],
+      [
+        1.0,
+        1.0
+      ]
+    ]
+  },
+  "gates": [
+    "G1",
+    "G2",
+    "G3",
+    "G5",
+    "G7",
+    "H1",
+    "H2",
+    "H3",
+    "H4",
+    "H5",
+    "H6"
+  ],
+  "git_commit": "55fd82c32822b4c7c6c1c94134b033bfcbd2a0dd",
+  "label": "ORIGINAL",
+  "latency": {
+    "inner_loops": 500,
+    "median_ms": 0.07728416804457083,
+    "noise_floor_pct": 5.0,
+    "outer_samples": 9,
+    "p50_ms": 0.07728416804457083,
+    "p95_ms": 0.07815823319833726,
+    "samples_ms": [
+      0.07586591603467241,
+      0.07747133396333084,
+      0.07728416804457083,
+      0.07570191600825638,
+      0.07661366800311953,
+      0.077489165996667,
+      0.07610475004184991,
+      0.07835683401208371,
+      0.07786033197771758
+    ],
+    "tracemalloc": false,
+    "warmups": 1
+  },
+  "memory": {
+    "inner_loops": 500,
+    "median_peak_mem_bytes": 920,
+    "method": "tracemalloc_separate_from_latency",
+    "peak_mem_bytes": 920,
+    "repeats": 5,
+    "samples_peak_mem_bytes": [
+      920,
+      920,
+      920,
+      920,
+      920
+    ],
+    "warmups": 1
+  },
+  "module_file": "src/swarm/pareto.py",
+  "oracle": {
+    "front0": [
+      5,
+      6,
+      9
+    ],
+    "front_partition_sha256": "dea701c7585647b26c53ea23befa8238e058baa69d12d041240c8d250d7697b7",
+    "fronts": [
+      [
+        5,
+        6,
+        9
+      ],
+      [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      [
+        7,
+        8
+      ]
+    ],
+    "index_count": 10,
+    "oracle": "brute_force_dominates+partition_sha256"
+  },
+  "parity": {
+    "note": "full-front partition + brute-force front0 (G1)",
+    "property_pass": true
+  },
+  "python": {
+    "executable": "/Users/djtelicloud/Documents/agentixai/grok-mcp-server/.worktrees/cursor/python-superiority-loop/.venv/bin/python3",
+    "implementation": "CPython",
+    "platform": "macOS-26.5.2-arm64-arm-64bit-Mach-O",
+    "version": "3.14.6 (main, Jun 23 2026, 15:46:31) [Clang 22.1.3 ]"
+  },
+  "schema": "unigrok-superiority-receipt-v1",
+  "source_path": "src/swarm/pareto.py",
+  "source_sha256": "d6bb5f0ad39fef820a263b65dd9ddc1e7ce1139b52c0b2fae8bc29358b60a633"
+}
