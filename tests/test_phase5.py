@@ -415,10 +415,13 @@ class TestResearchTools:
         assert res["jobs"][0]["job_id"] == "j-x"
 
     @pytest.mark.asyncio
-    async def test_get_research_job_hides_foreign_caller(self, monkeypatch):
+    async def test_get_research_job_hides_foreign_principal(self, monkeypatch):
         from types import SimpleNamespace
 
-        from src.utils import reset_active_caller, set_active_caller
+        from src.identity import (
+            reset_active_principal,
+            set_active_principal,
+        )
 
         manager = get_job_manager()
         monkeypatch.setattr(
@@ -433,48 +436,57 @@ class TestResearchTools:
                     "updated_at": "t",
                     "result": "secret-peer-answer",
                     "cost": 0.1,
-                    "caller": "codex-cli",
+                    "caller": "oauth:https%3A%2F%2Fcontrol.grokmcp.org:principal-a",
                 }
             ),
         )
-        token = set_active_caller("claude-code")
-        try:
-            res = await get_research_job("j-peer")
-        finally:
-            reset_active_caller(token)
-        assert res["status"] == "not_found"
-        assert "secret-peer-answer" not in str(res)
-
         ctx = SimpleNamespace(
             session=SimpleNamespace(
                 client_params=SimpleNamespace(
-                    clientInfo=SimpleNamespace(name="claude-code")
+                    clientInfo=SimpleNamespace(name="principal-a-spoof")
                 )
             )
         )
-        token = set_active_caller("claude-code")
+        token = set_active_principal(
+            "oauth:https%3A%2F%2Fcontrol.grokmcp.org:principal-b"
+        )
         try:
-            # Foreign persisted caller still hidden when ctx label differs.
-            monkeypatch.setattr(
-                manager._store,
-                "get_job",
-                AsyncMock(
-                    return_value={
-                        "id": "j-peer",
-                        "status": "done",
-                        "model": "m",
-                        "created_at": "t",
-                        "updated_at": "t",
-                        "result": "secret-peer-answer",
-                        "cost": 0.1,
-                        "caller": "codex-cli",
-                    }
-                ),
-            )
             res = await get_research_job("j-peer", ctx=ctx)
         finally:
-            reset_active_caller(token)
+            reset_active_principal(token)
         assert res["status"] == "not_found"
+        assert "secret-peer-answer" not in str(res)
+
+    @pytest.mark.asyncio
+    async def test_unbound_local_clientinfo_keeps_open_view(self, monkeypatch):
+        """Untrusted clientInfo does not invent an authorization boundary."""
+        manager = get_job_manager()
+        monkeypatch.setattr(
+            manager._store,
+            "get_job",
+            AsyncMock(
+                return_value={
+                    "id": "j-local",
+                    "status": "done",
+                    "model": "m",
+                    "created_at": "t",
+                    "updated_at": "t",
+                    "result": "trusted-local-result",
+                    "cost": 0.0,
+                    "caller": "other-local-client",
+                }
+            ),
+        )
+        ctx = SimpleNamespace(
+            session=SimpleNamespace(
+                client_params=SimpleNamespace(
+                    clientInfo=SimpleNamespace(name="local-client")
+                )
+            )
+        )
+        res = await get_research_job("j-local", ctx=ctx)
+        assert res["status"] == "done"
+        assert res["result"] == "trusted-local-result"
 
     @pytest.mark.asyncio
     async def test_list_research_jobs_scopes_to_bound_caller(self, monkeypatch):
@@ -505,8 +517,15 @@ class TestResearchTools:
         principal_token = set_active_principal(
             "oauth:https%3A%2F%2Fcontrol.grokmcp.org:stable-subject"
         )
+        ctx = SimpleNamespace(
+            session=SimpleNamespace(
+                client_params=SimpleNamespace(
+                    clientInfo=SimpleNamespace(name="spoofed-other-principal")
+                )
+            )
+        )
         try:
-            res = await list_research_jobs(limit=5)
+            res = await list_research_jobs(limit=5, ctx=ctx)
         finally:
             reset_active_principal(principal_token)
             reset_active_caller(token)

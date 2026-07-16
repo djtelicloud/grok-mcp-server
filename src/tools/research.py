@@ -7,18 +7,22 @@ from typing import Any, Dict, Optional
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import ToolAnnotations
 
-from ..identity import caller_from_mcp_context
-from ..jobs import get_job_manager, resolve_job_owner
+from ..identity import caller_from_mcp_context, get_active_principal
+from ..jobs import get_job_manager
 
 logger = logging.getLogger("GrokMCP")
 
 READONLY_TOOL = ToolAnnotations(readOnlyHint=True)
 
 
-def _job_requester(ctx: Optional[Context]) -> Optional[str]:
-    """Resolve the same durable owner used when the job was submitted."""
-    explicit = caller_from_mcp_context(ctx) if ctx is not None else None
-    return resolve_job_owner(explicit)
+def _job_requester(_ctx: Optional[Context]) -> Optional[str]:
+    """Scope reads only by the server-bound authenticated principal.
+
+    ``clientInfo`` is caller-controlled attribution, not an authorization
+    boundary. Trusted unbound local/stdio callers retain the historical open
+    view documented by these tools.
+    """
+    return get_active_principal()
 
 
 async def submit_research_job(

@@ -14,7 +14,8 @@ from typing import Any, Dict, Optional
 
 from mcp.server.fastmcp import FastMCP
 
-from ..jobs import get_job_manager, resolve_job_owner
+from ..identity import get_active_principal
+from ..jobs import get_job_manager
 from ..utils import (
     PathResolver,
     build_model_catalog,
@@ -138,7 +139,7 @@ def register_resource_primitives(mcp: FastMCP):
         mime_type="application/json",
     )
     async def job_resource(job_id: str) -> str:
-        view = await get_job_manager().get(job_id, caller=resolve_job_owner())
+        view = await get_job_manager().get(job_id, caller=get_active_principal())
         return _to_json(view if view is not None else {"status": "not_found", "job_id": job_id})
 
     @mcp.resource(
