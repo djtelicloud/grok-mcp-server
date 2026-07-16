@@ -138,6 +138,14 @@ def install(
     force: bool,
 ) -> int:
     themes = grok_home / "themes"
+    if (grok_home / ".git").exists():
+        print(
+            "error: --grok-home / GROK_HOME must be a user config directory, "
+            "not a Git checkout",
+            file=sys.stderr,
+        )
+        return 2
+
     sources = _sources(repo)
     missing = [str(src) for src, _ in sources if not src.is_file()]
     if missing:
@@ -157,22 +165,26 @@ def install(
             print(f"  - {err}", file=sys.stderr)
         return 2
 
-    if not dry_run:
-        themes.mkdir(parents=True, exist_ok=True)
-
-    planned: list[tuple[Path, Path]] = []
-    for src, dest_name in sources:
-        dest = themes / dest_name
-        planned.append((src, dest))
-        if dest.exists() and not force:
-            if _sha256(src) == _sha256(dest):
-                print(f"unchanged  {dest}")
-                continue
+    planned: list[tuple[Path, Path]] = [
+        (src, themes / dest_name) for src, dest_name in sources
+    ]
+    # Preflight all destinations before copying so a mid-loop conflict abort
+    # cannot leave a mixed partial install.
+    for src, dest in planned:
+        if dest.exists() and not force and _sha256(src) != _sha256(dest):
             print(
                 f"error: {dest} exists and differs from source; re-run with --force to overwrite",
                 file=sys.stderr,
             )
             return 3
+
+    if not dry_run:
+        themes.mkdir(parents=True, exist_ok=True)
+
+    for src, dest in planned:
+        if dest.exists() and not force:
+            print(f"unchanged  {dest}")
+            continue
         action = "would install" if dry_run else "install"
         print(f"{action:12} {src} -> {dest}")
         if not dry_run:
@@ -229,13 +241,25 @@ def enable_config(*, grok_home: Path, dry_run: bool) -> int:
         print(f"error: {config} not found; create a Grok config first", file=sys.stderr)
         return 2
     text = config.read_text(encoding="utf-8")
-    if re.search(r'(?m)^\s*theme\s*=\s*"unigrok"\s*$', text):
+    if re.search(r"""(?m)^\s*theme\s*=\s*["']unigrok["']\s*(?:#.*)?$""", text):
         print(f"already set: {config} has theme = \"unigrok\"")
         return 0
 
     new_text: str
     if re.search(r"(?m)^\s*theme\s*=", text):
-        new_text = re.sub(r'(?m)^(\s*theme\s*=\s*)".*?"\s*$', r'\1"unigrok"', text, count=1)
+        new_text = re.sub(
+            r"""(?m)^(\s*theme\s*=\s*)(["']).*\2\s*(?:#.*)?$""",
+            r'\1"unigrok"',
+            text,
+            count=1,
+        )
+        if new_text == text:
+            print(
+                f"error: {config} has a theme line that could not be updated; "
+                "set theme = \"unigrok\" manually",
+                file=sys.stderr,
+            )
+            return 2
     elif re.search(r"(?m)^\s*\[ui\]\s*$", text):
         new_text = re.sub(
             r"(?m)^(\s*\[ui\]\s*)$",
