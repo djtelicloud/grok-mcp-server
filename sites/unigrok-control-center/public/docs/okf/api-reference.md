@@ -3396,6 +3396,9 @@ async def cancel_swarm(task_id: str) -> str
 
 Cooperatively cancel a running swarm; the partial Pareto front is kept.
 
+When the request has a bound caller identity, only that caller's tasks may
+be cancelled (foreign ids look like missing).
+
 ### Function: `list_swarm_tasks` {#tools-swarm-list_swarm_tasks}
 
 ```python
@@ -3408,6 +3411,9 @@ List recent swarm tasks newest-first as a JSON array (id, effective
 status incl. staleness override, target, focus node, generations run,
 spend). The Playground's task picker consumes this — read-only, no gate:
 on a service that never ran a swarm it simply returns [].
+
+When the request has a bound caller identity, the list is scoped to that
+caller. Unbound local callers keep the historical open listing.
 
 ### Function: `plan_swarm_campaign` {#tools-swarm-plan_swarm_campaign}
 
@@ -4653,6 +4659,17 @@ async def GrokSessionStore.update_swarm_task(self, task_id: str, status: Optiona
 Update a swarm task row. updated_at ALWAYS bumps — the runner calls
 this after every candidate as its heartbeat, and staleness detection
 measures the time since the owning task last touched the row.
+
+### Method: `GrokSessionStore.list_swarm_tasks` {#utils-groksessionstore-list_swarm_tasks}
+
+```python
+async def GrokSessionStore.list_swarm_tasks(self, limit: int=20, caller: Optional[str]=None) -> List[Dict[str, Any]]
+```
+
+**Keywords:** grok, session, store, list, swarm, tasks
+
+Newest swarm tasks first. When ``caller`` is set, LIMIT applies to
+that caller's rows only (same contract as list_jobs).
 
 ### Method: `GrokSessionStore.insert_swarm_candidate` {#utils-groksessionstore-insert_swarm_candidate}
 
