@@ -70,9 +70,8 @@ and blocking questions are explicit exceptions.
 
 ## Human language (user-facing — mandatory)
 
-The sponsor is **not** a git operator. **Ready for supervisor** maps multi-agent UniGrok product shipping — not a vibe user's unrelated app (use Done/Blocked/plain English there).
-
 The sponsor is **not** a git operator. Match **intent**, not literal VCS vocabulary.
+**Ready for supervisor** maps multi-agent UniGrok product shipping — not a vibe user's unrelated app (use Done/Blocked/plain English there).
 Dyslexia-hostile jargon in answers is a product failure.
 
 ### Intent map (user words → agent duty)
