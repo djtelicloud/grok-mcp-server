@@ -1,6 +1,6 @@
 # Codex Active Work
 
-Last updated: 2026-07-16T17:50:41Z
+Last updated: 2026-07-16T17:52:41Z
 Owner: Codex integration coordinator
 Status: Current critical repairs are merged and Live; the security queue remains active.
 
@@ -49,13 +49,14 @@ credentials, OAuth codes, tokens, or private keys here.
 ## Active queue and safety posture
 
 - Python-superiority campaign PR #475 is held at exact head
-  `8e7331c2cc1abaf55da23c053abe7f8bf53dbcee`. Its contributor baseline at the
+  `ba2daa269956997fe28fe8449099f8eed53a519c`. Its contributor baseline at the
   prior head passed 2,202 tests, but two Forge tasks
   (`f29b306130e945f8a34eaa44b91fcb39` and
   `eca231fdad094aab9e909728f13035df`) failed before candidate generation
   because preflight stripped the repository's required `src.` package prefix.
   Grok's new unconditional keep-`src` commit is narrower than #476 and is not
-  the approved repair.
+  the approved repair. Its final scoreboard reclassification is accepted as
+  honest bookkeeping: 0 measured wins, 1 held target, 77 plans, 133 skips.
 - Draft #476 repairs that Forge import-provenance bug. Codex's focused suite
   passed 27 tests and the full suite passed 2,204 tests. Normal Codex must
   independently review and land it, then refresh the Forge runtime before

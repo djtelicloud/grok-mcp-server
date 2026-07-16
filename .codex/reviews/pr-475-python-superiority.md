@@ -4,23 +4,25 @@
 
 - PR: `djtelicloud/grok-mcp-server#475`
 - Exact base SHA: `ea15d046c25b6e58a9a3d8d118d4191c161efc07`
-- Exact candidate SHA: `8e7331c2cc1abaf55da23c053abe7f8bf53dbcee`
+- Exact candidate SHA: `ba2daa269956997fe28fe8449099f8eed53a519c`
 - Forge task ids: `f29b306130e945f8a34eaa44b91fcb39`,
   `eca231fdad094aab9e909728f13035df`
 - Verdict: `needs changes`
 - Public-results status: `held`
 
-PR #475 is a documentation-only inventory, not measured optimization evidence
-and not an actionable bulk refactor plan. Do not hand it to the normal Codex
-landing loop as approved work.
+PR #475 is a documentation inventory plus an unapproved Forge adapter edit,
+not measured optimization evidence and not an actionable bulk refactor plan.
+Do not hand it to the normal Codex landing loop as approved work.
 
 ## Inspected packet
 
-- 76 commits and 70 changed files: 69 plans under `docs/design/` plus one
-  production edit in `src/swarm/preflight.py`
-- 1,807 added lines and 5 deleted lines; no new test, oracle, or benchmark code
+- 77 commits and 71 changed files: 69 plans under `docs/design/`, one scoreboard
+  reclassification, plus one production edit in `src/swarm/preflight.py`
+- 1,845 added lines and 5 deleted lines; no new test, oracle, or benchmark code
 - Cursor campaign report: 201 plans done, 9 skipped, 0 pending
 - 126 historical per-file draft PRs plus the 75 in-tree continuation commits
+- reclassified scoreboard: 0 measured wins, 1 Swarm-ready target held, 77 plans
+  kept, and 133 targets skipped
 - no unresolved review threads on #475 at review time
 - contributor baseline at prior head `bda882ffbf6e2436b09af5d316a4c3cfb26ae1ad`:
   2,202 tests passed in 102.31 seconds
@@ -36,8 +38,11 @@ real measured candidate, Grok started task
 provenance before generation because Forge stripped the required `src.` package
 prefix. Neither produced a candidate or performance verdict.
 
-Grok then committed an unconditional keep-`src` repair at the current #475
-head. That fixes UniGrok but regresses conventional repositories where `src/`
+Grok then committed an unconditional keep-`src` repair, followed by an honest
+scoreboard reclassification at the current #475 head. The scoreboard correctly
+labels projected LOC as projected and measured wins as zero; it is bookkeeping,
+not performance evidence. The adapter edit fixes UniGrok but regresses
+conventional repositories where `src/`
 is a package container rather than the package name, and it adds no regression
 tests or generated API mirror update. Codex's draft #476 instead detects
 `src/__init__.py` inside the sandbox, covers both layouts, and passed the full
