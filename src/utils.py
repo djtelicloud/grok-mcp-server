@@ -3580,7 +3580,7 @@ class GrokSessionStore:
                         raise RuntimeError("jobs caller index is incompatible")
                     await self._conn.execute("PRAGMA user_version = 18;")
                     await self._conn.commit()
-                except Exception:
+                except BaseException:
                     await self._conn.rollback()
                     raise
 
