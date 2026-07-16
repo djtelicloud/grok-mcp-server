@@ -1615,6 +1615,15 @@ def validate_local_input(
     label: str = "file",
 ) -> Path:
     """Validate a resolved local input before any unbounded read occurs."""
+    # Hard secret denylist even when callers skip is_path_ignored (media tools).
+    name = path.name
+    name_lower = name.lower()
+    if (
+        name in {".env", "auth.json", "credentials.json", "id_rsa", "id_ed25519", "id_ecdsa", ".npmrc", ".pypirc"}
+        or name.startswith(".env.")
+        or name_lower.endswith((".pem", ".key", ".p12", ".pfx", ".keystore"))
+    ):
+        raise PermissionError(f"{label} is blocked by the secret path denylist: {path.name}")
     if not path.is_file():
         raise FileNotFoundError(f"{label} not found: {path}")
     if allowed_suffixes and path.suffix.lower() not in allowed_suffixes:
@@ -13570,6 +13579,28 @@ def is_path_ignored(path: Path, project_root: Path, gitignore_patterns: List[str
         'build', 'dist', 'out', 'target', 'bin', 'obj', '.git',
         '.github', '.pytest_cache', '__pycache__', 'uv.lock'
     }
+    # Always-on secret denylist — independent of workspace .gitignore so a
+    # missing/weak ignore file cannot expose credentials via read_local_file.
+    secret_basenames = {
+        '.env',
+        '.env.local',
+        '.env.production',
+        '.env.development',
+        'auth.json',
+        'credentials.json',
+        'id_rsa',
+        'id_ed25519',
+        'id_ecdsa',
+        '.npmrc',
+        '.pypirc',
+    }
+    secret_suffixes = (
+        '.pem',
+        '.key',
+        '.p12',
+        '.pfx',
+        '.keystore',
+    )
     try:
         relative = path.resolve().relative_to(project_root.resolve())
     except ValueError:
@@ -13577,6 +13608,14 @@ def is_path_ignored(path: Path, project_root: Path, gitignore_patterns: List[str
     for part in relative.parts:
         if part in standard_ignored_dirs:
             return True
+    name = relative.name
+    name_lower = name.lower()
+    if name in secret_basenames or name_lower in secret_basenames:
+        return True
+    if name.startswith('.env.') or name_lower.startswith('.env.'):
+        return True
+    if name_lower.endswith(secret_suffixes):
+        return True
 
     import fnmatch
     rel_str = str(relative)
