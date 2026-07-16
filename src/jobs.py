@@ -320,12 +320,32 @@ class JobManager:
             view["error"] = row.get("result")
         return view
 
-    async def get(self, job_id: str) -> Optional[Dict[str, Any]]:
-        row = await self._store.get_job(job_id)
-        return self.describe(row) if row else None
+    @staticmethod
+    def _caller_may_view(
+        row_caller: Optional[str], requester: Optional[str]
+    ) -> bool:
+        """When a requester identity is bound, only that caller's rows are
+        visible. Unbound requesters keep the historical open local view."""
+        req = normalize_caller(requester)
+        if not req:
+            return True
+        return normalize_caller(row_caller) == req
 
-    async def list(self, limit: int = 20) -> List[Dict[str, Any]]:
-        rows = await self._store.list_jobs(limit)
+    async def get(
+        self, job_id: str, caller: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
+        row = await self._store.get_job(job_id)
+        if row is None:
+            return None
+        if not self._caller_may_view(row.get("caller"), caller):
+            return None
+        return self.describe(row)
+
+    async def list(
+        self, limit: int = 20, caller: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        requester = normalize_caller(caller)
+        rows = await self._store.list_jobs(limit, caller=requester)
         return [self.describe(row) for row in rows]
 
     async def wait(self, job_id: str) -> None:

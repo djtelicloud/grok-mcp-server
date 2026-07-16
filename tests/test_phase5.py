@@ -362,6 +362,126 @@ class TestResearchTools:
         assert res["jobs"][0]["job_id"] == "j-x"
 
     @pytest.mark.asyncio
+    async def test_get_research_job_hides_foreign_caller(self, monkeypatch):
+        from types import SimpleNamespace
+
+        from src.utils import reset_active_caller, set_active_caller
+
+        manager = get_job_manager()
+        monkeypatch.setattr(
+            manager._store,
+            "get_job",
+            AsyncMock(
+                return_value={
+                    "id": "j-peer",
+                    "status": "done",
+                    "model": "m",
+                    "created_at": "t",
+                    "updated_at": "t",
+                    "result": "secret-peer-answer",
+                    "cost": 0.1,
+                    "caller": "codex-cli",
+                }
+            ),
+        )
+        token = set_active_caller("claude-code")
+        try:
+            res = await get_research_job("j-peer")
+        finally:
+            reset_active_caller(token)
+        assert res["status"] == "not_found"
+        assert "secret-peer-answer" not in str(res)
+
+        ctx = SimpleNamespace(
+            session=SimpleNamespace(
+                client_params=SimpleNamespace(
+                    clientInfo=SimpleNamespace(name="claude-code")
+                )
+            )
+        )
+        token = set_active_caller("claude-code")
+        try:
+            # Foreign persisted caller still hidden when ctx label differs.
+            monkeypatch.setattr(
+                manager._store,
+                "get_job",
+                AsyncMock(
+                    return_value={
+                        "id": "j-peer",
+                        "status": "done",
+                        "model": "m",
+                        "created_at": "t",
+                        "updated_at": "t",
+                        "result": "secret-peer-answer",
+                        "cost": 0.1,
+                        "caller": "codex-cli",
+                    }
+                ),
+            )
+            res = await get_research_job("j-peer", ctx=ctx)
+        finally:
+            reset_active_caller(token)
+        assert res["status"] == "not_found"
+
+    @pytest.mark.asyncio
+    async def test_list_research_jobs_scopes_to_bound_caller(self, monkeypatch):
+        manager = get_job_manager()
+        list_mock = AsyncMock(
+            return_value=[
+                {
+                    "id": "j-mine",
+                    "status": "done",
+                    "model": "m",
+                    "created_at": "t",
+                    "updated_at": "t",
+                    "result": "ok",
+                    "cost": 0.0,
+                    "caller": "claude-code",
+                }
+            ]
+        )
+        monkeypatch.setattr(manager._store, "list_jobs", list_mock)
+        from src.utils import reset_active_caller, set_active_caller
+
+        token = set_active_caller("claude-code")
+        try:
+            res = await list_research_jobs(limit=5)
+        finally:
+            reset_active_caller(token)
+        assert res["count"] == 1
+        assert res["jobs"][0]["job_id"] == "j-mine"
+        list_mock.assert_awaited_once_with(5, caller="claude-code")
+
+    @pytest.mark.asyncio
+    async def test_get_own_job_visible_to_matching_caller(self, monkeypatch):
+        manager = get_job_manager()
+        monkeypatch.setattr(
+            manager._store,
+            "get_job",
+            AsyncMock(
+                return_value={
+                    "id": "j-mine",
+                    "status": "done",
+                    "model": "m",
+                    "created_at": "t",
+                    "updated_at": "t",
+                    "result": "my-answer",
+                    "cost": 0.2,
+                    "caller": "claude-code",
+                }
+            ),
+        )
+        from src.utils import reset_active_caller, set_active_caller
+
+        token = set_active_caller("claude-code")
+        try:
+            res = await get_research_job("j-mine")
+        finally:
+            reset_active_caller(token)
+        assert res["status"] == "done"
+        assert res["result"] == "my-answer"
+
+    @pytest.mark.asyncio
     async def test_research_tools_registered_with_annotations(self):
         """submit is a mutating tool (no readOnlyHint); the gets are
         readOnly per the MCP spec annotations."""

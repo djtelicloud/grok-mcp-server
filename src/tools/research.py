@@ -7,12 +7,18 @@ from typing import Any, Dict, Optional
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import ToolAnnotations
 
-from ..identity import caller_from_mcp_context
+from ..identity import caller_from_mcp_context, get_active_caller, normalize_caller
 from ..jobs import get_job_manager
 
 logger = logging.getLogger("GrokMCP")
 
 READONLY_TOOL = ToolAnnotations(readOnlyHint=True)
+
+
+def _job_requester(ctx: Optional[Context]) -> Optional[str]:
+    """Match submit()'s attribution: explicit MCP clientInfo, else bound caller."""
+    explicit = caller_from_mcp_context(ctx) if ctx is not None else None
+    return normalize_caller(explicit) or get_active_caller()
 
 
 async def submit_research_job(
@@ -50,7 +56,9 @@ async def submit_research_job(
     )
 
 
-async def get_research_job(job_id: str) -> Dict[str, Any]:
+async def get_research_job(
+    job_id: str, ctx: Optional[Context] = None
+) -> Dict[str, Any]:
     """Fetch the status and result of a deferred research job.
 
     Statuses: `queued`/`running` (in flight), `done` (`result` and `cost_usd`
@@ -59,22 +67,32 @@ async def get_research_job(job_id: str) -> Dict[str, Any]:
     UNIGROK_JOB_TIMEOUT_SEC, meaning the task that owned it did not survive a
     server restart and the job will never finish on its own.
 
+    When the request has a bound caller identity, only that caller's jobs are
+    visible (foreign ids look like `not_found`).
+
     Args:
         job_id: ID returned by `submit_research_job`.
     """
-    view = await get_job_manager().get(str(job_id or "").strip())
+    view = await get_job_manager().get(
+        str(job_id or "").strip(), caller=_job_requester(ctx)
+    )
     if view is None:
         return {"status": "not_found", "job_id": job_id}
     return view
 
 
-async def list_research_jobs(limit: int = 20) -> Dict[str, Any]:
+async def list_research_jobs(
+    limit: int = 20, ctx: Optional[Context] = None
+) -> Dict[str, Any]:
     """List the most recent deferred research jobs, newest first.
+
+    When the request has a bound caller identity, the list is scoped to that
+    caller. Unbound local callers keep the historical open listing.
 
     Args:
         limit: Maximum number of jobs to return (clamped to 1-100, default 20).
     """
-    jobs = await get_job_manager().list(limit)
+    jobs = await get_job_manager().list(limit, caller=_job_requester(ctx))
     return {"jobs": jobs, "count": len(jobs)}
 
 
