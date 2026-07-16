@@ -74,6 +74,7 @@ def test_risk_declaration_is_unambiguous():
     assert declared_risk("risk: low\nrisk: high", []) is None
     assert inferred_risk(["src/utils.py"]) == "medium"
     assert inferred_risk(["scripts/land"]) == "high"
+    assert inferred_risk(["scripts/supervisor_approval.py"]) == "high"
 
 
 def test_supervisor_status_event_does_not_retrigger_its_own_workflow():
