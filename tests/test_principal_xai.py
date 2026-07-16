@@ -137,6 +137,15 @@ def test_client_id_cannot_select_key(monkeypatch: pytest.MonkeyPatch) -> None:
         ('{" oauth:a":"xai-a"}', "invalid_principal"),
         ('{"cursor":"xai-a"}', "invalid_principal"),
         ('{"oauth:":"xai-a"}', "invalid_principal"),
+        ('{"oauth:github:42":"xai-a"}', "invalid_principal"),
+        (
+            '{"oauth:http%3A%2F%2Fcontrol.grokmcp.org:github%3A42":"xai-a"}',
+            "invalid_principal",
+        ),
+        (
+            '{"oauth:https%3a%2f%2fcontrol.grokmcp.org:github%3A42":"xai-a"}',
+            "invalid_principal",
+        ),
         (
             '{"oauth:https%3A%2F%2Fcontrol.grokmcp.org:a":"xai-a",'
             '"oauth:https%3A%2F%2Fcontrol.grokmcp.org:a":"xai-b"}',

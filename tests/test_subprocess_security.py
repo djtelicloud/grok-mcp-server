@@ -165,3 +165,14 @@ def test_redact_secrets_removes_individual_principal_xai_keys(monkeypatch):
     assert redact_secrets("failure: opaque-principal-credential") == (
         "failure: [REDACTED]"
     )
+
+
+def test_redact_secrets_recovers_value_from_malformed_principal_map(monkeypatch):
+    monkeypatch.setenv(
+        "UNIGROK_PRINCIPAL_XAI_KEYS_JSON",
+        '{"oauth:legacy:42":"malformed-map-credential",',
+    )
+
+    assert redact_secrets("failure: malformed-map-credential") == (
+        "failure: [REDACTED]"
+    )

@@ -1328,14 +1328,30 @@ def redact_secrets(text: str) -> str:
         if name.upper() == "UNIGROK_API_KEYS":
             values.extend(part.strip() for part in raw_value.split(","))
         elif name.upper() == "UNIGROK_PRINCIPAL_XAI_KEYS_JSON":
+            # Redaction must not depend on the map being valid. A malformed
+            # principal is rejected for inference, but its configured value
+            # is still secret and may appear in an error raised while parsing.
             try:
-                from src.principal_xai import load_principal_xai_key_table
-
-                values.extend(load_principal_xai_key_table().values())
-            except Exception:
-                # The complete raw JSON remains an exact redaction candidate.
-                # Invalid configuration is handled fail-closed at inference.
-                pass
+                table = json.loads(raw_value)
+            except (TypeError, ValueError):
+                table = None
+            if isinstance(table, dict):
+                values.extend(
+                    str(value).strip()
+                    for value in table.values()
+                    if isinstance(value, str)
+                )
+            # Best-effort recovery also covers otherwise malformed JSON and
+            # duplicate entries that a normal object decode would discard.
+            for match in re.finditer(
+                r':\s*("(?:\\.|[^"\\])*")', raw_value
+            ):
+                try:
+                    value = json.loads(match.group(1))
+                except (TypeError, ValueError):
+                    continue
+                if isinstance(value, str):
+                    values.append(value.strip())
         elif name.upper() == "UNIGROK_API_KEY_RECORDS":
             try:
                 records = json.loads(raw_value)

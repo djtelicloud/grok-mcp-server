@@ -15,6 +15,7 @@ import re
 import secrets
 import threading
 from typing import Any, Dict, Mapping, Optional, Tuple
+from urllib.parse import quote, unquote, urlsplit
 
 from src.identity import get_active_principal, principal_kind
 
@@ -44,6 +45,35 @@ def default_xai_api_key(environ: Mapping[str, str] | None = None) -> str:
     """Owner / service default key (Live cloud twin path)."""
     source = os.environ if environ is None else environ
     return normalize_xai_api_key(source.get("XAI_API_KEY"))
+
+
+def _is_canonical_oauth_principal(value: str) -> bool:
+    """Validate the exact issuer-bound form emitted by HTTP middleware."""
+
+    if _CANONICAL_OAUTH_PRINCIPAL.fullmatch(value) is None:
+        return False
+    encoded_issuer, encoded_subject = value[len("oauth:") :].split(":", 1)
+    try:
+        issuer = unquote(encoded_issuer, errors="strict")
+        subject = unquote(encoded_subject, errors="strict")
+        parsed = urlsplit(issuer)
+        _ = parsed.port  # Validate a present port without retaining it.
+    except (UnicodeDecodeError, ValueError):
+        return False
+    if (
+        quote(issuer, safe="-._~") != encoded_issuer
+        or quote(subject, safe="-._~") != encoded_subject
+    ):
+        return False
+    return bool(
+        subject
+        and parsed.scheme == "https"
+        and parsed.netloc
+        and parsed.username is None
+        and parsed.password is None
+        and not parsed.query
+        and not parsed.fragment
+    )
 
 
 def _parse_principal_key_table(raw: str) -> Dict[str, str]:
@@ -78,7 +108,7 @@ def _parse_principal_key_table(raw: str) -> Dict[str, str]:
             not norm_key
             or len(norm_key) > 240
             or norm_key != key
-            or _CANONICAL_OAUTH_PRINCIPAL.fullmatch(norm_key) is None
+            or not _is_canonical_oauth_principal(norm_key)
         ):
             raise PrincipalXAIConfigurationError("invalid_principal")
         secret = normalize_xai_api_key(value if isinstance(value, str) else None)
