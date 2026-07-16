@@ -1,0 +1,106 @@
+<style>
+  :root{
+    --page:#060d13; --page-deep:#030609;
+    --surface:rgba(13,27,42,.65); --surface-soft:rgba(22,38,57,.5); --surface-strong:rgba(27,51,79,.85);
+    --ink:#f0f6fc; --ink-soft:#8b9eb0; --ink-faint:#7d93a6;
+    --border:rgba(79,231,255,.15); --border-strong:rgba(79,231,255,.35);
+    --cyan:#4fe7ff; --cyan-soft:rgba(79,231,255,.08);
+    --teal:#16f0ae; --teal-soft:rgba(22,240,174,.08);
+    --shadow:0 16px 48px rgba(0,0,0,.45);
+    --glow-cyan:0 0 20px rgba(79,231,255,.18); --glow-teal:0 0 20px rgba(22,240,174,.18);
+    --radius:12px; --radius-sm:6px;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    --sans:ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  }
+  body{
+    background:var(--page);
+    background-image:
+      radial-gradient(130% 60% at 50% -12%, rgba(79,231,255,.10), transparent 62%),
+      radial-gradient(circle at 1px 1px, rgba(79,231,255,.05) 1px, transparent 0);
+    background-size:auto, 22px 22px;
+    color:var(--ink); font-family:var(--sans); line-height:1.6; min-height:100vh;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:700px; margin:0 auto; padding:clamp(2rem,6vw,4rem) 1.25rem;}
+  .eyebrow{display:flex; align-items:center; gap:.7rem; font-family:var(--mono); font-size:12px;
+    letter-spacing:.22em; text-transform:uppercase; color:var(--cyan); text-shadow:var(--glow-cyan); margin:0 0 .85rem;}
+  .eyebrow::before{content:""; width:26px; height:1px; background:var(--cyan); box-shadow:var(--glow-cyan);}
+  h1{font-size:clamp(1.8rem,5vw,2.5rem); font-weight:600; letter-spacing:-.02em; margin:0; text-wrap:balance; color:var(--ink);}
+  .lede{color:var(--ink-soft); font-size:1.05rem; margin:.75rem 0 1.35rem; max-width:54ch;}
+  .env{display:inline-flex; align-items:center; gap:.55rem; font-family:var(--mono); font-size:12px; color:var(--ink-soft);
+    border:1px solid var(--border); background:var(--surface-soft); border-radius:999px; padding:.42rem .85rem;}
+  .env .dot{width:7px; height:7px; border-radius:50%; background:var(--teal); box-shadow:var(--glow-teal);}
+
+  .tiers{list-style:none; margin:2.5rem 0 0; padding:0; display:flex; flex-direction:column; gap:.7rem;}
+  .tier{display:grid; grid-template-columns:auto 1fr auto; align-items:center; gap:1.1rem;
+    background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:1.1rem 1.25rem;
+    box-shadow:var(--shadow); transition:all .25s cubic-bezier(.4,0,.2,1);}
+  .tier:hover{border-color:var(--border-strong); background:var(--surface-strong);}
+  .mark{font-family:var(--mono); font-size:13px; font-weight:600; color:var(--cyan); font-variant-numeric:tabular-nums;}
+  .name{display:flex; align-items:center; gap:.6rem; flex-wrap:wrap; font-weight:600; font-size:1.05rem; color:var(--ink);}
+  .name code{font-family:var(--mono); font-size:11px; font-weight:500; color:var(--cyan);
+    border:1px solid var(--border); background:var(--cyan-soft); border-radius:var(--radius-sm); padding:.12rem .44rem;}
+  .use{color:var(--ink-faint); font-size:.93rem; margin-top:.22rem;}
+  .chip{font-family:var(--mono); font-size:11px; letter-spacing:.05em; text-transform:uppercase; white-space:nowrap;
+    color:var(--teal); background:var(--teal-soft); border:1px solid rgba(22,240,174,.32);
+    border-radius:var(--radius-sm); padding:.3rem .6rem; box-shadow:var(--glow-teal);}
+
+  .rule{margin:2.1rem 0 0; padding:1.15rem 1.35rem; border:0; border-left:2px solid var(--cyan); border-radius:0;
+    background:var(--cyan-soft); box-shadow:var(--glow-cyan); font-size:.98rem; color:var(--ink-soft);}
+  .rule strong{color:var(--ink);}
+  .foot{margin-top:1.9rem; font-family:var(--mono); font-size:11px; color:var(--ink-faint); text-align:center; letter-spacing:.05em;}
+
+  @media (prefers-reduced-motion:no-preference){
+    .tier{opacity:0; transform:translateY(10px); animation:rise .55s cubic-bezier(.4,0,.2,1) forwards;}
+    .tier:nth-child(1){animation-delay:.06s} .tier:nth-child(2){animation-delay:.14s}
+    .tier:nth-child(3){animation-delay:.22s} .tier:nth-child(4){animation-delay:.3s}
+    @keyframes rise{to{opacity:1; transform:none;}}
+  }
+</style>
+
+<main class="wrap">
+  <header>
+    <p class="eyebrow">render surface &middot; verified live</p>
+    <h1>Rendering HTML in Claude Desktop</h1>
+    <p class="lede">Four ways to put visual content in this chat &mdash; a capability ladder from lightest to most powerful, and when each is the right call.</p>
+    <span class="env"><span class="dot"></span>Claude&nbsp;Code&nbsp;2.1.207 &middot; claude-desktop &middot; macOS</span>
+  </header>
+
+  <ol class="tiers">
+    <li class="tier">
+      <span class="mark">01</span>
+      <div>
+        <div class="name">Markdown <code>native</code></div>
+        <div class="use">Prose, tables, code blocks &mdash; the baseline you're reading right now.</div>
+      </div>
+      <span class="chip">confirmed</span>
+    </li>
+    <li class="tier">
+      <span class="mark">02</span>
+      <div>
+        <div class="name">Inline widget <code>show_widget</code></div>
+        <div class="use">Charts, cards, and interactive JS rendered right in the message. Best default for anything visual.</div>
+      </div>
+      <span class="chip">confirmed</span>
+    </li>
+    <li class="tier">
+      <span class="mark">03</span>
+      <div>
+        <div class="name">Inline widget + CDN <code>cdnjs</code></div>
+        <div class="use">Pull Chart.js, D3, and friends from the sandbox allowlist &mdash; libraries load and run.</div>
+      </div>
+      <span class="chip">confirmed</span>
+    </li>
+    <li class="tier">
+      <span class="mark">04</span>
+      <div>
+        <div class="name">Hosted artifact <code>Artifact</code></div>
+        <div class="use">A self-contained page you can open in a panel and share &mdash; dashboards, docs, tools. This page is one.</div>
+      </div>
+      <span class="chip">confirmed</span>
+    </li>
+  </ol>
+
+  <p class="rule"><strong>Rule of thumb.</strong> In the message &rarr; inline widget. A page to keep or share &rarr; hosted artifact. Words and tables &rarr; markdown.</p>
+  <p class="foot">unigrok palette &middot; the fourth tier is proven by this page existing</p>
+</main>
