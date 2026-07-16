@@ -112,6 +112,21 @@ class TestSandbox:
         with pytest.raises(SandboxError, match="missing"):
             sb.create()
 
+    def test_target_rel_parent_escape_refused(self, workspace, tmp_path):
+        sb = SwarmSandbox(workspace, tmp_path / "wr", "../escape.py")
+        with pytest.raises(SandboxError, match="escapes"):
+            sb.create()
+
+    def test_target_rel_absolute_escape_refused(self, workspace, tmp_path):
+        sb = SwarmSandbox(workspace, tmp_path / "wr", "/tmp/escape.py")
+        with pytest.raises(SandboxError, match="escapes"):
+            sb.create()
+
+    def test_write_target_refuses_escaped_rel(self, sandbox):
+        sandbox.target_rel = "../escape.py"
+        with pytest.raises(SandboxError, match="escapes"):
+            sandbox.write_target(b"should-not-land")
+
     def test_child_env_scrubs_secrets(self, sandbox, monkeypatch):
         monkeypatch.setenv("XAI_API_KEY", "xai-secret")
         monkeypatch.setenv("XAI_MANAGEMENT_API_KEY", "mgmt-secret")

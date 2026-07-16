@@ -136,9 +136,24 @@ class SwarmSandbox:
 
     # ── Target file plumbing ─────────────────────────────────────────────────
 
+    def _contained_work_path(self, rel: str) -> Path:
+        """Resolve a work-relative path; refuse escapes outside ``self.work``."""
+        work = self.work.resolve()
+        candidate = Path(str(rel or ""))
+        if not str(rel or "").strip() or candidate.is_absolute():
+            raise SandboxError(f"target {rel!r} escapes sandbox work dir")
+        path = (work / candidate).resolve()
+        try:
+            path.relative_to(work)
+        except ValueError as exc:
+            raise SandboxError(
+                f"target {rel!r} escapes sandbox work dir"
+            ) from exc
+        return path
+
     @property
     def target_path(self) -> Path:
-        return self.work / self.target_rel
+        return self._contained_work_path(self.target_rel)
 
     def read_target(self) -> bytes:
         return self.target_path.read_bytes()
