@@ -211,13 +211,14 @@ def decide_gate(
         return GateDecision("failure", "runtime or non-documentation path requires risk: medium")
 
     # Codex Approval is published only by the owner-dispatched workflow after
-    # it verifies the current PR head. It is the documented fallback when the
-    # Cursor Approver cannot approve (for example, a cursor-authored PR), and
-    # also remains the authority for high-risk packets.
-    if statuses.get("Codex Approval", "").lower() == "success":
-        return GateDecision("success", "exact-head Codex Approval")
+    # it verifies the current PR head. High-risk packets still short-circuit on
+    # that exact-head status. For low/medium, it is only a Cursor Approver
+    # fallback after required CI + Security/Bugbot evidence is green.
+    codex_approval = statuses.get("Codex Approval", "").lower() == "success"
 
     if declared == "high":
+        if codex_approval:
+            return GateDecision("success", "exact-head Codex Approval")
         return GateDecision("pending", "high-risk packet is waiting for exact-head Codex Approval")
 
     failed = _check_failure(checks, REQUIRED_CI_CHECKS + CURSOR_CHECKS + (CURSOR_APPROVER_CHECK,))
@@ -233,11 +234,13 @@ def decide_gate(
     cursor_approval = approver_state == "success" or statuses.get("Cursor Approval", "").lower() == "success"
     if approver_state not in {"success", "missing"}:
         missing.append(CURSOR_APPROVER_CHECK)
-    if not cursor_approval:
+    if not cursor_approval and not codex_approval:
         missing.append("Cursor approval")
     if missing:
         return GateDecision("pending", "waiting for " + ", ".join(dict.fromkeys(missing)))
 
+    if codex_approval:
+        return GateDecision("success", "exact-head Codex Approval")
     return GateDecision("success", f"Cursor failover approved for risk: {declared}")
 
 
