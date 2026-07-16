@@ -4,7 +4,7 @@
 
 - PR: `djtelicloud/grok-mcp-server#475`
 - Exact base SHA: `ea15d046c25b6e58a9a3d8d118d4191c161efc07`
-- Exact candidate SHA: `95062577097af7ba06f33a8b1c75074b5744264d`
+- Exact candidate SHA: `42de419afe5073b82ea7a00e00e3444cf7880758`
 - Forge task ids: `f29b306130e945f8a34eaa44b91fcb39`,
   `eca231fdad094aab9e909728f13035df`
 - Verdict: `needs changes`
@@ -16,17 +16,17 @@ Do not hand it to the normal Codex landing loop as approved work.
 
 ## Inspected packet
 
-- 79 commits and 73 changed files: 69 plans under `docs/design/`, the scoreboard
-  and first-file playbook, one production edit in `src/swarm/preflight.py`, and
-  one staged Pareto measurement script
-- 2,040 added lines and 5 deleted lines; the staged script is not yet an
+- 81 commits and 76 changed files: 69 plans under `docs/design/`, the scoreboard
+  and first-file playbooks, one production edit in `src/swarm/preflight.py`, a
+  staged Pareto measurement script and test, plus one diagnostic receipt
+- 2,627 added lines and 5 deleted lines; the staged method is not yet an
   approval-grade oracle or benchmark
 - Cursor campaign report: 201 plans done, 9 skipped, 0 pending
 - 126 historical per-file draft PRs plus the 75 in-tree continuation commits
 - reclassified scoreboard: 0 measured wins, 1 Swarm-ready target held, 77 plans
   kept, and 133 targets skipped
-- staged preparation only: `scripts/superiority_baseline_pareto.py` plus its
-  first-file playbook; no team or Swarm candidate has run
+- staged preparation only: harness, focused test/doc, and a diagnostic ORIGINAL
+  receipt; no team or Swarm candidate has run
 - no unresolved review threads on #475 at review time
 - contributor baseline at prior head `bda882ffbf6e2436b09af5d316a4c3cfb26ae1ad`:
   2,202 tests passed in 102.31 seconds
@@ -60,15 +60,19 @@ minimal fixture value only for diagnosis, it passes as `src.routing` but has a
 19.37% latency noise floor. Therefore the routing task is not retry-ready, and
 the Pareto target must remain the first and only candidate after CONTINUE.
 
-At prep head `9506257`, the staged Pareto harness passed the 12 existing target
-tests. Ten isolated 500-loop runs produced a 4.802595 ms/call median with a
-3.48% min-to-max range and identical 3,784-byte peaks. The workload is stable
-enough to refine, but the harness is not frozen: it injects synthetic package
-objects instead of using the normal verified worktree import, checks only
-`front0_size`, times latency under `tracemalloc`, and emits no raw outer samples,
-noise floor, source/fixture hashes, runtime identity, or independent oracle.
-Grok may repair only the prep harness and its focused test/doc while execution
-remains held; Codex must re-review it before CONTINUE.
+The first prep harness was rejected, then `55fd82c` added normal provenance,
+raw split latency/memory samples, hashes, labels, bundle fields, and focused
+tests. The new harness plus Pareto suites pass 21 tests. Direct adversarial
+calls still proved three bypasses: wrong later fronts pass when front 0 is
+correct, zero-loop/zero-memory captures emit plausible receipts, and a bundle
+can omit the target. It also lacks a frozen method hash, clean-tree proof,
+per-file bundle hashes, an input-size performance matrix, and an independent
+full-rank oracle.
+
+Receipt `42de419` predates those H7-H10 corrections and states that paths were
+normalized after capture. It is diagnostic/superseded, not authoritative
+ORIGINAL. Grok may repair only the prep harness/test/doc and mark that receipt
+superseded while execution remains held; Codex must re-review before CONTINUE.
 
 ## Quantitative plan audit
 
