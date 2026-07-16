@@ -33,7 +33,7 @@ credentials, OAuth codes, tokens, or private keys here.
   and `grok://jobs/{id}` now use the full server-bound authenticated principal
   as the hosted ownership boundary; client labels remain attribution-only,
   foreign and legacy-unowned rows are denied, and trusted unbound local/stdio
-  keeps its historical open view. Exact-head CI, CodeQL, Codex Approval,
+  callers keep their historical open view. Exact-head CI, CodeQL, Codex Approval,
   Supervisor Approval, Security Reviewer, Cursor Approval, and Bugbot passed;
   the local suite passed 2,202 tests.
 - Stable `:4765` and contributor `:4766` are healthy and ready on the current
