@@ -451,19 +451,44 @@ def test_cursor_python_superiority_loop_requires_measured_serial_evidence():
     assert "plan_swarm_campaign" in agent
     assert "start_code_swarm" in agent
     assert "Forge task id" in agent
-    assert "| End-to-end latency (ms) | measured | measured | measured % |" in agent
-    assert "| Bundle peak memory (bytes) | measured | measured | measured % |" in agent
+    assert (
+        "| Warm end-to-end latency p50 (ms) | measured | measured | measured % |"
+        in agent
+    )
+    assert (
+        "| Warm end-to-end latency p95 (ms) | measured | measured | measured % |"
+        in agent
+    )
+    assert (
+        "| Bundle process peak RSS (bytes) | measured | measured | measured % |"
+        in agent
+    )
+    assert (
+        "| Bundle traced Python allocation (bytes) | measured | measured | measured % |"
+        in agent
+    )
     assert "never sum or average isolated per-file performance percentages" in agent
+    assert "Freeze the oracle" in agent
+    assert "exact landed implementation" in agent
+    assert "intermediate diagnostic candidate" in agent
+    assert "final combined candidate" in agent
+    assert "private intelligence lane" in agent
     assert "independently check out the exact base and head" in agent
     assert "No PR is the correct result" in agent
     assert "alwaysApply: true" in rule
     assert ".cursor/agents/python-superiority.md" in rule
     assert "projected, not measured" in rule
     assert "one logical bundle" in rule
+    assert "must be the exact landed code, never a surrogate" in rule
+    assert "Team/hive output is diagnostic" in rule
+    assert "Keep raw methods and receipts private" in rule
     assert "Do not edit or normalize Grok's reporting" in review
     assert "Exact base SHA" in review
     assert "Candidate bundle files" in review
     assert "Do not sum or" in review
+    assert "Process peak RSS" in review
+    assert "Traced Python allocation" in review
+    assert "private intelligence lane" in review
     assert "approve measured win" in review
 
     pr_review = (

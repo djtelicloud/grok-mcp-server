@@ -33,6 +33,17 @@ is a search-and-measure campaign, not a documentation factory.
 7. When one original file becomes multiple files, treat the new files as one
    comparison bundle. Measure the same public entry point end to end on both
    revisions; never sum or average isolated per-file performance percentages.
+8. Freeze the oracle, workloads, measurement parameters, and reporting schema
+   before any production edit or official baseline capture. The official
+   ORIGINAL must execute the exact landed implementation; a surrogate is not a
+   baseline.
+9. A team/hive rewrite is an intermediate diagnostic candidate. Run Swarm only
+   after that candidate passes the frozen gates, and decide approval from exact
+   ORIGINAL versus the final combined candidate.
+10. Keep raw experiment methods and receipts in the private intelligence lane
+    until independent Codex reproduction. A public optimization PR contains
+    only the approved product change, focused product tests, and a minimal
+    reproducible result table.
 
 ## Cycle outcomes
 
@@ -57,8 +68,10 @@ with measured values:
 
 | Metric | Baseline | Champion | Change |
 | --- | ---: | ---: | ---: |
-| End-to-end latency (ms) | measured | measured | measured % |
-| Bundle peak memory (bytes) | measured | measured | measured % |
+| Warm end-to-end latency p50 (ms) | measured | measured | measured % |
+| Warm end-to-end latency p95 (ms) | measured | measured | measured % |
+| Bundle process peak RSS (bytes) | measured | measured | measured % |
+| Bundle traced Python allocation (bytes) | measured | measured | measured % |
 | Focused oracle | exact command | pass | n/a |
 | Full suite | exact command | pass | n/a |
 
@@ -76,11 +89,13 @@ The PR must define one comparison unit:
 - identical fixture, Python version, environment, warmup, and sample count; and
 - one correctness oracle that crosses the whole bundle boundary.
 
-Measure warm end-to-end operation latency and peak memory for the whole logical
-operation. If import or startup cost matters, measure it separately in a fresh
-process on both revisions. File-level parse/compile timings may be diagnostic,
-but they must not be summed, averaged, or presented as the bundle's performance
-result. LOC may be totaled across the bundle only as a structural metric.
+Measure warm end-to-end operation latency, process peak RSS, and traced Python
+allocation for the whole logical operation, labeling RSS and traced allocation
+as distinct metrics. If import or startup cost matters, measure it separately
+in a fresh process on both revisions. File-level parse/compile timings may be
+diagnostic, but they must not be summed, averaged, or presented as the bundle's
+performance result. LOC may be totaled across the bundle only as a structural
+metric.
 
 ### Refactor plan
 
@@ -113,4 +128,6 @@ Forge receipt are contributor evidence; they are not final approval. Codex must
 independently check out the exact base and head, rerun the oracle and benchmark,
 and create a separate report from
 `.codex/threads/templates/python-superiority-review.md`. Do not rewrite Grok's
-report to reconcile discrepancies. Never land or merge from this campaign.
+report to reconcile discrepancies. Raw method implementation and receipts stay
+in the private intelligence lane until that independent review approves a
+scrubbed public result. Never land or merge from this campaign.

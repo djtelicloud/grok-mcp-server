@@ -17,5 +17,12 @@ When the task or branch uses `python-superiority` or
 - A one-file-to-many refactor is one logical bundle. Measure the same end-to-end
   entry point across the exact base and head; never aggregate by summing or
   averaging isolated file percentages.
+- Freeze the method before any production edit or official baseline. ORIGINAL
+  must be the exact landed code, never a surrogate.
+- Team/hive output is diagnostic. Approval compares exact ORIGINAL with the
+  final combined candidate after any Swarm refinement.
+- Keep raw methods and receipts private until independent Codex reproduction;
+  the public PR carries only approved product code, tests, and the minimal
+  reproducible table.
 - A no-win cycle opens no PR. A refactor-plan PR must state why function-level
   Swarm search is blocked and label all forecasts **projected, not measured**.

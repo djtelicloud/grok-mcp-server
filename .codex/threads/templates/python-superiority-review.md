@@ -48,8 +48,10 @@ report it separately from warm operation latency.
 | --- | ---: | ---: | ---: | --- |
 | Warm end-to-end latency, median (ms) | | | | |
 | Warm end-to-end latency, p95 (ms) | | | | |
-| Bundle peak memory, median (bytes) | | | | |
-| Bundle peak memory, max (bytes) | | | | |
+| Process peak RSS, median (bytes) | | | | |
+| Process peak RSS, max (bytes) | | | | |
+| Traced Python allocation, median (bytes) | | | | |
+| Traced Python allocation, max (bytes) | | | | |
 | Cold import/startup, median (ms), if relevant | | | | |
 | Focused oracle | | | n/a | |
 | Full suite | | | n/a | |
@@ -70,4 +72,6 @@ report it separately from warm operation latency.
 
 Codex approval applies only to the candidate SHA and measurements named above.
 Do not link the result publicly until the verdict is `approve measured win` and
-the approved code is merged to `main`.
+the approved code is merged to `main`. Keep raw methods and receipts in the
+private intelligence lane; publish only the approved code, focused product
+tests, and minimal reproducible table.
