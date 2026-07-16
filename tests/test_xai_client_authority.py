@@ -90,6 +90,47 @@ def test_principal_key_rotation_keeps_old_generation_until_shutdown(monkeypatch)
     clients[1].close.assert_called_once_with()
 
 
+def test_two_principals_and_owner_never_share_inference_clients(monkeypatch):
+    clients = []
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+            self.collections = object()
+            self.close = MagicMock()
+            clients.append(self)
+
+    from src.identity import reset_active_principal, set_active_principal
+
+    principal_a = "oauth:https%3A%2F%2Fcontrol.grokmcp.org:github%3A42"
+    principal_b = "oauth:https%3A%2F%2Fcontrol.grokmcp.org:github%3A99"
+    monkeypatch.setattr("xai_sdk.Client", FakeClient)
+    monkeypatch.setenv("XAI_API_KEY", "xai-owner-default")
+    monkeypatch.setenv(
+        "UNIGROK_PRINCIPAL_XAI_KEYS_JSON",
+        (
+            '{"oauth:https%3A%2F%2Fcontrol.grokmcp.org:github%3A42":"xai-a",'
+            '"oauth:https%3A%2F%2Fcontrol.grokmcp.org:github%3A99":"xai-b"}'
+        ),
+    )
+
+    selected = []
+    for principal in (principal_a, principal_b, None):
+        token = set_active_principal(principal)
+        try:
+            selected.append(utils.get_xai_inference_client())
+        finally:
+            reset_active_principal(token)
+
+    assert len({id(client) for client in selected}) == 3
+    assert [client.kwargs["api_key"] for client in clients] == [
+        "xai-a",
+        "xai-b",
+        "xai-owner-default",
+    ]
+    assert utils.get_xai_inference_client() is selected[2]
+
+
 def test_principal_client_cache_is_thread_safe(monkeypatch):
     clients = []
 

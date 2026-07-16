@@ -8,7 +8,17 @@ os.environ.setdefault("XAI_API_KEY", "xai-test-dummy-key-for-unit-tests")
 os.environ["UNI_GROK_TESTING"] = "1"
 
 import pytest
+import src.principal_xai
 import src.utils
+
+
+def _reset_xai_client_state():
+    if hasattr(src.utils, "_clients"):
+        src.utils._clients.clear()
+    else:
+        src.utils._client = None  # legacy attribute name
+    with src.principal_xai._CREDENTIAL_GENERATIONS_LOCK:
+        src.principal_xai._CREDENTIAL_GENERATIONS.clear()
 
 @pytest.fixture(scope="session", autouse=True)
 def setup_test_env(tmp_path_factory):
@@ -20,20 +30,14 @@ def setup_test_env(tmp_path_factory):
 
 @pytest.fixture(autouse=True)
 def reset_global_client():
-    if hasattr(src.utils, "_clients"):
-        src.utils._clients.clear()
-    else:
-        src.utils._client = None  # legacy attribute name
+    _reset_xai_client_state()
     src.utils._management_client = None
     src.utils._MODEL_MAX_TOKENS_CACHE.clear()
     src.utils._BREAKER_STATE.clear()
     src.utils._ROUTING_ADVISOR.invalidate()
     src.utils._CALLER_SPEND_CACHE.clear()
     yield
-    if hasattr(src.utils, "_clients"):
-        src.utils._clients.clear()
-    else:
-        src.utils._client = None  # legacy attribute name
+    _reset_xai_client_state()
     src.utils._management_client = None
     src.utils._MODEL_MAX_TOKENS_CACHE.clear()
     src.utils._BREAKER_STATE.clear()

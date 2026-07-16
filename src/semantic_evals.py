@@ -39,6 +39,8 @@ from .hydration import (
     reset_hydration_services,
 )
 from .utils import (
+    _active_xai_breaker_scope,
+    _breaker_state_key,
     _bounded_redacted,
     _env_timeout,
     _parse_structured,
@@ -404,7 +406,8 @@ async def _grade_and_record(sample: TrajectorySample, store: Any, reservation: f
     actual_cost = 0.0
     try:
         model = _judge_model_override() or await resolve_model("coding")
-        if get_circuit_breaker_state().get(model, {}).get("open"):
+        breaker_key = _breaker_state_key(model, _active_xai_breaker_scope())
+        if get_circuit_breaker_state().get(breaker_key, {}).get("open"):
             _record_stat("judge_failures")
             logger.warning(f"Semantic eval skipped (breaker open for {model}).")
             return

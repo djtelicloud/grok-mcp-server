@@ -1464,6 +1464,137 @@ async def test_raw_proxy_uses_active_principal_key_for_stream_and_nonstream(
     ]
 
 
+def test_raw_proxy_oauth_middleware_selects_principal_key(monkeypatch):
+    calls = []
+
+    class UpstreamResponse:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {"id": "oauth-response", "choices": []}
+
+    class CapturingClient:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def post(self, _url, **kwargs):
+            calls.append(kwargs["headers"])
+            return UpstreamResponse()
+
+    async def introspect(_token, _required_scope):
+        return {
+            "active": True,
+            "scope": "unigrok:invoke",
+            "iss": "https://control.grokmcp.org",
+            "sub": "github:42",
+        }
+
+    principal = "oauth:https%3A%2F%2Fcontrol.grokmcp.org:github%3A42"
+    monkeypatch.setenv("UNIGROK_RUNTIME", "cloudrun")
+    monkeypatch.delenv("UNIGROK_API_KEY_RECORDS", raising=False)
+    monkeypatch.setenv(
+        "UNIGROK_OAUTH_INTROSPECTION_URL",
+        "https://control.grokmcp.org/oauth/introspect",
+    )
+    monkeypatch.setenv("XAI_API_KEY", "xai-owner-default")
+    monkeypatch.setenv(
+        "UNIGROK_PRINCIPAL_XAI_KEYS_JSON",
+        json.dumps({principal: "xai-teammate"}),
+    )
+    monkeypatch.setattr("src.http_server._introspect_oauth_token", introspect)
+    monkeypatch.setattr(
+        "src.http_server.get_xai_model_ids",
+        AsyncMock(return_value=["unigrok-agent", "grok-4.3"]),
+    )
+    monkeypatch.setattr("src.http_server.httpx.AsyncClient", CapturingClient)
+
+    with TestClient(
+        create_app(), base_url="https://mcp.grokmcp.org"
+    ) as client:
+        response = client.post(
+            "/v1/chat/completions",
+            headers={
+                "Authorization": "Bearer oauth-token",
+                "X-Client-ID": "spoofed-owner",
+                "X-Caller": "http:anon",
+            },
+            json={"model": "grok-4.3", "messages": []},
+        )
+
+    assert response.status_code == 200
+    assert calls == [
+        {"Authorization": "Bearer xai-teammate", "Content-Type": "application/json"}
+    ]
+
+
+def test_raw_proxy_static_bearer_spoof_cannot_select_principal_key(monkeypatch):
+    calls = []
+
+    class UpstreamResponse:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {"id": "static-response", "choices": []}
+
+    class CapturingClient:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def post(self, _url, **kwargs):
+            calls.append(kwargs["headers"])
+            return UpstreamResponse()
+
+    principal = "oauth:https%3A%2F%2Fcontrol.grokmcp.org:github%3A42"
+    monkeypatch.setenv("UNIGROK_RUNTIME", "cloudrun")
+    _set_static_keys(monkeypatch, "gateway-secret")
+    monkeypatch.delenv("UNIGROK_OAUTH_INTROSPECTION_URL", raising=False)
+    monkeypatch.setenv("XAI_API_KEY", "xai-owner-default")
+    monkeypatch.setenv(
+        "UNIGROK_PRINCIPAL_XAI_KEYS_JSON",
+        json.dumps({principal: "xai-teammate"}),
+    )
+    monkeypatch.setattr(
+        "src.http_server.get_xai_model_ids",
+        AsyncMock(return_value=["unigrok-agent", "grok-4.3"]),
+    )
+    monkeypatch.setattr("src.http_server.httpx.AsyncClient", CapturingClient)
+
+    with TestClient(
+        create_app(), base_url="https://mcp.grokmcp.org"
+    ) as client:
+        response = client.post(
+            "/v1/chat/completions",
+            headers={
+                "Authorization": "Bearer gateway-secret",
+                "X-Client-ID": principal,
+                "X-Caller": principal,
+            },
+            json={"model": "grok-4.3", "messages": []},
+        )
+
+    assert response.status_code == 200
+    assert calls == [
+        {
+            "Authorization": "Bearer xai-owner-default",
+            "Content-Type": "application/json",
+        }
+    ]
+
+
 @pytest.mark.asyncio
 async def test_raw_proxy_invalid_principal_map_fails_closed(monkeypatch):
     from src.http_server import post_xai_chat
