@@ -41,6 +41,7 @@ from ..utils import (
     credential_plane_contract,
     input_limit,
     validate_local_input,
+    enforce_caller_budget,
 )
 from xai_sdk.chat import user
 from xai_sdk.tools import code_execution, web_search as xai_web_search, x_search as xai_x_search
@@ -49,6 +50,7 @@ from ..identity import (
     get_active_client_id,
     get_active_principal,
     principal_kind,
+    resolve_request_caller,
     scoped_session,
 )
 
@@ -96,6 +98,40 @@ def _build_tool_result(
         plane="API",
         citations=citations,
         data=data,
+    )
+
+
+async def _enforce_metered_tool_budget() -> Optional[str]:
+    """Gate direct API-metered system tools on UNIGROK_CALLER_BUDGETS."""
+    caller = resolve_request_caller(None)
+    budget_principal = get_active_principal() or caller
+    await enforce_caller_budget(store, budget_principal)
+    return caller
+
+
+async def _record_metered_tool_telemetry(
+    *,
+    intent: str,
+    route: str,
+    cost_usd: float,
+    model: str,
+    latency_sec: float,
+    tokens: int,
+    caller: Optional[str],
+) -> None:
+    """Persist direct tool spend so caller budgets see non-orchestrate paths."""
+    await store.save_telemetry(
+        (intent or route)[:100],
+        "API",
+        1,
+        float(latency_sec or 0.0),
+        float(cost_usd or 0.0),
+        caller=caller,
+        model=model,
+        tokens=int(tokens or 0),
+        token_kind="provider_exact",
+        billing_source="xai_response_exact",
+        routing={"route": route, "plane": "API"},
     )
 
 
@@ -694,6 +730,7 @@ async def remote_code_execution(prompt: str, max_turns: Optional[int] = None) ->
     Renamed from `code_executor` — it invokes xAI's remote `code_execution`
     tool; no code runs on this machine.
     """
+    caller = await _enforce_metered_tool_budget()
     async with GrokInvocationContext("grok-4.3", logger, append_signature=True) as ctx:
         chat_params = {"model": "grok-4.3", "tools": [code_execution()], "include": ["code_execution_call_output"]}
         if max_turns:
@@ -717,7 +754,7 @@ async def remote_code_execution(prompt: str, max_turns: Optional[int] = None) ->
                 code_outputs.append(output.message.content)
 
         formatted = ctx.format_output("\n".join(result), [response])
-        return _build_tool_result(
+        built = _build_tool_result(
             ctx,
             response=response,
             route="code_execution",
@@ -725,6 +762,16 @@ async def remote_code_execution(prompt: str, max_turns: Optional[int] = None) ->
             formatted_text=formatted,
             data={"code_outputs": code_outputs} if code_outputs else None,
         )
+        await _record_metered_tool_telemetry(
+            intent=(prompt or "code_execution")[:100],
+            route="code_execution",
+            cost_usd=built.cost_usd,
+            model=built.model,
+            latency_sec=built.latency_sec,
+            tokens=built.tokens,
+            caller=caller,
+        )
+        return built
 
 
 def _validate_test_target(target: str) -> str:
@@ -825,6 +872,7 @@ async def web_search(
         allowed_domains: Restrict search to these domains (e.g. `["arxiv.org"]`).
         excluded_domains: Domains to exclude from search results.
     """
+    caller = await _enforce_metered_tool_budget()
     async with GrokInvocationContext("grok-4.3", logger, append_signature=True) as ctx:
         def _call_web():
             client = get_xai_client()
@@ -846,7 +894,7 @@ async def web_search(
         formatted = ctx.format_output("\n".join(result), [response])
         citations_mapped = [{"url": url} for url in response.citations] if response.citations else None
 
-        return _build_tool_result(
+        built = _build_tool_result(
             ctx,
             response=response,
             route="web_search",
@@ -855,6 +903,16 @@ async def web_search(
             citations=citations_mapped,
             data={"query": prompt, "citations": list(response.citations)} if response.citations else {"query": prompt},
         )
+        await _record_metered_tool_telemetry(
+            intent=(prompt or "web_search")[:100],
+            route="web_search",
+            cost_usd=built.cost_usd,
+            model=built.model,
+            latency_sec=built.latency_sec,
+            tokens=built.tokens,
+            caller=caller,
+        )
+        return built
 
 
 def _parse_search_date(value: str, param_name: str) -> datetime:
@@ -895,6 +953,7 @@ async def x_search(
             plane="API",
         )
 
+    caller = await _enforce_metered_tool_budget()
     async with GrokInvocationContext("grok-4.3", logger, append_signature=True) as ctx:
         def _call_x():
             client = get_xai_client()
@@ -917,7 +976,7 @@ async def x_search(
         formatted = ctx.format_output("\n".join(result), [response])
         citations_mapped = [{"url": url} for url in response.citations] if response.citations else None
 
-        return _build_tool_result(
+        built = _build_tool_result(
             ctx,
             response=response,
             route="x_search",
@@ -926,6 +985,16 @@ async def x_search(
             citations=citations_mapped,
             data={"query": prompt, "citations": list(response.citations)} if response.citations else {"query": prompt},
         )
+        await _record_metered_tool_telemetry(
+            intent=(prompt or "x_search")[:100],
+            route="x_search",
+            cost_usd=built.cost_usd,
+            model=built.model,
+            latency_sec=built.latency_sec,
+            tokens=built.tokens,
+            caller=caller,
+        )
+        return built
 
 
 async def db_vacuum() -> str:
