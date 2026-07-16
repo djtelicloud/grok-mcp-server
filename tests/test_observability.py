@@ -211,7 +211,7 @@ class TestJobRequestId:
 
         row = await ostore.get_job(view["job_id"])
         assert row["request_id"] == "rid-job-1"
-        assert JobManager.describe(row)["request_id"] == "rid-job-1"
+        assert JobManager().describe(row)["request_id"] == "rid-job-1"
 
     @pytest.mark.asyncio
     async def test_job_without_request_id_stays_none(self, ostore, monkeypatch):
@@ -223,7 +223,7 @@ class TestJobRequestId:
 
         row = await ostore.get_job(view["job_id"])
         assert row["request_id"] is None
-        assert "request_id" not in JobManager.describe(row)
+        assert "request_id" not in JobManager().describe(row)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

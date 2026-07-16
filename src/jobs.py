@@ -278,12 +278,20 @@ class JobManager:
             except Exception as persist_err:
                 logger.error(f"Distill job {job_id}: could not persist error: {persist_err}")
 
-    @staticmethod
-    def _is_stale(row: Dict[str, Any]) -> bool:
+    def _is_stale(self, row: Dict[str, Any]) -> bool:
         """A queued/running row not touched within the job timeout: the task
         that owned it did not survive (restart/crash), so the row can never
-        finish on its own."""
+        finish on its own.
+
+        Live tasks owned by this process are never stale: long defer calls and
+        semaphore waits do not heartbeat ``updated_at``, so a pure timestamp
+        check would false-stale in-flight work and invite client resubmits.
+        """
         if str(row.get("status")) not in ("queued", "running"):
+            return False
+        job_id = str(row.get("id") or "")
+        task = self._tasks.get(job_id) if job_id else None
+        if task is not None and not task.done():
             return False
         try:
             updated = datetime.fromisoformat(str(row.get("updated_at")))
@@ -291,11 +299,10 @@ class JobManager:
             return True
         return (datetime.now() - updated).total_seconds() > _job_timeout_sec()
 
-    @classmethod
-    def describe(cls, row: Dict[str, Any]) -> Dict[str, Any]:
+    def describe(self, row: Dict[str, Any]) -> Dict[str, Any]:
         """Public view of a job row (what get_research_job returns)."""
         status = str(row.get("status") or "unknown")
-        if cls._is_stale(row):
+        if self._is_stale(row):
             status = "stale"
         view: Dict[str, Any] = {
             "job_id": row.get("id"),

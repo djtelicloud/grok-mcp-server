@@ -313,20 +313,44 @@ class TestJobManager:
         fresh in-flight rows and terminal rows are untouched."""
         old = (datetime.now() - timedelta(seconds=_job_timeout_sec() + 60)).isoformat()
         fresh = datetime.now().isoformat()
+        manager = JobManager()
 
         stale_row = {"id": "j1", "status": "running", "updated_at": old, "model": "m", "created_at": old}
-        assert JobManager.describe(stale_row)["status"] == "stale"
+        assert manager.describe(stale_row)["status"] == "stale"
 
         fresh_row = {"id": "j2", "status": "running", "updated_at": fresh, "model": "m", "created_at": fresh}
-        assert JobManager.describe(fresh_row)["status"] == "running"
+        assert manager.describe(fresh_row)["status"] == "running"
 
         done_row = {
             "id": "j3", "status": "done", "updated_at": old, "model": "m",
             "created_at": old, "result": "r", "cost": 0.1,
         }
-        described = JobManager.describe(done_row)
+        described = manager.describe(done_row)
         assert described["status"] == "done"
         assert described["result"] == "r"
+
+    def test_live_task_not_false_stale_without_heartbeat(self):
+        """Long defer / queue wait must not look stale while this process owns it."""
+        from unittest.mock import MagicMock
+
+        old = (datetime.now() - timedelta(seconds=_job_timeout_sec() + 60)).isoformat()
+        manager = JobManager()
+        live = MagicMock()
+        live.done.return_value = False
+        manager._tasks["live-job"] = live
+        try:
+            row = {
+                "id": "live-job",
+                "status": "running",
+                "updated_at": old,
+                "model": "m",
+                "created_at": old,
+            }
+            assert manager.describe(row)["status"] == "running"
+            live.done.return_value = True
+            assert manager.describe(row)["status"] == "stale"
+        finally:
+            manager._tasks.pop("live-job", None)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

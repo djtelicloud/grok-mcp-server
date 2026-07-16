@@ -410,7 +410,7 @@ class TestDistillJob:
 
         row = await kstore.get_job(view["job_id"])
         assert row["caller"] == "codex-cli"
-        assert JobManager.describe(row)["caller"] == "codex-cli"
+        assert JobManager().describe(row)["caller"] == "codex-cli"
 
     @pytest.mark.asyncio
     async def test_distill_job_caller_falls_back_to_bound_context(self, kstore, monkeypatch):

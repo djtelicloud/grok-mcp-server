@@ -296,7 +296,7 @@ class TestJobCaller:
 
         row = await cstore.get_job(view["job_id"])
         assert row["caller"] == "codex-cli"
-        assert JobManager.describe(row)["caller"] == "codex-cli"
+        assert JobManager().describe(row)["caller"] == "codex-cli"
 
     @pytest.mark.asyncio
     async def test_job_caller_falls_back_to_bound_context(self, cstore, monkeypatch):
@@ -323,7 +323,7 @@ class TestJobCaller:
 
         row = await cstore.get_job(view["job_id"])
         assert row["caller"] is None
-        assert "caller" not in JobManager.describe(row)
+        assert "caller" not in JobManager().describe(row)
 
     @pytest.mark.asyncio
     async def test_create_job_itself_falls_back_to_bound_context(self, cstore):
