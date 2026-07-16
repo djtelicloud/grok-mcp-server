@@ -1,14 +1,25 @@
 {
+  "baseline_status": "diagnostic_superseded",
   "bundle": {
+    "entries": [
+      {
+        "loc": 169,
+        "path": "src/swarm/pareto.py",
+        "sha256": "d6bb5f0ad39fef820a263b65dd9ddc1e7ce1139b52c0b2fae8bc29358b60a633"
+      }
+    ],
     "files": [
       "src/swarm/pareto.py"
     ],
     "loc_by_file": {
       "src/swarm/pareto.py": 169
     },
+    "sha256_by_file": {
+      "src/swarm/pareto.py": "d6bb5f0ad39fef820a263b65dd9ddc1e7ce1139b52c0b2fae8bc29358b60a633"
+    },
     "total_loc": 169
   },
-  "capture_note": "Paths normalized to repo-relative for commit; SHAs and metrics are from live ORIGINAL capture.",
+  "capture_note": "H7\u2013H10 harness smoke/diagnostic until Codex re-reviews and posts CONTINUE; authoritative ORIGINAL is then recaptured from clean branch on landed main.",
   "entry_point": "src.swarm.pareto:fast_non_dominated_sort",
   "fixture_sha256": "89efceacbcbf87834b45fdcbafc4cf8399188067682c1c2d628c4d797521f14e",
   "frozen_inputs": {
@@ -66,47 +77,79 @@
     "H3",
     "H4",
     "H5",
-    "H6"
+    "H6",
+    "H7",
+    "H8",
+    "H9",
+    "H10"
   ],
-  "git_commit": "55fd82c32822b4c7c6c1c94134b033bfcbd2a0dd",
+  "git_commit": "42de419afe5073b82ea7a00e00e3444cf7880758",
+  "git_tree_sha": "682267389281258026ba7caf4a0df397f183b585",
   "label": "ORIGINAL",
   "latency": {
-    "inner_loops": 500,
-    "median_ms": 0.07728416804457083,
-    "noise_floor_pct": 5.0,
+    "inner_loops": 80,
+    "median_ms": 0.07688385012443177,
+    "noise_floor_pct": 5.565552136759121,
     "outer_samples": 9,
-    "p50_ms": 0.07728416804457083,
-    "p95_ms": 0.07815823319833726,
+    "p50_ms": 0.07688385012443177,
+    "p95_ms": 0.07815718483470846,
     "samples_ms": [
-      0.07586591603467241,
-      0.07747133396333084,
-      0.07728416804457083,
-      0.07570191600825638,
-      0.07661366800311953,
-      0.077489165996667,
-      0.07610475004184991,
-      0.07835683401208371,
-      0.07786033197771758
+      0.07717499975115061,
+      0.07695156236877665,
+      0.07479269988834858,
+      0.0788119748904137,
+      0.07706822507316247,
+      0.07585677485622,
+      0.07688385012443177,
+      0.0742062500648899,
+      0.07529739996243734
     ],
     "tracemalloc": false,
     "warmups": 1
   },
   "memory": {
-    "inner_loops": 500,
+    "inner_loops": 80,
     "median_peak_mem_bytes": 920,
+    "median_traced_python_alloc_bytes": 920,
     "method": "tracemalloc_separate_from_latency",
+    "metric": "traced_python_allocation_bytes",
     "peak_mem_bytes": 920,
-    "repeats": 5,
+    "peak_traced_python_alloc_bytes": 920,
+    "repeats": 3,
     "samples_peak_mem_bytes": [
       920,
       920,
+      920
+    ],
+    "samples_traced_python_alloc_bytes": [
       920,
       920,
       920
     ],
     "warmups": 1
   },
-  "module_file": "src/swarm/pareto.py",
+  "method": {
+    "fixture_sha256": "89efceacbcbf87834b45fdcbafc4cf8399188067682c1c2d628c4d797521f14e",
+    "focused_test_sha256": "bd61b7cd3315f563352d24dfe6d51510ded7a346b0102d5f3988cfa52f0756cf",
+    "harness_sha256": "14e55871fb48c37754e987571ee3e79a244605199ac91eec5d785826ae857189",
+    "method_sha256": "aed7e3eae6512c028ecfd6b417dcb20b86bb0df5f096e0cd26420d1386d1bbd1",
+    "oracle_matrix_sha256": "e8e10f9cd3a6b46648bca0003ce15de62e157473056a9ee2a13cdaa66b7237f8",
+    "parameters": {
+      "frozen_fixture_sha256": "89efceacbcbf87834b45fdcbafc4cf8399188067682c1c2d628c4d797521f14e",
+      "inner_loops": 80,
+      "mem_repeats": 3,
+      "oracle_matrix_sha256": "e8e10f9cd3a6b46648bca0003ce15de62e157473056a9ee2a13cdaa66b7237f8",
+      "outer_samples": 9,
+      "perf_matrix_sizes": [
+        10,
+        40,
+        100
+      ],
+      "warmups": 1
+    }
+  },
+  "module_file": "/Users/djtelicloud/Documents/agentixai/grok-mcp-server/.worktrees/cursor/python-superiority-loop/src/swarm/pareto.py",
+  "official_original": false,
   "oracle": {
     "front0": [
       5,
@@ -133,11 +176,199 @@
       ]
     ],
     "index_count": 10,
-    "oracle": "brute_force_dominates+partition_sha256"
+    "oracle": "independent_brute_force_peel"
+  },
+  "oracle_matrix": {
+    "cases": {
+      "dominated_chain": {
+        "front_count": 3,
+        "front_partition_sha256": "1f40aff81e6bc99080eeb68eb2c35024a6cc3dab63f6c911a63c9b743598cf0d",
+        "n": 3
+      },
+      "duplicates_ties": {
+        "front_count": 1,
+        "front_partition_sha256": "aa766e53d3d3dd46260bdd8985eb2851a61e5da2156052a75560d814e4ece156",
+        "n": 3
+      },
+      "empty": {
+        "front_count": 0,
+        "front_partition_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "n": 0
+      },
+      "frozen_main": {
+        "front_count": 3,
+        "front_partition_sha256": "dea701c7585647b26c53ea23befa8238e058baa69d12d041240c8d250d7697b7",
+        "n": 10
+      },
+      "larger_deterministic": {
+        "front_count": 4,
+        "front_partition_sha256": "9911787dc790e17d0039753156447bd36859b0ae4c18da74cb00813601c79b84",
+        "n": 24
+      },
+      "singleton": {
+        "front_count": 1,
+        "front_partition_sha256": "db407f11d7ede59abaab0e98e097ff2dae10a048207b801745d7199ef19c2387",
+        "n": 1
+      },
+      "tradeoffs": {
+        "front_count": 1,
+        "front_partition_sha256": "aa766e53d3d3dd46260bdd8985eb2851a61e5da2156052a75560d814e4ece156",
+        "n": 3
+      }
+    },
+    "oracle_matrix_sha256": "e8e10f9cd3a6b46648bca0003ce15de62e157473056a9ee2a13cdaa66b7237f8"
   },
   "parity": {
-    "note": "full-front partition + brute-force front0 (G1)",
+    "note": "independent full peel vs candidate fronts (H7/G1)",
     "property_pass": true
+  },
+  "performance_matrix": {
+    "cases": {
+      "n=10": {
+        "fixture_sha256": "adeb103875516282af5d1f4b6a73b879d1b7365cb75a133d341f531148bd7586",
+        "latency": {
+          "inner_loops": 80,
+          "median_ms": 0.07537759993283544,
+          "noise_floor_pct": 5.811015111748466,
+          "outer_samples": 9,
+          "p50_ms": 0.07537759993283544,
+          "p95_ms": 0.07791281241225079,
+          "samples_ms": [
+            0.0763411502703093,
+            0.07530624970968347,
+            0.07354323752224445,
+            0.07524009997723624,
+            0.07779843763273675,
+            0.07798906226526015,
+            0.07537759993283544,
+            0.07441146262863185,
+            0.0762687501264736
+          ],
+          "tracemalloc": false,
+          "warmups": 1
+        },
+        "memory": {
+          "inner_loops": 50,
+          "median_peak_mem_bytes": 984,
+          "median_traced_python_alloc_bytes": 984,
+          "method": "tracemalloc_separate_from_latency",
+          "metric": "traced_python_allocation_bytes",
+          "peak_mem_bytes": 984,
+          "peak_traced_python_alloc_bytes": 984,
+          "repeats": 3,
+          "samples_peak_mem_bytes": [
+            984,
+            984,
+            984
+          ],
+          "samples_traced_python_alloc_bytes": [
+            984,
+            984,
+            984
+          ],
+          "warmups": 1
+        },
+        "n": 10
+      },
+      "n=100": {
+        "fixture_sha256": "d0e41f70444e8d981d58090e4716a4e0f90d9d0c5dadea4fbbb35347d55c335c",
+        "latency": {
+          "inner_loops": 20,
+          "median_ms": 8.310706249903888,
+          "noise_floor_pct": 5.0,
+          "outer_samples": 9,
+          "p50_ms": 8.310706249903888,
+          "p95_ms": 8.458718750043772,
+          "samples_ms": [
+            8.298795850714669,
+            8.41578124964144,
+            8.487343750311993,
+            8.378556249954272,
+            8.267012500436977,
+            8.316431249841116,
+            8.268710398988333,
+            8.310706249903888,
+            8.216112499940209
+          ],
+          "tracemalloc": false,
+          "warmups": 1
+        },
+        "memory": {
+          "inner_loops": 50,
+          "median_peak_mem_bytes": 24720,
+          "median_traced_python_alloc_bytes": 24720,
+          "method": "tracemalloc_separate_from_latency",
+          "metric": "traced_python_allocation_bytes",
+          "peak_mem_bytes": 24720,
+          "peak_traced_python_alloc_bytes": 24720,
+          "repeats": 3,
+          "samples_peak_mem_bytes": [
+            24720,
+            24720,
+            24720
+          ],
+          "samples_traced_python_alloc_bytes": [
+            24720,
+            24720,
+            24720
+          ],
+          "warmups": 1
+        },
+        "n": 100
+      },
+      "n=40": {
+        "fixture_sha256": "d30b48ae01529d318390af5b5eed71e75ff7ea9244f22aaff2991eec2e012023",
+        "latency": {
+          "inner_loops": 80,
+          "median_ms": 1.3216197872679913,
+          "noise_floor_pct": 5.0,
+          "outer_samples": 9,
+          "p50_ms": 1.3216197872679913,
+          "p95_ms": 1.353336977554136,
+          "samples_ms": [
+            1.3245270874904236,
+            1.3333291626622668,
+            1.3551515625294996,
+            1.314763549817144,
+            1.3506151000910904,
+            1.3100526000926038,
+            1.3091489625367103,
+            1.3116838501446182,
+            1.3216197872679913
+          ],
+          "tracemalloc": false,
+          "warmups": 1
+        },
+        "memory": {
+          "inner_loops": 50,
+          "median_peak_mem_bytes": 3792,
+          "median_traced_python_alloc_bytes": 3792,
+          "method": "tracemalloc_separate_from_latency",
+          "metric": "traced_python_allocation_bytes",
+          "peak_mem_bytes": 3792,
+          "peak_traced_python_alloc_bytes": 3792,
+          "repeats": 3,
+          "samples_peak_mem_bytes": [
+            3792,
+            3792,
+            3792
+          ],
+          "samples_traced_python_alloc_bytes": [
+            3792,
+            3792,
+            3792
+          ],
+          "warmups": 1
+        },
+        "n": 40
+      }
+    },
+    "note": "per-case only; do not score wins from aggregates",
+    "sizes": [
+      10,
+      40,
+      100
+    ]
   },
   "python": {
     "executable": "/Users/djtelicloud/Documents/agentixai/grok-mcp-server/.worktrees/cursor/python-superiority-loop/.venv/bin/python3",
@@ -145,7 +376,7 @@
     "platform": "macOS-26.5.2-arm64-arm-64bit-Mach-O",
     "version": "3.14.6 (main, Jun 23 2026, 15:46:31) [Clang 22.1.3 ]"
   },
-  "schema": "unigrok-superiority-receipt-v1",
-  "source_path": "src/swarm/pareto.py",
+  "schema": "unigrok-superiority-receipt-v2",
+  "source_path": "/Users/djtelicloud/Documents/agentixai/grok-mcp-server/.worktrees/cursor/python-superiority-loop/src/swarm/pareto.py",
   "source_sha256": "d6bb5f0ad39fef820a263b65dd9ddc1e7ce1139b52c0b2fae8bc29358b60a633"
 }

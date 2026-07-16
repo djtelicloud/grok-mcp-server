@@ -1,4 +1,4 @@
-"""Focused tests for prep-only superiority pareto harness (H1–H6 / G1–G10)."""
+"""Focused tests for prep-only superiority pareto harness (H1–H10 / G1–G10)."""
 
 from __future__ import annotations
 
@@ -10,16 +10,24 @@ import pytest
 from scripts.superiority_baseline_pareto import (
     FROZEN_POINTS,
     LABELS,
+    BundleError,
+    CaptureParamError,
+    DirtyTreeError,
     OracleError,
     ProvenanceError,
-    brute_force_front0,
-    build_receipt,
+    brute_force_peel,
+    canonicalize_bundle,
+    compute_method_identity,
     fixture_sha256,
     full_front_partition,
     import_pareto,
+    independent_dominates,
     measure_latency_ms,
-    measure_peak_mem_bytes,
+    measure_traced_python_alloc_bytes,
+    oracle_matrix_hashes,
+    repo_root,
     run_capture,
+    validate_capture_params,
 )
 
 
@@ -40,31 +48,100 @@ class TestH1Provenance:
             import_pareto(decoy)
 
 
-class TestH2Oracle:
-    def test_full_front_matches_brute_force_and_covers_indices(self):
+class TestH7Oracle:
+    def test_full_peel_matches_every_front(self):
         mod = import_pareto(PARETO)
-        result = full_front_partition(
-            FROZEN_POINTS, mod.fast_non_dominated_sort, mod.dominates
-        )
-        assert sorted(result["front0"]) == brute_force_front0(
-            FROZEN_POINTS, mod.dominates
-        )
+        result = full_front_partition(FROZEN_POINTS, mod.fast_non_dominated_sort)
+        expected = brute_force_peel(FROZEN_POINTS, independent_dominates)
+        assert result["fronts"] == expected
         flat = [i for front in result["fronts"] for i in front]
         assert sorted(flat) == list(range(len(FROZEN_POINTS)))
-        assert len(result["front_partition_sha256"]) == 64
 
-    def test_oracle_corruption_detected(self):
+    def test_wrong_later_front_rejected(self):
         mod = import_pareto(PARETO)
 
         def bad_sort(points):
             fronts = mod.fast_non_dominated_sort(points)
-            # Drop an index → partition integrity fails.
-            if fronts and fronts[0]:
-                fronts = [fronts[0][1:], *fronts[1:]]
+            if len(fronts) >= 2:
+                # Collapse later fronts incorrectly.
+                return [fronts[0], [i for f in fronts[1:] for i in f][:1]]
             return fronts
 
         with pytest.raises(OracleError):
-            full_front_partition(FROZEN_POINTS, bad_sort, mod.dominates)
+            full_front_partition(FROZEN_POINTS, bad_sort)
+
+    def test_production_dominates_corruption_ignored_by_independent_oracle(self):
+        mod = import_pareto(PARETO)
+
+        def lie_dominates(a, b):
+            return False
+
+        # Candidate uses real sort (correct fronts); independent oracle still peels.
+        result = full_front_partition(
+            FROZEN_POINTS, mod.fast_non_dominated_sort, lie_dominates
+        )
+        assert result["fronts"] == brute_force_peel(
+            FROZEN_POINTS, independent_dominates
+        )
+
+    def test_oracle_matrix_hashes_stable(self):
+        mod = import_pareto(PARETO)
+        a = oracle_matrix_hashes(mod.fast_non_dominated_sort)
+        b = oracle_matrix_hashes(mod.fast_non_dominated_sort)
+        assert a["oracle_matrix_sha256"] == b["oracle_matrix_sha256"]
+        assert "frozen_main" in a["cases"]
+        assert "dominated_chain" in a["cases"]
+
+
+class TestH8Params:
+    def test_refuse_zero_and_negative_work(self):
+        with pytest.raises(CaptureParamError):
+            validate_capture_params(
+                outer_samples=1, inner_loops=0, warmups=0, mem_repeats=0
+            )
+        with pytest.raises(CaptureParamError):
+            run_capture(
+                label="ORIGINAL",
+                outer_samples=1,
+                inner_loops=0,
+                warmups=0,
+                mem_repeats=0,
+                allow_dirty=True,
+                include_perf_matrix=False,
+            )
+
+
+class TestH9Bundle:
+    def test_target_always_included_when_omitted(self):
+        entries = canonicalize_bundle(
+            root=repo_root(),
+            target_path=PARETO,
+            extra=["src/swarm/__init__.py"],
+        )
+        paths = [e["path"] for e in entries]
+        assert paths[0] == "src/swarm/pareto.py"
+        assert "src/swarm/__init__.py" in paths
+        assert all("sha256" in e and e["loc"] > 0 for e in entries)
+
+    def test_absolute_and_escaping_rejected(self):
+        with pytest.raises(BundleError):
+            canonicalize_bundle(
+                root=repo_root(),
+                target_path=PARETO,
+                extra=["/tmp/evil.py"],
+            )
+        with pytest.raises(BundleError):
+            canonicalize_bundle(
+                root=repo_root(),
+                target_path=PARETO,
+                extra=["../outside.py"],
+            )
+        with pytest.raises(BundleError):
+            canonicalize_bundle(
+                root=repo_root(),
+                target_path=PARETO,
+                extra=["src/swarm/does_not_exist.py"],
+            )
 
 
 class TestH3LatencyMemorySplit:
@@ -82,91 +159,96 @@ class TestH3LatencyMemorySplit:
         assert latency["median_ms"] > 0
         assert latency["noise_floor_pct"] >= 5.0
 
-    def test_peak_mem_measured_separately(self):
+    def test_traced_python_alloc_measured_separately(self):
         mod = import_pareto(PARETO)
-        memory = measure_peak_mem_bytes(
+        memory = measure_traced_python_alloc_bytes(
             mod.fast_non_dominated_sort,
             FROZEN_POINTS,
             repeats=3,
             inner_loops=50,
             warmups=1,
         )
-        assert memory["method"] == "tracemalloc_separate_from_latency"
-        assert memory["peak_mem_bytes"] >= 0
-        assert len(memory["samples_peak_mem_bytes"]) == 3
+        assert memory["metric"] == "traced_python_allocation_bytes"
+        assert len(memory["samples_traced_python_alloc_bytes"]) == 3
+
+
+class TestH10MethodAndDirty:
+    def test_method_hash_stable_across_labels(self):
+        mod = import_pareto(PARETO)
+        matrix = oracle_matrix_hashes(mod.fast_non_dominated_sort)
+        a = compute_method_identity(
+            outer_samples=9,
+            inner_loops=40,
+            warmups=1,
+            mem_repeats=3,
+            oracle_matrix=matrix,
+        )
+        b = compute_method_identity(
+            outer_samples=9,
+            inner_loops=40,
+            warmups=1,
+            mem_repeats=3,
+            oracle_matrix=matrix,
+        )
+        assert a["method_sha256"] == b["method_sha256"]
+
+    def test_method_hash_drifts_with_params(self):
+        mod = import_pareto(PARETO)
+        matrix = oracle_matrix_hashes(mod.fast_non_dominated_sort)
+        a = compute_method_identity(
+            outer_samples=9,
+            inner_loops=40,
+            warmups=1,
+            mem_repeats=3,
+            oracle_matrix=matrix,
+        )
+        b = compute_method_identity(
+            outer_samples=10,
+            inner_loops=40,
+            warmups=1,
+            mem_repeats=3,
+            oracle_matrix=matrix,
+        )
+        assert a["method_sha256"] != b["method_sha256"]
+
+    def test_dirty_refusal_without_allow(self, monkeypatch: pytest.MonkeyPatch):
+        from scripts import superiority_baseline_pareto as harness
+
+        monkeypatch.setattr(harness, "path_is_dirty", lambda _cwd, _rel: True)
+        with pytest.raises(DirtyTreeError):
+            run_capture(
+                label="ORIGINAL",
+                outer_samples=9,
+                inner_loops=20,
+                warmups=1,
+                mem_repeats=3,
+                allow_dirty=False,
+                include_perf_matrix=False,
+            )
 
 
 class TestH4H5H6Receipt:
     def test_labels_restricted(self):
         assert LABELS == ("ORIGINAL", "TEAM_FINAL", "SWARM_FINAL")
 
-    def test_receipt_deterministic_fixture_and_bundle_loc(self):
+    def test_receipt_diagnostic_not_official_original(self):
         receipt = run_capture(
             label="ORIGINAL",
             target_path=PARETO,
             outer_samples=9,
             inner_loops=40,
             warmups=1,
-            mem_repeats=2,
-            bundle_files=["src/swarm/pareto.py"],
+            mem_repeats=3,
+            allow_dirty=True,
+            include_perf_matrix=False,
         )
-        assert receipt["schema"] == "unigrok-superiority-receipt-v1"
-        assert receipt["label"] == "ORIGINAL"
+        assert receipt["schema"] == "unigrok-superiority-receipt-v2"
+        assert receipt["baseline_status"] == "diagnostic_superseded"
+        assert receipt["official_original"] is False
         assert receipt["fixture_sha256"] == fixture_sha256(FROZEN_POINTS)
-        assert receipt["source_sha256"]
-        assert receipt["git_commit"]
-        assert receipt["python"]["executable"]
-        assert receipt["frozen_inputs"]["points"]
-        assert receipt["latency"]["outer_samples"] == 9
-        assert receipt["oracle"]["front_partition_sha256"]
-        assert receipt["bundle"]["total_loc"] == receipt["bundle"]["loc_by_file"][
-            "src/swarm/pareto.py"
-        ]
-        # Round-trip JSON stability for key identity fields.
+        assert receipt["method"]["method_sha256"]
+        assert receipt["oracle_matrix"]["oracle_matrix_sha256"]
+        assert "src/swarm/pareto.py" in receipt["bundle"]["sha256_by_file"]
         blob = json.dumps(receipt, sort_keys=True)
         again = json.loads(blob)
-        assert again["fixture_sha256"] == receipt["fixture_sha256"]
-        assert again["source_sha256"] == receipt["source_sha256"]
-
-    def test_bundle_schema_names_multiple_files(self):
-        mod = import_pareto(PARETO)
-        oracle = full_front_partition(
-            FROZEN_POINTS, mod.fast_non_dominated_sort, mod.dominates
-        )
-        latency = {
-            "samples_ms": [1.0] * 9,
-            "median_ms": 1.0,
-            "p50_ms": 1.0,
-            "p95_ms": 1.0,
-            "noise_floor_pct": 5.0,
-            "outer_samples": 9,
-            "inner_loops": 1,
-            "warmups": 0,
-            "tracemalloc": False,
-        }
-        memory = {
-            "samples_peak_mem_bytes": [10],
-            "peak_mem_bytes": 10,
-            "median_peak_mem_bytes": 10,
-            "repeats": 1,
-            "inner_loops": 1,
-            "warmups": 0,
-            "method": "tracemalloc_separate_from_latency",
-        }
-        receipt = build_receipt(
-            label="TEAM_FINAL",
-            pareto_mod=mod,
-            target_path=PARETO,
-            points=FROZEN_POINTS,
-            latency=latency,
-            memory=memory,
-            oracle=oracle,
-            bundle_files=["src/swarm/pareto.py", "src/swarm/__init__.py"],
-        )
-        assert set(receipt["bundle"]["files"]) == {
-            "src/swarm/pareto.py",
-            "src/swarm/__init__.py",
-        }
-        assert receipt["bundle"]["total_loc"] == sum(
-            receipt["bundle"]["loc_by_file"].values()
-        )
+        assert again["method"]["method_sha256"] == receipt["method"]["method_sha256"]
