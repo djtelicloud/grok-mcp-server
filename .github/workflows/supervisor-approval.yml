@@ -6,6 +6,12 @@ on:
   check_run:
     types: [completed]
   status:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Pull request number to re-evaluate
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -19,7 +25,8 @@ jobs:
       ${{
         github.event_name == 'pull_request_target' ||
         (github.event_name == 'check_run' && !contains(github.event.check_run.name, 'Supervisor Gate')) ||
-        github.event_name == 'status'
+        github.event_name == 'status' ||
+        github.event_name == 'workflow_dispatch'
       }}
     runs-on: ubuntu-latest
     steps:
@@ -35,12 +42,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           EVENT_NAME: ${{ github.event_name }}
           PULL_REQUEST_NUMBER: ${{ github.event.pull_request.number }}
+          MANUAL_PULL_REQUEST_NUMBER: ${{ inputs.pr_number }}
           CHECK_RUN_PULL_REQUESTS: ${{ toJson(github.event.check_run.pull_requests) }}
         shell: bash
         run: |
           set -euo pipefail
           if [[ "${EVENT_NAME}" == "pull_request_target" ]]; then
             number="${PULL_REQUEST_NUMBER}"
+          elif [[ "${EVENT_NAME}" == "workflow_dispatch" ]]; then
+            number="${MANUAL_PULL_REQUEST_NUMBER}"
           elif [[ "${EVENT_NAME}" == "status" ]]; then
             number="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/pulls" --jq '.[0].number // empty')"
           else
