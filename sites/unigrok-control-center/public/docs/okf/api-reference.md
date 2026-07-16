@@ -5146,7 +5146,7 @@ unchanged so explicit model slugs keep working everywhere.
 ### Method: `ModelResolver.catalog_snapshot` {#utils-modelresolver-catalog_snapshot}
 
 ```python
-async def ModelResolver.catalog_snapshot(self) -> tuple[List[str], str, bool]
+async def ModelResolver.catalog_snapshot(self, credential_scope: Optional[str]=None) -> tuple[List[str], str, bool]
 ```
 
 **Keywords:** model, resolver, catalog, snapshot

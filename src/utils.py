@@ -9510,16 +9510,27 @@ class ModelResolver:
 
     def __init__(self, ttl: float = _TTL_SEC):
         self._ttl = ttl
-        self._resolved: Dict[str, tuple] = {}  # alias → (slug, timestamp)
-        self._catalog: Optional[tuple] = None  # (ids, source, available, timestamp)
+        # Cache by opaque credential generation as well as alias. Different
+        # principals can have different xAI entitlements, and key rotation
+        # must not inherit the retired key's catalog for the TTL window.
+        self._resolved: Dict[tuple[str, str], tuple] = {}
+        self._catalogs: Dict[str, tuple] = {}
         self._lock = asyncio.Lock()
         self._catalog_lock = asyncio.Lock()
 
     def invalidate(self):
         self._resolved.clear()
-        self._catalog = None
+        self._catalogs.clear()
 
-    async def catalog_snapshot(self) -> tuple[List[str], str, bool]:
+    @staticmethod
+    def _credential_scope() -> str:
+        """Opaque process-local generation for the active API credential."""
+
+        return _active_xai_breaker_scope()
+
+    async def catalog_snapshot(
+        self, credential_scope: Optional[str] = None
+    ) -> tuple[List[str], str, bool]:
         """Return a TTL-cached catalog without making routing depend on it.
 
         Discovery failure returns the known fallback IDs and is cached just
@@ -9528,18 +9539,24 @@ class ModelResolver:
         """
         if not self._discovery_enabled():
             return list(FALLBACK_XAI_LANGUAGE_MODELS), "static_fallback", False
-        cached = self._catalog
+        credential_scope = credential_scope or self._credential_scope()
+        cached = self._catalogs.get(credential_scope)
         if cached is not None and time.time() - cached[3] < self._ttl:
             return list(cached[0]), str(cached[1]), bool(cached[2])
         async with self._catalog_lock:
-            cached = self._catalog
+            cached = self._catalogs.get(credential_scope)
             if cached is not None and time.time() - cached[3] < self._ttl:
                 return list(cached[0]), str(cached[1]), bool(cached[2])
             discovery = await discover_xai_api_models()
             ids = [entry.get("id") for entry in discovery.get("models", []) if entry.get("id")]
             source = str(discovery.get("source") or "unknown")
             available = bool(discovery.get("available"))
-            self._catalog = (ids, source, available, time.time())
+            self._catalogs[credential_scope] = (
+                ids,
+                source,
+                available,
+                time.time(),
+            )
             return list(ids), source, available
 
     @staticmethod
@@ -9583,23 +9600,33 @@ class ModelResolver:
         default = _model_alias_default(alias)
         if not self._discovery_enabled():
             return default
-        cached = self._resolved.get(alias)
+        cache_key = (self._credential_scope(), alias)
+        cached = self._resolved.get(cache_key)
         if cached is not None and time.time() - cached[1] < self._ttl:
             return cached[0]
         async with self._lock:
-            cached = self._resolved.get(alias)
+            # Re-read after waiting: a context-bound credential may have
+            # rotated while another task held the resolver lock.
+            cache_key = (self._credential_scope(), alias)
+            cached = self._resolved.get(cache_key)
             if cached is not None and time.time() - cached[1] < self._ttl:
                 return cached[0]
-            resolved = await self._resolve_from_catalog(alias, default)
+            resolved = await self._resolve_from_catalog(
+                alias, default, credential_scope=cache_key[0]
+            )
             # Discovery-down results are cached too: the fallback IS the
             # default, and re-probing every call would stall each turn on the
             # discovery timeout while the API is unreachable.
-            self._resolved[alias] = (resolved, time.time())
+            self._resolved[cache_key] = (resolved, time.time())
             return resolved
 
-    async def _resolve_from_catalog(self, alias: str, default: str) -> str:
+    async def _resolve_from_catalog(
+        self, alias: str, default: str, *, credential_scope: str
+    ) -> str:
         try:
-            catalog_ids, _, available = await self.catalog_snapshot()
+            catalog_ids, _, available = await self.catalog_snapshot(
+                credential_scope=credential_scope
+            )
         except Exception as exc:  # discover catches internally; belt and braces
             logging.getLogger("GrokMCP").warning(
                 f"Model alias '{alias}': catalog discovery raised, using default '{default}': {exc}"

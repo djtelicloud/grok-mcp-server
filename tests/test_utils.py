@@ -6691,6 +6691,86 @@ class TestModelResolver:
         assert first == second == DEFAULT_PLANNING_MODEL
         assert mock_disc.await_count == 1
 
+    @pytest.mark.asyncio
+    async def test_catalog_and_alias_caches_are_credential_scoped(self, monkeypatch):
+        from src.identity import reset_active_principal, set_active_principal
+        from src.utils import DEFAULT_PLANNING_MODEL, ModelResolver
+
+        principal_a = "oauth:https%3A%2F%2Fcontrol.grokmcp.org:github%3A42"
+        principal_b = "oauth:https%3A%2F%2Fcontrol.grokmcp.org:github%3A99"
+        monkeypatch.setenv("UNI_GROK_TESTING", "0")
+        monkeypatch.delenv("XAI_API_KEY", raising=False)
+        monkeypatch.setenv(
+            "UNIGROK_PRINCIPAL_XAI_KEYS_JSON",
+            json.dumps(
+                {
+                    principal_a: "xai-principal-a",
+                    principal_b: "xai-principal-b",
+                }
+            ),
+        )
+        resolver = ModelResolver()
+        discover = AsyncMock(
+            side_effect=[
+                self._catalog([DEFAULT_PLANNING_MODEL]),
+                self._catalog(["grok-9-reasoning"]),
+            ]
+        )
+
+        with patch("src.utils.discover_xai_api_models", discover):
+            token_a = set_active_principal(principal_a)
+            try:
+                assert await resolver.resolve("planning") == DEFAULT_PLANNING_MODEL
+            finally:
+                reset_active_principal(token_a)
+
+            token_b = set_active_principal(principal_b)
+            try:
+                assert await resolver.resolve("planning") == "grok-9-reasoning"
+            finally:
+                reset_active_principal(token_b)
+
+            token_a = set_active_principal(principal_a)
+            try:
+                assert await resolver.resolve("planning") == DEFAULT_PLANNING_MODEL
+            finally:
+                reset_active_principal(token_a)
+
+        assert discover.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_key_rotation_invalidates_catalog_generation(self, monkeypatch):
+        from src.identity import reset_active_principal, set_active_principal
+        from src.utils import DEFAULT_PLANNING_MODEL, ModelResolver
+
+        principal = "oauth:https%3A%2F%2Fcontrol.grokmcp.org:github%3A42"
+        monkeypatch.setenv("UNI_GROK_TESTING", "0")
+        monkeypatch.delenv("XAI_API_KEY", raising=False)
+        resolver = ModelResolver()
+        discover = AsyncMock(
+            side_effect=[
+                self._catalog([DEFAULT_PLANNING_MODEL]),
+                self._catalog(["grok-10-reasoning"]),
+            ]
+        )
+        token = set_active_principal(principal)
+        try:
+            with patch("src.utils.discover_xai_api_models", discover):
+                monkeypatch.setenv(
+                    "UNIGROK_PRINCIPAL_XAI_KEYS_JSON",
+                    json.dumps({principal: "xai-first"}),
+                )
+                assert await resolver.resolve("planning") == DEFAULT_PLANNING_MODEL
+                monkeypatch.setenv(
+                    "UNIGROK_PRINCIPAL_XAI_KEYS_JSON",
+                    json.dumps({principal: "xai-second"}),
+                )
+                assert await resolver.resolve("planning") == "grok-10-reasoning"
+        finally:
+            reset_active_principal(token)
+
+        assert discover.await_count == 2
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Phase 2 — Server-side conversation state (SDK mocked, no network calls)
