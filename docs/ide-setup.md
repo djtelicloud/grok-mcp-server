@@ -247,8 +247,13 @@ check `codex mcp --help`. Keep the server name as `grok`; this repo's
 `.codex/mcp/grok-routing.json` and Codex intelligence config route to the
 `mcp__grok` tool namespace.)
 
-## Antigravity / Gemini (`settings.json` → MCP servers)
+## Antigravity / Gemini (`.gemini/settings.json`)
 
+Antigravity configures its MCP servers in the tracked project file `.gemini/settings.json`.
+The configuration natively sets `allowNonWorkspaceAccess: false` and restricts tool access to `mcp(grok/*)` to ensure the agent cannot mutate the host outside of the worktree.
+
+> [!WARNING]
+> **Tracked Configs Only**: Never replace the repository's `.gemini/config.json` or `.gemini/settings.json` with a private host credential file (like your `~/.gemini/config`). These files must remain public project configuration.
 ```json
 {
   "mcpServers": {
@@ -263,6 +268,12 @@ check `codex mcp --help`. Keep the server name as `grok`; this repo's
   }
 }
 ```
+
+> [!WARNING]
+> **Secret & Worktree Safety**
+> - **No Secrets in Configs**: Never copy `XAI_API_KEY`, Google ADC credentials, or host `~/.gemini/config` files into this repository or the IDE MCP config JSON. 
+> - **Isolated Worktrees**: Operate inside `.worktrees/gemini/<task>/` (or the provider home). Do not pollute Documents with loose checkouts or mutate the primary shared `main` checkout.
+
 
 > [!NOTE]
 > IDEs cache MCP schemas. After adding or changing a tool, reconnect the Forge

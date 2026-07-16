@@ -65,6 +65,14 @@ Example shape (fill with real live state, not this template text):
 2. Large-context pass on architecture vs dual-plane docs — report 1–2 fixable gaps.
 ```
 
-## 5. Verification Requirements
+## 5. Antigravity Calling UniGrok Models (Client Habit)
+
+When using the UniGrok MCP server to execute model operations, follow this strict client habit:
+1. **Model Discovery**: Call `grok_mcp_discover_self` when you need to understand available UniGrok model identities.
+2. **Explicit Routing**: Call the `agent` tool with an explicit `mode`, and optionally supply a `plane` and `fallback_policy`.
+3. **CLI-First Billing**: Prefer CLI-compatible work under `cli_first`. Use `same_plane` when billing boundaries must not be crossed.
+4. **Honest Attribution**: Never invent catalog membership from product names (e.g., UI name `grok-4.5` vs API slugs vs CLI live catalog). Keep attribution honest in commit trailers per `docs/agent-attribution.md`. Do not claim UniGrok runs Gemini/Google models as native inference planes.
+
+## 6. Verification Requirements
 * A Codex/project-admin session reviews the draft PR's exact current head and alone runs `scripts/land` from a `codex/*` integration branch before protected merge and local synchronization.
 * Use `.agents/skills/unigrok-workspace-memory/SKILL.md` for commit-anchored recall. Pass the Gemini worktree's own full HEAD; Codex records the verified outcome after landing.
