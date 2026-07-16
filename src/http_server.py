@@ -975,9 +975,13 @@ def _validated_public_mcp_resource(raw: str) -> Optional[str]:
     HTTP DNS-rebinding allowlist.
     """
     resource = _validated_https_url(raw)
-    if resource and not urlsplit(resource).path:
+    if not resource:
+        return None
+    path = urlsplit(resource).path
+    if not path:
         resource = f"{resource}/mcp"
-    if resource and urlsplit(resource).path == "/mcp":
+        path = "/mcp"
+    if path == "/mcp":
         return resource
     return None
 
