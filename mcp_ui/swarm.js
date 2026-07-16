@@ -15,7 +15,7 @@
 // Must match src/version.py UI_ASSET_VERSION and the query token on the
 // swarm.js reference in swarm.html. The sample uses the same token so a
 // revalidated page cannot pair new logic with a heuristically cached payload.
-const UI_ASSET_VERSION = "grok-v0.6.0-r13";
+const UI_ASSET_VERSION = "grok-v0.6.0-r14";
 
 const $ = (id) => document.getElementById(id);
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -764,8 +764,235 @@ function browserAnalyzePython(code) {
     bytes: new TextEncoder().encode(code).length,
     loc: lines.filter((line) => line.trim()).length,
     functions,
-    searchability: { ready: false, blockers: ["missing_tests", "missing_benchmark"] },
+    // Mirror the server's 3-key shape: a verified/scored search still needs an
+    // oracle + measurement (advisory), but code-only analysis is not "blocked".
+    searchability: {
+      ready: functions.length > 0,
+      blockers: functions.length > 0 ? [] : ["no_functions"],
+      scored_search_requirements: ["missing_tests", "missing_benchmark"],
+    },
   };
+}
+
+// ── Optional-verification scaffolding ────────────────────────────────────────
+// Progressive disclosure: free analyze is code-only. Scoring rewrites is opt-in
+// and needs exactly ONE honest input — sample inputs — from which we scaffold a
+// SWARM_BENCH harness and a baseline-equivalence pytest. Both are pre-filled,
+// valid-on-open, and fully editable. We label them honestly: they only prove
+// equivalence on the sample inputs; the user strengthens them for real
+// correctness. The tool still receives test_code + bench_code — the UI wrote
+// them from one input instead of forcing two hand-authored code blocks.
+
+// The `missing_tests` / `missing_benchmark` searchability markers are NOT hard
+// blockers here: the UI scaffolds both. We feature-detect either shape — the
+// original server listed them under searchability.blockers; the softened server
+// (claude/swarm-analyze-advisory) moves them to
+// searchability.scored_search_requirements and sets ready=true for code-only
+// input. We read every field name so the two compose whichever lands.
+const SCAFFOLDABLE_MARKERS = new Set(["missing_tests", "missing_benchmark"]);
+
+function classifySearchability(searchability) {
+  const s = searchability || {};
+  const blockers = Array.isArray(s.blockers) ? s.blockers : [];
+  const advisory = [
+    ...(Array.isArray(s.scored_search_requirements) ? s.scored_search_requirements : []),
+    ...(Array.isArray(s.advisory) ? s.advisory : []),
+    ...(Array.isArray(s.optional) ? s.optional : []),
+  ];
+  // Hard blockers are anything the UI cannot scaffold away.
+  const hardBlockers = blockers.filter((b) => !SCAFFOLDABLE_MARKERS.has(b));
+  // Optional-to-verify = the scaffoldable markers wherever the server put them.
+  const optional = [...new Set([
+    ...advisory,
+    ...blockers.filter((b) => SCAFFOLDABLE_MARKERS.has(b)),
+  ])];
+  return { hardBlockers, optional };
+}
+
+function functionNameFromFocus(focus) {
+  if (typeof focus !== "string") return "";
+  const name = focus.includes(":") ? focus.split(":").pop() : focus;
+  return (name || "").trim();
+}
+
+// Rank the hottest function: highest cyclomatic complexity, then most LOC, then
+// deepest nesting. This is a heuristic hint — the picker stays fully editable.
+function topHotspot(functions) {
+  const list = Array.isArray(functions) ? functions.filter((fn) => fn && fn.focus_node) : [];
+  if (!list.length) return null;
+  return list.slice().sort((a, b) =>
+    (b.cyclomatic_complexity || 0) - (a.cyclomatic_complexity || 0)
+    || (b.loc || 0) - (a.loc || 0)
+    || (b.max_nesting || 0) - (a.max_nesting || 0)
+  )[0];
+}
+
+// JSON.stringify emits a valid Python (double-quoted) string literal for every
+// standard case (control chars → \n/\uXXXX, backslashes doubled, no \' or \/),
+// so we embed the frozen original source and the sample text without a fragile
+// triple-quote heredoc that a stray ''' in user code could break.
+function pyStr(value) {
+  return JSON.stringify(String(value));
+}
+
+function scaffoldEquivalenceTest(code, fnName, sampleText) {
+  const name = fnName || "your_function";
+  return `# Scaffolded baseline-equivalence check.
+# We scaffolded this; it checks that each candidate rewrite returns the SAME
+# result as your ORIGINAL code on the sample inputs below. It is a STARTER — it
+# only proves equivalence on THESE inputs. Strengthen it for real correctness.
+import copy
+import json
+
+from module_under_test import ${name} as _candidate
+
+# Frozen copy of your original implementation — the equivalence oracle. The
+# swarm replaces module_under_test with each candidate; this stays the baseline.
+_ORIGINAL_SOURCE = ${pyStr(code)}
+_original_ns = {"__name__": "original_reference"}
+exec(compile(_ORIGINAL_SOURCE, "original_reference.py", "exec"), _original_ns)
+_original = _original_ns[${pyStr(name)}]
+
+# Each element is the positional-argument list for one call.
+SAMPLE_INPUTS = json.loads(${pyStr(sampleText)})
+
+
+def test_candidate_matches_original_on_samples():
+    assert SAMPLE_INPUTS, "add at least one sample call to make this check meaningful"
+    for index, call_args in enumerate(SAMPLE_INPUTS):
+        # Deep-copy per call so a hotspot that mutates its inputs in place
+        # (e.g. list.sort()) does not let the first call taint the second.
+        candidate_out = _candidate(*copy.deepcopy(call_args))
+        original_out = _original(*copy.deepcopy(call_args))
+        assert candidate_out == original_out, (
+            f"candidate diverged from the original on sample #{index}: {call_args!r}"
+        )
+`;
+}
+
+function scaffoldBenchHarness(fnName, sampleText) {
+  const name = fnName || "your_function";
+  return `# Scaffolded SWARM_BENCH harness (same shape as scripts/swarm_bench.py).
+# We scaffolded this; it MEASURES latency and peak memory of the hotspot on your
+# sample inputs and prints the one contract line the swarm reads. Nothing is
+# simulated — these are real perf_counter + tracemalloc numbers.
+import json
+import time
+import tracemalloc
+
+from module_under_test import ${name} as target
+
+# Each element is the positional-argument list for one call.
+SAMPLE_INPUTS = json.loads(${pyStr(sampleText)})
+INNER_LOOPS = 200
+
+# Untimed warmup.
+for _call_args in SAMPLE_INPUTS:
+    target(*_call_args)
+
+tracemalloc.start()
+_started = time.perf_counter()
+for _ in range(INNER_LOOPS):
+    for _call_args in SAMPLE_INPUTS:
+        target(*_call_args)
+_latency_ms = (time.perf_counter() - _started) * 1000 / INNER_LOOPS
+_current, _peak = tracemalloc.get_traced_memory()
+tracemalloc.stop()
+
+print("SWARM_BENCH " + json.dumps({"latency_ms": _latency_ms, "peak_mem_bytes": int(_peak)}))
+`;
+}
+
+// A textarea we generated carries data-scaffolded="1"; a manual edit clears it
+// so re-scaffolding never clobbers the user's own work.
+function markScaffolded(el) { if (el) el.dataset.scaffolded = "1"; }
+function isScaffolded(el) { return !!el && el.dataset.scaffolded === "1"; }
+
+function validateSampleText(sampleText) {
+  const text = (sampleText || "").trim();
+  if (!text) return { ok: false, empty: true, message: "add at least one sample call" };
+  try {
+    const parsed = JSON.parse(text);
+    if (!Array.isArray(parsed)) {
+      return { ok: false, message: "sample inputs must be a JSON array of calls" };
+    }
+    return { ok: true, empty: parsed.length === 0, parsed };
+  } catch (err) {
+    return { ok: false, message: `not valid JSON: ${err.message}` };
+  }
+}
+
+// Write both scaffolds from the current hotspot + sample inputs. `force` regen
+// overwrites even manually-edited boxes (the explicit Regenerate button);
+// otherwise we only (re)write boxes that are still auto-generated or empty.
+function scaffoldOracles(force) {
+  const testEl = $("testInput");
+  const benchEl = $("benchInput");
+  const sampleEl = $("sampleInput");
+  if (!testEl || !benchEl) return;
+  const code = $("codeInput")?.value ?? "";
+  const fnName = functionNameFromFocus($("focusPicker")?.value ?? "");
+  const rawSample = sampleEl ? sampleEl.value : "";
+  // Keep scaffolds valid-on-open: fall back to an empty JSON array when the
+  // sample field is blank or not-yet-valid JSON. The pre-launch check still
+  // flags an empty array before any budget is spent.
+  const check = validateSampleText(rawSample);
+  const sampleText = check.ok ? rawSample.trim() : "[]";
+  const sampleMsg = $("sampleMsg");
+  if (sampleMsg) {
+    sampleMsg.textContent = check.ok
+      ? (check.empty ? "valid, but empty — add at least one call before you score" : "sample inputs look valid")
+      : (rawSample.trim() ? check.message : "");
+    sampleMsg.className = check.ok || !rawSample.trim() ? "muted" : "err";
+  }
+  if (force || isScaffolded(testEl) || !testEl.value.trim()) {
+    testEl.value = scaffoldEquivalenceTest(code, fnName, sampleText);
+    markScaffolded(testEl);
+  }
+  if (force || isScaffolded(benchEl) || !benchEl.value.trim()) {
+    benchEl.value = scaffoldBenchHarness(fnName, sampleText);
+    markScaffolded(benchEl);
+  }
+}
+
+// Inline pre-launch validation: sanity-check the oracles AT THE FIELD before a
+// swarm burns budget — the test must reference module_under_test + the hotspot,
+// and the bench must emit the SWARM_BENCH contract token.
+function validateOraclesBeforeRun() {
+  const testEl = $("testInput");
+  const benchEl = $("benchInput");
+  const testMsg = $("testFieldMsg");
+  const benchMsg = $("benchFieldMsg");
+  const sampleMsg = $("sampleMsg");
+  if (testMsg) testMsg.textContent = "";
+  if (benchMsg) benchMsg.textContent = "";
+  const fnName = functionNameFromFocus($("focusPicker")?.value ?? "");
+  const testCode = testEl?.value ?? "";
+  const benchCode = benchEl?.value ?? "";
+  const problems = [];
+  if (!fnName) problems.push({ el: sampleMsg, text: "choose a hotspot function first" });
+  if (!testCode.trim()) {
+    problems.push({ el: testMsg, text: "the equivalence test is empty" });
+  } else if (!testCode.includes("module_under_test")) {
+    problems.push({ el: testMsg, text: "test must import from module_under_test" });
+  } else if (fnName && !testCode.includes(fnName)) {
+    problems.push({ el: testMsg, text: `test does not reference ${fnName}` });
+  }
+  const sampleCheck = validateSampleText($("sampleInput")?.value ?? "");
+  if (sampleCheck.ok && sampleCheck.empty) {
+    problems.push({ el: sampleMsg, text: "add at least one sample call before scoring" });
+  } else if (!sampleCheck.ok) {
+    problems.push({ el: sampleMsg, text: sampleCheck.message });
+  }
+  if (!benchCode.trim()) {
+    problems.push({ el: benchMsg, text: "the benchmark is empty" });
+  } else if (!benchCode.includes("SWARM_BENCH")) {
+    problems.push({ el: benchMsg, text: "benchmark must print a SWARM_BENCH contract line" });
+  }
+  for (const problem of problems) {
+    if (problem.el) { problem.el.textContent = problem.text; problem.el.className = "err"; }
+  }
+  return problems.length === 0;
 }
 
 function renderAnalysis(result, exact) {
@@ -797,12 +1024,22 @@ function renderAnalysis(result, exact) {
     </div>`).join("");
   const ruffCount = Object.values(result.ruff?.counts_by_code || {})
     .reduce((sum, value) => sum + Number(value || 0), 0);
+  // Reframe searchability: real blockers stay red; the scaffoldable markers
+  // (missing_tests/missing_benchmark) become a neutral opt-in note — we scaffold
+  // them. Feature-detects both the current and softened server shapes.
+  const { hardBlockers, optional } = classifySearchability(result.searchability);
+  const hardBlockersHtml = hardBlockers.length
+    ? `<div class="err" style="margin-top:7px">Blockers: ${esc(hardBlockers.join(", "))}</div>`
+    : "";
+  const optionalHtml = optional.length
+    ? `<div class="privacy-note">Optional to verify: add a check and we'll scaffold it. Open “Score it against your tests” below — one Sample-inputs field fills a benchmark and a baseline-equivalence test for you.</div>`
+    : `<div class="privacy-note">Ready to score. Open “Score it against your tests” below to scaffold a benchmark and equivalence test from one Sample-inputs field.</div>`;
   panel.innerHTML = `
     <h3>${(result.functions || []).length} function${(result.functions || []).length === 1 ? "" : "s"} found</h3>
     <div class="muted">${esc(result.loc ?? 0)} source lines · ${esc(result.bytes ?? 0)} bytes${exact ? ` · ${ruffCount} Ruff finding${ruffCount === 1 ? "" : "s"}` : " · approximate browser metrics"}</div>
     ${result.secret_warning ? '<div class="err" style="margin-top:7px">Secret-like text detected. Remove it before export or search.</div>' : ""}
     <div class="function-list">${rows || `<div class="muted">${exact ? "No functions found." : "No top-level functions detected by the approximate browser scanner."}</div>`}</div>
-    <div class="privacy-note">Search blockers: ${esc((result.searchability?.blockers || []).join(", ") || "none")}</div>`;
+    ${hardBlockersHtml}${optionalHtml}`;
   const picker = $("focusPicker");
   if (picker) {
     picker.replaceChildren(new Option(
@@ -813,17 +1050,23 @@ function renderAnalysis(result, exact) {
         `${fn.focus_node} · CC ${fn.cyclomatic_complexity} · ${fn.loc} LOC`, fn.focus_node
       ));
     }
-    if ((result.functions || []).length) picker.value = result.functions[0].focus_node;
+    // Auto-pick the top-ranked hotspot (editable), not just the first def.
+    const hottest = topHotspot(result.functions);
+    if (hottest) picker.value = hottest.focus_node;
   }
+  // Verified EXECUTION stays gated to contributor Forge; scaffolding is free and
+  // available in any mode. If the opt-in panel is already open, refresh the
+  // scaffolds against the newly-picked hotspot (only the untouched ones).
   const canSearch = exact && state.runtimeMode === "contributor" && (result.functions || []).length > 0;
   const runBtn = $("runPasteBtn");
   if (runBtn) runBtn.disabled = !canSearch;
   const runMsg = $("pasteRunMsg");
   if (runMsg) {
     runMsg.textContent = canSearch
-      ? "Tests and benchmark are required; every winner is re-measured."
+      ? "Scaffolded benchmark + equivalence test are ready to edit; every winner is re-measured."
       : "Verified execution is available only in contributor Forge after exact analysis.";
   }
+  if ($("searchSetup")?.open) scaffoldOracles(false);
 }
 
 async function analyzePastedCode() {
@@ -868,33 +1111,28 @@ async function analyzePastedCode() {
 }
 
 $("analyzeBtn")?.addEventListener("click", analyzePastedCode);
-$("pasteExampleBtn")?.addEventListener("click", () => {
+// The example proves the whole flow is templatable: one paste + one Sample-
+// inputs value auto-scaffolds a working benchmark AND a baseline-equivalence
+// test — the user hand-authors neither.
+const SLOW_EXAMPLE_SAMPLE = `[
+  [[3, 1, 3, 2, 1]],
+  [[5, 5, 5, 5, 5, 5]]
+]`;
+
+$("pasteExampleBtn")?.addEventListener("click", async () => {
   const code = $("codeInput");
+  const sample = $("sampleInput");
   const test = $("testInput");
   const bench = $("benchInput");
   if (code) code.value = SLOW_EXAMPLE;
-  if (test) test.value = `from module_under_test import deduplicate
-
-def test_order_and_duplicates():
-    assert deduplicate([3, 1, 3, 2, 1]) == [3, 1, 2]
-`;
-  if (bench) bench.value = `import json
-import time
-import tracemalloc
-from module_under_test import deduplicate
-
-values = list(range(400)) * 3
-deduplicate(values[:50])
-tracemalloc.start()
-started = time.perf_counter()
-for _ in range(20):
-    deduplicate(values)
-latency_ms = (time.perf_counter() - started) * 1000 / 20
-_current, peak = tracemalloc.get_traced_memory()
-tracemalloc.stop()
-print("SWARM_BENCH " + json.dumps({"latency_ms": latency_ms, "peak_mem_bytes": peak}))
-`;
-  analyzePastedCode();
+  if (sample) sample.value = SLOW_EXAMPLE_SAMPLE;
+  // Reset scaffold ownership so the example regenerates both oracles cleanly.
+  if (test) { test.value = ""; delete test.dataset.scaffolded; }
+  if (bench) { bench.value = ""; delete bench.dataset.scaffolded; }
+  await analyzePastedCode();
+  const setup = $("searchSetup");
+  if (setup) setup.open = true;
+  scaffoldOracles(true);
 });
 
 async function runPasteSwarm() {
@@ -908,8 +1146,10 @@ async function runPasteSwarm() {
     search_strategy: $("strategyPicker")?.value ?? "",
     primary_goal: $("goalPicker")?.value ?? "",
   };
-  if (!args.focus_node || !args.test_code.trim() || !args.bench_code.trim()) {
-    if (runMsg) runMsg.textContent = "Choose a function and provide both tests and benchmark.";
+  // Inline pre-launch validation: surface any problem AT THE FIELD before a
+  // swarm burns budget — never after.
+  if (!validateOraclesBeforeRun()) {
+    if (runMsg) runMsg.textContent = "Fix the highlighted field(s) before scoring.";
     return;
   }
   if (button) button.disabled = true;
@@ -946,6 +1186,18 @@ async function runPasteSwarm() {
 }
 
 $("runPasteBtn")?.addEventListener("click", runPasteSwarm);
+
+// ── Opt-in scaffold wiring ───────────────────────────────────────────────────
+// Opening the panel pre-fills the oracles; editing sample inputs or the hotspot
+// regenerates only the still-untouched boxes; a manual edit takes ownership.
+$("searchSetup")?.addEventListener("toggle", (event) => {
+  if (event.target.open) scaffoldOracles(false);
+});
+$("sampleInput")?.addEventListener("input", () => scaffoldOracles(false));
+$("focusPicker")?.addEventListener("change", () => scaffoldOracles(false));
+$("rescaffoldBtn")?.addEventListener("click", () => scaffoldOracles(true));
+$("testInput")?.addEventListener("input", (event) => { delete event.target.dataset.scaffolded; });
+$("benchInput")?.addEventListener("input", (event) => { delete event.target.dataset.scaffolded; });
 
 async function refreshTaskPicker() {
   const picker = $("taskPicker");

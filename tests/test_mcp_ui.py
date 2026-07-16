@@ -47,9 +47,9 @@ def test_mcp_ui_static_files_are_served(monkeypatch):
     assert index.status_code == 200
     assert "<title>UniGrok Gateway Console v0.6.0</title>" in index.text
     assert '<span class="version-badge">v0.6.0</span>' in index.text
-    assert 'script type="module" src="./app.js?v=grok-v0.6.0-r13"' in index.text
-    assert '<link rel="stylesheet" href="./styles.css?v=grok-v0.6.0-r13" />' in index.text
-    assert '<link rel="stylesheet" href="./tokens.css?v=grok-v0.6.0-r13" />' in index.text
+    assert 'script type="module" src="./app.js?v=grok-v0.6.0-r14"' in index.text
+    assert '<link rel="stylesheet" href="./styles.css?v=grok-v0.6.0-r14" />' in index.text
+    assert '<link rel="stylesheet" href="./tokens.css?v=grok-v0.6.0-r14" />' in index.text
     assert "Console" in index.text
     assert 'id="surfaceModeBadge"' in index.text
     assert 'id="tab-btn-schemas"' not in index.text
@@ -303,6 +303,22 @@ def test_mcp_ui_swarm_playground_is_served_and_honest(monkeypatch):
     assert "analyze_code_for_swarm" in script.text
     assert 'state.runtimeMode === "contributor"' in script.text
     assert "source was not uploaded" in script.text
+    # Phase 2 progressive disclosure: scoring is opt-in and its oracle boxes are
+    # auto-scaffolded from ONE sample-inputs field, labeled honestly. The tool
+    # still receives test_code + bench_code — the UI writes them.
+    assert "Score it against your tests" in page.text
+    assert 'id="sampleInput"' in page.text
+    assert "Sample inputs (JSON)" in page.text
+    assert "We scaffolded this" in page.text
+    assert "strengthen it for real correctness" in page.text
+    assert "scaffoldOracles" in script.text
+    assert "SWARM_BENCH" in script.text  # the scaffolded bench emits the contract token
+    # The missing_tests/missing_benchmark markers are reframed as optional-to-
+    # verify and feature-detected across the current and softened server shapes.
+    assert "classifySearchability" in script.text
+    assert "Optional to verify" in script.text
+    # Inline pre-launch validation surfaces problems at the field, not post-burn.
+    assert "validateOraclesBeforeRun" in script.text
     # The bundled sample is a REAL recorded run and says so inside itself.
     with TestClient(create_app(), base_url="http://localhost:8080") as client:
         sample = client.get("/ui/swarm-sample.json")
@@ -319,6 +335,76 @@ def test_mcp_ui_swarm_playground_is_served_and_honest(monkeypatch):
     # Apply stays gated by mode in the UI exactly like the tool.
     assert "apply is disabled outside UNIGROK_SWARM=active" in script.text
     assert "apply is disabled while the swarm is still running" in script.text
+
+
+def test_mcp_ui_swarm_verification_is_opt_in_and_scaffolded(monkeypatch):
+    """The disabled-until-two-empty-boxes verification gate is gone. Free
+    analyze is code-only; scoring is an opt-in toggle whose oracle boxes are
+    auto-scaffolded from ONE sample-inputs field. start_paste_swarm still
+    receives test_code + bench_code — the UI generates them, not the user."""
+    monkeypatch.delenv("UNIGROK_RUNTIME", raising=False)
+    monkeypatch.delenv("UNIGROK_API_KEYS", raising=False)
+
+    with TestClient(create_app(), base_url="http://localhost:8080") as client:
+        page = client.get("/ui/swarm.html")
+        script = client.get("/ui/swarm.js")
+
+    assert page.status_code == 200
+    assert script.status_code == 200
+
+    # ── The old gate is gone ────────────────────────────────────────────────
+    # The Run button no longer starts hard-disabled in the markup, and the two
+    # "required" empty oracle textareas are no longer demanded up front.
+    assert 'id="runPasteBtn" class="primary" type="button" disabled' not in page.text
+    assert "pytest code · required" not in page.text
+    assert "benchmark script · required" not in page.text
+    assert "Run verified local search: add tests and benchmark" not in page.text
+    assert "Print one SWARM_BENCH JSON line" not in page.text
+
+    # ── The opt-in / scaffold affordance is present ─────────────────────────
+    assert "Score it against your tests" in page.text  # the opt-in summary
+    assert 'id="sampleInput"' in page.text            # the one honest input
+    assert "Sample inputs (JSON)" in page.text
+    assert 'id="rescaffoldBtn"' in page.text
+    # Both oracles still exist (the tool requires them) but are scaffolded and
+    # labeled honestly rather than hand-authored into two empty boxes.
+    assert 'id="testInput"' in page.text
+    assert 'id="benchInput"' in page.text
+    assert "baseline-equivalence pytest" in page.text
+    assert "SWARM_BENCH harness" in page.text
+    assert "We scaffolded this" in page.text
+    assert "strengthen it for real correctness" in page.text
+
+    # ── The scaffolds are generated client-side and honest ──────────────────
+    assert "scaffoldOracles" in script.text
+    assert "scaffoldBenchHarness" in script.text
+    assert "scaffoldEquivalenceTest" in script.text
+    assert "topHotspot" in script.text  # focus auto-picks the hottest function
+    assert "SWARM_BENCH" in script.text  # the bench scaffold prints the contract token
+    assert "module_under_test" in script.text  # the equivalence test imports the candidate
+
+    # ── missing_tests / missing_benchmark are optional-to-verify, not red ────
+    # Feature-detected across the current (blockers) and softened (advisory)
+    # server shapes — never hard-depended on one.
+    assert "classifySearchability" in script.text
+    assert "SCAFFOLDABLE_MARKERS" in script.text
+    assert "advisory" in script.text
+    assert "Optional to verify" in script.text
+
+    # ── Inline pre-launch validation surfaces problems at the field ─────────
+    assert "validateOraclesBeforeRun" in script.text
+    assert "must print a SWARM_BENCH contract line" in script.text
+    assert "must import from module_under_test" in script.text
+
+    # ── The tool still receives both UI-generated code blocks ───────────────
+    assert "start_paste_swarm" in script.text
+    assert "test_code:" in script.text
+    assert "bench_code:" in script.text
+
+    # ── CSP stays intact: no inline handlers, no JS eval, no CDN ────────────
+    assert "onclick=" not in page.text
+    assert " eval(" not in script.text
+    assert "<style>" not in page.text
 
 
 def test_mcp_ui_layout_engine_is_local_and_ide_first():
@@ -483,7 +569,7 @@ def test_mcp_ui_markdown_renderer_is_shared_and_escape_first():
     assert "\\u000E-\\u001F" in renderer.text
     # app.js imports the shared renderer at the current cache-bust version and
     # no longer defines its own.
-    assert 'from "./markdown.js?v=grok-v0.6.0-r13"' in script.text
+    assert 'from "./markdown.js?v=grok-v0.6.0-r14"' in script.text
     assert "import { parseMarkdown" in script.text
     assert "function parseMarkdown" not in script.text
     assert "renderMarkdownInto" in script.text
