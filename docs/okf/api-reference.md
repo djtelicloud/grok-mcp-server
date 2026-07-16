@@ -968,7 +968,7 @@ gateway's X-Caller / MCP clientInfo); None stays None.
 ### Method: `JobManager.describe` {#jobs-jobmanager-describe}
 
 ```python
-def JobManager.describe(cls, row: Dict[str, Any]) -> Dict[str, Any]
+def JobManager.describe(self, row: Dict[str, Any]) -> Dict[str, Any]
 ```
 
 **Keywords:** job, manager, describe
