@@ -867,6 +867,55 @@ def test_models_lists_unigrok_agent(monkeypatch):
     assert {"unigrok-agent", "grok-4.3"}.issubset(ids)
 
 
+def test_models_omits_fallback_api_slugs_when_api_key_missing(monkeypatch):
+    """Without XAI_API_KEY, do not advertise static API fallbacks as callable."""
+    monkeypatch.delenv("UNIGROK_RUNTIME", raising=False)
+    monkeypatch.delenv("UNIGROK_API_KEYS", raising=False)
+    monkeypatch.delenv("XAI_API_KEY", raising=False)
+    monkeypatch.setattr("src.http_server.xai_api_key_configured", lambda: False)
+    discover = AsyncMock(
+        return_value={
+            "models": [{"id": "grok-4.3"}, {"id": "grok-4"}],
+            "available": False,
+            "source": "xai_api_fallback",
+            "warnings": ["xAI API model discovery failed"],
+        }
+    )
+    monkeypatch.setattr("src.http_server.discover_xai_api_models", discover)
+
+    with TestClient(create_app()) as client:
+        res = client.get("/v1/models")
+
+    assert res.status_code == 200
+    ids = [item["id"] for item in res.json()["data"]]
+    assert ids == ["unigrok-agent"]
+    discover.assert_not_awaited()
+
+
+def test_models_includes_discovered_api_slugs_when_api_key_present(monkeypatch):
+    monkeypatch.delenv("UNIGROK_RUNTIME", raising=False)
+    monkeypatch.delenv("UNIGROK_API_KEYS", raising=False)
+    monkeypatch.setattr("src.http_server.xai_api_key_configured", lambda: True)
+    monkeypatch.setattr(
+        "src.http_server.discover_xai_api_models",
+        AsyncMock(
+            return_value={
+                "models": [{"id": "grok-4.3"}],
+                "available": True,
+                "source": "xai_api",
+                "warnings": [],
+            }
+        ),
+    )
+
+    with TestClient(create_app()) as client:
+        res = client.get("/v1/models")
+
+    assert res.status_code == 200
+    ids = {item["id"] for item in res.json()["data"]}
+    assert ids == {"unigrok-agent", "grok-4.3"}
+
+
 def test_agent_chat_completion_uses_shared_harness(monkeypatch):
     monkeypatch.delenv("UNIGROK_RUNTIME", raising=False)
     monkeypatch.delenv("UNIGROK_API_KEYS", raising=False)

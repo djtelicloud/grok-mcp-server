@@ -512,6 +512,7 @@ async def test_list_models_renders_api_cli_and_profile_sections(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_http_model_ids_exclude_cli_and_profiles(monkeypatch):
+    monkeypatch.setattr("src.http_server.xai_api_key_configured", lambda: True)
     monkeypatch.setattr(
         "src.http_server.discover_xai_api_models",
         AsyncMock(

@@ -65,6 +65,7 @@ from .utils import (
     run_agent_turn,
     set_request_id,
     store,
+    xai_api_key_configured,
 )
 
 
@@ -1645,6 +1646,11 @@ async def metrics(request: Request) -> Response:
 
 
 async def get_xai_model_ids() -> List[str]:
+    # OpenAI-compat /v1/models feeds raw-proxy allowlisting. Without a usable
+    # XAI_API_KEY, discovery falls back to static API slugs that cannot be
+    # proxied — advertise only the dual-plane agent virtual model instead.
+    if not xai_api_key_configured():
+        return [UNIGROK_AGENT_MODEL]
     discovery = await discover_xai_api_models()
     names = [item["id"] for item in discovery["models"] if item.get("id")]
     return sorted({UNIGROK_AGENT_MODEL, *names})
