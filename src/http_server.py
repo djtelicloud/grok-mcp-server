@@ -235,9 +235,14 @@ def _api_key_records() -> tuple[tuple[str, str], ...]:
                 raise RuntimeError(
                     "UNIGROK_API_KEY_RECORDS ids must be lowercase stable slugs."
                 )
-            if not isinstance(secret, str) or not 8 <= len(secret) <= 8_192:
+            if (
+                not isinstance(secret, str)
+                or not 8 <= len(secret) <= 8_192
+                or any(char.isspace() or ord(char) == 127 for char in secret)
+            ):
                 raise RuntimeError(
-                    "UNIGROK_API_KEY_RECORDS secrets must be 8..8192 characters."
+                    "UNIGROK_API_KEY_RECORDS secrets must be 8..8192 "
+                    "non-whitespace characters."
                 )
             if secret in seen_secrets:
                 raise RuntimeError(
@@ -359,6 +364,9 @@ async def _introspect_oauth_token(token: str, required_scope: str) -> Optional[D
     if not required_scopes.issubset(scope_set) or not isinstance(subject, str) or not subject:
         return None
     authorization_servers = _oauth_authorization_servers()
+    # OAuth issuer identifiers are exact strings, not origins to normalize at
+    # token-validation time. Trailing-slash/case variants are distinct and
+    # fail closed unless configured and minted identically by the AS.
     if not isinstance(issuer, str) or issuer not in authorization_servers:
         return None
     resource = _public_mcp_resource()

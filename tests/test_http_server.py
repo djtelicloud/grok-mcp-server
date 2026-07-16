@@ -288,6 +288,7 @@ def test_production_rejects_position_only_static_keys(monkeypatch):
         "[]",
         '{"UPPER":"long-enough-secret"}',
         '{"one":"short"}',
+        '{"one":" secret "}',
         '{"one":"shared-secret","two":"shared-secret"}',
         '{"one":"first-secret","one":"second-secret"}',
     ),
@@ -396,6 +397,7 @@ async def test_oauth_introspection_binds_issuer_and_audience(monkeypatch):
     (
         {"iss": None},
         {"iss": "https://other-issuer.example"},
+        {"iss": "https://auth.grokmcp.org/"},
         {"aud": None},
         {"aud": "https://wrong-resource.example/mcp"},
         {"aud": ["https://wrong-resource.example/mcp"]},
