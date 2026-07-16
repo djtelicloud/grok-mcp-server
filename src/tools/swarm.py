@@ -1,7 +1,7 @@
 """MCP tools for the swarm code optimizer (contributor-mode only).
 
 Public surface: analyze_code_for_swarm, start_code_swarm, start_paste_swarm,
-get_swarm_status, list_swarm_tasks, apply_swarm_winner, cancel_swarm. Mutating tools are triple-gated (contributor mode + attached
+get_swarm_status, list_swarm_tasks, apply_swarm_winner, cancel_swarm, export_swarm_narrow_pr. Mutating tools are triple-gated (contributor mode + attached
 workspace + not Cloud Run) — the stable public MCP is workspace-neutral and
 must never mutate a caller's files. apply_swarm_winner is additionally gated on
 UNIGROK_SWARM=active and guarded by the base_file_hash staleness check plus
@@ -1034,6 +1034,91 @@ async def plan_swarm_campaign(
     }
 
 
+
+async def export_swarm_narrow_pr(task_id: str) -> Dict[str, Any]:
+    """Export a narrow PR-shaped payload for the best verified swarm candidate.
+
+    Read-only: builds a unified diff against the live workspace bytes without
+    writing files. Used by contributor tooling to hand a single candidate to a
+    human/supervisor review packet.
+    """
+    task = await store.get_swarm_task(task_id)
+    if not task:
+        return {
+            "format": "unigrok-swarm-narrow-pr-v1",
+            "task_id": task_id,
+            "error": f"no swarm task `{task_id}`",
+            "hash_matches": False,
+        }
+
+    candidates = await store.list_swarm_candidates(task_id)
+    if not candidates:
+        return {
+            "format": "unigrok-swarm-narrow-pr-v1",
+            "task_id": task_id,
+            "error": "no candidates",
+            "hash_matches": False,
+        }
+
+    feasible = [c for c in candidates if c.get("feasible")]
+    pool = feasible or candidates
+    front = _current_front(feasible) if feasible else pool
+    champion = select_champion(front) if front else None
+    candidate = champion or sorted(
+        pool,
+        key=lambda c: (
+            int(c.get("pareto_rank") if c.get("pareto_rank") is not None else 10**9),
+            -float(c.get("crowding") or 0.0),
+        ),
+    )[0]
+
+    target_path = str(task.get("target_path") or "")
+    try:
+        target = _task_target(task)
+        live = target.read_bytes()
+    except (ValueError, FileNotFoundError, PermissionError, OSError) as exc:
+        return {
+            "format": "unigrok-swarm-narrow-pr-v1",
+            "task_id": task_id,
+            "candidate_id": candidate.get("id"),
+            "error": f"cannot read target: {exc}",
+            "hash_matches": False,
+        }
+
+    hash_matches = hashlib.sha256(live).hexdigest() == task.get("base_file_hash")
+    start = int(candidate.get("byte_start") or 0)
+    end = int(candidate.get("byte_end") or 0)
+    if not (0 <= start <= end <= len(live)):
+        start, end = 0, len(live)
+    original = live[start:end].decode("utf-8", errors="replace")
+    proposed = str(candidate.get("code") or "")
+    diff = "".join(
+        difflib.unified_diff(
+            original.splitlines(keepends=True),
+            proposed.splitlines(keepends=True),
+            fromfile=f"a/{target_path}",
+            tofile=f"b/{target_path}",
+        )
+    )
+
+    return {
+        "format": "unigrok-swarm-narrow-pr-v1",
+        "task_id": task_id,
+        "candidate_id": candidate.get("id"),
+        "target_path": target_path,
+        "focus_node": task.get("focus_node"),
+        "hash_matches": hash_matches,
+        "diff": diff,
+        "verification": {
+            "latency_ms": candidate.get("latency_ms"),
+            "feasible": bool(candidate.get("feasible")),
+            "pareto_rank": candidate.get("pareto_rank"),
+            "crowding": candidate.get("crowding"),
+            "mutator": candidate.get("mutator"),
+        },
+    }
+
+
 def register_swarm_tools(mcp: FastMCP) -> None:
     mcp.add_tool(analyze_code_for_swarm, annotations=READONLY_TOOL)
     mcp.add_tool(plan_swarm_campaign, annotations=READONLY_TOOL)
@@ -1043,6 +1128,7 @@ def register_swarm_tools(mcp: FastMCP) -> None:
     mcp.add_tool(list_swarm_tasks, annotations=READONLY_TOOL)
     mcp.add_tool(apply_swarm_winner, annotations=DESTRUCTIVE_TOOL)
     mcp.add_tool(cancel_swarm)
+    mcp.add_tool(export_swarm_narrow_pr, annotations=READONLY_TOOL)
 
 
 register_internal_tool("analyze_code_for_swarm", analyze_code_for_swarm)
@@ -1053,3 +1139,4 @@ register_internal_tool("get_swarm_status", get_swarm_status)
 register_internal_tool("list_swarm_tasks", list_swarm_tasks)
 register_internal_tool("apply_swarm_winner", apply_swarm_winner)
 register_internal_tool("cancel_swarm", cancel_swarm)
+register_internal_tool("export_swarm_narrow_pr", export_swarm_narrow_pr)
