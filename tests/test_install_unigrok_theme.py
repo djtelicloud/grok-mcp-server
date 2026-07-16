@@ -176,6 +176,30 @@ def test_reject_nested_path_inside_product_checkout(tmp_path: Path) -> None:
 
 
 @pytest.mark.skipif(not DESIGN_TOML.is_file(), reason="theme design artifacts not on this checkout")
+def test_install_rejects_installer_checkout_when_repo_differs(tmp_path: Path) -> None:
+    """A mismatched --repo must not allow writes into the script checkout."""
+    grok_home = REPO / ".grok-theme-install-mismatched-repo"
+    other_repo = tmp_path / "other-product"
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--repo",
+            str(other_repo),
+            "--grok-home",
+            str(grok_home),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 2
+    assert "inside the product checkout" in result.stderr
+    assert not grok_home.exists()
+
+
+@pytest.mark.skipif(not DESIGN_TOML.is_file(), reason="theme design artifacts not on this checkout")
 def test_install_rejects_symlinked_theme_directory_inside_product(tmp_path: Path) -> None:
     grok_home = tmp_path / "grok-home"
     grok_home.mkdir()
@@ -186,6 +210,32 @@ def test_install_rejects_symlinked_theme_directory_inside_product(tmp_path: Path
         [
             sys.executable,
             str(SCRIPT),
+            "--repo",
+            str(REPO),
+            "--grok-home",
+            str(grok_home),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 2
+    assert "theme directory must not resolve inside the product checkout" in result.stderr
+    assert not target.exists()
+
+
+@pytest.mark.skipif(not DESIGN_TOML.is_file(), reason="theme design artifacts not on this checkout")
+def test_check_rejects_symlinked_theme_directory_inside_product(tmp_path: Path) -> None:
+    grok_home = tmp_path / "grok-home"
+    grok_home.mkdir()
+    target = REPO / ".grok-theme-check-symlink-target"
+    (grok_home / "themes").symlink_to(target)
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--check",
             "--repo",
             str(REPO),
             "--grok-home",
