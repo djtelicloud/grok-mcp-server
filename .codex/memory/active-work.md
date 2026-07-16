@@ -1,6 +1,6 @@
 # Codex Active Work
 
-Last updated: 2026-07-16T18:00:05Z
+Last updated: 2026-07-16T18:04:37Z
 Owner: Codex integration coordinator
 Status: Current critical repairs are merged and Live; the security queue remains active.
 
@@ -60,6 +60,9 @@ credentials, OAuth codes, tokens, or private keys here.
   Independent reproduction also found the routing task's benchmark omits
   required keyword-only `reason_score`; its minimally corrected fixture has a
   19.37% noise floor. After CONTINUE, retry only the held Pareto target first.
+  Sponsor permits Grok to improve the experiment method before rerun. Freeze
+  that method on a clean current-main task branch before any production change
+  or baseline capture, then apply it unchanged to original and candidate.
 - Draft #476 repairs that Forge import-provenance bug. Codex's focused suite
   passed 27 tests and the full suite passed 2,204 tests. Normal Codex must
   independently review and land it, then refresh the Forge runtime before

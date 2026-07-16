@@ -135,7 +135,10 @@ completion.
    memory; never sum or average per-file percentages.
 7. Submit at most one implementation candidate at a time. Codex independently
    reproduces its oracle and benchmark and writes a separate review report.
-8. Do not retry `extract_routing_features` until its required keyword fixture
+8. After CONTINUE, start from landed `main` on a clean task branch. Improve and
+   freeze the oracle/benchmark before changing production code or capturing the
+   baseline, then apply the identical method to the exact original and candidate.
+9. Do not retry `extract_routing_features` until its required keyword fixture
    and high-noise benchmark are replaced with a stable, reviewable oracle.
 
 ## Approval boundary
