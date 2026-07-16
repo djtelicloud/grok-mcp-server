@@ -14,7 +14,8 @@
     "default_request": {
       "mode": "auto",
       "plane": "auto",
-      "model": null
+      "model": null,
+      "fallback_policy": "same_plane"
     },
     "pin_policy": "Pin only an exact model id present in the selected live plane catalog. A model pin selects a model, not a new credential plane.",
     "fallback_policy": {
