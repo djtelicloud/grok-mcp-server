@@ -42,12 +42,14 @@ class PreflightError(RuntimeError):
 
 
 def module_name_for(target_rel: str) -> str:
-    """Dotted module name for a workspace-relative path, tolerating the
-    src/ layout. Non-standard layouts fail the provenance probe loudly
-    rather than guessing."""
+    """Dotted module name for a workspace-relative path.
+
+    UniGrok ships ``src`` as the installable package (``src/__init__.py``),
+    and sandbox PYTHONPATH is the workspace root — so paths under ``src/``
+    must keep the ``src.`` prefix (``src.swarm.pareto``, not ``swarm.pareto``).
+    Non-standard layouts still fail the provenance probe loudly.
+    """
     parts = list(PurePosixPath(target_rel).with_suffix("").parts)
-    if parts and parts[0] == "src":
-        parts = parts[1:]
     if not parts:
         raise PreflightError(f"cannot derive a module name from {target_rel!r}", {})
     return ".".join(parts)
