@@ -3,6 +3,7 @@ import {
   getGitHubControlMode,
   loadGitHubAuthConfig,
   requestHostMatchesApplication,
+  requestOriginMatchesApplication,
 } from "../../../lib/github-auth-config";
 import { clearGitHubSessionCookie } from "../../../lib/github-oauth";
 
@@ -14,7 +15,7 @@ export async function POST(request: Request): Promise<Response> {
     const config = loadGitHubAuthConfig();
     if (
       !requestHostMatchesApplication(config, request.headers.get("host")) ||
-      request.headers.get("origin") !== config.appBaseUrl.origin
+      !requestOriginMatchesApplication(config, request.headers.get("origin"))
     ) {
       return new Response("Sign-out is unavailable.", { status: 400 });
     }

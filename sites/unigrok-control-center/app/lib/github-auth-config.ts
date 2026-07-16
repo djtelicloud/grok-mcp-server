@@ -105,6 +105,23 @@ export function requestHostMatchesApplication(
   return hostHeader.toLowerCase() === config.appBaseUrl.host.toLowerCase();
 }
 
+/** True when a browser Origin matches the control app origin exactly.
+ *
+ * Cookie-authenticated control POSTs must require this: session cookies are
+ * SameSite=Lax, which still sends them on same-site sibling-subdomain forms.
+ */
+export function requestOriginMatchesApplication(
+  config: Pick<GitHubAuthConfig, "appBaseUrl">,
+  originHeader: string | null | undefined,
+): boolean {
+  if (!originHeader || originHeader.length > 512) return false;
+  try {
+    return new URL(originHeader).origin === config.appBaseUrl.origin;
+  } catch {
+    return false;
+  }
+}
+
 function readEnvironmentText(
   environment: NodeJS.ProcessEnv,
   key: string,

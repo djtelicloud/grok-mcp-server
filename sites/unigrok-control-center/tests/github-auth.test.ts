@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { authorizeGitHubCollaborator, githubRequest } from "../app/lib/github-app";
-import { loadGitHubAuthConfig, type GitHubAuthConfig } from "../app/lib/github-auth-config";
+import {
+  loadGitHubAuthConfig,
+  requestOriginMatchesApplication,
+  type GitHubAuthConfig,
+} from "../app/lib/github-auth-config";
 import { createGitHubSessionCookie, readGitHubSession } from "../app/lib/github-oauth";
 
 const privateKey = ["-----BEGIN", "PRIVATE KEY-----\n", "A".repeat(256), "\n-----END", "PRIVATE KEY-----"].join(" ").replaceAll("  ", " ");
@@ -78,4 +82,23 @@ test("GitHub requests cannot escape the constant repository API origin", async (
     await assert.rejects(() => githubRequest(path, "t".repeat(40), request as typeof fetch));
   }
   assert.equal(called, false);
+});
+
+test("cookie control POSTs require exact application Origin", () => {
+  const config = loadGitHubAuthConfig(environment);
+  assert.equal(
+    requestOriginMatchesApplication(config, "https://control.grokmcp.org"),
+    true,
+  );
+  assert.equal(
+    requestOriginMatchesApplication(config, "https://evil.example"),
+    false,
+  );
+  assert.equal(
+    requestOriginMatchesApplication(config, "https://docs.grokmcp.org"),
+    false,
+  );
+  assert.equal(requestOriginMatchesApplication(config, null), false);
+  assert.equal(requestOriginMatchesApplication(config, ""), false);
+  assert.equal(requestOriginMatchesApplication(config, "not-a-url"), false);
 });

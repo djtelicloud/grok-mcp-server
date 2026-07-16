@@ -1,5 +1,9 @@
 import { authorizeGitHubCollaborator, createInstallationCredential } from "../../../lib/github-app";
-import { loadGitHubAuthConfig, requestHostMatchesApplication } from "../../../lib/github-auth-config";
+import {
+  loadGitHubAuthConfig,
+  requestHostMatchesApplication,
+  requestOriginMatchesApplication,
+} from "../../../lib/github-auth-config";
 import { readGitHubSession } from "../../../lib/github-oauth";
 import { callHostedReviewBroker, fetchImmutableReviewEvidence } from "../../../lib/github-review-broker";
 import { loadMcpOAuthConfig } from "../../../lib/mcp-oauth";
@@ -9,7 +13,12 @@ export const dynamic = "force-dynamic";
 export async function POST(request: Request): Promise<Response> {
   try {
     const github = loadGitHubAuthConfig();
-    if (!requestHostMatchesApplication(github, request.headers.get("host"))) return response(400);
+    if (
+      !requestHostMatchesApplication(github, request.headers.get("host")) ||
+      !requestOriginMatchesApplication(github, request.headers.get("origin"))
+    ) {
+      return response(400);
+    }
     const session = await readGitHubSession(github, request.headers.get("cookie"));
     if (!session) return response(401);
     const credential = await createInstallationCredential(github);
