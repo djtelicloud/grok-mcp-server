@@ -114,12 +114,37 @@ def test_redact_secrets_strips_keys_and_bearer_tokens():
     assert "[REDACTED" in redacted
 
 
+def test_redact_secrets_strips_github_jwt_and_google_keys():
+    jwt = (
+        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
+        "eyJzdWIiOiIxMjM0NTY3ODkwIn0."
+        "signaturepaddingvalue12"
+    )
+    text = (
+        f"token=github_pat_11AAAAAAAABBBBBBBBBB "
+        f"classic=ghp_abcdefghijklmnopqrst "
+        f"google=AIzaSyA-abcdefghijklmnopqrstuv "
+        f"jwt={jwt}"
+    )
+    redacted = redact_secrets(text)
+    assert "github_pat_" not in redacted
+    assert "ghp_" not in redacted
+    assert "AIza" not in redacted
+    assert "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9" not in redacted
+    assert "[REDACTED" in redacted
+
+
 @pytest.mark.parametrize(
     ("text", "secret"),
     [
         ("Authorization: BEARER abc.defghi123456", "abc.defghi123456"),
         ("Authorization: Bearer\tabc.defghi123456", "abc.defghi123456"),
         ("OpenAI_Api_Key = secretvalue123", "secretvalue123"),
+        ("ghs_abcdefghijklmnopqrst", "ghs_abcdefghijklmnopqrst"),
+        (
+            "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.signaturepaddingvalue12",
+            "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9",
+        ),
     ],
 )
 def test_redact_secrets_fast_path_preserves_case_and_whitespace_coverage(text, secret):

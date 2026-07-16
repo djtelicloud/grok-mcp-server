@@ -1145,6 +1145,19 @@ _SECRET_PATTERNS = (
     (re.compile(r"\b(xai-[A-Za-z0-9_\-]{8,}|sk-proj-[A-Za-z0-9_\-]{8,}|sk-[A-Za-z0-9_\-]{8,})\b"), "[REDACTED_KEY]"),
     (re.compile(r"(?i)\b(bearer\s+)[A-Za-z0-9._~+/=\-]{8,}"), r"\1[REDACTED_TOKEN]"),
     (re.compile(r"(?i)\b([A-Z0-9_]*API_KEY\s*=\s*)[^\s'\"\n]+"), r"\1[REDACTED]"),
+    # Align with intelligence_payloads high-value shapes so job/log/tool
+    # redaction cannot leak tokens already treated as secrets elsewhere.
+    (
+        re.compile(r"\b(github_pat_[A-Za-z0-9_]{10,}|gh[pousr]_[A-Za-z0-9]{10,})\b"),
+        "[REDACTED_TOKEN]",
+    ),
+    (
+        re.compile(
+            r"\beyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b"
+        ),
+        "[REDACTED_JWT]",
+    ),
+    (re.compile(r"\bAIza[A-Za-z0-9_-]{25,}\b"), "[REDACTED_KEY]"),
 )
 
 _TASK_STOPWORDS = {
@@ -1268,13 +1281,25 @@ def load_grok_prompt(prompt_ref: str) -> str:
 
 def redact_secrets(text: str) -> str:
     redacted = str(text or "")
-    if "xai-" not in redacted and "sk-" not in redacted:
-        # This guard must remain a conservative superset of the two
-        # case-insensitive regexes below. False positives only cost a regex
-        # pass; a false negative could leak a credential.
-        folded = redacted.lower()
-        if "bearer" not in folded and "api_key" not in folded:
-            return redacted
+    # Fast path: skip regex work only when none of the pattern families'
+    # needles appear. False positives only cost a regex pass; a false
+    # negative could leak a credential.
+    folded = redacted.lower()
+    if not (
+        "xai-" in folded
+        or "sk-" in folded
+        or "bearer" in folded
+        or "api_key" in folded
+        or "github_pat_" in folded
+        or "ghp_" in folded
+        or "gho_" in folded
+        or "ghu_" in folded
+        or "ghs_" in folded
+        or "ghr_" in folded
+        or "eyj" in folded
+        or "aiza" in folded
+    ):
+        return redacted
     for pattern, replacement in _SECRET_PATTERNS:
         redacted = pattern.sub(replacement, redacted)
     return redacted
