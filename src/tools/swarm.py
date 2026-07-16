@@ -10,6 +10,7 @@ or leave the tests broken.
 """
 
 from __future__ import annotations
+from ..utils import create_scrubbed_subprocess_exec
 
 import asyncio
 import difflib
@@ -893,7 +894,7 @@ async def _reverify(task: Dict[str, Any], target: Path, original: bytes) -> tupl
     env["PYTHONPATH"] = str(workspace)
     env["PYTHONHASHSEED"] = "0"
     try:
-        proc = await asyncio.create_subprocess_exec(
+        proc = await create_scrubbed_subprocess_exec(
             python, "-m", "pytest", "-q", "-p", "no:cacheprovider", task["test_target"],
             cwd=str(workspace),
             env=env,

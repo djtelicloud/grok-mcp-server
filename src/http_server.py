@@ -506,9 +506,18 @@ def _is_local_operator_request(scope: Dict[str, Any]) -> bool:
     if not _is_verified_local_request(scope):
         return False
     path = scope.get("path", "")
-    return path in _LOCAL_OPERATOR_PATHS or any(
+    is_operator = path in _LOCAL_OPERATOR_PATHS or any(
         _path_matches_prefix(path, prefix) for prefix in _LOCAL_OPERATOR_PREFIXES
     )
+    if not is_operator:
+        return False
+        
+    # If keys are active, force auth for sensitive endpoints even if it's a "local" Host,
+    # to mitigate spoofed Host headers over bridge networks.
+    if _auth_is_active() and (path == "/runtimez" or path == "/metrics"):
+        return False
+        
+    return True
 
 
 def _request_may_bypass_auth(scope: Dict[str, Any]) -> bool:
@@ -540,6 +549,15 @@ class GatewayAuthMiddleware:
             await self.app(scope, receive, send)
             return
         if not _auth_is_active() or _request_may_bypass_auth(scope):
+            if not _auth_is_active() and self.bound_host not in ("127.0.0.1", "::1", "localhost"):
+                from starlette.responses import Response
+                resp = Response(
+                    "Gateway authentication is not configured, but server is bound to a non-loopback interface. "
+                    "Refusing unauthenticated public access. Set UNIGROK_API_KEYS.", 
+                    status_code=403
+                )
+                await resp(scope, receive, send)
+                return
             await self.app(scope, receive, send)
             return
         token = _extract_bearer_token(_scope_header(scope, b"authorization"))

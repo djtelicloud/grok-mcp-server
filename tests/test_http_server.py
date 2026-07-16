@@ -538,7 +538,7 @@ def test_runtimez_reports_the_current_phoneword_dial(monkeypatch):
     }
 
 
-def test_runtimez_stays_open_on_localhost_with_gateway_auth(monkeypatch):
+def test_runtimez_requires_auth_on_localhost_when_keys_set(monkeypatch):
     monkeypatch.delenv("UNIGROK_RUNTIME", raising=False)
     monkeypatch.setenv("UNIGROK_API_KEYS", "client-secret")
 
@@ -549,7 +549,7 @@ def test_runtimez_stays_open_on_localhost_with_gateway_auth(monkeypatch):
     ) as client:
         res = client.get("/runtimez")
 
-    assert res.status_code == 200
+    assert res.status_code == 401
 
 
 def test_local_unauthenticated_override_is_loopback_only(monkeypatch):
@@ -629,7 +629,7 @@ def test_trusted_compose_proxy_never_bypasses_inference_auth(monkeypatch):
         metrics = client.get("/metrics")
 
     assert ui.status_code == 200
-    assert runtime.status_code == 200
+    assert runtime.status_code == 401
     assert inference.status_code == 401
     assert metrics.status_code == 401
 

@@ -6,6 +6,7 @@ files, copy credentials, route work, or grant a worker completion authority.
 """
 
 from __future__ import annotations
+from ..utils import create_scrubbed_subprocess_exec
 
 import asyncio
 import hashlib
@@ -280,7 +281,7 @@ async def _run_bounded_process(
 
     started = time.monotonic()
     try:
-        process = await asyncio.create_subprocess_exec(
+        process = await create_scrubbed_subprocess_exec(
             *argv,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,

@@ -1017,9 +1017,10 @@ class TestTier2ToolsRegistered:
             async def wait(self):
                 return 0
 
-        async def fake_create_subprocess_exec(*cmd, cwd, stdout, stderr):
+        async def fake_create_subprocess_exec(*cmd, cwd, stdout, stderr, env=None, **kwargs):
             captured["cmd"] = cmd
             captured["cwd"] = cwd
+            captured["env"] = env
             return FakeProc()
 
         monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)

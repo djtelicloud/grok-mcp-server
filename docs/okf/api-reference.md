@@ -3820,21 +3820,33 @@ True when a grok CLI binary is resolvable on this host — the gate the
 local CLI plane needs (binary presence only; auth validity is the
 CLI's own concern at call time).
 
-### Function: `grok_cli_oauth_env` {#utils-grok_cli_oauth_env}
+### Function: `scrubbed_subprocess_env` {#utils-scrubbed_subprocess_env}
 
 ```python
-def grok_cli_oauth_env(base: Optional[Dict[str, str]]=None) -> Dict[str, str]
+def scrubbed_subprocess_env(base: Optional[Dict[str, str]]=None) -> Dict[str, str]
 ```
 
-**Keywords:** grok, cli, oauth, env
+**Keywords:** scrubbed, subprocess, env
 
-Return an OAuth-only environment for a Grok CLI child.
+Return an environment stripped of UniGrok server-owned secrets.
 
 The UniGrok process owns API, management, gateway, and subordinate-provider
-credentials. Removing that exact set from every CLI child keeps the xAI
-credential planes independent and prevents Grok-launched tools from seeing
-unrelated provider secrets. The persisted grok.com OAuth path remains
-available, so the CLI must use that subscription identity or fail closed.
+credentials. Removing that exact set from every child keeps the credential
+planes independent and prevents launched tools (like git, pytest, CLI) from 
+seeing unrelated provider secrets.
+
+### Function: `create_scrubbed_subprocess_exec` {#utils-create_scrubbed_subprocess_exec}
+
+```python
+async def create_scrubbed_subprocess_exec(*args, env=None, **kwargs)
+```
+
+**Keywords:** create, scrubbed, subprocess, exec
+
+Wrapper around asyncio.create_subprocess_exec that strips server secrets.
+
+Ensures that any launched subprocess (like git, pytest, CLI) does not inherit
+the XAI_API_KEY or other UniGrok provider credentials.
 
 ### Function: `grok_cli_plane_status` {#utils-grok_cli_plane_status}
 

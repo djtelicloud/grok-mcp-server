@@ -16,6 +16,7 @@ exfiltration valuable.
 """
 
 from __future__ import annotations
+from ..utils import create_scrubbed_subprocess_exec
 
 import asyncio
 import json
@@ -229,7 +230,7 @@ class SwarmSandbox:
     ) -> Tuple[int, str, str]:
         """Run one untrusted child: own session, RLIMITs, allowlisted env,
         process-group SIGKILL on timeout (rc -9)."""
-        proc = await asyncio.create_subprocess_exec(
+        proc = await create_scrubbed_subprocess_exec(
             *argv,
             cwd=str(self.work),
             env=self.child_env(),

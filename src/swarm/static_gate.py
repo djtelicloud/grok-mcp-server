@@ -16,6 +16,7 @@ alone.
 """
 
 from __future__ import annotations
+from ..utils import create_scrubbed_subprocess_exec
 
 import asyncio
 from collections import Counter
@@ -50,7 +51,7 @@ async def violation_counts(
     if not binary:
         return None
     try:
-        proc = await asyncio.create_subprocess_exec(
+        proc = await create_scrubbed_subprocess_exec(
             binary, "check",
             "--select", _RUFF_RULES,
             "--isolated",

@@ -1,3 +1,4 @@
+from ..utils import create_scrubbed_subprocess_exec
 # src/tools/system.py
 # Decomposed System, Files, and Diagnostics tools for UniGrok MCP
 
@@ -136,7 +137,7 @@ async def grok_mcp_status(view: Literal["text", "json"] = "text") -> str:
 
         git_sha = "Unknown"
         try:
-            proc_git = await asyncio.create_subprocess_exec(
+            proc_git = await create_scrubbed_subprocess_exec(
                 "git", "rev-parse", "HEAD",
                 cwd=str(proj_root), stdout=subprocess.PIPE, stderr=subprocess.PIPE
             )
@@ -768,7 +769,7 @@ async def run_local_tests(
         else:
             cmd = [sys.executable, "-m", "pytest", "-q", safe_target]
 
-        proc = await asyncio.create_subprocess_exec(
+        proc = await create_scrubbed_subprocess_exec(
             *cmd,
             cwd=str(project_root),
             stdout=asyncio.subprocess.PIPE,
@@ -1422,7 +1423,7 @@ async def grok_mcp_restart_container() -> SystemResult:
             )
 
         try:
-            proc = await asyncio.create_subprocess_exec(
+            proc = await create_scrubbed_subprocess_exec(
                 "docker", "compose", "up", "--build", "-d",
                 cwd=str(proj_root),
                 stdout=subprocess.PIPE,

@@ -6,6 +6,7 @@ an isolated linter subprocess over stdin; only aggregate rule counts survive.
 """
 
 from __future__ import annotations
+from ..utils import create_scrubbed_subprocess_exec
 
 import ast
 import asyncio
@@ -267,7 +268,7 @@ async def add_ruff_summary(source: str, analytics: Dict[str, Any]) -> Dict[str, 
         analytics["ruff"] = {"available": False, "counts_by_code": {}}
         return analytics
     try:
-        proc = await asyncio.create_subprocess_exec(
+        proc = await create_scrubbed_subprocess_exec(
             binary,
             "check",
             "--isolated",

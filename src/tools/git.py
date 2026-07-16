@@ -1,3 +1,4 @@
+from ..utils import create_scrubbed_subprocess_exec
 import asyncio
 import os
 import re
@@ -140,7 +141,7 @@ def _validate_patch_targets(patch: str, repo: Path):
 
 async def _run_git(args: List[str], repo_path: Optional[str] = None, stdin: Optional[bytes] = None) -> str:
     repo = _repo_root(repo_path)
-    proc = await asyncio.create_subprocess_exec(
+    proc = await create_scrubbed_subprocess_exec(
         "git",
         *args,
         cwd=str(repo),
