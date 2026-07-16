@@ -909,7 +909,12 @@ CLI_MODEL_IDS = tuple(FALLBACK_GROK_CLI_MODELS)
 
 
 def xai_api_key_configured() -> bool:
-    return bool(_normalize_xai_api_key(os.environ.get("XAI_API_KEY") or XAI_API_KEY))
+    """True when the active principal has a usable xAI key (owner or override)."""
+    try:
+        from src.principal_xai import effective_xai_api_key
+    except Exception:
+        return bool(_normalize_xai_api_key(os.environ.get("XAI_API_KEY") or XAI_API_KEY))
+    return bool(effective_xai_api_key())
 
 
 def cli_plane_ready_for_local_runtime() -> bool:
@@ -1953,7 +1958,9 @@ async def build_model_catalog(include_cli: bool = True) -> Dict[str, Any]:
 # Global xAI client connection pools.  The inference client is intentionally
 # incapable of carrying management authority; Collections call sites receive
 # the operation-scoped management facade below.
-_client = None
+# Inference clients keyed by non-secret key fingerprint so optional principal
+# overrides (UNIGROK_PRINCIPAL_XAI_KEYS_JSON) do not share the owner client.
+_clients: dict[str, Any] = {}
 _management_client = None
 # Both factories are called from executor threads — guard each check-then-set
 # so concurrent first calls cannot leak duplicate Client instances or cross
@@ -2041,7 +2048,10 @@ def xai_management_key_state() -> XAIManagementKeyState:
 
 
 def get_xai_inference_client():
-    """Return the cached inference-only xAI SDK client.
+    """Return a cached inference-only xAI SDK client for the active key.
+
+    Owner default is ``XAI_API_KEY``. Optional OAuth principal overrides come
+    from ``UNIGROK_PRINCIPAL_XAI_KEYS_JSON`` (see ``src.principal_xai``).
 
     The installed SDK reads ``XAI_MANAGEMENT_KEY`` whenever its management
     argument is falsey.  Pass a fixed, non-provider isolation canary instead of
@@ -2050,25 +2060,32 @@ def get_xai_inference_client():
     client's channel or inference call paths.
     """
 
-    global _client
-    if _client is None:
+    from src.principal_xai import effective_xai_api_key, xai_api_key_fingerprint
+
+    api_key = effective_xai_api_key()
+    if not api_key:
+        raise ValueError("XAI_API_KEY is not configured in the environment.")
+    cache_id = xai_api_key_fingerprint(api_key)
+
+    client = _clients.get(cache_id)
+    if client is None:
         with _client_lock:
-            if _client is None:
-                if not XAI_API_KEY:
-                    raise ValueError("XAI_API_KEY is not configured in the environment.")
+            client = _clients.get(cache_id)
+            if client is None:
                 from xai_sdk import Client
 
                 raw_client = Client(
-                    api_key=XAI_API_KEY,
+                    api_key=api_key,
                     management_api_key=_XAI_INFERENCE_MANAGEMENT_ISOLATION_KEY,
                 )
-                _client = _InferenceOnlyXAIClient(raw_client)
+                client = _InferenceOnlyXAIClient(raw_client)
+                _clients[cache_id] = client
     if _eval_record_enabled():
         # Opt-in eval recording tap (UNIGROK_EVAL_RECORD=1): a thin per-call
         # proxy that appends completed responses to a cassette event log.
         # OFF by default — this branch never runs without the env flag.
-        return _EvalRecordingClient(_client)
-    return _client
+        return _EvalRecordingClient(client)
+    return client
 
 
 def get_xai_client():
@@ -2110,14 +2127,13 @@ def get_xai_management_client():
 def close_xai_inference_client():
     """Close only the inference client cache."""
 
-    global _client
     with _client_lock:
-        if _client is not None:
+        for client in list(_clients.values()):
             try:
-                _client.close()
+                client.close()
             except Exception:
                 pass
-            _client = None
+        _clients.clear()
 
 
 def close_xai_management_client():

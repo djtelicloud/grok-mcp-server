@@ -26,9 +26,11 @@ def test_inference_factory_constructs_with_only_inference_authority(monkeypatch)
 
     monkeypatch.setattr("xai_sdk.Client", FakeClient)
     monkeypatch.setattr(utils, "XAI_API_KEY", "inference-test-key")
+    monkeypatch.setenv("XAI_API_KEY", "inference-test-key")
+    monkeypatch.delenv("UNIGROK_PRINCIPAL_XAI_KEYS_JSON", raising=False)
     monkeypatch.setenv("XAI_MANAGEMENT_API_KEY", "management-test-key")
     monkeypatch.setenv("XAI_MANAGEMENT_KEY", "sdk-management-test-key")
-    monkeypatch.setattr(utils, "_client", None)
+    utils._clients.clear()
 
     inference = utils.get_xai_inference_client()
 
@@ -53,9 +55,11 @@ def test_real_sdk_inference_constructor_never_uses_management_environment(
 
     monkeypatch.setattr(SDKClient, "_make_grpc_channel", capture_channel)
     monkeypatch.setattr(utils, "XAI_API_KEY", "inference-test-key")
+    monkeypatch.setenv("XAI_API_KEY", "inference-test-key")
+    monkeypatch.delenv("UNIGROK_PRINCIPAL_XAI_KEYS_JSON", raising=False)
     monkeypatch.setenv("XAI_MANAGEMENT_API_KEY", "canonical-management-test-key")
     monkeypatch.setenv("XAI_MANAGEMENT_KEY", "sdk-management-test-key")
-    monkeypatch.setattr(utils, "_client", None)
+    utils._clients.clear()
 
     inference = utils.get_xai_inference_client()
 
@@ -226,7 +230,9 @@ def test_eval_recording_wraps_inference_but_never_management(monkeypatch):
     monkeypatch.setenv("XAI_MANAGEMENT_API_KEY", "management-test-key")
     monkeypatch.delenv("XAI_MANAGEMENT_KEY", raising=False)
     monkeypatch.setenv("UNIGROK_EVAL_RECORD", "1")
-    monkeypatch.setattr(utils, "_client", None)
+    monkeypatch.setenv("XAI_API_KEY", "inference-test-key")
+    monkeypatch.delenv("UNIGROK_PRINCIPAL_XAI_KEYS_JSON", raising=False)
+    utils._clients.clear()
     monkeypatch.setattr(utils, "_management_client", None)
 
     inference = utils.get_xai_inference_client()
@@ -248,14 +254,15 @@ def test_eval_recording_wraps_inference_but_never_management(monkeypatch):
 def test_role_specific_close_functions_do_not_cross_caches(monkeypatch):
     inference = SimpleNamespace(close=MagicMock())
     management = SimpleNamespace(close=MagicMock())
-    monkeypatch.setattr(utils, "_client", inference)
+    utils._clients.clear()
+    utils._clients["fp-test"] = inference
     monkeypatch.setattr(utils, "_management_client", management)
 
     utils.close_xai_inference_client()
 
     inference.close.assert_called_once_with()
     management.close.assert_not_called()
-    assert utils._client is None
+    assert utils._clients == {}
     assert utils._management_client is management
 
     utils.close_xai_management_client()
@@ -267,14 +274,15 @@ def test_role_specific_close_functions_do_not_cross_caches(monkeypatch):
 def test_compatibility_close_hook_closes_both_role_caches(monkeypatch):
     inference = SimpleNamespace(close=MagicMock())
     management = SimpleNamespace(close=MagicMock())
-    monkeypatch.setattr(utils, "_client", inference)
+    utils._clients.clear()
+    utils._clients["fp-test"] = inference
     monkeypatch.setattr(utils, "_management_client", management)
 
     utils.close_xai_client()
 
     inference.close.assert_called_once_with()
     management.close.assert_called_once_with()
-    assert utils._client is None
+    assert utils._clients == {}
     assert utils._management_client is None
 
 
@@ -291,9 +299,11 @@ def test_management_factory_is_thread_safe_and_separate_from_inference(monkeypat
 
     monkeypatch.setattr("xai_sdk.Client", SlowClient)
     monkeypatch.setattr(utils, "XAI_API_KEY", "inference-test-key")
+    monkeypatch.setenv("XAI_API_KEY", "inference-test-key")
+    monkeypatch.delenv("UNIGROK_PRINCIPAL_XAI_KEYS_JSON", raising=False)
     monkeypatch.setenv("XAI_MANAGEMENT_API_KEY", "management-test-key")
     monkeypatch.delenv("XAI_MANAGEMENT_KEY", raising=False)
-    monkeypatch.setattr(utils, "_client", None)
+    utils._clients.clear()
     monkeypatch.setattr(utils, "_management_client", None)
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:

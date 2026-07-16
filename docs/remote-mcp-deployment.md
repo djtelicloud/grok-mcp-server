@@ -62,11 +62,31 @@ on the production OAuth service; a static bearer must not become a hidden
 bypass around membership revocation. The service account needs only access to
 that xAI secret and the normal logging/metrics permissions.
 
-Optional **per-insider** cloud credentials (write+ principal binds their own
-Grok key or CLI material) are a **TARGET** design: they must not replace the
-owner default, must bind to OAuth `sub` (never `X-Client-ID`), and must use
-Secret Manager / KMS-class storage — never plaintext browser forms for public
-or unauthenticated callers.
+Optional **per-insider** cloud credentials (write+ OAuth principal) may bind
+their own xAI API key without replacing the owner default:
+
+| Variable | Purpose |
+| --- | --- |
+| `XAI_API_KEY` | **Owner default** (Secret Manager) — always the fallback |
+| `UNIGROK_PRINCIPAL_XAI_KEYS_JSON` | JSON map of OAuth principal → xAI API key |
+
+Example map (store the whole JSON as one Secret Manager secret; never commit):
+
+```json
+{
+  "oauth:github|user:123456": "xai-teammate-key",
+  "github|user:123456": "xai-teammate-key"
+}
+```
+
+Rules:
+
+- Only principals with kind `oauth:` use the map; `http:anon` and labels never do.
+- Lookup accepts full `oauth:…` keys or the bare subject after `oauth:`.
+- Missing map entry → **owner default**.
+- Never put raw keys in IDE MCP JSON or public clone workflows.
+- Prefer Secret Manager / KMS-class injection of the JSON blob; never browser
+  paste for unauthenticated callers.
 
 The gateway publishes RFC 9728 metadata without authentication. Every other
 remote route is denied unless control-origin introspection returns an active
