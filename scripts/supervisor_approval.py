@@ -126,6 +126,15 @@ def _check_failure(checks: dict[str, str], names: tuple[str, ...]) -> str | None
     return None
 
 
+def has_exact_cursor_approval(reviews: list[dict[str, Any]], head_sha: str) -> bool:
+    return any(
+        item.get("user", {}).get("login") in {"cursor", "cursor[bot]"}
+        and item.get("state") == "APPROVED"
+        and item.get("commit_id") == head_sha
+        for item in reviews
+    )
+
+
 def decide_gate(
     *,
     declared: str | None,
@@ -224,9 +233,8 @@ def evaluate_pr(client: GitHubClient, repository: str, pr_number: int) -> tuple[
         for item in check_runs
     }
     statuses = {item["context"]: item.get("state", "") for item in combined_status.get("statuses", [])}
-    for item in reviews:
-        if item.get("user", {}).get("login") in {"cursor", "cursor[bot]"} and item.get("state") == "APPROVED":
-            statuses["Cursor Approval"] = "success"
+    if has_exact_cursor_approval(reviews, head_sha):
+        statuses["Cursor Approval"] = "success"
 
     body = pr.get("body") or ""
     declared = declared_risk(body, labels)
