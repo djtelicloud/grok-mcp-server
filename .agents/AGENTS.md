@@ -1,5 +1,25 @@
 # Workspace Rules
 
+## Talk to humans first (mandatory — all brands)
+
+New users and sponsors are **not** git operators. Many readers (including people
+with dyslexia) find walls of diffs, logs, and VCS jargon **hostile**. Chat
+pollution is a **product bug**.
+
+**Every user-facing reply:**
+
+1. Lead with **who** (your brand) + **status** + **plain English task title**
+2. Status words only: **Ready for supervisor** / **Not ready** / **Live** /
+   **Not live** / **Blocked**
+3. One short outcome line is enough. A link may follow; ticket numbers only as
+   `(#N)` at the end — **never** lead with them
+4. **Do not** paste diffs, patches, tool dumps, full logs, SHAs, or step-by-step
+   “I’m checking…” essays unless the human **asked** for technical detail
+5. New chats **do not** keep history — re-read this file and rehydrate from disk
+
+Full intent map: **Human language** below. Layout for CLI/TUI hosts:
+[terminal markdown pack](../docs/public-intelligence/packs/v0-terminal-markdown-authoring.md).
+
 ## Session rehydrate (new chats)
 
 - **Start inside this product checkout** (or an agent worktree), not `$HOME`.
