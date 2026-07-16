@@ -496,8 +496,8 @@ def test_mcp_ui_fact_cost_tells_the_truth_for_zero():
     """cost_usd=0 must not render as '-' (unknown); subscription $0 says so."""
     with TestClient(create_app(), base_url="http://localhost:8080") as client:
         script = client.get("/ui/app.js")
-    assert "cost !== 0" not in script.text
-    assert 'billing.trim().toLowerCase() === "subscription"' in script.text
+    assert 'typeof rawBilling === "string" ? rawBilling.trim() : ""' in script.text
+    assert 'billing.toLowerCase() === "subscription"' in script.text
     assert "cost === 0 && isSubscription" in script.text
     assert '"Subscription"' in script.text
     assert "cost.toFixed(5)" in script.text

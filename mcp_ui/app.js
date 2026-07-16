@@ -1913,10 +1913,11 @@ function renderFactsPane(method, response, elapsed) {
   // a free API turn) — never paint "-" which reads as "unknown".
   const rawCost = payload.cost_usd;
   const cost = typeof rawCost === "string" && rawCost.trim() !== "" ? Number(rawCost) : rawCost;
-  const billing = payload.billing_class || payload.routing?.billing_class || "";
+  const rawBilling = payload.billing_class || payload.routing?.billing_class || "";
+  const billing = typeof rawBilling === "string" ? rawBilling.trim() : "";
   let costLabel = "-";
   if (typeof cost === "number" && Number.isFinite(cost)) {
-    const isSubscription = typeof billing === "string" && billing.trim().toLowerCase() === "subscription";
+    const isSubscription = billing.toLowerCase() === "subscription";
     costLabel = (cost === 0 && isSubscription)
       ? "Subscription"
       : `$${cost.toFixed(5)}`;
