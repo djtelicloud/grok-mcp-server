@@ -27,6 +27,7 @@ from .utils import (
     _parse_structured,
     check_circuit_breaker,
     get_xai_client,
+    xai_api_key_configured,
     record_xai_success,
     redact_secrets,
     resolve_model,
@@ -125,6 +126,19 @@ class JobManager:
     ) -> None:
         timeout = _job_timeout_sec()
         try:
+            # Deferred research always burns the metered API plane (chat.defer).
+            # Fail closed before claiming a defer slot when no usable key is
+            # configured so CLI-only / same_plane callers get an honest error.
+            if not xai_api_key_configured():
+                await self._store.update_job(
+                    job_id,
+                    status="error",
+                    result=(
+                        "Research jobs require a usable metered API plane "
+                        "(XAI_API_KEY); they cannot run on the CLI subscription."
+                    ),
+                )
+                return
             # The slot gates the defer call: the row stays 'queued' while
             # waiting, so a burst of submissions never pins more than
             # UNIGROK_MAX_CONCURRENT_JOBS timed threads at once.
@@ -209,6 +223,16 @@ class JobManager:
 
     async def _run_distill_job(self, job_id: str, session: str, model: str) -> None:
         try:
+            if not xai_api_key_configured():
+                await self._store.update_job(
+                    job_id,
+                    status="error",
+                    result=(
+                        "Distill jobs require a usable metered API plane "
+                        "(XAI_API_KEY); they cannot run on the CLI subscription."
+                    ),
+                )
+                return
             async with self._defer_slots:
                 await self._store.update_job(job_id, status="running")
                 messages = await self._store.load_messages(session)
@@ -303,6 +327,9 @@ class JobManager:
             "model": row.get("model"),
             "created_at": row.get("created_at"),
             "updated_at": row.get("updated_at"),
+            # Deferred jobs always execute on the metered developer API.
+            "plane": "API",
+            "billing_class": "metered",
         }
         if row.get("caller"):
             # Submitting agent's identity (v8 column) — absent on old rows
