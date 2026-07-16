@@ -25,6 +25,8 @@ import sys
 from pathlib import Path
 from typing import Optional
 
+from ..subprocess_security import create_scrubbed_subprocess_exec
+
 # Correctness-only pyflakes rules: undefined name / local used before binding.
 _RUFF_RULES = "F821,F823"
 
@@ -50,7 +52,7 @@ async def violation_counts(
     if not binary:
         return None
     try:
-        proc = await asyncio.create_subprocess_exec(
+        proc = await create_scrubbed_subprocess_exec(
             binary, "check",
             "--select", _RUFF_RULES,
             "--isolated",

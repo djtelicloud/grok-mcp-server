@@ -22,6 +22,8 @@ import shlex
 import signal
 import tempfile
 import textwrap
+
+from ..subprocess_security import create_scrubbed_subprocess_exec
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
@@ -893,7 +895,7 @@ async def _reverify(task: Dict[str, Any], target: Path, original: bytes) -> tupl
     env["PYTHONPATH"] = str(workspace)
     env["PYTHONHASHSEED"] = "0"
     try:
-        proc = await asyncio.create_subprocess_exec(
+        proc = await create_scrubbed_subprocess_exec(
             python, "-m", "pytest", "-q", "-p", "no:cacheprovider", task["test_target"],
             cwd=str(workspace),
             env=env,

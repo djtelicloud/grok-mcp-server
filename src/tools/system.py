@@ -16,6 +16,7 @@ from mcp.types import ToolAnnotations
 from ..models.results import SystemResult
 from ..metrics import build_metrics_snapshot, fetch_provider_api_usage
 from ..semantic_evals import get_semantic_eval_stats
+from ..subprocess_security import create_scrubbed_subprocess_exec
 from ..version import __version__
 
 from ..utils import (
@@ -141,7 +142,7 @@ async def grok_mcp_status(view: Literal["text", "json"] = "text") -> str:
 
         git_sha = "Unknown"
         try:
-            proc_git = await asyncio.create_subprocess_exec(
+            proc_git = await create_scrubbed_subprocess_exec(
                 "git", "rev-parse", "HEAD",
                 cwd=str(proj_root), stdout=subprocess.PIPE, stderr=subprocess.PIPE
             )
@@ -777,7 +778,7 @@ async def run_local_tests(
         else:
             cmd = [sys.executable, "-m", "pytest", "-q", safe_target]
 
-        proc = await asyncio.create_subprocess_exec(
+        proc = await create_scrubbed_subprocess_exec(
             *cmd,
             cwd=str(project_root),
             stdout=asyncio.subprocess.PIPE,
@@ -1449,7 +1450,7 @@ async def grok_mcp_restart_container() -> SystemResult:
             )
 
         try:
-            proc = await asyncio.create_subprocess_exec(
+            proc = await create_scrubbed_subprocess_exec(
                 "docker", "compose", "up", "--build", "-d",
                 cwd=str(proj_root),
                 stdout=subprocess.PIPE,

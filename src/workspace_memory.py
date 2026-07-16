@@ -15,13 +15,13 @@ import json
 import logging
 import os
 import re
-import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path, PurePosixPath
 from typing import Any, Dict, List, Optional, TextIO
 
 from .identity import get_active_caller
+from .subprocess_security import scrubbed_subprocess_run
 from .utils import (
     PathResolver,
     _bounded_redacted,
@@ -51,7 +51,7 @@ def workspace_memory_mode() -> str:
 
 
 def _git(repo: Path, *args: str, check: bool = True) -> str:
-    result = subprocess.run(
+    result = scrubbed_subprocess_run(
         ["git", *args],
         cwd=repo,
         check=False,
@@ -94,7 +94,7 @@ def _validate_sha(repo: Path, value: str, *, require_landed: bool = False) -> st
         raise WorkspaceMemoryError("commit SHA must be a full 40-character lowercase hex id")
     _git(repo, "cat-file", "-e", f"{sha}^{{commit}}")
     if require_landed:
-        result = subprocess.run(
+        result = scrubbed_subprocess_run(
             ["git", "merge-base", "--is-ancestor", sha, "refs/heads/main"],
             cwd=repo,
             check=False,
@@ -215,7 +215,7 @@ def _write_git_note(repo: Path, row: Dict[str, Any]) -> None:
                 "GIT_COMMITTER_EMAIL": "unigrok@local.invalid",
             }
         )
-        result = subprocess.run(
+        result = scrubbed_subprocess_run(
             [
                 "git", "notes", f"--ref={NOTE_REF}", "add", "-f", "-m", payload,
                 row["landed_sha"],
@@ -436,7 +436,7 @@ def _freshness(kind: str, created_at: Any) -> float:
 
 def _git_applicability(repo: Path, row: Dict[str, Any], head: str) -> Optional[Dict[str, Any]]:
     landed = row["landed_sha"]
-    ancestor = subprocess.run(
+    ancestor = scrubbed_subprocess_run(
         ["git", "merge-base", "--is-ancestor", landed, head],
         cwd=repo,
         check=False,
@@ -455,7 +455,7 @@ def _git_applicability(repo: Path, row: Dict[str, Any], head: str) -> Optional[D
             if line
         ]
         for path in paths:
-            probe = subprocess.run(
+            probe = scrubbed_subprocess_run(
                 ["git", "cat-file", "-e", f"{head}:{path}"],
                 cwd=repo,
                 check=False,
@@ -479,7 +479,7 @@ def _git_applicability(repo: Path, row: Dict[str, Any], head: str) -> Optional[D
 
 
 def _is_ancestor(repo: Path, candidate: str, head: str) -> bool:
-    result = subprocess.run(
+    result = scrubbed_subprocess_run(
         ["git", "merge-base", "--is-ancestor", candidate, head],
         cwd=repo,
         check=False,
