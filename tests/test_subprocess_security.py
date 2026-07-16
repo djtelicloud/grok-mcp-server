@@ -1,4 +1,5 @@
 import asyncio
+import json
 import subprocess
 
 import pytest
@@ -111,6 +112,42 @@ def test_redact_secrets_removes_unstructured_exact_value(monkeypatch):
     assert redact_secrets("failure: plain-provider-secret") == "failure: [REDACTED]"
 
 
+def test_redact_secrets_removes_invalid_principal_map_values(monkeypatch):
+    monkeypatch.setenv(
+        "UNIGROK_PRINCIPAL_XAI_KEYS_JSON",
+        '{"not-a-valid-principal":"mapped-opaque-secret",'
+        '"not-a-valid-principal":"duplicate-opaque-secret"}',
+    )
+
+    assert redact_secrets(
+        "failure: mapped-opaque-secret duplicate-opaque-secret"
+    ) == "failure: [REDACTED] [REDACTED]"
+
+
+def test_redact_secrets_removes_overflow_principal_map_values(monkeypatch):
+    entries = {f"invalid-{index}": f"mapped-secret-{index}" for index in range(257)}
+    entries["invalid-256"] = "mapped-overflow-secret"
+    monkeypatch.setenv("UNIGROK_PRINCIPAL_XAI_KEYS_JSON", json.dumps(entries))
+
+    assert redact_secrets("failure: mapped-overflow-secret") == (
+        "failure: [REDACTED]"
+    )
+
+
+def test_redact_secrets_fails_closed_for_too_large_principal_map(monkeypatch):
+    monkeypatch.setenv(
+        "UNIGROK_PRINCIPAL_XAI_KEYS_JSON",
+        json.dumps(
+            {
+                "invalid-target": "mapped-too-large-secret",
+                "padding": "x" * 66_000,
+            }
+        ),
+    )
+
+    assert redact_secrets("failure: mapped-too-large-secret") == "[REDACTED]"
+
+
 def test_redact_secrets_removes_individual_gateway_keys(monkeypatch):
     monkeypatch.setenv(
         "UNIGROK_API_KEYS", "first-gateway-secret, second-gateway-secret"
@@ -152,5 +189,16 @@ def test_redact_secrets_removes_unknown_secret_shaped_env_value(monkeypatch):
     monkeypatch.setenv("FUTURE_PROVIDER_API_KEY", "future-provider-secret")
 
     assert redact_secrets("failure: future-provider-secret") == (
+        "failure: [REDACTED]"
+    )
+
+
+def test_redact_secrets_removes_individual_principal_xai_keys(monkeypatch):
+    monkeypatch.setenv(
+        "UNIGROK_PRINCIPAL_XAI_KEYS_JSON",
+        '{"oauth:https%3A%2F%2Fcontrol.grokmcp.org:github%3A42":"opaque-principal-credential"}',
+    )
+
+    assert redact_secrets("failure: opaque-principal-credential") == (
         "failure: [REDACTED]"
     )

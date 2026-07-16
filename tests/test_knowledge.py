@@ -15,12 +15,14 @@ from pydantic import ValidationError
 
 import src.utils as utils_module
 from evals.fakes import FakeClient
+from src.identity import reset_active_principal, set_active_principal
 from src.jobs import JobManager
 from src.utils import (
     DEFAULT_CODING_MODEL,
     FactList,
     GrokSessionStore,
     PathResolver,
+    _active_xai_breaker_scope,
     _parse_structured,
     append_and_save_history,
     format_knowledge_notes,
@@ -388,8 +390,11 @@ class TestDistillJob:
     async def test_distill_honors_open_circuit_breaker(self, kstore):
         await kstore.save_message("sess-b", "user", "hello")
         threshold = utils_module._breaker_threshold()
+        credential_scope = _active_xai_breaker_scope()
         for _ in range(threshold):
-            record_xai_failure(DEFAULT_CODING_MODEL)
+            record_xai_failure(
+                DEFAULT_CODING_MODEL, credential_scope=credential_scope
+            )
         manager = JobManager(job_store=kstore)
         with patch("src.utils.get_xai_client", return_value=FakeClient()):
             submitted = await manager.submit_distill("sess-b")
@@ -978,6 +983,26 @@ class TestCollectionsAdapter:
         assert args[0] == "col-new"
         assert args[1].startswith("fact-7-") and args[1].endswith(".txt")
         assert args[2] == b"durable fact text"
+
+    @pytest.mark.asyncio
+    async def test_principal_credential_cannot_use_owner_collection(
+        self, monkeypatch, reset_collections_state
+    ):
+        principal = "oauth:https%3A%2F%2Fcontrol.grokmcp.org:github%3A42"
+        monkeypatch.setenv("UNIGROK_COLLECTIONS", "1")
+        monkeypatch.setenv("XAI_API_KEY", "xai-owner")
+        monkeypatch.setenv(
+            "UNIGROK_PRINCIPAL_XAI_KEYS_JSON",
+            json.dumps({principal: "xai-principal"}),
+        )
+        token = set_active_principal(principal)
+        try:
+            with patch("src.utils.get_xai_management_client") as mock_client:
+                assert await sync_fact_to_collection(1, "fact") is False
+                assert await search_knowledge_collection("fact") == []
+            mock_client.assert_not_called()
+        finally:
+            reset_active_principal(token)
 
     @pytest.mark.asyncio
     async def test_sync_reuses_existing_collection(self, monkeypatch, reset_collections_state):
