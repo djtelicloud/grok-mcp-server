@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from scripts.supervisor_approval import (
+    augment_cursor_evidence,
     has_exact_cursor_approval,
     decide_gate,
     declared_risk,
@@ -88,3 +89,52 @@ def test_cursor_approval_must_match_the_current_head():
     assert not has_exact_cursor_approval(reviews, "new")
     reviews[0]["commit_id"] = "new"
     assert has_exact_cursor_approval(reviews, "new")
+
+
+def test_bugbot_neutral_and_missing_security_check_can_pass():
+    raw = {
+        "build (3.11)": "success",
+        "build (3.12)": "success",
+        "Project Site": "success",
+        "Control Cloud Run Image": "success",
+        "evals-offline": "success",
+        "docker": "success",
+        "Cursor Bugbot": "neutral",
+    }
+    checks = augment_cursor_evidence(raw, reviews=[])
+    decision = decide_gate(
+        declared="low",
+        inferred="low",
+        checks=checks,
+        statuses={"Cursor Approval": "success"},
+    )
+    assert checks["Cursor Bugbot"] == "success"
+    assert checks["Cursor Security Agent: Security Reviewer"] == "success"
+    assert decision.state == "success"
+
+
+def test_security_reviewer_changes_requested_blocks_gate():
+    raw = {
+        "build (3.11)": "success",
+        "build (3.12)": "success",
+        "Project Site": "success",
+        "Control Cloud Run Image": "success",
+        "evals-offline": "success",
+        "docker": "success",
+        "Cursor Bugbot": "success",
+    }
+    reviews = [
+        {
+            "state": "CHANGES_REQUESTED",
+            "body": "<!-- CURSOR_AUTOMATION_ID: f12530a3-7ff4-11f1-ba66-0e7d0216e441 | RUN_ID: x -->\nblock",
+        }
+    ]
+    checks = augment_cursor_evidence(raw, reviews=reviews)
+    decision = decide_gate(
+        declared="low",
+        inferred="low",
+        checks=checks,
+        statuses={"Cursor Approval": "success"},
+    )
+    assert decision.state == "failure"
+    assert "Security Reviewer" in decision.description
