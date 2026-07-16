@@ -161,7 +161,7 @@ def _check_failure(checks: dict[str, str], names: tuple[str, ...]) -> str | None
 
 def has_exact_cursor_approval(reviews: list[dict[str, Any]], head_sha: str) -> bool:
     return any(
-        item.get("user", {}).get("login") in CURSOR_APPROVER_ACTORS
+        (item.get("user") or {}).get("login") in CURSOR_APPROVER_ACTORS
         and item.get("state") == "APPROVED"
         and item.get("commit_id") == head_sha
         for item in reviews

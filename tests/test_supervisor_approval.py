@@ -252,6 +252,11 @@ def test_cursor_approval_must_match_the_current_head():
     assert has_exact_cursor_approval(reviews, "new")
 
 
+def test_cursor_approval_tolerates_missing_review_author():
+    reviews = [{"user": None, "state": "APPROVED", "commit_id": "current"}]
+    assert not has_exact_cursor_approval(reviews, "current")
+
+
 def test_bugbot_neutral_and_missing_security_check_stays_pending():
     raw = {
         "build (3.11)": "success",
