@@ -241,7 +241,14 @@ def install(
     # Preflight all destinations before copying so a mid-loop conflict abort
     # cannot leave a mixed partial install.
     for src, dest in planned:
-        if dest.exists() and not force and _sha256(src) != _sha256(dest):
+        if dest.exists() and not dest.is_file():
+            print(
+                f"error: {dest} exists and is not a regular file; "
+                "remove it before installing",
+                file=sys.stderr,
+            )
+            return 3
+        if dest.is_file() and not force and _sha256(src) != _sha256(dest):
             print(
                 f"error: {dest} exists and differs from source; re-run with --force to overwrite",
                 file=sys.stderr,
@@ -252,7 +259,7 @@ def install(
         themes.mkdir(parents=True, exist_ok=True)
 
     for src, dest in planned:
-        if dest.exists() and not force:
+        if dest.is_file() and not force:
             print(f"unchanged  {dest}")
             continue
         action = "would install" if dry_run else "install"
