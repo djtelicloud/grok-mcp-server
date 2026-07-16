@@ -2974,6 +2974,26 @@ async def raw_get_session_history(session: str) -> str
 
 Get local chat history for a session — lets agent recall prior context.
 
+## tools/consistency.py {#tools-consistency}
+
+### Function: `architecture_consistency_sweep` {#tools-consistency-architecture_consistency_sweep}
+
+```python
+async def architecture_consistency_sweep(target_paths: List[str], rules_paths: List[str], ctx: Optional[Context]=None) -> Dict[str, Any]
+```
+
+**Keywords:** architecture, consistency, sweep
+
+Perform a wide-pass consistency sweep across target code and rule documents.
+
+This tool reads the provided files, runs a deep reasoning pass using Grok,
+and returns a scored consistency report indicating where the codebase has
+drifted from the authoritative claims in the rules_paths.
+
+Args:
+    target_paths: A list of paths to target source files to audit.
+    rules_paths: A list of paths to authoritative documents (e.g. docs/ide-setup.md).
+
 ## tools/faq.py {#tools-faq}
 
 ### Function: `lookup_unigrok_faq` {#tools-faq-lookup_unigrok_faq}
