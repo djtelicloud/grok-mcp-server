@@ -512,6 +512,10 @@ host. Production Cloud Run serves ``mcp.grokmcp.org`` (and similar), so
 authenticated /mcp traffic must allow the public hostname from
 ``UNIGROK_PUBLIC_MCP_URL`` or the optional override.
 
+Unsafe or non-HTTPS overrides are ignored: they must not expand the
+Host/Origin allowlist (OAuth metadata already rejects them via
+:func:`_public_mcp_resource`).
+
 ## hydration.py {#hydration}
 
 ### Class: `HydrationService` {#hydration-hydrationservice}

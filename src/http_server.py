@@ -968,13 +968,22 @@ def _validated_https_url(value: str) -> Optional[str]:
     return f"https://{parsed.netloc}{normalized_path}"
 
 
-def _public_mcp_resource() -> Optional[str]:
-    resource = _validated_https_url(os.environ.get("UNIGROK_PUBLIC_MCP_URL", ""))
+def _validated_public_mcp_resource(raw: str) -> Optional[str]:
+    """Return a public ``…/mcp`` HTTPS resource, or ``None`` when unsafe.
+
+    Only global HTTPS hosts may publish OAuth metadata or widen the Streamable
+    HTTP DNS-rebinding allowlist.
+    """
+    resource = _validated_https_url(raw)
     if resource and not urlsplit(resource).path:
         resource = f"{resource}/mcp"
     if resource and urlsplit(resource).path == "/mcp":
         return resource
     return None
+
+
+def _public_mcp_resource() -> Optional[str]:
+    return _validated_public_mcp_resource(os.environ.get("UNIGROK_PUBLIC_MCP_URL", ""))
 
 
 def _oauth_protected_resource_metadata_url(
@@ -2138,6 +2147,10 @@ def public_mcp_transport_security(
     host. Production Cloud Run serves ``mcp.grokmcp.org`` (and similar), so
     authenticated /mcp traffic must allow the public hostname from
     ``UNIGROK_PUBLIC_MCP_URL`` or the optional override.
+
+    Unsafe or non-HTTPS overrides are ignored: they must not expand the
+    Host/Origin allowlist (OAuth metadata already rejects them via
+    :func:`_public_mcp_resource`).
     """
     hosts = [
         "127.0.0.1",
@@ -2155,16 +2168,18 @@ def public_mcp_transport_security(
         "http://[::1]",
         "http://[::1]:*",
     ]
-    raw = (public_mcp_url if public_mcp_url is not None else os.environ.get("UNIGROK_PUBLIC_MCP_URL", "")).strip()
-    if raw:
-        parsed = urlsplit(raw)
+    if public_mcp_url is None:
+        resource = _public_mcp_resource()
+    else:
+        resource = _validated_public_mcp_resource(public_mcp_url)
+    if resource:
+        parsed = urlsplit(resource)
         host = (parsed.hostname or "").lower()
         if host:
             hosts.append(host)
             if parsed.port:
                 hosts.append(f"{host}:{parsed.port}")
-            scheme = parsed.scheme if parsed.scheme in {"http", "https"} else "https"
-            origin = f"{scheme}://{host}"
+            origin = f"https://{host}"
             if parsed.port:
                 origin = f"{origin}:{parsed.port}"
             origins.append(origin)
