@@ -1671,6 +1671,8 @@ def _openai_finish_reason(layer: MetaLayer) -> str:
 
 
 _AGENT_MODES = ("auto", "fast", "reasoning", "thinking")
+_AGENT_PLANES = ("auto", "cli", "api")
+_AGENT_FALLBACK_POLICIES = ("same_plane", "cross_plane")
 
 
 def _resolve_agent_model(payload: Dict[str, Any]) -> Optional[str]:
@@ -1690,14 +1692,26 @@ def _resolve_agent_model(payload: Dict[str, Any]) -> Optional[str]:
 def _agent_turn_kwargs(payload: Dict[str, Any]) -> Dict[str, Any]:
     """Shared run_agent_turn kwargs for the OpenAI-compatible agent branch.
 
-    Accepts the extension fields `xai_model`, `mode`, and `thinking_mode` so
-    remote clients keep the full routing surface (same mode mapping as the
-    stdio `agent` tool).
+    Accepts the extension fields `xai_model`, `mode`, `thinking_mode`, `plane`,
+    and `fallback_policy` so remote clients keep the full routing surface
+    (same mode/plane mapping as the public MCP `agent` tool).
     """
     mode = payload.get("mode")
     mode = mode.strip().lower() if isinstance(mode, str) else ""
     if mode not in _AGENT_MODES:
         mode = "auto"
+    plane = payload.get("plane")
+    plane = plane.strip().lower() if isinstance(plane, str) else "auto"
+    if plane not in _AGENT_PLANES:
+        plane = "auto"
+    fallback_policy = payload.get("fallback_policy")
+    fallback_policy = (
+        fallback_policy.strip().lower()
+        if isinstance(fallback_policy, str)
+        else "cross_plane"
+    )
+    if fallback_policy not in _AGENT_FALLBACK_POLICIES:
+        fallback_policy = "cross_plane"
     return {
         "session": _scoped_session(_session_from_payload(payload)),
         "messages": payload.get("messages") or [],
@@ -1705,6 +1719,8 @@ def _agent_turn_kwargs(payload: Dict[str, Any]) -> Dict[str, Any]:
         "mode": "reasoning" if mode == "reasoning" else "auto",
         "thinking_mode": mode == "thinking" or bool(payload.get("thinking_mode")),
         "enable_agentic": mode != "fast",
+        "plane": plane,
+        "fallback_policy": fallback_policy,
         # The HTTP compatibility surface is an untrusted principal boundary.
         # Subscription CLI execution must never inherit the service checkout,
         # durable CLI home, native session memory, or built-in tools.

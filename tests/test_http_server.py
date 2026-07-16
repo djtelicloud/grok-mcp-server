@@ -1657,6 +1657,41 @@ def test_agent_chat_completion_passes_mode_extensions(monkeypatch):
         assert mock_run.await_args.kwargs["mode"] == "reasoning"
 
 
+def test_agent_chat_completion_passes_plane_and_fallback_policy(monkeypatch):
+    """Facade forwards allowlisted plane/fallback_policy like the MCP agent."""
+    monkeypatch.delenv("UNIGROK_RUNTIME", raising=False)
+    monkeypatch.delenv("UNIGROK_API_KEYS", raising=False)
+    mock_run = AsyncMock(return_value=MetaLayer(generation="ok"))
+    monkeypatch.setattr("src.http_server.run_agent_turn", mock_run)
+
+    with TestClient(create_app()) as client:
+        client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "unigrok-agent",
+                "plane": "cli",
+                "fallback_policy": "same_plane",
+                "messages": [{"role": "user", "content": "hi"}],
+            },
+        )
+        kwargs = mock_run.await_args.kwargs
+        assert kwargs["plane"] == "cli"
+        assert kwargs["fallback_policy"] == "same_plane"
+
+        client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "unigrok-agent",
+                "plane": "evil",
+                "fallback_policy": "also-evil",
+                "messages": [{"role": "user", "content": "hi"}],
+            },
+        )
+        kwargs = mock_run.await_args.kwargs
+        assert kwargs["plane"] == "auto"
+        assert kwargs["fallback_policy"] == "cross_plane"
+
+
 def test_agent_chat_completion_maps_finish_reason(monkeypatch):
     """Budget/depth exhaustion reads as OpenAI's 'length'; the raw
     finish_reason and usage come through in the response."""
