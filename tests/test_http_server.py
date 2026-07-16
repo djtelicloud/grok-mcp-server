@@ -502,7 +502,7 @@ def test_local_okf_manifest_and_generated_api_reference_are_served(monkeypatch):
 
 
 def test_cloudrun_protects_mcp_inference_and_operator_surfaces(monkeypatch):
-    """Remote clients never inherit the localhost UI/runtime exemptions."""
+    """Remote clients never inherit the localhost data-endpoint exemptions."""
     monkeypatch.setenv("UNIGROK_RUNTIME", "cloudrun")
     monkeypatch.setenv("UNIGROK_API_KEYS", "client-secret")
     monkeypatch.delenv("UNIGROK_ALLOW_UNAUTHENTICATED", raising=False)
@@ -513,12 +513,85 @@ def test_cloudrun_protects_mcp_inference_and_operator_surfaces(monkeypatch):
             "/v1/models": client.get("/v1/models"),
             "/runtimez": client.get("/runtimez"),
             "/metrics": client.get("/metrics"),
-            "/ui/": client.get("/ui/"),
-            "/docs/okf/manifest.json": client.get("/docs/okf/manifest.json"),
         }
 
     assert all(response.status_code == 401 for response in responses.values()), responses
     assert all(response.headers["WWW-Authenticate"] == "Bearer" for response in responses.values())
+
+
+def test_cloudrun_serves_public_static_ui_shell_without_credentials(monkeypatch):
+    """Cloud Run publishes the read-only static shell; data endpoints stay gated.
+
+    The shell files are already public on GitHub/PyPI, so serving them
+    anonymously leaks nothing while letting the hosted console load before
+    sign-in.
+    """
+    monkeypatch.setenv("UNIGROK_RUNTIME", "cloudrun")
+    monkeypatch.setenv("UNIGROK_API_KEYS", "client-secret")
+    monkeypatch.delenv("UNIGROK_ALLOW_UNAUTHENTICATED", raising=False)
+
+    with TestClient(create_app(), base_url="https://mcp.grokmcp.org") as client:
+        index = client.get("/ui/")
+        script = client.get("/ui/app.js")
+        okf = client.get("/docs/okf/okf-manifest.json")
+        mcp_denied = client.post(
+            "/mcp",
+            json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+            headers={"Accept": "application/json, text/event-stream"},
+        )
+        metrics_denied = client.get("/metrics")
+        runtimez_denied = client.get("/runtimez")
+
+    assert index.status_code == 200
+    assert "UniGrok" in index.text
+    assert script.status_code == 200
+    assert okf.status_code == 200
+    assert "api-reference.md" in okf.json()["files"]
+    assert mcp_denied.status_code == 401
+    assert metrics_denied.status_code == 401
+    assert runtimez_denied.status_code == 401
+
+
+def test_cloudrun_static_shell_exemption_is_get_head_only(monkeypatch):
+    """POST under /ui is not a side door: only safe read verbs are exempt."""
+    monkeypatch.setenv("UNIGROK_RUNTIME", "cloudrun")
+    monkeypatch.setenv("UNIGROK_API_KEYS", "client-secret")
+    monkeypatch.delenv("UNIGROK_ALLOW_UNAUTHENTICATED", raising=False)
+
+    with TestClient(create_app(), base_url="https://mcp.grokmcp.org") as client:
+        ui_post = client.post("/ui/", json={"probe": True})
+        okf_post = client.post("/docs/okf/okf-manifest.json", json={"probe": True})
+        docs_root = client.get("/docs/architecture.md")
+        prefix_sibling = client.get("/uix")
+
+    # Auth denies the non-exempt verb before StaticFiles can even answer 405.
+    assert ui_post.status_code == 401
+    assert okf_post.status_code == 401
+    # The exemption is /docs/okf exactly, never the broader /docs tree a
+    # source-checkout deployment would expose.
+    assert docs_root.status_code == 401
+    # Boundary-correct prefix: "/uix" must not inherit the shell exemption.
+    assert prefix_sibling.status_code == 401
+
+
+def test_local_runtime_never_inherits_cloudrun_static_shell_exemption(monkeypatch):
+    """Regression pin: non-loopback GET /ui with auth active stays denied in
+    local runtime exactly as before the Cloud Run shell exemption existed."""
+    monkeypatch.setenv("UNIGROK_RUNTIME", "local")
+    monkeypatch.setenv("UNIGROK_API_KEYS", "client-secret")
+    monkeypatch.delenv("UNIGROK_ALLOW_UNAUTHENTICATED", raising=False)
+    monkeypatch.delenv("UNIGROK_TRUSTED_LOOPBACK_PROXY", raising=False)
+
+    with TestClient(
+        create_app(),
+        base_url="https://gateway.example.com",
+        client=("203.0.113.20", 50000),
+    ) as client:
+        ui = client.get("/ui/")
+        okf = client.get("/docs/okf/okf-manifest.json")
+
+    assert ui.status_code == 401
+    assert okf.status_code == 401
 
 
 def test_cloudrun_well_known_allowlist_is_exact(monkeypatch):

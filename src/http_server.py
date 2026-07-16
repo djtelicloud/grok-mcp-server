@@ -451,8 +451,10 @@ _PUBLIC_AUTH_EXEMPT_PATHS = (
 
 # The bundled Control Center, runtime diagnostics, and source documentation
 # are local operator surfaces. They stay convenient at localhost, including
-# when client bearer keys are configured, but are never exempt in Cloud Run or
-# when reached through a non-loopback Host.
+# when client bearer keys are configured, but this exemption never applies in
+# Cloud Run or through a non-loopback Host. (Cloud Run separately publishes
+# only the read-only static shell via _is_public_static_shell_request below;
+# /runtimez and /metrics data stay gated everywhere remote.)
 _LOCAL_OPERATOR_PATHS = ("/runtimez", "/metrics")
 _LOCAL_OPERATOR_PREFIXES = ("/ui", "/docs")
 
@@ -515,6 +517,38 @@ def _is_local_operator_request(scope: Dict[str, Any]) -> bool:
     )
 
 
+# Cloud Run serves the static Control Center shell publicly: these files ship
+# on GitHub and PyPI already, so gating them buys no secrecy while breaking the
+# one-console architecture (the hosted shell must load before any sign-in can
+# happen). Scope is deliberately exact:
+#
+# * ``/docs/okf`` rather than ``/docs`` broadly — the Docker image only bakes
+#   ``docs/okf/``, but a source-checkout Cloud Run deployment would have
+#   ``create_docs_app`` serving the entire ``docs/`` tree, which is not a
+#   published surface.
+# * GET/HEAD only — the shell is read-only; state-changing verbs keep normal
+#   bearer auth so no write path ever rides this exemption.
+#
+# Everything the shell talks to (/mcp, /v1, /metrics, /runtimez) stays behind
+# bearer auth. Deployment note: browser POSTs from the hosted shell to /mcp
+# additionally require UNIGROK_ALLOWED_ORIGINS to list the exact hosted origin
+# (e.g. https://mcp.grokmcp.org) — MCPOriginMiddleware rejects other browser
+# origins regardless of this static exemption.
+_PUBLIC_STATIC_SHELL_PREFIXES = ("/ui", "/docs/okf")
+
+
+def _is_public_static_shell_request(scope: Dict[str, Any]) -> bool:
+    if not is_cloudrun_runtime():
+        return False
+    if scope.get("method") not in ("GET", "HEAD"):
+        return False
+    path = scope.get("path", "")
+    return any(
+        _path_matches_prefix(path, prefix)
+        for prefix in _PUBLIC_STATIC_SHELL_PREFIXES
+    )
+
+
 def _request_may_bypass_auth(scope: Dict[str, Any]) -> bool:
     # The broad development bypass is stricter than the operator-static
     # exemption: an asserted Docker proxy boundary may expose /ui, /runtimez,
@@ -540,7 +574,11 @@ class GatewayAuthMiddleware:
             return
         scope["unigrok.bound_host"] = self.bound_host
         path = scope.get("path", "")
-        if _is_public_auth_exempt_path(path) or _is_local_operator_request(scope):
+        if (
+            _is_public_auth_exempt_path(path)
+            or _is_local_operator_request(scope)
+            or _is_public_static_shell_request(scope)
+        ):
             await self.app(scope, receive, send)
             return
         if not _auth_is_active() or _request_may_bypass_auth(scope):
