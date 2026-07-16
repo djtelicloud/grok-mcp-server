@@ -5,6 +5,7 @@ type: "index"
 description: "Zero-shot agent knowledge bundle for discoverability and usage of the UniGrok MCP server."
 topics:
   - "agent-tool"
+  - "copilot-agent-playbook"
   - "chat-modes"
   - "reasoning-guard"
   - "grok-4.5-pinning"
@@ -41,6 +42,7 @@ authoritative.
 
 ## Navigation Map
 - [Agent Entrypoint](agent-tool.md): Stable HTTP and trusted stdio agent contracts.
+- [VS Code Copilot Agent Playbook](copilot-agent-playbook.md): Stable-lane habits, mode selection, context packaging, and self-verification for Copilot.
 - [Chat & Context Modes](chat-modes.md): Trusted-stdio direct text, stateful threads, files, and vision tools.
 - [Reasoning Guard & Level Enforcement](reasoning-guard.md): Trusted-stdio minimum-profile enforcement and its HTTP boundary.
 - [Model Pinning & Profiles](grok-4.5-pinning.md): API vs CLI paths, fallback parameters, and Grok 4.5 capabilities.
