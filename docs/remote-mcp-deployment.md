@@ -85,8 +85,9 @@ Rules:
 - Only principals with kind `oauth:` use the map; `http:anon` and labels never do.
 - Every map key must be the full canonical
   `oauth:<percent-encoded-issuer>:<percent-encoded-sub>` principal emitted by
-  the gateway. Bare subjects, unbound subjects, and client labels are rejected
-  fail-closed.
+  the gateway, and its decoded issuer must exactly match a validated
+  `UNIGROK_OAUTH_AUTHORIZATION_SERVERS` entry. Bare subjects, unbound subjects,
+  unlisted issuers, and client labels are rejected fail-closed.
 - Missing map entry → **owner default**.
 - The binding applies to both MCP agent execution and the authenticated
   `/v1/chat/completions` proxy; neither path may silently switch a mapped

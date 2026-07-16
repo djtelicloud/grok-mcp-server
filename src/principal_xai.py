@@ -9,12 +9,14 @@ Cloud twin law (sponsor Approved):
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import os
 import re
 import secrets
 import threading
 from typing import Any, Dict, Mapping, Optional, Tuple
+from urllib.parse import quote, unquote, urlsplit
 
 from src.identity import get_active_principal, principal_kind
 
@@ -35,6 +37,65 @@ class PrincipalXAIConfigurationError(ValueError):
         super().__init__("Principal xAI key configuration is invalid.")
 
 
+def _configured_authorization_servers(source: Mapping[str, str]) -> set[str]:
+    """Return the same normalized public issuer set used by HTTP metadata."""
+    raw_values = [
+        item.strip()
+        for item in source.get("UNIGROK_OAUTH_AUTHORIZATION_SERVERS", "").split(",")
+        if item.strip()
+    ]
+    validated: set[str] = set()
+    for raw in raw_values:
+        if any(ord(char) <= 32 or ord(char) == 127 for char in raw):
+            return set()
+        try:
+            parsed = urlsplit(raw)
+            host = parsed.hostname
+            parsed.port
+        except ValueError:
+            return set()
+        if (
+            parsed.scheme.lower() != "https"
+            or not host
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.query
+            or parsed.fragment
+        ):
+            return set()
+        normalized_host = host.lower().rstrip(".")
+        if normalized_host == "localhost" or normalized_host.endswith(
+            (".localhost", ".local", ".internal")
+        ):
+            return set()
+        try:
+            address = ipaddress.ip_address(normalized_host)
+        except ValueError:
+            address = None
+        if address is not None and not address.is_global:
+            return set()
+        normalized_path = parsed.path.rstrip("/")
+        validated.add(f"https://{parsed.netloc}{normalized_path}")
+    return validated
+
+
+def _is_configured_canonical_oauth_principal(
+    principal: str, authorization_servers: set[str]
+) -> bool:
+    parts = principal.split(":", 2)
+    if len(parts) != 3 or parts[0] != "oauth":
+        return False
+    issuer = unquote(parts[1])
+    subject = unquote(parts[2])
+    if not issuer or not subject or issuer not in authorization_servers:
+        return False
+    return principal == (
+        "oauth:"
+        f"{quote(issuer, safe='-._~')}:"
+        f"{quote(subject, safe='-._~')}"
+    )
+
+
 def normalize_xai_api_key(value: Optional[str]) -> str:
     key = str(value or "").strip()
     return "" if not key or key == _PLACEHOLDER else key
@@ -46,7 +107,9 @@ def default_xai_api_key(environ: Mapping[str, str] | None = None) -> str:
     return normalize_xai_api_key(source.get("XAI_API_KEY"))
 
 
-def _parse_principal_key_table(raw: str) -> Dict[str, str]:
+def _parse_principal_key_table(
+    raw: str, *, authorization_servers: set[str]
+) -> Dict[str, str]:
     text = str(raw or "").strip()
     if not text:
         return {}
@@ -79,10 +142,18 @@ def _parse_principal_key_table(raw: str) -> Dict[str, str]:
             or len(norm_key) > 240
             or norm_key != key
             or _CANONICAL_OAUTH_PRINCIPAL.fullmatch(norm_key) is None
+            or not _is_configured_canonical_oauth_principal(
+                norm_key, authorization_servers
+            )
         ):
             raise PrincipalXAIConfigurationError("invalid_principal")
         secret = normalize_xai_api_key(value if isinstance(value, str) else None)
-        if not secret:
+        if (
+            not secret
+            or not isinstance(value, str)
+            or value != value.strip()
+            or any(ord(char) <= 32 or ord(char) == 127 for char in value)
+        ):
             raise PrincipalXAIConfigurationError("invalid_key")
         out[norm_key] = secret
     return out
@@ -93,7 +164,13 @@ def load_principal_xai_key_table(
 ) -> Dict[str, str]:
     """Load optional principal → key map (never log values)."""
     source = os.environ if environ is None else environ
-    return _parse_principal_key_table(source.get(_PRINCIPAL_KEYS_ENV, ""))
+    raw = source.get(_PRINCIPAL_KEYS_ENV, "")
+    if not str(raw or "").strip():
+        return {}
+    return _parse_principal_key_table(
+        raw,
+        authorization_servers=_configured_authorization_servers(source),
+    )
 
 
 def _lookup_principal_key(

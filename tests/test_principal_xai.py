@@ -138,6 +138,22 @@ def test_client_id_cannot_select_key(monkeypatch: pytest.MonkeyPatch) -> None:
         ('{"cursor":"xai-a"}', "invalid_principal"),
         ('{"oauth:":"xai-a"}', "invalid_principal"),
         (
+            '{"oauth:https%3A%2F%2Funlisted.example:a":"xai-a"}',
+            "invalid_principal",
+        ),
+        (
+            '{"oauth:https%3a%2f%2fcontrol.grokmcp.org:a":"xai-a"}',
+            "invalid_principal",
+        ),
+        (
+            '{"oauth:https%3A%2F%2Fcontrol.grokmcp.org:a":" xai-a"}',
+            "invalid_key",
+        ),
+        (
+            '{"oauth:https%3A%2F%2Fcontrol.grokmcp.org:a":"xai-a\\n"}',
+            "invalid_key",
+        ),
+        (
             '{"oauth:https%3A%2F%2Fcontrol.grokmcp.org:a":"xai-a",'
             '"oauth:https%3A%2F%2Fcontrol.grokmcp.org:a":"xai-b"}',
             "duplicate_principal",
@@ -175,6 +191,22 @@ def test_invalid_principal_map_fails_closed_without_secret_output(
         assert "xai-" not in json.dumps(status)
     finally:
         reset_active_principal(token)
+
+
+def test_principal_map_requires_configured_authorization_server(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("UNIGROK_OAUTH_AUTHORIZATION_SERVERS", raising=False)
+    monkeypatch.setenv(
+        "UNIGROK_PRINCIPAL_XAI_KEYS_JSON",
+        '{"oauth:https%3A%2F%2Fcontrol.grokmcp.org:a":"xai-a"}',
+    )
+    assert xai_api_service_configured() is False
+    with pytest.raises(PrincipalXAIConfigurationError) as raised:
+        resolve_xai_api_key(
+            principal="oauth:https%3A%2F%2Fcontrol.grokmcp.org:a"
+        )
+    assert raised.value.code == "invalid_principal"
 
 
 @pytest.mark.parametrize(

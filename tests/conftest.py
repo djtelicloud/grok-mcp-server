@@ -6,6 +6,9 @@ os.environ.setdefault("XAI_API_KEY", "xai-test-dummy-key-for-unit-tests")
 
 # Flag to signal all modules that tests are running
 os.environ["UNI_GROK_TESTING"] = "1"
+os.environ.setdefault(
+    "UNIGROK_OAUTH_AUTHORIZATION_SERVERS", "https://control.grokmcp.org"
+)
 
 import pytest
 import src.utils
