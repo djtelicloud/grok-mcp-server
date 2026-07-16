@@ -1039,6 +1039,7 @@ async def test_agent_tool_ctx_hidden_from_schema():
 @pytest.mark.asyncio
 async def test_grok_mcp_restart_container_gating(monkeypatch, tmp_path):
     from src.tools.system import grok_mcp_restart_container
+    from src.identity import reset_active_principal, set_active_principal
 
     # 1. Test disabled behavior
     monkeypatch.setenv("UNIGROK_ENABLE_CONTAINER_RESTART", "0")
@@ -1046,8 +1047,16 @@ async def test_grok_mcp_restart_container_gating(monkeypatch, tmp_path):
     assert res.data["status"] == "disabled"
     assert "disabled" in res.response
 
-    # 2. Test enabled behavior without a Compose project.
     monkeypatch.setenv("UNIGROK_ENABLE_CONTAINER_RESTART", "1")
+    principal_token = set_active_principal("http:key-1")
+    try:
+        res_http = await grok_mcp_restart_container()
+    finally:
+        reset_active_principal(principal_token)
+    assert res_http.data["status"] == "http_forbidden"
+    assert "unavailable over HTTP/MCP" in res_http.response
+
+    # 2. Test enabled behavior without a Compose project.
     invalid_root = tmp_path / "outside"
     invalid_root.mkdir()
     with patch("src.tools.system.PathResolver.get_service_root", return_value=invalid_root):

@@ -10879,20 +10879,35 @@ async def _call_plane(
 
         try:
             if session and store:
+                # Persist the native CLI mapping before releasing the logical
+                # lock so a concurrent same-session turn cannot resume the
+                # stale id and clobber the winner on save.
                 async with _cli_logical_session_lock(session):
-                    text, returned_id, cli_session_id, stored_cli_id = await _run_cli_mapped_session()
+                    text, returned_id, cli_session_id, stored_cli_id = (
+                        await _run_cli_mapped_session()
+                    )
+                    if use_native_cli_session:
+                        final_id = returned_id or cli_session_id
+                        if final_id and final_id != stored_cli_id:
+                            await store.save_session(
+                                session, cli_session_id=final_id, model=model_name
+                            )
             else:
-                text, returned_id, cli_session_id, stored_cli_id = await _run_cli_mapped_session()
+                text, returned_id, cli_session_id, stored_cli_id = (
+                    await _run_cli_mapped_session()
+                )
+                if use_native_cli_session:
+                    final_id = returned_id or cli_session_id
+                    if final_id and final_id != stored_cli_id:
+                        await store.save_session(
+                            session, cli_session_id=final_id, model=model_name
+                        )
         except RuntimeError as exc:
             if not _is_cli_session_in_use_error(str(exc)):
                 record_xai_failure(model_name)
             raise
 
         record_xai_success(model_name)
-        if use_native_cli_session:
-            final_id = returned_id or cli_session_id
-            if final_id and final_id != stored_cli_id:
-                await store.save_session(session, cli_session_id=final_id, model=model_name)
         # Subscription plane: the CLI exposes no token usage and has no
         # per-token price, so tokens/cost stay 0 by design.
         return text, 0, 0.0, True

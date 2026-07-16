@@ -429,11 +429,11 @@ with ?format=prometheus.
 The JSON shape needs no extra dependencies and any JSON-capable collector
 can scrape it; the Prometheus variant renders the SAME snapshot as text
 exposition 0.0.4 via stdlib string building (see
-_render_prometheus_metrics). Auth-protected like every non-probe route
-(the auth middleware only exempts /healthz and /readyz). Combines the
-telemetry table (per-plane and per-caller aggregates) with in-process
-runtime state: circuit breakers, the timed-thread gauge, and the routing
-advisor's current view.
+_render_prometheus_metrics). Available only over the verified local
+operator path; bearer or OAuth status scope never grants remote access to
+its cross-caller aggregates. Combines the telemetry table (per-plane and
+per-caller aggregates) with in-process runtime state: circuit breakers,
+the timed-thread gauge, and the routing advisor's current view.
 
 ### Function: `public_agent` {#http_server-public_agent}
 
@@ -511,6 +511,10 @@ FastMCP defaults to localhost-only hosts when constructed with the default
 host. Production Cloud Run serves ``mcp.grokmcp.org`` (and similar), so
 authenticated /mcp traffic must allow the public hostname from
 ``UNIGROK_PUBLIC_MCP_URL`` or the optional override.
+
+Unsafe or non-HTTPS overrides are ignored: they must not expand the
+Host/Origin allowlist (OAuth metadata already rejects them via
+:func:`_public_mcp_resource`).
 
 ## hydration.py {#hydration}
 
