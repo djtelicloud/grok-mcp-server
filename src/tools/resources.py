@@ -14,6 +14,7 @@ from typing import Any, Dict, Optional
 
 from mcp.server.fastmcp import FastMCP
 
+from ..identity import get_active_caller, normalize_caller
 from ..jobs import get_job_manager
 from ..utils import (
     PathResolver,
@@ -139,7 +140,13 @@ def register_resource_primitives(mcp: FastMCP):
     )
     async def job_resource(job_id: str) -> str:
         view = await get_job_manager().get(job_id)
-        return _to_json(view if view is not None else {"status": "not_found", "job_id": job_id})
+        if view is None:
+            return _to_json({"status": "not_found", "job_id": job_id})
+        # Mirror research-job tool authz (#259): bound callers only see own rows.
+        requester = normalize_caller(get_active_caller())
+        if requester and normalize_caller(view.get("caller")) != requester:
+            return _to_json({"status": "not_found", "job_id": job_id})
+        return _to_json(view)
 
     @mcp.resource(
         "grok://knowledge",
