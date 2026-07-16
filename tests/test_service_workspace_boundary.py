@@ -228,6 +228,7 @@ def test_stable_and_contributor_compose_files_are_separate():
     dockerfile = Path("Dockerfile").read_text(encoding="utf-8")
     assert "chown -R appuser:appuser /app" not in dockerfile
     assert "chmod -R a-w /app" in dockerfile
+    assert "ENV UNIGROK_STATE_DIR=/state" in dockerfile
 
     dials = Path("docker-compose.dials.yml").read_text(encoding="utf-8")
     assert "UNIGROK_MODE_DIALS=1" in dials
