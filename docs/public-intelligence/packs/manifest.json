@@ -105,6 +105,33 @@
         "Session or task-RAG database dumps",
         "Contributor workspace memory rows"
       ]
+    },
+    {
+      "pack_id": "public-vs-insider-agent-law",
+      "version": "v0",
+      "title": "Public vs insider agent law",
+      "summary": "Stable MCP clients stay on 4765 + using-unigrok; product rehydrate and Ready-for-supervisor land radio are insider-only.",
+      "audience": "public",
+      "body_path": "docs/public-intelligence/packs/v0-public-vs-insider-agent-law.md",
+      "source_gym": "Audience-split deep dive: vibe users on stable Docker MCP loading full AGENTS land culture.",
+      "promoted_from": [
+        "AGENTS.md",
+        ".agents/AGENTS.md",
+        "skills/using-unigrok/SKILL.md",
+        ".agents/skills/session-rehydrate/SKILL.md"
+      ],
+      "scrub": {
+        "secrets": true,
+        "private_paths": true,
+        "raw_memory": true,
+        "unreviewed_logs": true
+      },
+      "never_includes": [
+        "API keys or OAuth secrets",
+        "Private unigrok-intelligence playbooks",
+        "Session or task-RAG database dumps",
+        "Contributor workspace memory rows"
+      ]
     }
   ]
 }

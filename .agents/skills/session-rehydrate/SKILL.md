@@ -1,15 +1,25 @@
 ---
 name: session-rehydrate
 description: >-
-  Boot a new IDE/agent session into full UniGrok product context. Activate on
-  "rehydrate", "boot", "where were we", "session start", first message after
-  IDE reset, or when the agent was started outside the product checkout.
+  Boot a new IDE/agent session into full UniGrok *product* context. Activate only
+  when cwd is a UniGrok product checkout (or agent worktree), or the user
+  explicitly asks for product rehydrate. Triggers: "rehydrate", "boot",
+  "where were we", "session start", first message after IDE reset *inside*
+  product. Do not run full product rehydrate for foreign apps on stable MCP.
 ---
 
 # Session rehydrate (persist intelligence across chats)
 
 New Grok/Claude/Codex sessions do **not** inherit prior chat transcripts.
 Intelligence is rehydrated from **git + disk**, not model memory.
+
+**Product-cwd gate (mandatory):** This skill is for **developing UniGrok itself**.
+If the open project is a foreign app using only stable MCP (`:4765`), do **not**
+run this full product boot (no land-status pipeline, no worktree hygiene lecture,
+no "Ready for supervisor" multi-agent radio). Use `using-unigrok` +
+`grok_mcp_discover_self` instead. Only continue if cwd is `…/grok-mcp-server`
+(or a named agent worktree under it / provider worktree home), or the user
+explicitly said **product rehydrate**.
 
 > [!IMPORTANT]
 > **Glossary: Do not conflate "Hydrate" concepts**
@@ -48,11 +58,15 @@ so these rules load.
 
 ## Boot sequence (run once at session start)
 
-### 0. Workspace
+### 0. Workspace (product-cwd gate)
 
 - Prefer cwd: product checkout `…/grok-mcp-server` or a named agent worktree.
-- If cwd is `$HOME` or unrelated, **say so once**, then rehydrate from absolute
-  product paths anyway (or ask to reopen the project folder).
+- **Foreign app / stable MCP only:** stop product rehydrate. Tell the user once
+  that product boot is for UniGrok development; offer `discover_self` +
+  `using-unigrok` for their app. Do not invent land/Forge/worktree workflows.
+- If cwd is `$HOME` or unclear and the user asked for product rehydrate, **say
+  so once** and either open the product folder or rehydrate from absolute
+  product paths only when they confirm.
 
 ### 1. Product law
 

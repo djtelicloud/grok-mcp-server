@@ -117,10 +117,20 @@ credential or billing plane; `cross_plane` allows bounded failover. CLI
 provider cost remains unavailable, so report local counts and estimated tokens,
 not invented subscription cost or remaining provider quota.
 
+## Status language (vibe apps vs UniGrok product)
+
+- **Foreign apps / stable MCP only:** report status as **Done**, **Blocked**,
+  or plain English. Do **not** force multi-agent **Ready for supervisor** /
+  land-pipeline radio — that language is for shipping *this* UniGrok product.
+- **Developing UniGrok itself** (product checkout / write+ insider): full
+  human-radio map in `.agents/AGENTS.md` applies (Ready / Live / Blocked / Who).
+
 ## Safe onboarding behavior
 
 - On first connect in a session, call `grok_mcp_discover_self` and read
   `data.bootstrap` + `data.request_context` before inventing setup steps.
+- When `can_mutate_workspace` and `can_use_swarm` are false, treat contributor
+  workflows as **disabled** (no land, Forge, Swarm, or product rehydrate).
 - Treat `credential_planes` notices from status or an agent result as the
   source of truth. Ask before device authentication, installation, or secret
   configuration.
