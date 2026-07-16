@@ -167,6 +167,28 @@ def _file_hash(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+# The launch tools stay human-readable str returns (their prose carries the
+# honesty framing and every consumer/test that reads the backtick id keeps
+# working). This trailer rides ALONGSIDE that prose as a wording-independent,
+# machine-stable line — same "format":"unigrok-…-vN" convention the swarm's
+# other machine payloads use — so the workbench can drive a run off a stable
+# id instead of regex-scraping the sentence, where any wording change silently
+# breaks the parse.
+SWARM_LAUNCH_FORMAT = "unigrok-swarm-launch-v1"
+
+
+def _launch_receipt(task_id: str, input_kind: str) -> str:
+    """A deterministic, prose-independent launch receipt appended to the human
+    message. Emitted as an HTML comment so it is invisible when the message is
+    rendered but trivially parseable from the raw tool text:
+    ``<!--unigrok-swarm-launch-v1 {"task_id":"…","input_kind":"…"}-->``."""
+    body = json.dumps(
+        {"format": SWARM_LAUNCH_FORMAT, "task_id": task_id, "input_kind": input_kind},
+        separators=(",", ":"),
+    )
+    return f"\n\n<!--{SWARM_LAUNCH_FORMAT} {body}-->"
+
+
 async def analyze_code_for_swarm(code: str, language: str = "python") -> str:
     """Analyze pasted Python without a model call, import, or user-code execution.
 
@@ -263,6 +285,7 @@ async def _launch_code_swarm(
         f"(mode={swarm_config.swarm_mode()}, strategy={strategy}, goal={goal}, "
         f"budget=${budget:.2f}). "
         f"Poll with get_swarm_status('{task_id}')."
+        + _launch_receipt(task_id, "workspace")
     )
 
 
@@ -390,6 +413,7 @@ async def start_paste_swarm(
             f"Paste swarm `{task_id}` started for `{focus_node}` "
             f"(strategy={strategy}, goal={goal}, mode={swarm_config.swarm_mode()}). "
             f"Poll with get_swarm_status('{task_id}')."
+            + _launch_receipt(task_id, "paste")
         )
 
 

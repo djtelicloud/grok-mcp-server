@@ -322,6 +322,63 @@ print("SWARM_BENCH " + json.dumps({"latency_ms": 5.0, "peak_mem_bytes": 2048}))
         assert "secret-like" in secret
 
     @pytest.mark.asyncio
+    async def test_launch_emits_structured_task_id_receipt(self, wired, monkeypatch):
+        """Both launch tools ride a wording-independent machine receipt next to
+        the human prose so the workbench can drive a run off a stable id instead
+        of regex-scraping the sentence. The prose (and its backtick id) is left
+        intact, and the receipt's task_id equals the id actually created."""
+        import json as jsonlib
+        import re
+
+        store, _ws = wired
+        monkeypatch.setenv("UNIGROK_SWARM", "dry_run")
+        monkeypatch.setenv("UNIGROK_SWARM_MAX_GENERATIONS", "2")
+        monkeypatch.setenv("UNIGROK_SWARM_POPULATION", "4")
+        monkeypatch.setenv("UNIGROK_SWARM_BENCH_REPEATS", "3")
+
+        def parse_receipt(text):
+            match = re.search(
+                r"<!--unigrok-swarm-launch-v1 (\{.*?\})-->", text
+            )
+            assert match, f"no structured launch receipt in: {text!r}"
+            return jsonlib.loads(match.group(1))
+
+        code_out = await swarm_tools.start_code_swarm(
+            "pkg/dedup.py", "function:dedup", "pkg/test_dedup.py",
+            "python pkg/bench_dedup.py", allow_unstable_bench=True,
+        )
+        code_receipt = parse_receipt(code_out)
+        assert code_receipt["format"] == "unigrok-swarm-launch-v1"
+        assert code_receipt["input_kind"] == "workspace"
+        # The receipt id matches both the legacy backtick prose id and a real row.
+        assert code_receipt["task_id"] == code_out.split("`")[1]
+        assert await store.get_swarm_task(code_receipt["task_id"]) is not None
+        await swarm_tools._get_runner().wait(code_receipt["task_id"], timeout=60.0)
+
+        source = (GOLDEN / "dedup.py").read_text()
+        test_code = (
+            "from module_under_test import dedup\n\n"
+            "def test_dedup():\n    assert dedup([1, 2, 1]) == [1, 2]\n"
+        )
+        bench_code = (
+            "import json\n"
+            "from module_under_test import dedup\n"
+            "dedup([1, 2, 1])\n"
+            'print("SWARM_BENCH " + json.dumps({"latency_ms": 5.0, "peak_mem_bytes": 2048}))\n'
+        )
+        paste_out = await swarm_tools.start_paste_swarm(
+            source, test_code, bench_code, "function:dedup",
+            search_strategy="elite_offspring", allow_unstable_bench=True,
+        )
+        paste_receipt = parse_receipt(paste_out)
+        assert paste_receipt["format"] == "unigrok-swarm-launch-v1"
+        assert paste_receipt["input_kind"] == "paste"
+        assert paste_receipt["task_id"] == paste_out.split("`")[1]
+        paste_task = await store.get_swarm_task(paste_receipt["task_id"])
+        assert paste_task is not None and paste_task["input_kind"] == "paste"
+        await swarm_tools._get_runner().wait(paste_receipt["task_id"], timeout=60.0)
+
+    @pytest.mark.asyncio
     async def test_dry_run_finds_front_and_refuses_apply(self, wired, monkeypatch):
         store, _ws = wired
         monkeypatch.setenv("UNIGROK_SWARM", "dry_run")
