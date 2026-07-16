@@ -1,0 +1,139 @@
+<!--
+  Codex Desktop durable in-chat reference fragment.
+  Render this as a focused fragment, not as a full HTML document. The host
+  owns the theme; the variables below keep the display readable in both its
+  light and dark themes.
+-->
+<style>
+  #conversation-canvas {
+    --canvas-accent: var(--cyan, var(--primary));
+    --canvas-outcome: var(--teal, var(--viz-series-2));
+    color: var(--foreground);
+  }
+
+  #conversation-canvas .canvas-track {
+    stroke: var(--border);
+  }
+
+  #conversation-canvas .canvas-arrow {
+    stroke: var(--canvas-accent);
+  }
+
+  #conversation-canvas .canvas-node {
+    fill: var(--card);
+    stroke: var(--border);
+  }
+
+  #conversation-canvas .canvas-node-active {
+    fill: color-mix(in srgb, var(--canvas-accent) 18%, var(--card));
+    stroke: var(--canvas-accent);
+  }
+
+  #conversation-canvas .canvas-node-outcome {
+    fill: color-mix(in srgb, var(--canvas-outcome) 18%, var(--card));
+    stroke: var(--canvas-outcome);
+  }
+
+  #conversation-canvas .canvas-label {
+    fill: var(--card-foreground);
+  }
+</style>
+
+<section id="conversation-canvas" aria-label="Choose the next in-chat display">
+  <div class="viz-controls" aria-label="Display intent">
+    <button class="btn btn-primary" type="button" data-view="decide" aria-pressed="true">
+      <i data-lucide="git-compare-arrows" aria-hidden="true"></i>
+      Decide
+    </button>
+    <button class="btn" type="button" data-view="monitor" aria-pressed="false">
+      <i data-lucide="activity" aria-hidden="true"></i>
+      Monitor
+    </button>
+    <button class="btn" type="button" data-view="explain" aria-pressed="false">
+      <i data-lucide="lightbulb" aria-hidden="true"></i>
+      Explain
+    </button>
+  </div>
+
+  <svg viewBox="0 0 720 120" width="100%" height="120" role="img" aria-labelledby="canvas-title canvas-description">
+    <title id="canvas-title">A three-step in-chat display sequence</title>
+    <desc id="canvas-description">The selected view turns a starting point into a useful outcome through three visible steps.</desc>
+    <circle cx="56" cy="60" r="36" fill="var(--canvas-accent)" opacity="0.08" aria-hidden="true"></circle>
+    <circle cx="664" cy="60" r="36" fill="var(--canvas-outcome)" opacity="0.08" aria-hidden="true"></circle>
+    <path class="canvas-track" d="M218 60H278M442 60H502" fill="none" stroke-width="2" aria-hidden="true"></path>
+    <path class="canvas-arrow" d="M268 54L278 60L268 66M492 54L502 60L492 66" fill="none" stroke-width="2" aria-hidden="true"></path>
+    <rect class="canvas-node" x="22" y="24" width="196" height="72" rx="12" stroke-width="2"></rect>
+    <rect class="canvas-node canvas-node-active" x="278" y="24" width="164" height="72" rx="12" stroke-width="2"></rect>
+    <rect class="canvas-node canvas-node-outcome" x="502" y="24" width="196" height="72" rx="12" stroke-width="2"></rect>
+    <text class="canvas-label" x="120" y="66" text-anchor="middle" data-step="0">Inputs</text>
+    <text class="canvas-label" x="360" y="66" text-anchor="middle" data-step="1">Tradeoff</text>
+    <text class="canvas-label" x="600" y="66" text-anchor="middle" data-step="2">Decision</text>
+  </svg>
+
+  <div class="viz-row">
+    <span class="viz-badge" data-label>Decision view</span>
+    <span class="text-muted" data-detail>Turn a multi-step choice into one visible decision.</span>
+    <button class="btn btn-ghost" type="button" data-action>Build this view</button>
+  </div>
+</section>
+
+<script>
+  (() => {
+    const root = document.getElementById("conversation-canvas");
+    const views = {
+      decide: {
+        label: "Decision view",
+        steps: ["Inputs", "Tradeoff", "Decision"],
+        detail: "Turn a multi-step choice into one visible decision.",
+        prompt: "Create an in-chat decision display for the current task. Show the inputs, the key tradeoff, and the recommended decision."
+      },
+      monitor: {
+        label: "Status view",
+        steps: ["Signal", "Delta", "Next check"],
+        detail: "Make changing work visible without a wall of updates.",
+        prompt: "Create an in-chat status display for the current task. Show the most important signal, what changed, and the next verification."
+      },
+      explain: {
+        label: "Explainer view",
+        steps: ["Question", "Visual", "Takeaway"],
+        detail: "Turn a complex idea into one memorable picture.",
+        prompt: "Create an in-chat explainer for the current task. Show the question, the clearest visual model, and the takeaway."
+      }
+    };
+
+    const buttons = root.querySelectorAll("[data-view]");
+    const steps = root.querySelectorAll("[data-step]");
+    const label = root.querySelector("[data-label]");
+    const detail = root.querySelector("[data-detail]");
+    const action = root.querySelector("[data-action]");
+    let selected = "decide";
+
+    const select = (view) => {
+      selected = view;
+      const choice = views[view];
+      buttons.forEach((button) => {
+        const active = button.dataset.view === view;
+        button.classList.toggle("btn-primary", active);
+        button.setAttribute("aria-pressed", String(active));
+      });
+      steps.forEach((step, index) => {
+        step.textContent = choice.steps[index];
+      });
+      label.textContent = choice.label;
+      detail.textContent = choice.detail;
+    };
+
+    buttons.forEach((button) => {
+      button.addEventListener("click", () => select(button.dataset.view));
+    });
+
+    action.addEventListener("click", async () => {
+      if (window.openai?.sendFollowUpMessage) {
+        await window.openai.sendFollowUpMessage({
+          title: "Build in-chat display",
+          prompt: views[selected].prompt
+        });
+      }
+    });
+  })();
+</script>
