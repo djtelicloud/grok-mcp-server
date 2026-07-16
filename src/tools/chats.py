@@ -8,7 +8,12 @@ from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import ToolAnnotations
 from pydantic import BaseModel, Field
 from ..models.results import ChatResult, AgentResult, ReflectionResult
-from ..identity import caller_from_mcp_context, scoped_session
+from ..identity import (
+    caller_from_mcp_context,
+    get_active_principal,
+    resolve_request_caller,
+    scoped_session,
+)
 
 from ..utils import (
     store,
@@ -27,6 +32,7 @@ from ..utils import (
     input_limit,
     validate_local_input,
     DEFAULT_PLANNING_MODEL,
+    enforce_caller_budget,
 )
 from xai_sdk.chat import system, user, assistant, image, file as xai_file
 
@@ -61,6 +67,41 @@ def _research_agent_count() -> int:
     except ValueError:
         return 4
     return value if value in (4, 16) else 4
+
+
+async def _enforce_chat_tool_budget() -> Optional[str]:
+    """Gate direct API-metered chat tools on UNIGROK_CALLER_BUDGETS."""
+    caller = resolve_request_caller(None)
+    budget_principal = get_active_principal() or caller
+    await enforce_caller_budget(store, budget_principal)
+    return caller
+
+
+async def _record_chat_tool_telemetry(
+    *,
+    intent: str,
+    route: str,
+    cost_usd: float,
+    model: str,
+    latency_sec: float,
+    tokens: int,
+    caller: Optional[str],
+) -> None:
+    """Persist vision/files spend so caller budgets see non-orchestrate paths."""
+    await store.save_telemetry(
+        (intent or route)[:100],
+        "API",
+        1,
+        float(latency_sec or 0.0),
+        float(cost_usd or 0.0),
+        caller=caller,
+        model=model,
+        tokens=int(tokens or 0),
+        token_kind="provider_exact",
+        billing_source="xai_response_exact",
+        routing={"route": route, "plane": "API"},
+    )
+
 
 # Pydantic Schemas for RPC Boundary Validation
 class GrokAgentInput(BaseModel):
@@ -602,6 +643,7 @@ async def chat_with_vision(
         image_urls: Public image URLs to analyze.
         detail: Image detail level. One of `"auto"`, `"low"`, or `"high"`.
     """
+    caller = await _enforce_chat_tool_budget()
     session = scoped_session(session)
     async with GrokInvocationContext(model, logger, append_signature=True) as ctx:
         history = (await load_history(session, store)) if session else []
@@ -661,6 +703,15 @@ async def chat_with_vision(
 
         citations_mapped = [{"url": url} for url in response.citations] if hasattr(response, 'citations') and response.citations else None
 
+        await _record_chat_tool_telemetry(
+            intent=(prompt or "vision")[:100],
+            route="vision",
+            cost_usd=cost_usd,
+            model=model,
+            latency_sec=ctx.elapsed,
+            tokens=tokens_val,
+            caller=caller,
+        )
         return ChatResult(
             response=response.content,
             text=formatted_text,
@@ -704,6 +755,7 @@ async def chat_with_files(
             plane="API",
         )
 
+    caller = await _enforce_chat_tool_budget()
     dynamic_sys_prompt, ctx_injected, context_id = await get_dynamic_context(prompt=prompt)
     if system_prompt:
         dynamic_sys_prompt += f"\nAdditional Instructions:\n{system_prompt}"
@@ -759,6 +811,15 @@ async def chat_with_files(
 
         citations_mapped = [{"url": url} for url in response.citations] if hasattr(response, 'citations') and response.citations else None
 
+        await _record_chat_tool_telemetry(
+            intent=(prompt or "files")[:100],
+            route="files",
+            cost_usd=cost_usd,
+            model=model,
+            latency_sec=ctx.elapsed,
+            tokens=tokens_val,
+            caller=caller,
+        )
         return ChatResult(
             response=response.content,
             text=formatted_text,
