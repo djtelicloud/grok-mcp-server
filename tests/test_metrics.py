@@ -284,6 +284,31 @@ async def test_save_telemetry_persists_usage_provenance(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_save_telemetry_redacts_secrets_in_intent(tmp_path):
+    """Prompt prefixes must not land at-rest with live credentials."""
+    store = GrokSessionStore(db_path=tmp_path / "intent-redact.db")
+    try:
+        secret = "xai-1234567890abcdef"
+        await store.save_telemetry(
+            f"deploy with {secret} please",
+            "API",
+            1,
+            0.5,
+            0.001,
+        )
+        await store.save_telemetry("history-compaction", "API", 1, 0.1, 0.0)
+        rows = {row["intent"]: row for row in await store.get_telemetry_stats()}
+        leaked = next(
+            intent for intent in rows if "deploy with" in intent or "REDACTED" in intent
+        )
+        assert secret not in leaked
+        assert "[REDACTED_KEY]" in leaked
+        assert "history-compaction" in rows
+    finally:
+        await store.close()
+
+
+@pytest.mark.asyncio
 async def test_save_telemetry_persists_partial_cross_plane_usage(tmp_path):
     store = GrokSessionStore(db_path=tmp_path / "partial-usage.db")
     try:

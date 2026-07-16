@@ -3754,13 +3754,18 @@ class GrokSessionStore:
             meta["routing"] = clean_routing
         meta_str = json.dumps(meta, separators=(",", ":")) if meta else None
         now_str = datetime.now().isoformat()
+        # Intent is often a prompt prefix from orchestrate. Redact+bound at
+        # write time so secrets/PII never land at-rest even though /metrics
+        # deliberately omits intent from exports. Exact labels like
+        # "history-compaction" stay unchanged (short, no secret patterns).
+        clean_intent = redact_secrets(str(intent or "")).strip()[:100]
         async with self._lock:
             await self._conn.execute("BEGIN IMMEDIATE;")
             try:
                 cursor = await self._conn.execute(
                     "INSERT INTO telemetry (intent, chosen_plane, success, latency, cost, context_id, metadata, created_at) "
                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                    (intent, chosen_plane, success_value, latency, cost, context_id, meta_str, now_str)
+                    (clean_intent, chosen_plane, success_value, latency, cost, context_id, meta_str, now_str)
                 )
                 telemetry_id = int(cursor.lastrowid)
                 if normalized_attempt_rows:
