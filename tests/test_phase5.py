@@ -127,6 +127,7 @@ class TestJobsStore:
             async with s._conn.execute("SELECT name FROM sqlite_master WHERE type='index';") as cursor:
                 indexes = {r[0] for r in await cursor.fetchall()}
                 assert "idx_jobs_created_at" in indexes
+                assert "idx_jobs_caller_created_at_id" in indexes
 
             await s.create_job("job-a", prompt="research quantum stuff", model="grok-4.3")
             row = await s.get_job("job-a")
