@@ -288,6 +288,7 @@ async def _run_bounded_process(
             stderr=asyncio.subprocess.PIPE,
             cwd=cwd,
             env=dict(env),
+            allow_secret_names={"CLAUDE_CODE_OAUTH_TOKEN"},
             start_new_session=True,
         )
     except Exception:

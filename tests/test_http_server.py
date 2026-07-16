@@ -7,6 +7,7 @@ from starlette.responses import JSONResponse
 from starlette.testclient import TestClient
 
 from src.credentials import (
+    AMBIENT_SERVER_SECRET_ENV_NAMES,
     NON_BEARER_SERVER_OWNED_ENV_NAMES,
     SERVER_OWNED_SECRET_ENV_NAMES,
     UPSTREAM_PROVIDER_SECRET_ENV_NAMES,
@@ -783,8 +784,13 @@ def test_upstream_provider_secret_registry_completely_classifies_server_envs():
         set(UPSTREAM_PROVIDER_SECRET_ENV_NAMES)
         & set(NON_BEARER_SERVER_OWNED_ENV_NAMES)
     )
+    assert not (
+        set(AMBIENT_SERVER_SECRET_ENV_NAMES)
+        & set(UPSTREAM_PROVIDER_SECRET_ENV_NAMES)
+    )
     assert set(SERVER_OWNED_SECRET_ENV_NAMES) == (
         set(UPSTREAM_PROVIDER_SECRET_ENV_NAMES)
+        | set(AMBIENT_SERVER_SECRET_ENV_NAMES)
         | set(NON_BEARER_SERVER_OWNED_ENV_NAMES)
     )
 

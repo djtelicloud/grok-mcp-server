@@ -45,6 +45,7 @@ from .subprocess_security import (
 from .credentials import (
     CLI_AUTH_SETUP_COMMAND,
     SERVER_OWNED_SECRET_ENV_NAMES,
+    secret_environment_names,
     build_credential_plane_contract,
     credential_plane_policy,
 )
@@ -1292,7 +1293,7 @@ def redact_secrets(text: str) -> str:
     # the pattern guard below. Ignore short values to avoid destructive false
     # positives in ordinary output.
     exact_values: set[str] = set()
-    for name in SERVER_OWNED_SECRET_ENV_NAMES:
+    for name in secret_environment_names(os.environ):
         raw_value = os.environ.get(name, "")
         values = [raw_value.strip()]
         if name == "UNIGROK_API_KEYS":

@@ -27,6 +27,44 @@ def test_scrubbed_subprocess_env_preserves_explicit_safe_values(monkeypatch):
     assert child == {"PATH": "/safe/bin", "SAFE_CHILD_SETTING": "kept"}
 
 
+def test_scrubbed_subprocess_env_rejects_named_and_unknown_secret_families():
+    child = scrubbed_subprocess_env(
+        {
+            "PATH": "/safe/bin",
+            "LANG": "C.UTF-8",
+            "GH_TOKEN": "github-secret",
+            "AWS_SECRET_ACCESS_KEY": "aws-secret",
+            "DATABASE_URL": "postgres://user:pass@example/db",
+            "SSH_AUTH_SOCK": "/tmp/agent.sock",
+            "FUTURE_PROVIDER_API_KEY": "future-secret",
+            "SOME_CLIENT_SECRET": "client-secret",
+            "TOKENIZERS_PARALLELISM": "false",
+        }
+    )
+
+    assert child == {
+        "PATH": "/safe/bin",
+        "LANG": "C.UTF-8",
+        "TOKENIZERS_PARALLELISM": "false",
+    }
+
+
+def test_scrubbed_subprocess_env_allows_only_explicit_reviewed_secret():
+    child = scrubbed_subprocess_env(
+        {
+            "PATH": "/safe/bin",
+            "CLAUDE_CODE_OAUTH_TOKEN": "subscription-oauth",
+            "XAI_API_KEY": "server-api-secret",
+        },
+        allow_secret_names={"CLAUDE_CODE_OAUTH_TOKEN"},
+    )
+
+    assert child == {
+        "PATH": "/safe/bin",
+        "CLAUDE_CODE_OAUTH_TOKEN": "subscription-oauth",
+    }
+
+
 @pytest.mark.asyncio
 async def test_async_subprocess_wrapper_scrubs_environment(monkeypatch):
     captured = {}
@@ -86,5 +124,13 @@ def test_redact_secrets_replaces_longer_prefix_keys_first(monkeypatch):
     )
 
     assert redact_secrets("failure: shared-prefix-key-with-suffix") == (
+        "failure: [REDACTED]"
+    )
+
+
+def test_redact_secrets_removes_unknown_secret_shaped_env_value(monkeypatch):
+    monkeypatch.setenv("FUTURE_PROVIDER_API_KEY", "future-provider-secret")
+
+    assert redact_secrets("failure: future-provider-secret") == (
         "failure: [REDACTED]"
     )
