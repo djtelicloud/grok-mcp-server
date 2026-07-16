@@ -6546,6 +6546,55 @@ class GrokSessionStore:
             await self._on_write_completed()
 
     @_with_write_retry_async
+    async def save_message_pair(
+        self,
+        session_name: str,
+        prompt: str,
+        reply: str,
+        metadata: Optional[dict] = None,
+    ) -> None:
+        """Atomically persist one complete user/assistant turn."""
+        await self._ensure_initialized()
+        async with self._lock:
+            await self._conn.execute("BEGIN IMMEDIATE;")
+            try:
+                async with self._conn.execute(
+                    "SELECT 1 FROM sessions WHERE session_name = ?", (session_name,)
+                ) as cursor:
+                    exists = await cursor.fetchone()
+                now_str = datetime.now().isoformat()
+                if not exists:
+                    await self._conn.execute(
+                        "INSERT INTO sessions (session_name, last_active) VALUES (?, ?)",
+                        (session_name, now_str),
+                    )
+                else:
+                    await self._conn.execute(
+                        "UPDATE sessions SET last_active = ? WHERE session_name = ?",
+                        (now_str, session_name),
+                    )
+                await self._conn.execute(
+                    "INSERT INTO messages "
+                    "(session_name, role, content, timestamp, metadata) "
+                    "VALUES (?, ?, ?, ?, NULL)",
+                    (session_name, "user", prompt, now_str),
+                )
+                meta_str = (
+                    json.dumps(metadata, separators=(",", ":")) if metadata else None
+                )
+                await self._conn.execute(
+                    "INSERT INTO messages "
+                    "(session_name, role, content, timestamp, metadata) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (session_name, "assistant", reply, now_str, meta_str),
+                )
+                await self._conn.commit()
+            except BaseException:
+                await self._conn.rollback()
+                raise
+            await self._on_write_completed()
+
+    @_with_write_retry_async
     async def replace_messages(self, session_name: str, messages: List[Dict[str, Any]]):
         """Atomically replace a session's message history in one transaction.
 
@@ -6610,6 +6659,98 @@ class GrokSessionStore:
                         msg["metadata"] = meta
                     results.append(msg)
                 return results
+
+    @_with_read_retry_async
+    async def message_snapshot(self, session_name: str) -> tuple[int, int]:
+        """Return the durable message high-water mark and row count."""
+        await self._ensure_initialized()
+        async with self._read_conn() as conn:
+            async with conn.execute(
+                "SELECT COALESCE(MAX(id), 0), COUNT(*) FROM messages "
+                "WHERE session_name = ?",
+                (session_name,),
+            ) as cursor:
+                row = await cursor.fetchone()
+                if not row:
+                    return (0, 0)
+                return (int(row[0] or 0), int(row[1] or 0))
+
+    @_with_write_retry_async
+    async def replace_messages_if_snapshot(
+        self,
+        session_name: str,
+        messages: List[Dict[str, Any]],
+        expected_max_id: int,
+        expected_count: int,
+    ) -> bool:
+        """Replace only the exact message snapshot that was summarized.
+
+        The snapshot comparison and replacement share one write transaction,
+        so a concurrent append either commits first and makes this return
+        ``False``, or waits until the compacted history is committed.
+        """
+        await self._ensure_initialized()
+        async with self._lock:
+            await self._conn.execute("BEGIN IMMEDIATE;")
+            try:
+                async with self._conn.execute(
+                    "SELECT COALESCE(MAX(id), 0), COUNT(*) FROM messages "
+                    "WHERE session_name = ?",
+                    (session_name,),
+                ) as cursor:
+                    row = await cursor.fetchone()
+                current_max = int(row[0] or 0) if row else 0
+                current_count = int(row[1] or 0) if row else 0
+                if (
+                    current_max != int(expected_max_id)
+                    or current_count != int(expected_count)
+                ):
+                    await self._conn.rollback()
+                    return False
+
+                await self._conn.execute(
+                    "DELETE FROM messages WHERE session_name = ? AND id <= ?",
+                    (session_name, int(expected_max_id)),
+                )
+                now_str = datetime.now().isoformat()
+                async with self._conn.execute(
+                    "SELECT 1 FROM sessions WHERE session_name = ?", (session_name,)
+                ) as cursor:
+                    exists = await cursor.fetchone()
+                if not exists:
+                    await self._conn.execute(
+                        "INSERT INTO sessions (session_name, last_active) VALUES (?, ?)",
+                        (session_name, now_str),
+                    )
+                for msg in messages:
+                    metadata = msg.get("metadata")
+                    meta_str = (
+                        json.dumps(metadata, separators=(",", ":"))
+                        if metadata
+                        else None
+                    )
+                    await self._conn.execute(
+                        "INSERT INTO messages "
+                        "(session_name, role, content, timestamp, metadata) "
+                        "VALUES (?, ?, ?, ?, ?)",
+                        (
+                            session_name,
+                            msg.get("role"),
+                            msg.get("content"),
+                            now_str,
+                            meta_str,
+                        ),
+                    )
+                await self._conn.execute(
+                    "UPDATE sessions SET last_active = ? WHERE session_name = ?",
+                    (now_str, session_name),
+                )
+                await self._conn.commit()
+            except BaseException:
+                await self._conn.rollback()
+                raise
+            await self._on_write_completed()
+            return True
 
     # ── Deferred research jobs (consumed by src/jobs.py JobManager) ──────────
     @_with_write_retry_async
@@ -7098,8 +7239,12 @@ async def append_and_save_history(session: str, history: list, prompt: str, repl
 
     active_store = store_param if store_param is not None else store
     try:
-        await active_store.save_message(session, "user", prompt)
-        await active_store.save_message(session, "assistant", reply, metadata=metadata)
+        await active_store.save_message_pair(
+            session,
+            prompt,
+            reply,
+            metadata=metadata,
+        )
     except Exception as e:
         logging.getLogger("GrokMCP").warning(f"Failed to append/save SQLite chat history for session '{session}': {e}")
 
@@ -7315,6 +7460,7 @@ async def maybe_compact_history(
     exercise it with a mocked client). Returns the possibly-compacted history;
     every failure path returns the input unchanged.
     """
+    session = scoped_session(session)
     if os.environ.get("UNI_GROK_TESTING") == "1" and not force:
         return history
     if not session or not history or len(history) < 4:
@@ -7344,6 +7490,24 @@ async def maybe_compact_history(
     except Exception as exc:
         logger.warning(f"History compaction skipped for session '{session}': {exc}")
         return history
+
+    active_store = store_param if store_param is not None else store
+    baseline_snapshot: Optional[tuple[int, int]] = None
+    if active_store is not None:
+        try:
+            baseline_snapshot = await active_store.message_snapshot(session)
+        except Exception as count_err:
+            logger.warning(
+                f"History compaction skipped for session '{session}': "
+                f"could not read message count ({count_err})"
+            )
+            return history
+        if baseline_snapshot != (0, 0) and baseline_snapshot[1] != len(history):
+            logger.warning(
+                f"History compaction skipped for session '{session}': "
+                f"local/durable history drift ({len(history)} != {baseline_snapshot[1]})"
+            )
+            return history
 
     total_cost = 0.0
     summary_content = ""
@@ -7432,7 +7596,21 @@ async def maybe_compact_history(
         "time": datetime.now().strftime("%d.%m.%Y %H:%M:%S"),
     }
     compacted = [summary_entry] + list(newest)
-    await save_history(session, compacted, store_param)
+    if active_store is not None and baseline_snapshot is not None:
+        replaced = await active_store.replace_messages_if_snapshot(
+            session,
+            compacted,
+            expected_max_id=baseline_snapshot[0],
+            expected_count=baseline_snapshot[1],
+        )
+        if not replaced:
+            logger.warning(
+                f"History compaction skipped for session '{session}': "
+                "concurrent history drift"
+            )
+            return history
+    else:
+        return history
     logger.info(
         f"Compacted session '{session}' history: {len(history)} -> {len(compacted)} messages."
     )
