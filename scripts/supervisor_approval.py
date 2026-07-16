@@ -28,6 +28,7 @@ HIGH_RISK_PREFIXES = (
     ".github/rulesets/",
     "scripts/land",
     "scripts/land.py",
+    "scripts/supervisor_approval.py",
     "Dockerfile",
     "docker-compose.yml",
     ".openai/hosting.json",
