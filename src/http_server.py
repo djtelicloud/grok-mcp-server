@@ -981,7 +981,8 @@ def _validated_public_mcp_resource(raw: str) -> Optional[str]:
     resource = _validated_https_url(raw)
     if not resource:
         return None
-    path = urlsplit(resource).path
+    parsed = urlsplit(resource)
+    path = parsed.path
     if not path:
         resource = f"{resource}/mcp"
         path = "/mcp"
