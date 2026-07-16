@@ -21,6 +21,7 @@ from src.utils import (
     FactList,
     GrokSessionStore,
     PathResolver,
+    _active_xai_breaker_scope,
     _parse_structured,
     append_and_save_history,
     format_knowledge_notes,
@@ -388,8 +389,11 @@ class TestDistillJob:
     async def test_distill_honors_open_circuit_breaker(self, kstore):
         await kstore.save_message("sess-b", "user", "hello")
         threshold = utils_module._breaker_threshold()
+        credential_scope = _active_xai_breaker_scope()
         for _ in range(threshold):
-            record_xai_failure(DEFAULT_CODING_MODEL)
+            record_xai_failure(
+                DEFAULT_CODING_MODEL, credential_scope=credential_scope
+            )
         manager = JobManager(job_store=kstore)
         with patch("src.utils.get_xai_client", return_value=FakeClient()):
             submitted = await manager.submit_distill("sess-b")

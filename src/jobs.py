@@ -27,6 +27,7 @@ from .utils import (
     AGENTIC_TOOLS_SCHEMA,
     _DISTILL_SYS_PROMPT,
     FactList,
+    _active_xai_breaker_scope,
     _bounded_redacted,
     _chat_create_supports,
     _env_timeout,
@@ -247,7 +248,10 @@ class JobManager:
                 # _parse_structured folds capability-missing and upstream
                 # errors into one None, and ticking the breaker on a missing
                 # SDK capability would poison the model for real traffic.
-                check_circuit_breaker(model)
+                api_breaker_scope = _active_xai_breaker_scope()
+                check_circuit_breaker(
+                    model, credential_scope=api_breaker_scope
+                )
                 parsed, _tokens, cost = await _parse_structured(
                     FactList,
                     _DISTILL_SYS_PROMPT,
@@ -263,7 +267,9 @@ class JobManager:
                         result="Distillation unavailable: structured parse failed or is unsupported by the installed SDK.",
                     )
                     return
-                record_xai_success(model)
+                record_xai_success(
+                    model, credential_scope=api_breaker_scope
+                )
                 source = f"session:{session}"
                 saved_ids = []
                 for fact in parsed.facts:
