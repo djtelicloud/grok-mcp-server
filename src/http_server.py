@@ -1,4 +1,5 @@
 import asyncio
+from collections import defaultdict, deque
 import contextvars
 import hmac
 import ipaddress
@@ -655,6 +656,73 @@ class MCPOriginMiddleware:
                 response = _json_error("Origin not allowed.", status_code=403, code="forbidden")
                 await response(scope, receive, send)
                 return
+        await self.app(scope, receive, send)
+
+
+
+_RATE_LIMITED_PREFIXES = ("/mcp", "/v1")
+
+
+def _http_rate_limit_per_minute() -> Optional[int]:
+    """UNIGROK_HTTP_RATE_LIMIT: max requests/minute/principal. Unset/blank = off."""
+    raw = os.environ.get("UNIGROK_HTTP_RATE_LIMIT", "").strip()
+    if not raw:
+        return None
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        logging.getLogger("GrokMCP").warning(
+            "Ignoring malformed UNIGROK_HTTP_RATE_LIMIT=%r", raw
+        )
+        return None
+    if value <= 0:
+        return None
+    return max(1, min(value, 1_000_000))
+
+
+class HttpRateLimitMiddleware:
+    """In-process per-principal QPS throttle for /mcp and /v1.
+
+    Fail-open when UNIGROK_HTTP_RATE_LIMIT is unset. Distinct from
+    UNIGROK_CALLER_BUDGETS (spend) and circuit breakers (provider errors).
+    Pure ASGI — same SSE-disconnect tombstone as GatewayAuthMiddleware.
+    """
+
+    def __init__(self, app):
+        self.app = app
+        self._hits: Dict[str, deque] = defaultdict(deque)
+        self._lock = asyncio.Lock()
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        path = scope.get("path", "") or ""
+        if not path.startswith(_RATE_LIMITED_PREFIXES):
+            await self.app(scope, receive, send)
+            return
+        limit = _http_rate_limit_per_minute()
+        if limit is None:
+            await self.app(scope, receive, send)
+            return
+        principal = _derive_http_principal(scope)
+        now = time.monotonic()
+        window = 60.0
+        async with self._lock:
+            bucket = self._hits[principal]
+            while bucket and (now - bucket[0]) >= window:
+                bucket.popleft()
+            if len(bucket) >= limit:
+                retry_after = max(1, int(window - (now - bucket[0])) + 1)
+                response = _json_error(
+                    "Rate limit exceeded.",
+                    status_code=429,
+                    code="rate_limit_exceeded",
+                )
+                response.headers["Retry-After"] = str(retry_after)
+                await response(scope, receive, send)
+                return
+            bucket.append(now)
         await self.app(scope, receive, send)
 
 
@@ -2564,6 +2632,7 @@ def create_app(*, bound_host: Optional[str] = None) -> Starlette:
             Middleware(StaticAssetCacheMiddleware),
             Middleware(MCPOriginMiddleware),
             Middleware(GatewayAuthMiddleware, bound_host=effective_bound_host),
+            Middleware(HttpRateLimitMiddleware),
             Middleware(ModeDialContextMiddleware),
             Middleware(CallerContextMiddleware),
         ],

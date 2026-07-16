@@ -12,6 +12,7 @@ from src.credentials import (
     UPSTREAM_PROVIDER_SECRET_ENV_NAMES,
 )
 from src.http_server import (
+    HttpRateLimitMiddleware,
     GatewayAuthMiddleware,
     MCPOriginMiddleware,
     ModeDialContextMiddleware,
@@ -1243,6 +1244,7 @@ def test_middleware_is_pure_asgi():
 
     assert not issubclass(GatewayAuthMiddleware, BaseHTTPMiddleware)
     assert not issubclass(MCPOriginMiddleware, BaseHTTPMiddleware)
+    assert not issubclass(HttpRateLimitMiddleware, BaseHTTPMiddleware)
     assert not issubclass(ModeDialContextMiddleware, BaseHTTPMiddleware)
     assert not issubclass(StaticAssetCacheMiddleware, BaseHTTPMiddleware)
 
