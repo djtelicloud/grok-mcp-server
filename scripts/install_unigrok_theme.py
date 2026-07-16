@@ -131,15 +131,65 @@ def _sources(repo: Path) -> list[tuple[Path, str]]:
 
 
 def _reject_git_home(grok_home: Path) -> int | None:
-    """Refuse paths that look like a Git checkout (user config dir only)."""
-    if (grok_home / ".git").exists():
-        print(
-            "error: --grok-home / GROK_HOME must be a user config directory, "
-            "not a Git checkout",
-            file=sys.stderr,
-        )
-        return 2
+    """Refuse paths inside a Git work tree (user config dir only)."""
+    cur = grok_home.expanduser().resolve()
+    for candidate in (cur, *cur.parents):
+        if (candidate / ".git").exists():
+            print(
+                "error: --grok-home / GROK_HOME must be a user config directory, "
+                "not inside a Git checkout",
+                file=sys.stderr,
+            )
+            return 2
     return None
+
+
+def _ui_section_span(text: str) -> tuple[int, int] | None:
+    """Return [start, end) byte offsets of the [ui] table body, or None."""
+    match = re.search(r"(?m)^\s*\[ui\]\s*(?:#.*)?$", text)
+    if not match:
+        return None
+    start = match.end()
+    next_header = re.search(r"(?m)^\s*\[[^\]]+\]\s*(?:#.*)?$", text[start:])
+    end = start + next_header.start() if next_header else len(text)
+    return start, end
+
+
+def _set_ui_theme(text: str, theme: str = "unigrok") -> tuple[str, str]:
+    """
+    Set [ui] theme = \"...\" only inside the [ui] table.
+
+    Returns (new_text, status) where status is already|updated|appended.
+    """
+    span = _ui_section_span(text)
+    theme_re = re.compile(
+        rf"""(?m)^(\s*theme\s*=\s*)(["']){re.escape(theme)}\2\s*(?:#.*)?$"""
+    )
+    any_theme_re = re.compile(
+        r"""(?m)^(\s*theme\s*=\s*)(["']).*?\2\s*(?:#.*)?$"""
+    )
+
+    if span is not None:
+        start, end = span
+        body = text[start:end]
+        if theme_re.search(body):
+            return text, "already"
+        if any_theme_re.search(body):
+            new_body, n = any_theme_re.subn(rf'\1"{theme}"', body, count=1)
+            if n != 1 or new_body == body:
+                raise ValueError("theme line in [ui] could not be updated")
+            return text[:start] + new_body + text[end:], "updated"
+        insert = f'\ntheme = "{theme}"'
+        # Keep a trailing newline in the section when possible.
+        if body.endswith("\n"):
+            new_body = body.rstrip("\n") + insert + "\n"
+        else:
+            new_body = body + insert
+        return text[:start] + new_body + text[end:], "updated"
+
+    # No [ui] table — do not rewrite theme keys in other tables.
+    appended = text.rstrip() + f'\n\n[ui]\ntheme = "{theme}"\n'
+    return appended, "appended"
 
 
 def install(
@@ -252,37 +302,17 @@ def enable_config(*, grok_home: Path, dry_run: bool) -> int:
         print(f"error: {config} not found; create a Grok config first", file=sys.stderr)
         return 2
     text = config.read_text(encoding="utf-8")
-    if re.search(r"""(?m)^\s*theme\s*=\s*["']unigrok["']\s*(?:#.*)?$""", text):
-        print(f"already set: {config} has theme = \"unigrok\"")
+    try:
+        new_text, status = _set_ui_theme(text, "unigrok")
+    except ValueError as exc:
+        print(f"error: {config}: {exc}; set theme = \"unigrok\" under [ui] manually", file=sys.stderr)
+        return 2
+    if status == "already":
+        print(f"already set: {config} [ui] theme = \"unigrok\"")
         return 0
 
-    new_text: str
-    if re.search(r"(?m)^\s*theme\s*=", text):
-        new_text = re.sub(
-            r"""(?m)^(\s*theme\s*=\s*)(["']).*\2\s*(?:#.*)?$""",
-            r'\1"unigrok"',
-            text,
-            count=1,
-        )
-        if new_text == text:
-            print(
-                f"error: {config} has a theme line that could not be updated; "
-                "set theme = \"unigrok\" manually",
-                file=sys.stderr,
-            )
-            return 2
-    elif re.search(r"(?m)^\s*\[ui\]\s*$", text):
-        new_text = re.sub(
-            r"(?m)^(\s*\[ui\]\s*)$",
-            r'\1\ntheme = "unigrok"',
-            text,
-            count=1,
-        )
-    else:
-        new_text = text.rstrip() + '\n\n[ui]\ntheme = "unigrok"\n'
-
     backup = config.with_suffix(".toml.unigrok-theme-bak")
-    print(f"{'would write' if dry_run else 'write'} {config} theme = \"unigrok\"")
+    print(f"{'would write' if dry_run else 'write'} {config} [ui] theme = \"unigrok\"")
     print(f"{'would backup' if dry_run else 'backup'} {backup}")
     if dry_run:
         return 0

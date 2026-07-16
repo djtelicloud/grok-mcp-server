@@ -146,6 +146,63 @@ def test_enable_config_rejects_git_checkout(tmp_path: Path) -> None:
         check=False,
     )
     assert result.returncode == 2
-    assert "not a Git checkout" in result.stderr
+    assert "not inside a Git checkout" in result.stderr or "not a Git checkout" in result.stderr
     assert 'theme = "tokyonight"' in config.read_text(encoding="utf-8")
     assert not (grok_home / "config.toml.unigrok-theme-bak").exists()
+
+
+@pytest.mark.skipif(not DESIGN_TOML.is_file(), reason="theme design artifacts not on this checkout")
+def test_reject_nested_path_inside_git_worktree(tmp_path: Path) -> None:
+    root = tmp_path / "repo"
+    nested = root / ".grok"
+    nested.mkdir(parents=True)
+    (root / ".git").mkdir()
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--repo",
+            str(REPO),
+            "--grok-home",
+            str(nested),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 2
+    assert "Git checkout" in result.stderr
+    assert not (nested / "themes").exists()
+
+
+@pytest.mark.skipif(not DESIGN_TOML.is_file(), reason="theme design artifacts not on this checkout")
+def test_enable_config_only_rewrites_ui_theme(tmp_path: Path) -> None:
+    grok_home = tmp_path / "grok-home"
+    grok_home.mkdir()
+    config = grok_home / "config.toml"
+    config.write_text(
+        '[other]\ntheme = "keep-me"\n\n[ui]\ntheme = "tokyonight"\n',
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--repo",
+            str(REPO),
+            "--grok-home",
+            str(grok_home),
+            "--enable-config",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr + result.stdout
+    text = config.read_text(encoding="utf-8")
+    assert 'theme = "keep-me"' in text
+    assert 'theme = "unigrok"' in text
+    assert 'theme = "tokyonight"' not in text
+
