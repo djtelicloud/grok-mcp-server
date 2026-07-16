@@ -1896,17 +1896,25 @@ function renderFactsPane(method, response, elapsed) {
     return;
   }
 
-  // A FastMCP tool exception arrives as result.isError with the message in
-  // content[0].text — that is a failed run, never a SUCCESS receipt.
-  if (response.result?.isError) {
-    const status = setText("factStatus", "TOOL ERROR");
-    if (status) status.style.color = "var(--red)";
-  } else {
-    const status = setText("factStatus", "SUCCESS");
-    if (status) status.style.color = "var(--teal)";
-  }
-
   const payload = extractToolPayload(response) || {};
+  // Status must reflect AgentResult.finish_reason too: credential/plane
+  // failures return a normal tools/call payload (not result.isError), so a
+  // green SUCCESS receipt would lie about the outcome.
+  let statusLabel = "SUCCESS";
+  let statusColor = "var(--teal)";
+  if (response.result?.isError) {
+    statusLabel = "TOOL ERROR";
+    statusColor = "var(--red)";
+  } else if (payload.finish_reason === "error") {
+    statusLabel = "FAILED";
+    statusColor = "var(--red)";
+  } else if (payload.finish_reason === "fallback" || payload.degraded === true) {
+    statusLabel = "DEGRADED";
+    statusColor = "var(--orange)";
+  }
+  const status = setText("factStatus", statusLabel);
+  if (status) status.style.color = statusColor;
+
   setText("factTokens", payload.tokens || "-");
   // The wire may deliver cost as a number or a serialized string; only a
   // finite value renders as currency. cost===0 is real (CLI subscription or
@@ -1977,8 +1985,14 @@ async function callAgent(prompt) {
       addMessageBubble("error", `Tool error: ${payload.response || payload.text || "unknown tool failure"}`);
       return;
     }
-
     const answer = payload.text || payload.response || "No response field returned.";
+    // finish_reason=error is a completed tools/call with a failed agent turn
+    // (e.g. credential-setup) — show it as an error bubble, not an agent answer.
+    if (payload.finish_reason === "error") {
+      addMessageBubble("error", answer);
+      return;
+    }
+
     addMessageBubble("agent", answer);
     renderCitations(payload.citations);
   } catch (err) {

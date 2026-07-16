@@ -434,7 +434,7 @@ def test_oauth_metadata_challenge_omits_mcp_document_for_query_variant(monkeypat
     assert response.headers["WWW-Authenticate"] == 'Bearer scope="unigrok:connect"'
 
 
-def test_oauth_introspection_allows_valid_status_token(monkeypatch):
+def test_oauth_status_token_does_not_grant_metrics_operator_access(monkeypatch):
     monkeypatch.setenv("UNIGROK_RUNTIME", "cloudrun")
     monkeypatch.delenv("UNIGROK_API_KEYS", raising=False)
     monkeypatch.setenv(
@@ -450,7 +450,8 @@ def test_oauth_introspection_allows_valid_status_token(monkeypatch):
     with TestClient(create_app(), base_url="https://mcp.grokmcp.org") as client:
         response = client.get("/metrics", headers={"Authorization": "Bearer token-value"})
 
-    assert response.status_code == 200
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "forbidden"
 
 
 def test_oauth_subject_cannot_evade_budget_attribution_with_client_headers():
@@ -691,7 +692,7 @@ def test_trusted_compose_proxy_never_bypasses_inference_auth(monkeypatch):
     assert ui.status_code == 200
     assert runtime.status_code == 200
     assert inference.status_code == 401
-    assert metrics.status_code == 401
+    assert metrics.status_code == 200
 
 
 def test_readyz_accepts_cli_auth_without_xai_api_key(monkeypatch, tmp_path):
@@ -1092,7 +1093,6 @@ async def test_public_mcp_exposes_only_agent():
         "review_pull_request",
         "grok_mcp_status",
         "grok_mcp_discover_self",
-        "grok_mcp_restart_container",
     ]
 
 
@@ -1776,20 +1776,31 @@ def test_agent_stream_error_still_terminates_with_done(monkeypatch):
     assert body.rstrip().endswith("data: [DONE]")
 
 
-def test_metrics_is_auth_protected(monkeypatch):
-    """/metrics sits behind the bearer auth like every non-probe route: 401
-    without a token, 200 with a configured key."""
-    monkeypatch.delenv("UNIGROK_RUNTIME", raising=False)
+def test_metrics_is_verified_local_operator_only(monkeypatch):
+    """Bearer authentication alone never grants global metrics access."""
+    monkeypatch.setenv("UNIGROK_RUNTIME", "local")
     monkeypatch.setenv("UNIGROK_API_KEYS", "metrics-secret")
     monkeypatch.delenv("UNIGROK_ALLOW_UNAUTHENTICATED", raising=False)
 
-    with TestClient(create_app()) as client:
+    with TestClient(
+        create_app(),
+        base_url="https://gateway.example.com",
+        client=("203.0.113.20", 50000),
+    ) as client:
         denied = client.get("/metrics")
         allowed = client.get("/metrics", headers={"Authorization": "Bearer metrics-secret"})
+    with TestClient(
+        create_app(),
+        base_url="http://localhost:8080",
+        client=("127.0.0.1", 50000),
+    ) as client:
+        local = client.get("/metrics")
 
     assert denied.status_code == 401
-    assert allowed.status_code == 200
-    assert allowed.json()["format"] == "unigrok-json-v1"
+    assert allowed.status_code == 403
+    assert allowed.json()["error"]["code"] == "forbidden"
+    assert local.status_code == 200
+    assert local.json()["format"] == "unigrok-json-v1"
 
 
 def test_metrics_aggregates_planes_and_runtime(monkeypatch):
@@ -1808,7 +1819,11 @@ def test_metrics_aggregates_planes_and_runtime(monkeypatch):
 
     monkeypatch.setattr(http_module.store, "get_telemetry_stats", AsyncMock(return_value=rows))
 
-    with TestClient(create_app()) as client:
+    with TestClient(
+        create_app(),
+        base_url="http://localhost:8080",
+        client=("127.0.0.1", 50000),
+    ) as client:
         res = client.get("/metrics")
 
     assert res.status_code == 200
@@ -1839,7 +1854,11 @@ def test_metrics_survives_telemetry_read_failure(monkeypatch):
         AsyncMock(side_effect=RuntimeError("db offline")),
     )
 
-    with TestClient(create_app()) as client:
+    with TestClient(
+        create_app(),
+        base_url="http://localhost:8080",
+        client=("127.0.0.1", 50000),
+    ) as client:
         res = client.get("/metrics")
 
     assert res.status_code == 200
@@ -1899,3 +1918,127 @@ async def test_post_xai_chat_502_bad_gateway_on_errors(monkeypatch):
     body_json = json.loads(res_json.body.decode())
     assert body_json["error"]["type"] == "bad_gateway"
     assert body_json["error"]["message"].startswith("Upstream returned invalid JSON.")
+
+
+def test_credential_bearing_httpx_clients_disable_proxy_env():
+    """Bearer-carrying httpx clients must not inherit HTTPS_PROXY/HTTP_PROXY.
+
+    Matches the subordinate-provider contract in src/providers/base.py
+    (trust_env=False, follow_redirects=False).
+    """
+    import ast
+
+    root = Path(__file__).resolve().parents[1]
+    sources = [
+        root / "src" / "http_server.py",
+        root / "src" / "metrics.py",
+        root / "src" / "providers" / "base.py",
+    ]
+    found = 0
+    for path in sources:
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            is_async_client = (
+                isinstance(func, ast.Attribute)
+                and func.attr == "AsyncClient"
+                and isinstance(func.value, ast.Name)
+                and func.value.id == "httpx"
+            )
+            if not is_async_client:
+                continue
+            found += 1
+            keywords = {
+                kw.arg: kw.value
+                for kw in node.keywords
+                if kw.arg is not None
+            }
+            trust = keywords.get("trust_env")
+            redirects = keywords.get("follow_redirects")
+            assert isinstance(trust, ast.Constant) and trust.value is False, (
+                f"{path.name}:{node.lineno} AsyncClient missing trust_env=False"
+            )
+            assert isinstance(redirects, ast.Constant) and redirects.value is False, (
+                f"{path.name}:{node.lineno} AsyncClient missing follow_redirects=False"
+            )
+    assert found >= 5, f"expected ≥5 credential-bearing AsyncClient sites, found {found}"
+
+
+def test_xai_chat_completions_url_defaults_and_rejects_unsafe_overrides(monkeypatch):
+    from src.http_server import XAI_BASE_URL, _xai_chat_completions_url
+
+    monkeypatch.delenv("XAI_API_BASE_URL", raising=False)
+    assert _xai_chat_completions_url() == f"{XAI_BASE_URL.rstrip('/')}/chat/completions"
+
+    monkeypatch.setenv("XAI_API_BASE_URL", "https://api.x.ai/v1")
+    assert _xai_chat_completions_url() == "https://api.x.ai/v1/chat/completions"
+
+    for unsafe in (
+        "http://api.x.ai/v1",
+        "https://169.254.169.254/v1",
+        "https://evil.internal/v1",
+        "https://localhost/v1",
+    ):
+        monkeypatch.setenv("XAI_API_BASE_URL", unsafe)
+        assert _xai_chat_completions_url() is None, unsafe
+
+
+@pytest.mark.asyncio
+async def test_post_xai_chat_rejects_unsafe_base_url_without_calling_out(monkeypatch):
+    from src.http_server import post_xai_chat
+    import json
+
+    called = {"post": False}
+
+    class ForbiddenClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, *args, **kwargs):
+            called["post"] = True
+            raise AssertionError("unsafe XAI_API_BASE_URL must not call out")
+
+    monkeypatch.setenv("XAI_API_KEY", "dummy-key")
+    monkeypatch.setenv("XAI_API_BASE_URL", "http://169.254.169.254/v1")
+    monkeypatch.setattr("src.http_server.httpx.AsyncClient", lambda **kwargs: ForbiddenClient())
+
+    res = await post_xai_chat({"model": "grok-4.3", "messages": []})
+    assert res.status_code == 503
+    body = json.loads(res.body.decode())
+    assert body["error"]["code"] == "service_unavailable"
+    assert "XAI_API_BASE_URL" in body["error"]["message"]
+    assert not called["post"]
+
+
+@pytest.mark.asyncio
+async def test_stream_xai_chat_rejects_unsafe_base_url_without_calling_out(monkeypatch):
+    called = {"stream": False}
+
+    class ForbiddenClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        def stream(self, *args, **kwargs):
+            called["stream"] = True
+            raise AssertionError("unsafe XAI_API_BASE_URL must not call out")
+
+    monkeypatch.setenv("XAI_API_KEY", "dummy-key")
+    monkeypatch.setenv("XAI_API_BASE_URL", "http://169.254.169.254/v1")
+    monkeypatch.setattr("src.http_server.httpx.AsyncClient", lambda **kwargs: ForbiddenClient())
+
+    chunks = [
+        chunk
+        async for chunk in stream_xai_chat({"model": "grok-4.3", "messages": []})
+    ]
+    body = b"".join(chunks).decode("utf-8")
+    assert "XAI_API_BASE_URL is not a public HTTPS endpoint." in body
+    assert body.endswith("data: [DONE]\n\n")
+    assert called["stream"] is False

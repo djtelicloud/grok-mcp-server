@@ -318,7 +318,11 @@ async def fetch_provider_api_usage() -> Dict[str, Any]:
         }
     }
     try:
-        async with httpx.AsyncClient(timeout=8.0) as client:
+        async with httpx.AsyncClient(
+            timeout=8.0,
+            follow_redirects=False,
+            trust_env=False,
+        ) as client:
             response = await client.post(
                 f"https://management-api.x.ai/v1/billing/teams/{team_id}/usage",
                 headers={"Authorization": f"Bearer {management_key}"},

@@ -5838,6 +5838,73 @@ class TestCliPlaneV2:
         )
 
     @pytest.mark.asyncio
+    async def test_cli_persists_native_session_id_under_logical_lock(
+        self, monkeypatch
+    ):
+        """Regression: save_session must run while the logical session lock
+        is still held, or concurrent turns can clobber the mapping."""
+        import json as json_module
+
+        from src import utils
+        from src.utils import _call_plane
+
+        monkeypatch.setenv("UNIGROK_RUNTIME", "local")
+        monkeypatch.setattr(
+            PathResolver, "get_grok_cli_path", staticmethod(lambda: "/tmp/grok")
+        )
+
+        class TrackingLock:
+            def __init__(self):
+                self._lock = asyncio.Lock()
+                self.held = False
+
+            async def __aenter__(self):
+                await self._lock.acquire()
+                self.held = True
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                self.held = False
+                self._lock.release()
+                return False
+
+        tracking = TrackingLock()
+        monkeypatch.setattr(utils, "_cli_logical_session_lock", lambda _s: tracking)
+
+        class FakeProc:
+            returncode = 0
+
+        async def fake_exec(*cmd, **kwargs):
+            return FakeProc()
+
+        payload = json_module.dumps({
+            "text": "hello from cli",
+            "sessionId": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+        }).encode()
+
+        async def fake_communicate(proc, timeout_sec, input_data=None):
+            return payload, b""
+
+        monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+        monkeypatch.setattr("src.utils.communicate_with_timeout", fake_communicate)
+
+        held_during_save = {"value": False}
+
+        async def save_session(session_name, **kwargs):
+            held_during_save["value"] = tracking.held
+
+        store = self._fake_store(session_row={})
+        store.save_session = AsyncMock(side_effect=save_session)
+
+        content, _, _, is_cli = await _call_plane(
+            "cli-fallback", "hi", "sess", store, "sys"
+        )
+        assert (content, is_cli) == ("hello from cli", True)
+        store.save_session.assert_awaited_once()
+        assert held_during_save["value"] is True
+        assert tracking.held is False
+
+    @pytest.mark.asyncio
     async def test_cli_resumes_stored_session_without_rewrite(self, monkeypatch):
         import json as json_module
 

@@ -843,7 +843,11 @@ class TestMetricsSegmentation:
             http_module.store, "get_telemetry_stats", AsyncMock(return_value=rows)
         )
 
-        with TestClient(create_app()) as client:
+        with TestClient(
+            create_app(),
+            base_url="http://localhost:8080",
+            client=("127.0.0.1", 50000),
+        ) as client:
             res = client.get("/metrics")
 
         assert res.status_code == 200

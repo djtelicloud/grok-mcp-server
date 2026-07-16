@@ -248,7 +248,11 @@ async def _introspect_oauth_token(token: str, required_scope: str) -> Optional[D
     if not url or not token or len(token) > 8_192:
         return None
     try:
-        async with httpx.AsyncClient(timeout=5.0, follow_redirects=False) as client:
+        async with httpx.AsyncClient(
+            timeout=5.0,
+            follow_redirects=False,
+            trust_env=False,
+        ) as client:
             response = await client.post(
                 url,
                 headers={
@@ -449,7 +453,7 @@ _PUBLIC_AUTH_EXEMPT_PATHS = (
 # are local operator surfaces. They stay convenient at localhost, including
 # when client bearer keys are configured, but are never exempt in Cloud Run or
 # when reached through a non-loopback Host.
-_LOCAL_OPERATOR_PATHS = ("/runtimez",)
+_LOCAL_OPERATOR_PATHS = ("/runtimez", "/metrics")
 _LOCAL_OPERATOR_PREFIXES = ("/ui", "/docs")
 
 
@@ -513,8 +517,8 @@ def _is_local_operator_request(scope: Dict[str, Any]) -> bool:
 
 def _request_may_bypass_auth(scope: Dict[str, Any]) -> bool:
     # The broad development bypass is stricter than the operator-static
-    # exemption: an asserted Docker proxy boundary may expose /ui and
-    # /runtimez, but it never disables auth for /mcp, /v1, or /metrics.
+    # exemption: an asserted Docker proxy boundary may expose /ui, /runtimez,
+    # and local-only /metrics, but it never disables auth for /mcp or /v1.
     return _allow_unauthenticated() and _is_direct_loopback_request(scope)
 
 
@@ -972,13 +976,27 @@ def _validated_https_url(value: str) -> Optional[str]:
     return f"https://{parsed.netloc}{normalized_path}"
 
 
-def _public_mcp_resource() -> Optional[str]:
-    resource = _validated_https_url(os.environ.get("UNIGROK_PUBLIC_MCP_URL", ""))
-    if resource and not urlsplit(resource).path:
+def _validated_public_mcp_resource(raw: str) -> Optional[str]:
+    """Return a public ``…/mcp`` HTTPS resource, or ``None`` when unsafe.
+
+    Only global HTTPS hosts may publish OAuth metadata or widen the Streamable
+    HTTP DNS-rebinding allowlist.
+    """
+    resource = _validated_https_url(raw)
+    if not resource:
+        return None
+    parsed = urlsplit(resource)
+    path = parsed.path
+    if not path:
         resource = f"{resource}/mcp"
-    if resource and urlsplit(resource).path == "/mcp":
+        path = "/mcp"
+    if path == "/mcp":
         return resource
     return None
+
+
+def _public_mcp_resource() -> Optional[str]:
+    return _validated_public_mcp_resource(os.environ.get("UNIGROK_PUBLIC_MCP_URL", ""))
 
 
 def _oauth_protected_resource_metadata_url(
@@ -1568,12 +1586,19 @@ async def metrics(request: Request) -> Response:
     The JSON shape needs no extra dependencies and any JSON-capable collector
     can scrape it; the Prometheus variant renders the SAME snapshot as text
     exposition 0.0.4 via stdlib string building (see
-    _render_prometheus_metrics). Auth-protected like every non-probe route
-    (the auth middleware only exempts /healthz and /readyz). Combines the
-    telemetry table (per-plane and per-caller aggregates) with in-process
-    runtime state: circuit breakers, the timed-thread gauge, and the routing
-    advisor's current view.
+    _render_prometheus_metrics). Available only over the verified local
+    operator path; bearer or OAuth status scope never grants remote access to
+    its cross-caller aggregates. Combines the telemetry table (per-plane and
+    per-caller aggregates) with in-process runtime state: circuit breakers,
+    the timed-thread gauge, and the routing advisor's current view.
     """
+    if not _is_verified_local_request(request.scope):
+        return _json_error(
+            "Metrics are available only to a verified local operator.",
+            status_code=403,
+            code="forbidden",
+        )
+
     try:
         rows = await store.get_telemetry_stats()
     except Exception as exc:
@@ -1822,6 +1847,23 @@ def _xai_headers() -> Dict[str, str]:
     return {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
 
 
+def _xai_chat_completions_url() -> Optional[str]:
+    """Return the chat-completions URL, or ``None`` when an override is unsafe.
+
+    ``XAI_API_BASE_URL`` is operator-controlled but credential-bearing: the
+    gateway attaches ``XAI_API_KEY``. Unset keeps the built-in xAI default.
+    A set-but-unsafe override fails closed (no silent fallback that would hide
+    a misconfiguration while still shipping the bearer token elsewhere).
+    """
+    raw = os.environ.get("XAI_API_BASE_URL", "").strip()
+    if not raw:
+        return f"{XAI_BASE_URL.rstrip('/')}/chat/completions"
+    base = _validated_https_url(raw)
+    if base is None:
+        return None
+    return f"{base.rstrip('/')}/chat/completions"
+
+
 def _xai_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     allowed = {
         "model",
@@ -1845,9 +1887,19 @@ def _xai_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
 async def post_xai_chat(payload: Dict[str, Any]) -> Response:
     if not os.environ.get("XAI_API_KEY"):
         return _json_error("XAI_API_KEY is not configured.", status_code=503, code="service_unavailable")
-    url = os.environ.get("XAI_API_BASE_URL", XAI_BASE_URL).rstrip("/") + "/chat/completions"
+    url = _xai_chat_completions_url()
+    if url is None:
+        return _json_error(
+            "XAI_API_BASE_URL is not a public HTTPS endpoint.",
+            status_code=503,
+            code="service_unavailable",
+        )
     try:
-        async with httpx.AsyncClient(timeout=120.0) as client:
+        async with httpx.AsyncClient(
+            timeout=120.0,
+            follow_redirects=False,
+            trust_env=False,
+        ) as client:
             response = await client.post(url, json=_xai_payload(payload), headers=_xai_headers())
         if response.status_code >= 400:
             return _json_error(
@@ -1875,7 +1927,14 @@ async def stream_xai_chat(payload: Dict[str, Any]) -> AsyncIterator[bytes]:
         yield _sse_error("XAI_API_KEY is not configured.", "service_unavailable")
         yield b"data: [DONE]\n\n"
         return
-    url = os.environ.get("XAI_API_BASE_URL", XAI_BASE_URL).rstrip("/") + "/chat/completions"
+    url = _xai_chat_completions_url()
+    if url is None:
+        yield _sse_error(
+            "XAI_API_BASE_URL is not a public HTTPS endpoint.",
+            "service_unavailable",
+        )
+        yield b"data: [DONE]\n\n"
+        return
     stream_timeout = httpx.Timeout(
         connect=10.0,
         read=_bounded_env_float(
@@ -1885,7 +1944,11 @@ async def stream_xai_chat(payload: Dict[str, Any]) -> AsyncIterator[bytes]:
         pool=10.0,
     )
     try:
-        async with httpx.AsyncClient(timeout=stream_timeout) as client:
+        async with httpx.AsyncClient(
+            timeout=stream_timeout,
+            follow_redirects=False,
+            trust_env=False,
+        ) as client:
             async with client.stream("POST", url, json=_xai_payload(payload), headers=_xai_headers()) as response:
                 if response.status_code >= 400:
                     await response.aread()
@@ -2142,6 +2205,10 @@ def public_mcp_transport_security(
     host. Production Cloud Run serves ``mcp.grokmcp.org`` (and similar), so
     authenticated /mcp traffic must allow the public hostname from
     ``UNIGROK_PUBLIC_MCP_URL`` or the optional override.
+
+    Unsafe or non-HTTPS overrides are ignored: they must not expand the
+    Host/Origin allowlist (OAuth metadata already rejects them via
+    :func:`_public_mcp_resource`).
     """
     hosts = [
         "127.0.0.1",
@@ -2159,16 +2226,18 @@ def public_mcp_transport_security(
         "http://[::1]",
         "http://[::1]:*",
     ]
-    raw = (public_mcp_url if public_mcp_url is not None else os.environ.get("UNIGROK_PUBLIC_MCP_URL", "")).strip()
-    if raw:
-        parsed = urlsplit(raw)
+    if public_mcp_url is None:
+        resource = _public_mcp_resource()
+    else:
+        resource = _validated_public_mcp_resource(public_mcp_url)
+    if resource:
+        parsed = urlsplit(resource)
         host = (parsed.hostname or "").lower()
         if host:
             hosts.append(host)
             if parsed.port:
                 hosts.append(f"{host}:{parsed.port}")
-            scheme = parsed.scheme if parsed.scheme in {"http", "https"} else "https"
-            origin = f"{scheme}://{host}"
+            origin = f"https://{host}"
             if parsed.port:
                 origin = f"{origin}:{parsed.port}"
             origins.append(origin)
@@ -2255,10 +2324,9 @@ def create_public_mcp() -> FastMCP:
         return path.read_text(encoding="utf-8")
 
     # Expose status and onboarding helper tools to the HTTP /mcp endpoint
-    from .tools.system import grok_mcp_status, grok_mcp_discover_self, grok_mcp_restart_container
+    from .tools.system import grok_mcp_status, grok_mcp_discover_self
     mcp.add_tool(grok_mcp_status, name="grok_mcp_status")
     mcp.add_tool(grok_mcp_discover_self, name="grok_mcp_discover_self")
-    mcp.add_tool(grok_mcp_restart_container, name="grok_mcp_restart_container")
 
     # Repository evidence is useful to IDE agents developing UniGrok, but it
     # must never become part of the globally registered stable service or a

@@ -486,6 +486,12 @@ def test_mcp_ui_error_surfaces_tell_the_truth():
     assert 'id="factFinishReason"' in index.text
     assert 'id="factDegraded"' in index.text
     assert "payload.finish_reason" in script.text
+    assert "extractToolPayload(response) || {}" in script.text
+    # AgentResult finish_reason=error is a normal tools/call payload — must not
+    # paint SUCCESS, and the transcript must use an error bubble.
+    assert 'payload.finish_reason === "error"' in script.text
+    assert 'statusLabel = "FAILED"' in script.text
+    assert 'statusLabel = "DEGRADED"' in script.text
     assert "failing checks" in script.text
     assert "describeNotReady" in script.text
     # The connection-lost wording is reserved for actual fetch failures.

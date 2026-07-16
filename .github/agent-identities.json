@@ -42,6 +42,18 @@
       },
       "product": "Copilot",
       "provider": "GitHub"
+    },
+    {
+      "credit_name": "Cursor Composer",
+      "github_identity": null,
+      "product": "Composer",
+      "provider": "Cursor"
+    },
+    {
+      "credit_name": "Cursor",
+      "github_identity": null,
+      "product": "Cursor",
+      "provider": "Cursor"
     }
   ],
   "agent_identity_markers": [
