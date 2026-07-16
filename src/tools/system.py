@@ -438,7 +438,7 @@ async def clear_chat_history(session: str = "default") -> str:
 
 async def list_models() -> List[str]:
     """List live xAI API model IDs. Lightweight, direct, and fast."""
-    async with GrokInvocationContext("utility", logger, append_signature=False) as ctx:
+    async with GrokInvocationContext("utility", logger, append_signature=False):
         catalog = await discover_xai_api_models()
         return [m["id"] for m in catalog.get("models", [])]
 
@@ -1378,7 +1378,7 @@ async def grok_mcp_restart_container() -> SystemResult:
     """Safely restart the UniGrok Docker container by executing docker compose up --build -d.
     Only works if running in a context where docker compose is available and enabled.
     """
-    async with GrokInvocationContext("utility", logger, append_signature=False) as ctx:
+    async with GrokInvocationContext("utility", logger, append_signature=False):
         enabled = os.environ.get("UNIGROK_ENABLE_CONTAINER_RESTART", "").strip().lower() in ("1", "true")
         if not enabled:
             err_msg = "Container restart is disabled on this server. Enable it by setting UNIGROK_ENABLE_CONTAINER_RESTART=1."

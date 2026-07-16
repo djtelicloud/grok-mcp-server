@@ -8,6 +8,14 @@ memory, no competitive process IP.
 
 ## Problem this pack solves
 
+> [!IMPORTANT]
+> **Glossary: Do not conflate "Hydrate" concepts**
+> - **Session Rehydrate**: Booting intelligence from git/disk across chats (this pack).
+> - **Process / Telemetry Hydration**: In-process runtime accumulators surviving server restarts (`src/hydration.py`).
+> - **Hydration Lanes / Scratchpads**: Disposable worktrees used for isolation/continuity (`.worktrees/`).
+> Never mix these up; they are three completely separate boundaries.
+
+
 New sessions often print a **status table only**, then wait. Strong brands
 (Claude, Cursor, Grok) also offered real next work; weaker loads (some Gemini /
 Antigravity and Copilot / Kimi sessions) stopped at the table. Humans need both

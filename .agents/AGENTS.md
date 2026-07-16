@@ -27,6 +27,7 @@ Full intent map: **Human language** below. Layout for CLI/TUI hosts:
 - On first message after IDE reset, or when the user says **rehydrate** /
   **boot** / **where were we**, follow
   [`.agents/skills/session-rehydrate/SKILL.md`](skills/session-rehydrate/SKILL.md).
+  *(Note: See that skill for the strict glossary separating session rehydrate from process telemetry and hydration lanes.)*
 - Continuity lives in git/disk: private
   `../unigrok-intelligence/codex/continuity/active-work-latest.md` (if present),
   open PR notes, and `./scripts/land-status` — not chat memory.

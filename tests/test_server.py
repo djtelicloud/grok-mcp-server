@@ -963,12 +963,12 @@ async def test_generate_image_rejects_invalid_count():
 @pytest.mark.asyncio
 async def test_clear_chat_history_sanitization():
     # Valid session name should work (or mock work)
-    with patch("src.tools.system.store.delete_session", new_callable=AsyncMock) as mock_delete:
+    with patch("src.tools.system.store.delete_session", new_callable=AsyncMock):
         res = await clear_chat_history("valid-session-123_abc")
         assert "Cleared history for session" in res
 
     # Namespaced session name containing colon should work
-    with patch("src.tools.system.store.delete_session", new_callable=AsyncMock) as mock_delete:
+    with patch("src.tools.system.store.delete_session", new_callable=AsyncMock):
         res_ns = await clear_chat_history("vscode:my-session-name")
         assert "Cleared history for session" in res_ns
 

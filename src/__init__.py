@@ -5,5 +5,6 @@ from .version import __version__
 
 __all__ = [
     "main", 
-    "mcp",   
+    "mcp",
+    "__version__",
 ]
