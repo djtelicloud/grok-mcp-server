@@ -52,12 +52,84 @@ def test_high_control_plane_packet_stays_with_codex():
     assert "Codex Approval" in decision.description
 
 
+def test_exact_head_codex_approval_is_a_safe_cursor_fallback():
+    decision = decide_gate(
+        declared="low",
+        inferred="low",
+        checks=_checks(cursor=False),
+        statuses={"Codex Approval": "success"},
+    )
+    assert decision.state == "success"
+    assert decision.description == "exact-head Codex Approval"
+
+
+def test_codex_fallback_ignores_failed_cursor_approver():
+    checks = _checks(cursor=False)
+    checks["Cursor Approval Agent: Pull Request Router and Approver"] = "failure"
+    decision = decide_gate(
+        declared="medium",
+        inferred="medium",
+        checks=checks,
+        statuses={"Codex Approval": "success"},
+    )
+    assert decision.state == "success"
+    assert decision.description == "exact-head Codex Approval"
+
+
+def test_codex_fallback_ignores_in_progress_cursor_approver():
+    checks = _checks(cursor=False)
+    checks["Cursor Approval Agent: Pull Request Router and Approver"] = "in_progress"
+    decision = decide_gate(
+        declared="low",
+        inferred="low",
+        checks=checks,
+        statuses={"Codex Approval": "success"},
+    )
+    assert decision.state == "success"
+    assert decision.description == "exact-head Codex Approval"
+
+
+def test_low_medium_codex_fallback_still_requires_ci():
+    decision = decide_gate(
+        declared="low",
+        inferred="low",
+        checks={},
+        statuses={"Codex Approval": "success"},
+    )
+    assert decision.state == "pending"
+    assert "waiting for" in decision.description
+
+
+def test_low_medium_codex_fallback_fails_on_red_ci():
+    checks = _checks(cursor=False)
+    checks["build (3.11)"] = "failure"
+    decision = decide_gate(
+        declared="medium",
+        inferred="medium",
+        checks=checks,
+        statuses={"Codex Approval": "success"},
+    )
+    assert decision.state == "failure"
+    assert "required check failed" in decision.description
+
+
+def test_high_codex_approval_still_short_circuits():
+    decision = decide_gate(
+        declared="high",
+        inferred="high",
+        checks={},
+        statuses={"Codex Approval": "success"},
+    )
+    assert decision.state == "success"
+    assert decision.description == "exact-head Codex Approval"
+
+
 def test_high_path_cannot_be_declared_medium():
     decision = decide_gate(
         declared="medium",
         inferred="high",
         checks=_checks(),
-        statuses={},
+        statuses={"Codex Approval": "success"},
     )
     assert decision.state == "failure"
 

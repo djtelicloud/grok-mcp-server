@@ -210,12 +210,24 @@ def decide_gate(
     if inferred == "medium" and declared == "low":
         return GateDecision("failure", "runtime or non-documentation path requires risk: medium")
 
+    # Codex Approval is published only by the owner-dispatched workflow after
+    # it verifies the current PR head. High-risk packets still short-circuit on
+    # that exact-head status. For low/medium, it is only a Cursor Approver
+    # fallback after required CI + Security/Bugbot evidence is green.
+    codex_approval = statuses.get("Codex Approval", "").lower() == "success"
+
     if declared == "high":
-        if statuses.get("Codex Approval", "").lower() == "success":
-            return GateDecision("success", "high-risk packet has exact-head Codex Approval")
+        if codex_approval:
+            return GateDecision("success", "exact-head Codex Approval")
         return GateDecision("pending", "high-risk packet is waiting for exact-head Codex Approval")
 
-    failed = _check_failure(checks, REQUIRED_CI_CHECKS + CURSOR_CHECKS + (CURSOR_APPROVER_CHECK,))
+    # Exact-head Codex Approval substitutes for the Cursor Approver only.
+    # Keep CI + Security/Bugbot fatal either way; skip Approver failure/pending
+    # when Codex has already satisfied that slot.
+    required_checks = REQUIRED_CI_CHECKS + CURSOR_CHECKS
+    if not codex_approval:
+        required_checks = required_checks + (CURSOR_APPROVER_CHECK,)
+    failed = _check_failure(checks, required_checks)
     if failed:
         return GateDecision("failure", f"required check failed: {failed}")
 
@@ -226,13 +238,15 @@ def decide_gate(
     ]
     approver_state = _state_for_check(checks, CURSOR_APPROVER_CHECK)
     cursor_approval = approver_state == "success" or statuses.get("Cursor Approval", "").lower() == "success"
-    if approver_state not in {"success", "missing"}:
+    if not codex_approval and approver_state not in {"success", "missing"}:
         missing.append(CURSOR_APPROVER_CHECK)
-    if not cursor_approval:
+    if not cursor_approval and not codex_approval:
         missing.append("Cursor approval")
     if missing:
         return GateDecision("pending", "waiting for " + ", ".join(dict.fromkeys(missing)))
 
+    if codex_approval:
+        return GateDecision("success", "exact-head Codex Approval")
     return GateDecision("success", f"Cursor failover approved for risk: {declared}")
 
 
