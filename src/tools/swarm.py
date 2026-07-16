@@ -454,9 +454,11 @@ async def get_swarm_status(task_id: str, view: Literal["text", "json"] = "text")
                     f"{c.get('peak_mem_bytes')} | {c.get('diff_bytes')} |"
                 )
             if swarm_config.swarm_mode() == "active":
+                champion = select_champion(front, str(task.get("primary_goal") or "balanced"))
+                champion_id = champion["id"] if champion else front[0]["id"]
                 lines.append(
                     "\nApply the winner with "
-                    f"`apply_swarm_winner('{front[0]['id']}')` (re-verified before it lands)."
+                    f"`apply_swarm_winner('{champion_id}')` (re-verified before it lands)."
                 )
             else:
                 lines.append("\n(dry_run: apply is disabled — set UNIGROK_SWARM=active to apply.)")
@@ -1063,14 +1065,19 @@ async def export_swarm_narrow_pr(task_id: str) -> Dict[str, Any]:
     feasible = [c for c in candidates if c.get("feasible")]
     pool = feasible or candidates
     front = _current_front(feasible) if feasible else pool
-    champion = select_champion(front) if front else None
-    candidate = champion or sorted(
-        pool,
-        key=lambda c: (
-            int(c.get("pareto_rank") if c.get("pareto_rank") is not None else 10**9),
-            -float(c.get("crowding") or 0.0),
-        ),
-    )[0]
+    champion = select_champion(front, str(task.get("primary_goal") or "balanced")) if front else None
+    champion_id = str(task.get("champion_id") or "") or (champion["id"] if champion else None)
+    
+    if champion_id:
+        candidate = next((c for c in pool if c["id"] == champion_id), champion)
+    else:
+        candidate = sorted(
+            pool,
+            key=lambda c: (
+                int(c.get("pareto_rank") if c.get("pareto_rank") is not None else 10**9),
+                -float(c.get("crowding") or 0.0),
+            ),
+        )[0]
 
     target_path = str(task.get("target_path") or "")
     try:
@@ -1104,6 +1111,7 @@ async def export_swarm_narrow_pr(task_id: str) -> Dict[str, Any]:
     return {
         "format": "unigrok-swarm-narrow-pr-v1",
         "task_id": task_id,
+        "primary_goal": str(task.get("primary_goal") or "balanced"),
         "candidate_id": candidate.get("id"),
         "target_path": target_path,
         "focus_node": task.get("focus_node"),
@@ -1111,6 +1119,8 @@ async def export_swarm_narrow_pr(task_id: str) -> Dict[str, Any]:
         "diff": diff,
         "verification": {
             "latency_ms": candidate.get("latency_ms"),
+            "peak_mem_bytes": candidate.get("peak_mem_bytes"),
+            "diff_bytes": candidate.get("diff_bytes"),
             "feasible": bool(candidate.get("feasible")),
             "pareto_rank": candidate.get("pareto_rank"),
             "crowding": candidate.get("crowding"),

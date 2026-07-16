@@ -256,14 +256,17 @@ class SwarmEngine:
             text = parse_mutation_output(getattr(healed, "text", ""))
         return text
 
-    @staticmethod
-    def _validated_generation_cost(result: Any) -> float:
+    def _validated_generation_cost(self, result: Any) -> float:
         """Fail closed before malformed accounting can poison durable spend."""
         try:
             cost = float(getattr(result, "cost_usd", 0.0) or 0.0)
         except (TypeError, ValueError) as exc:
             raise BudgetExceeded("swarm generation returned an invalid cost") from exc
-        if not math.isfinite(cost) or cost != 0.0:
+        
+        # If cross-model routing is enabled, we allow non-zero costs up to the budget
+        is_cross_model = bool(self.config.model_providers)
+        
+        if not math.isfinite(cost) or (cost != 0.0 and not is_cross_model):
             raise BudgetExceeded(
                 "swarm generation violated the exact-zero CLI cost contract "
                 f"(cost={cost!r})"
