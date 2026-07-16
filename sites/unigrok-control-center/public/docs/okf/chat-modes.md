@@ -17,6 +17,13 @@ critique.
 > public `agent` entrypoint instead. Confirm every deployment with MCP
 > `tools/list`.
 
+> **VS Code / Copilot note:** Copilot MCP clients on the public HTTP surface
+> should use the unified `agent` entrypoint with `mode="fast"`,
+> `mode="reasoning"`, `mode="thinking"`, or `mode="research"` rather than
+> expecting the trusted-stdio `chat*` tools below. See
+> [Agent Entrypoint](agent-tool.md) for the stable HTTP request patterns,
+> `workspace_context` rules, and model/plane metadata guidance.
+
 ## Schema contracts
 
 All chat and context tools return `ChatResult` (inheriting from `BaseResult`) with the exception of `grok_reflect` which returns `ReflectionResult`.

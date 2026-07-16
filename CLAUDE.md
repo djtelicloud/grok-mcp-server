@@ -1,5 +1,14 @@
 # CLAUDE.md
 
+## Talk to humans first
+
+**Short plain answers only** unless the human asked for technical detail.
+Brand + Ready/Live/Blocked + plain task title. No diffs, tool dumps, or git
+lectures in chat. Full law: [.agents/AGENTS.md](.agents/AGENTS.md) →
+**Talk to humans first** / **Human language**.
+
+---
+
 Guidance for Claude Code working in **uni-grok-mcp**. Shared multi-agent rules
 (git coordination, endpoint, credentials boundary) live in
 [.agents/AGENTS.md](.agents/AGENTS.md) — this file adds Claude-Code-specific
@@ -34,9 +43,16 @@ plane requests should use `fallback_policy=same_plane` when crossing credential
 planes is forbidden; `cross_plane` permits bounded failover. The CLI execution
 adapter does not expose the full API ReAct local-tool loop. `_call_plane`
 invokes the headless CLI with
-`--output-format json` or `streaming-json`, deterministic `-s` native session
-ids, optional `--json-schema`, `--effort`, and `--max-turns`, plus `grok
---check` for plane readiness. Native CLI sessions are the continuity mechanism;
+`--output-format json` or `streaming-json`, per-session `--session-id` creation
+and `--resume` continuation (with `--fork-session` on collision — the native id
+is stored per session, not a deterministic hash of the name), optional
+`--json-schema`, `--effort`, and `--max-turns`. `--session-id` names a new
+native CLI conversation; `--resume` continues an existing one; and
+`--fork-session --session-id ...` is the safe continuation path when the
+resumed session is busy. CLI-plane readiness comes from the bounded
+`grok models` probe that confirms the grok.com login state, while service
+readiness is exposed separately at `GET /readyz`. Native CLI sessions are the
+continuity mechanism;
 the old `grok sessions list` scrape and fragile regex session sync are gone.
 Still-unintegrated CLI surfaces include `grok agent stdio|serve|leader` and
 `--best-of-n`. Treat the CLI as ground truth when unifying the two planes.
@@ -58,7 +74,7 @@ model/cost metadata. Modes: `auto` (default), `fast`, `reasoning`, `thinking`,
 - `src/server.py` — MCP server / tool registration
 - `src/http_server.py` — Streamable HTTP + `/healthz`, `/ui/` test bench
 - `src/cli.py` — `unigrok-mcp` entry point (`main.py` → `src.cli:main`)
-- `src/utils.py` — plane routing (`_call_plane`), session sync
+- `src/utils.py` — plane routing (`_call_plane`), CLI session continuity
 - `src/tools/` — agent tool implementations
 - `src/storage.py`, `src/jobs.py` — session state / async jobs
 - `tests/` — pytest suite (`asyncio_mode = auto`)
@@ -71,6 +87,7 @@ model/cost metadata. Modes: `auto` (default), `fast`, `reasoning`, `thinking`,
 uv run python main.py init        # bootstrap .env + print IDE configs
 docker compose up --build -d      # start shared service on :4765
 curl -s http://localhost:4765/healthz
+curl -s http://localhost:4765/readyz
 uv run pytest -q                  # full test suite
 ./scripts/land                    # test and land committed task work to main
 ```

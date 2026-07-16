@@ -1,7 +1,7 @@
 """MCP tools for the swarm code optimizer (contributor-mode only).
 
 Public surface: analyze_code_for_swarm, start_code_swarm, start_paste_swarm,
-get_swarm_status, list_swarm_tasks, apply_swarm_winner, cancel_swarm. Mutating tools are triple-gated (contributor mode + attached
+get_swarm_status, list_swarm_tasks, apply_swarm_winner, cancel_swarm, export_swarm_narrow_pr. Mutating tools are triple-gated (contributor mode + attached
 workspace + not Cloud Run) — the stable public MCP is workspace-neutral and
 must never mutate a caller's files. apply_swarm_winner is additionally gated on
 UNIGROK_SWARM=active and guarded by the base_file_hash staleness check plus
@@ -454,9 +454,11 @@ async def get_swarm_status(task_id: str, view: Literal["text", "json"] = "text")
                     f"{c.get('peak_mem_bytes')} | {c.get('diff_bytes')} |"
                 )
             if swarm_config.swarm_mode() == "active":
+                champion = select_champion(front, str(task.get("primary_goal") or "balanced"))
+                champion_id = champion["id"] if champion else front[0]["id"]
                 lines.append(
                     "\nApply the winner with "
-                    f"`apply_swarm_winner('{front[0]['id']}')` (re-verified before it lands)."
+                    f"`apply_swarm_winner('{champion_id}')` (re-verified before it lands)."
                 )
             else:
                 lines.append("\n(dry_run: apply is disabled — set UNIGROK_SWARM=active to apply.)")
@@ -874,7 +876,8 @@ async def _reverify(task: Dict[str, Any], target: Path, original: bytes) -> tupl
     """Run the task's test_target against the LIVE workspace; restore original
     bytes on failure."""
     workspace = PathResolver.get_workspace_root()
-    python = str((workspace / ".venv" / "bin" / "python")) if (workspace / ".venv").exists() else "python3"
+    import sys
+    python = str((workspace / ".venv" / "bin" / "python")) if (workspace / ".venv").exists() else sys.executable
     proc = None
     runtime_dir = tempfile.TemporaryDirectory(prefix="unigrok-reverify-")
     env = {
@@ -920,20 +923,231 @@ async def _reverify(task: Dict[str, Any], target: Path, original: bytes) -> tupl
     return passed, output
 
 
+async def plan_swarm_campaign(
+    target_paths: List[str],
+    test_roots: List[str] = ["tests"],
+    max_targets: int = 5,
+) -> Dict[str, Any]:
+    """Perform a wide-pass analysis to find swarmable hotspot functions.
+    
+    Deterministically maps files/functions to available tests and categorizes
+    them into a campaign plan without executing any code.
+    
+    Args:
+        target_paths: Workspace-relative paths to files or directories to scan.
+        test_roots: Workspace-relative paths where tests live (default: ["tests"]).
+        max_targets: Maximum number of swarm-ready targets to rank and return.
+    """
+    workspace = PathResolver.get_workspace_root()
+    if workspace is None:
+        return {"error": "A workspace must be attached to plan a campaign."}
+        
+    resolved_targets: List[Path] = []
+    for tp in target_paths:
+        try:
+            rp = _resolve_workspace_input(tp, "target_paths element")
+            if rp.is_file() and rp.suffix == ".py":
+                resolved_targets.append(rp)
+            elif rp.is_dir():
+                resolved_targets.extend([p for p in rp.rglob("*.py") if p.is_file()])
+        except Exception as e:
+            logger.warning(f"Skipping {tp}: {e}")
+            
+    # Remove duplicates
+    resolved_targets = list({p.resolve(): p for p in resolved_targets}.values())
+    
+    candidates = []
+    non_swarm = []
+    
+    for rp in resolved_targets:
+        try:
+            source = rp.read_text(encoding="utf-8")
+            analytics = await analyze_python_source_full(source)
+            if not analytics.get("parse_ok"):
+                continue
+                
+            rel_path = str(rp.relative_to(workspace))
+            
+            for func in analytics.get("functions", []):
+                focus_node = func.get("focus_node")
+                loc = func.get("loc", 0)
+                complexity = func.get("cyclomatic_complexity", 0)
+                
+                # Filter trivial spans
+                if loc < 15 or complexity <= 3:
+                    non_swarm.append({
+                        "path": rel_path,
+                        "focus_node": focus_node,
+                        "reason": f"trivial span (loc={loc}, complexity={complexity}) -> ide_edit_not_swarm"
+                    })
+                    continue
+                    
+                # Heuristic oracle binding
+                base_name = rp.stem
+                test_file_candidates = []
+                for tr in test_roots:
+                    try:
+                        tr_path = _resolve_workspace_input(tr, "test_root")
+                        if tr_path.is_dir():
+                            # Check tests/test_{base_name}.py
+                            guess = tr_path / f"test_{base_name}.py"
+                            if guess.is_file():
+                                test_file_candidates.append(str(guess.relative_to(workspace)))
+                    except Exception:
+                        pass
+                        
+                if not test_file_candidates:
+                    candidates.append({
+                        "target_path": rel_path,
+                        "focus_node": focus_node,
+                        "searchability": "blocked",
+                        "blockers": ["missing_tests"],
+                        "signals": {"loc": loc, "complexity": complexity}
+                    })
+                else:
+                    # found tests
+                    candidates.append({
+                        "target_path": rel_path,
+                        "focus_node": focus_node,
+                        "searchability": "ready",
+                        "blockers": [],
+                        "suggested_launch": {
+                            "test_target": test_file_candidates[0]
+                        },
+                        "signals": {"loc": loc, "complexity": complexity}
+                    })
+        except Exception as e:
+            logger.warning(f"Failed to analyze {rp}: {e}")
+            
+    # Rank ready candidates by complexity * loc
+    ready = [c for c in candidates if c["searchability"] == "ready"]
+    ready.sort(key=lambda x: x["signals"]["complexity"] * x["signals"]["loc"], reverse=True)
+    ready = ready[:max_targets]
+    
+    # Assign ranks
+    for i, c in enumerate(ready):
+        c["rank"] = i + 1
+        
+    blocked = [c for c in candidates if c["searchability"] == "blocked"]
+    
+    return {
+        "format": "unigrok-swarm-campaign-plan-v1",
+        "candidates": ready + blocked,
+        "non_swarm": non_swarm
+    }
+
+
+
+async def export_swarm_narrow_pr(task_id: str) -> Dict[str, Any]:
+    """Export a narrow PR-shaped payload for the best verified swarm candidate.
+
+    Read-only: builds a unified diff against the live workspace bytes without
+    writing files. Used by contributor tooling to hand a single candidate to a
+    human/supervisor review packet.
+    """
+    task = await store.get_swarm_task(task_id)
+    if not task:
+        return {
+            "format": "unigrok-swarm-narrow-pr-v1",
+            "task_id": task_id,
+            "error": f"no swarm task `{task_id}`",
+            "hash_matches": False,
+        }
+
+    candidates = await store.list_swarm_candidates(task_id)
+    if not candidates:
+        return {
+            "format": "unigrok-swarm-narrow-pr-v1",
+            "task_id": task_id,
+            "error": "no candidates",
+            "hash_matches": False,
+        }
+
+    feasible = [c for c in candidates if c.get("feasible")]
+    pool = feasible or candidates
+    front = _current_front(feasible) if feasible else pool
+    champion = select_champion(front, str(task.get("primary_goal") or "balanced")) if front else None
+    champion_id = str(task.get("champion_id") or "") or (champion["id"] if champion else None)
+    
+    if champion_id:
+        candidate = next((c for c in pool if c["id"] == champion_id), champion)
+    else:
+        candidate = sorted(
+            pool,
+            key=lambda c: (
+                int(c.get("pareto_rank") if c.get("pareto_rank") is not None else 10**9),
+                -float(c.get("crowding") or 0.0),
+            ),
+        )[0]
+
+    target_path = str(task.get("target_path") or "")
+    try:
+        target = _task_target(task)
+        live = target.read_bytes()
+    except (ValueError, FileNotFoundError, PermissionError, OSError) as exc:
+        return {
+            "format": "unigrok-swarm-narrow-pr-v1",
+            "task_id": task_id,
+            "candidate_id": candidate.get("id"),
+            "error": f"cannot read target: {exc}",
+            "hash_matches": False,
+        }
+
+    hash_matches = hashlib.sha256(live).hexdigest() == task.get("base_file_hash")
+    start = int(candidate.get("byte_start") or 0)
+    end = int(candidate.get("byte_end") or 0)
+    if not (0 <= start <= end <= len(live)):
+        start, end = 0, len(live)
+    original = live[start:end].decode("utf-8", errors="replace")
+    proposed = str(candidate.get("code") or "")
+    diff = "".join(
+        difflib.unified_diff(
+            original.splitlines(keepends=True),
+            proposed.splitlines(keepends=True),
+            fromfile=f"a/{target_path}",
+            tofile=f"b/{target_path}",
+        )
+    )
+
+    return {
+        "format": "unigrok-swarm-narrow-pr-v1",
+        "task_id": task_id,
+        "primary_goal": str(task.get("primary_goal") or "balanced"),
+        "candidate_id": candidate.get("id"),
+        "target_path": target_path,
+        "focus_node": task.get("focus_node"),
+        "hash_matches": hash_matches,
+        "diff": diff,
+        "verification": {
+            "latency_ms": candidate.get("latency_ms"),
+            "peak_mem_bytes": candidate.get("peak_mem_bytes"),
+            "diff_bytes": candidate.get("diff_bytes"),
+            "feasible": bool(candidate.get("feasible")),
+            "pareto_rank": candidate.get("pareto_rank"),
+            "crowding": candidate.get("crowding"),
+            "mutator": candidate.get("mutator"),
+        },
+    }
+
+
 def register_swarm_tools(mcp: FastMCP) -> None:
     mcp.add_tool(analyze_code_for_swarm, annotations=READONLY_TOOL)
+    mcp.add_tool(plan_swarm_campaign, annotations=READONLY_TOOL)
     mcp.add_tool(start_code_swarm)
     mcp.add_tool(start_paste_swarm)
     mcp.add_tool(get_swarm_status, annotations=READONLY_TOOL)
     mcp.add_tool(list_swarm_tasks, annotations=READONLY_TOOL)
     mcp.add_tool(apply_swarm_winner, annotations=DESTRUCTIVE_TOOL)
     mcp.add_tool(cancel_swarm)
+    mcp.add_tool(export_swarm_narrow_pr, annotations=READONLY_TOOL)
 
 
 register_internal_tool("analyze_code_for_swarm", analyze_code_for_swarm)
+register_internal_tool("plan_swarm_campaign", plan_swarm_campaign)
 register_internal_tool("start_code_swarm", start_code_swarm)
 register_internal_tool("start_paste_swarm", start_paste_swarm)
 register_internal_tool("get_swarm_status", get_swarm_status)
 register_internal_tool("list_swarm_tasks", list_swarm_tasks)
 register_internal_tool("apply_swarm_winner", apply_swarm_winner)
 register_internal_tool("cancel_swarm", cancel_swarm)
+register_internal_tool("export_swarm_narrow_pr", export_swarm_narrow_pr)

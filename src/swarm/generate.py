@@ -31,18 +31,24 @@ async def generate_mutation(
     *,
     remaining_budget_usd: float,
     session: Optional[str] = None,
+    model_provider: Optional[str] = None,
 ) -> GenerationResult:
-    """One toolless completion, strictly on the CLI subscription plane."""
+    """One toolless completion, supporting cross-model routing if model_provider is set."""
     _ = remaining_budget_usd  # retained in the injectable engine contract
     from ..utils import run_agent_turn
+    
+    # If a specific provider is requested, use auto plane routing. Otherwise enforce free CLI.
+    requested_plane = "auto" if model_provider else "cli"
+    fallback = "cross_plane" if model_provider else "same_plane"
 
     layer = await run_agent_turn(
         prompt=prompt,
         system_prompt=system_prompt,
-        mode="fast",
+        model=model_provider,
+        mode="fast" if not model_provider else "auto",
         enable_agentic=False,
-        plane="cli",
-        fallback_policy="same_plane",
+        plane=requested_plane,
+        fallback_policy=fallback,
         session=session,
         caller="swarm",
         cli_no_plan=True,
@@ -52,11 +58,19 @@ async def generate_mutation(
     )
     plane = str(getattr(layer, "plane", "") or "unknown")
     cost = float(getattr(layer, "cost_usd", 0.0) or 0.0)
-    if plane not in {"CLI", "CLI-Fallback"} or not math.isfinite(cost) or cost != 0.0:
-        raise BudgetExceeded(
-            "swarm generation refused a non-CLI or charged result "
-            f"(plane={plane!r}, cost=${cost:.4f})"
-        )
+    
+    # If no provider was specified, strictly enforce $0 CLI contract
+    if not model_provider:
+        if plane not in {"CLI", "CLI-Fallback"} or not math.isfinite(cost) or cost != 0.0:
+            raise BudgetExceeded(
+                "swarm generation refused a non-CLI or charged result "
+                f"(plane={plane!r}, cost=${cost:.4f})"
+            )
+    else:
+        if cost > remaining_budget_usd:
+            raise BudgetExceeded(
+                f"swarm generation exceeded budget (cost=${cost:.4f}, remaining=${remaining_budget_usd:.4f})"
+            )
     if str(getattr(layer, "finish_reason", "") or "") not in {
         "final_answer", "fallback"
     }:

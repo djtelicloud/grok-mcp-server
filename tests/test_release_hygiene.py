@@ -429,3 +429,40 @@ def test_agent_rules_allow_draft_pr_submission_but_reserve_final_integration():
     assert "GitHub Copilot" in claude_rules
     assert "Codex Integration Owner" in gemini_rules
     assert "scripts/land" in copilot_rules
+
+
+def test_dual_supervisor_land_law_is_consistent() -> None:
+    """Cursor may land green low/medium work; high-risk stays Codex."""
+    shared = (ROOT / ".agents" / "AGENTS.md").read_text(encoding="utf-8")
+    rules = (
+        ROOT / ".cursor" / "rules" / "cursor-automations-single-pass.mdc"
+    ).read_text(encoding="utf-8")
+    design = (ROOT / "docs" / "design" / "dual-supervisor-land.md").read_text(
+        encoding="utf-8"
+    )
+    contributing = (ROOT / "CONTRIBUTING.md").read_text(encoding="utf-8")
+
+    shared_failover = next(
+        line for line in shared.splitlines() if line.startswith("- **Low/medium land path")
+    )
+    cursor_failover = next(
+        line for line in rules.splitlines() if line.startswith("- **Low/medium land path")
+    )
+    codex_owner = next(
+        line for line in shared.splitlines() if line.startswith("- **Codex Owns")
+    )
+
+    assert "Dual supervisor (Codex + Cursor)" in shared
+    assert "Low/medium land path (when Codex is busy or out of credits)" in shared
+    assert "Low/medium land path (when Codex is busy or out of credits)" in rules
+    assert "One land owner per PR head" in shared or "one land owner" in shared.lower()
+    assert "low/medium" in design.lower()
+    assert "Codex Approval" in design
+    assert "risk: low|medium|high" in design
+    assert "dual-supervisor" in contributing.lower() or "Dual supervisor" in contributing
+    assert shared_failover == cursor_failover
+    assert "Bugbot and Security Reviewer complete" in shared_failover
+    assert "Supervisor Approval" in shared_failover
+    assert "scripts/land" in codex_owner
+    assert "merge to shared `main` except through the fully gated dual-supervisor low/medium-risk path" in codex_owner
+    assert "permits only a protected low/medium-risk merge" in codex_owner

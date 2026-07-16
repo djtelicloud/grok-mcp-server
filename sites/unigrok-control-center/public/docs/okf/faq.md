@@ -36,6 +36,42 @@ Enable the server under Cursor **Settings → MCP**. Cursor and the gateway must
 run on the same machine: `localhost` inside a remote development container or
 SSH host refers to that remote environment, not your laptop.
 
+## How do I connect VS Code Copilot to both the stable and Forge lanes? {#vscode-copilot-connect}
+
+**Keywords:** vscode, copilot, forge, mcp.json, dual lane, vscode-forge
+
+Use `.vscode/mcp.json` for a repository-local setup or the user-level VS Code
+MCP config when you want the same lanes in every workspace:
+
+```json
+{
+  "servers": {
+    "unigrok": {
+      "type": "http",
+      "url": "http://localhost:4765/mcp",
+      "headers": { "X-Client-ID": "vscode" }
+    },
+    "unigrok-forge": {
+      "type": "http",
+      "url": "http://localhost:4766/mcp",
+      "headers": { "X-Client-ID": "vscode-forge" }
+    }
+  }
+}
+```
+
+Use `unigrok` on port `4765` for ordinary Copilot chat and other
+workspace-neutral requests. Add `unigrok-forge` on port `4766` only while
+developing UniGrok itself, where you need repository-mounted file/git/test
+tools, workspace memory, or Swarm. Keep `XAI_API_KEY` out of the IDE config:
+credentials belong to the server-side `.env` or the authenticated Grok CLI
+plane.
+
+For day-to-day use, start with `agent(mode="fast")` or the default `auto`
+route on the stable lane and escalate to `reasoning` only when the repo state,
+tool surface, or model routing needs a deeper pass. Reload the VS Code window
+after adding the Forge lane if the tool list still looks stale.
+
 ## Do I need an xAI API key in every IDE? {#shared-api-key}
 
 **Keywords:** api key, xai api key, credentials, ide, shared gateway
@@ -167,6 +203,73 @@ CLI-first selection uses the model ids returned by the authenticated live
 `grok models` probe. It never assumes a previously known subscription model
 still exists; the current catalog's default is preferred for reasoning and its
 composer model for coding.
+
+## Why did thinking or research fail on the CLI plane? {#api-only-modes}
+
+**Keywords:** thinking, research, vision, api-only, same_plane, cli plane,
+cli-incompatible, same_plane_capability_incompatible, deep think
+
+`mode="thinking"`, multi-agent `mode="research"`, and vision routes are
+**API-native**. They need the metered xAI API plane (and a configured
+`XAI_API_KEY` on the server), not the SuperGrok CLI subscription alone.
+
+If you call `agent` with `plane="cli"` and `fallback_policy="same_plane"` while
+requesting one of those capabilities, UniGrok **fails closed** before spend.
+The receipt looks like:
+
+- `finish_reason`: `error`
+- `model`: `cli-incompatible`
+- `routing.why_detail`: `same_plane_capability_incompatible`
+- message telling you to choose `plane="api"` or `plane="auto"`
+
+What to do:
+
+1. For deep-think / reflection: `mode="thinking"` with `plane="api"` (or
+   `plane="auto"` when the API key is configured so routing may land on API).
+2. For citation-backed research: `mode="research"` the same way — still
+   API-native.
+3. For subscription-only work: stay on CLI with `mode="fast"`, `mode="auto"`,
+   or `mode="reasoning"` (planning on the live CLI catalog). Do not pin
+   thinking/research to CLI under `same_plane`.
+
+This is not a CLI outage. Compatible CLI chat can still be Ready while
+API-only modes correctly refuse a CLI-only pin.
+
+## Why did CLI reasoning fail after a fast/composer turn on the same session? {#cli-model-switch-session}
+
+**Keywords:** MODEL_SWITCH_INCOMPATIBLE_AGENT, agent type sticky, native
+session, grok-build-plan, cursor agent, composer, reasoning, same_plane,
+session recovery, start_new_session
+
+The Grok CLI binds an **agent type** to each native CLI conversation. A
+`mode="fast"` / composer turn may leave the native session on agent type
+`cursor`. A later `mode="reasoning"` turn on the **same logical `session`**
+needs `grok-4.5` with agent type `grok-build-plan`. The CLI then rejects the
+model switch with `MODEL_SWITCH_INCOMPATIBLE_AGENT` and suggests starting a
+new native session.
+
+UniGrok recovers automatically when the stable service is on a build that
+includes the model-switch recovery path (`src/utils.py`):
+
+1. Detect `MODEL_SWITCH_INCOMPATIBLE_AGENT` (and related “couldn't set model /
+   requires agent” wording).
+2. Open a **fresh** native CLI `--session-id` (do not `--fork-session` — fork
+   keeps the sticky agent binding).
+3. Replay bounded **server-side** history into that fresh session so the
+   logical MCP `session` name still continues.
+
+What callers should do:
+
+1. Prefer keeping a stable logical `session` name; let UniGrok rebind the
+   native CLI id under the hood.
+2. If an older image still surfaces the raw CLI error, rebuild/restart the
+   stable container from current `main`, or use a **new** logical `session`
+   name for the planning turn as a temporary workaround.
+3. Do not treat this as a billing-plane failure — both turns can stay on CLI
+   with `fallback_policy="same_plane"`.
+
+Fresh sessions are always fine: `mode="reasoning"` + `plane="cli"` +
+`same_plane` succeeds when the live CLI catalog has a planning model.
 
 ## What should an IDE agent do when a credential plane is unavailable? {#credential-plane-actions}
 

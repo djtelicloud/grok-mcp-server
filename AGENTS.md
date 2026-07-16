@@ -1,5 +1,13 @@
 # AGENTS.md
 
+## Talk to humans first
+
+Before anything else: **short plain answers**. Brand + status + what it is.
+No diffs, logs, or git lectures unless the human asked. Full law:
+[.agents/AGENTS.md](.agents/AGENTS.md) → **Talk to humans first** / **Human language**.
+
+---
+
 Guidance for Codex working in **uni-grok-mcp**. Shared multi-agent rules
 (git coordination, endpoint, credentials boundary) live in
 [.agents/AGENTS.md](.agents/AGENTS.md) — this file adds Codex-specific
@@ -40,10 +48,11 @@ plane requests should use `fallback_policy=same_plane` when crossing credential
 planes is forbidden; `cross_plane` permits bounded failover. The CLI execution
 adapter does not expose the full API ReAct local-tool loop. `_call_plane`
 invokes the headless CLI with
-`--output-format json` or `streaming-json`, deterministic `--session-id`
-creation and `--resume` continuation, optional `--json-schema`, `--effort`,
-and `--max-turns`, plus `grok --check` for plane readiness. Native CLI sessions
-are the continuity mechanism;
+`--output-format json` or `streaming-json`, per-session `--session-id`
+creation and `--resume` continuation (with `--fork-session` on collision — the
+native id is stored per session, not a deterministic hash), optional
+`--json-schema`, `--effort`, and `--max-turns`, plus a `grok models` probe for
+plane readiness. Native CLI sessions are the continuity mechanism;
 the old `grok sessions list` scrape and fragile regex session sync are gone.
 Still-unintegrated CLI surfaces include `grok agent stdio|serve|leader` and
 `--best-of-n`. Treat the CLI as ground truth when unifying the two planes.

@@ -80,6 +80,19 @@ coverage, and bounded repair actions. Agents must ask the user before running
 installation, device-auth, or secret-configuration actions and suppress repeat
 prompts until the notice id changes.
 
+## IDE session checks
+
+For VS Code Copilot and other IDE clients, use the metadata returned by the
+public `agent` tool and `grok_mcp_status(view="json")` to confirm the session
+is behaving as expected:
+
+- Verify `model`, `route`, `plane`, `why`, `degraded`, `cost_usd`, and
+  `latency_sec` after a request instead of inferring behavior from prose.
+- Use `credentials.notices` and the shared `credential_planes` object to decide
+  whether to prompt for CLI auth, API configuration, or no action at all.
+- Treat `X-Client-ID` as a reporting/session label for dashboards and budgets,
+  not as a credential or permission grant.
+
 ## Circuit Breakers & Failover
 
 The gateway maintains per-model circuit breakers to prevent repeated xAI API

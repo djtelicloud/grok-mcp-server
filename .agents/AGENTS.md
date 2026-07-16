@@ -1,5 +1,25 @@
 # Workspace Rules
 
+## Talk to humans first (mandatory — all brands)
+
+New users and sponsors are **not** git operators. Many readers (including people
+with dyslexia) find walls of diffs, logs, and VCS jargon **hostile**. Chat
+pollution is a **product bug**.
+
+**Every user-facing reply:**
+
+1. Lead with **who** (your brand) + **status** + **plain English task title**
+2. Status words only: **Ready for supervisor** / **Not ready** / **Live** /
+   **Not live** / **Blocked**
+3. One short outcome line is enough. A link may follow; ticket numbers only as
+   `(#N)` at the end — **never** lead with them
+4. **Do not** paste diffs, patches, tool dumps, full logs, SHAs, or step-by-step
+   “I’m checking…” essays unless the human **asked** for technical detail
+5. New chats **do not** keep history — re-read this file and rehydrate from disk
+
+Full intent map: **Human language** below. Layout for CLI/TUI hosts:
+[terminal markdown pack](../docs/public-intelligence/packs/v0-terminal-markdown-authoring.md).
+
 ## Session rehydrate (new chats)
 
 - **Start inside this product checkout** (or an agent worktree), not `$HOME`.
@@ -26,6 +46,13 @@ changes or user-requested live updates. Required boot summaries, safety prompts,
 and blocking questions are explicit exceptions.
 - Prefer UniGrok MCP CLI/`fast` for hard judgment; keep visible output tiny.
   Insider silent-think doctrine is private (not public default).
+- **Terminal markdown (layout law):** when the host is a CLI/TUI, author user-
+  facing replies as portable GFM structure (short lead line, sparse bullets or
+  small tables, fenced dumps, paths/links). Do not use raw HTML as the primary
+  chat UI. Themes paint colors; agents do not invent color languages. Full
+  guide: [docs/public-intelligence/packs/v0-terminal-markdown-authoring.md](../docs/public-intelligence/packs/v0-terminal-markdown-authoring.md).
+  Human radio (Ready/Live/titles) remains the content law — this is only how
+  that text is shaped.
 - **Public intelligence packs:** distilled gym wins for clones live under
   `docs/public-intelligence/`. After Live work, ask once: promote a scrubbed
   pack/skill? Never auto-sync private intelligence or raw memory to public.
@@ -95,7 +122,8 @@ Not live / Blocked / Who (brand)** plus the **task title**.
 ## Multi-Agent Git Coordination
 - **PR-First Contribution Record**: Every change to `origin/main` goes through a pull request. After local verification, an authorized IDE agent may push only its own agent-prefixed task branch and open or update a draft pull request. If that agent lacks GitHub credentials, it hands Codex the exact commit so an authorized Codex session can publish the same branch and draft PR. A commit-only handoff is pre-PR evidence, not a substitute for the PR.
 - **Humans Accountable, Agents Traceable**: The sponsoring GitHub user remains the accountable contributor. Record material IDE/model work with the canonical `Agent-Assisted-By:` trailer and advisory review with `Agent-Reviewed-By:` as defined in [docs/agent-attribution.md](../docs/agent-attribution.md). Never invent `Co-authored-by` identities: use that trailer only for a real person's linked GitHub email or an exact bot identity in `.github/agent-identities.json`.
-- **Codex Owns Final Integration**: The Codex/project-admin role is independent of interface: Codex Desktop, CLI, GitHub Copilot, or another authorized Codex session may perform it. Contributor agents may inspect, edit, test, commit, push their own agent-prefixed branch, and open or update its draft PR. They must not push shared `main`, run `scripts/land`, merge, rebase shared `main`, or publish releases or deployments unless they are explicitly acting as the Codex/project-admin integration session. Exception: a contributor **may remove only its own finished disposable scratchpad** (see Worktree lifecycle); never delete peers’ live trees or the primary main checkout.
+- **Codex Owns Final Integration**: The Codex/project-admin role is independent of interface: Codex Desktop, CLI, GitHub Copilot, or another authorized Codex session may perform it. Contributor agents may inspect, edit, test, commit, push their own agent-prefixed branch, and open or update its draft PR. They must not push shared `main`, merge to shared `main` except through the fully gated dual-supervisor low/medium-risk path below, run `scripts/land`, rebase shared `main`, or publish releases or deployments unless they are explicitly acting as the Codex/project-admin integration session. The separate dual-supervisor path permits only a protected low/medium-risk merge after its full gates; it does not grant contributors `scripts/land`, shared-main rebase, release, or deploy authority. Exception: a contributor **may remove only its own finished disposable scratchpad** (see Worktree lifecycle); never delete peers’ live trees or the primary main checkout.
+- **Dual supervisor (Codex + Cursor):** Codex remains default for **high** risk, `scripts/land` culture, release/deploy, and exact-head **Codex Approval** when required. When Codex is busy or out of credits, **Cursor Cloud/Grok 4.5 Fast** may land **green low/medium-risk** packets after Bugbot + Security + Approver single-pass, green required CI, CODEOWNERS review, and exact-head `Supervisor Approval`. One land owner per PR head. High-risk work (credentials, land scripts, branch protection, release/deploy, public MCP final-answer path) stays Codex/human. See [docs/design/dual-supervisor-land.md](../docs/design/dual-supervisor-land.md).
 - **Shared Main Checkout**: Primary product folder stays on integrated `main`. Agents do not thrash it for experiments.
 - **Do Not Branch-Switch the Shared Folder**: Parallel work uses separate scratchpads so other IDEs keep a stable main folder.
 - **Worktrees Are Disposable Scratchpads**: One task, one contained tree only — under `<repo>/.worktrees/<agent>/<task>/` or `/tmp/unigrok-<agent>-<task>/`. Never sibling clutter like `Documents/…/grok-<feature>/` next to the real repo.
@@ -122,7 +150,9 @@ These rules apply to Cursor Automations and Bugbot Autofix on this repo:
 - **No branch thrash.** Stay on the PR head you were given. Do not create extra branches/PRs unless the automation’s job is explicitly Autofix and a fix commit is required.
 - **One action per head SHA.** Post at most one approval **or** one concise review comment for a given PR head. If an active run for the same automation + head already exists, exit without duplicating work.
 - **Ignore bot echo.** Do not re-trigger meaningful work solely because `cursor[bot]`, Bugbot, Copilot, Gemini, or Codex left a review comment.
-- **Approver path:** wait for Cursor Bugbot to finish; require green required checks; approve only low-risk diffs with no unresolved medium/high Bugbot findings; otherwise comment blockers and stop.
+- **Approver path:** wait for Cursor Bugbot to finish; require green required checks; approve low/medium diffs with no unresolved medium/high Bugbot findings; block high-risk diffs and stop.
+- **Low/medium land path (when Codex is busy or out of credits):** after Bugbot and Security Reviewer complete, and after Approver approval on an undrafted Ready packet, Cursor merger may merge **green low/medium** only if the risk-aware `Supervisor Approval` status and branch protection allow (CI green; reviews satisfied; no open medium/high findings). Do not merge high-risk. Do not thrash with Codex on the same head—one land owner. If `Supervisor Approval` is missing, comment the exact blocker; do not invent an admin bypass.
+- **High-risk path:** comment blockers and stop; Codex (or human) owns land through exact-head `Codex Approval`.
 - **Security Reviewer path:** inspect the PR diff + existing review threads once; report only actionable unresolved security findings; exit cleanly. Never attempt multi-module orchestration.
 - **Bugbot Autofix path:** apply the minimal doc/code fix for the cited finding on the existing PR branch; commit and push that branch only.
 - **Autofix fidelity:** one cited finding → one minimal fix → one push on the given PR head. Do not reopen review modules, spawn peers, or “also fix” adjacent nits. If another Autofix / Approver / Security run is already active for this head, exit.

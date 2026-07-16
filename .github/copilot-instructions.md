@@ -1,5 +1,11 @@
 # GitHub Copilot instructions for UniGrok
 
+## Talk to humans first
+
+**Short plain answers** in chat. Brand + Ready/Live/Blocked + plain task title.
+No diffs, tool dumps, or git lectures unless the human asked. Full law:
+`.agents/AGENTS.md` → **Talk to humans first** / **Human language**.
+
 Read `AGENTS.md` and `.agents/AGENTS.md` before changing this repository. Their
 shared rules are authoritative.
 
@@ -13,6 +19,13 @@ On **rehydrate** / **boot** / first message after IDE reset, follow
 `.agents/skills/session-rehydrate/SKILL.md`. After the short status table you
 **must** emit **Next smartest steps (Copilot)** (or Kimi if that is the host
 model brand) with **1–2 concrete offers**. A table-only rehydrate is incomplete.
+
+> [!IMPORTANT]
+> **Glossary: Do not conflate "Hydrate" concepts**
+> - **Session Rehydrate**: Booting intelligence from git/disk across chats.
+> - **Process / Telemetry Hydration**: Recovering bounded in-memory runtime state from the configured durable store after restart (`src/hydration.py`).
+> - **Hydration Lanes / Scratchpads**: Disposable Git worktrees used for contributor isolation.
+> Never mix these up; they are three completely separate boundaries.
 
 - **Your strengths:** VS Code in-editor speed; this file’s fidelity; VS Code MCP
   client setup; plain-title human radio for sponsor status.
@@ -42,3 +55,13 @@ required checks, use a `codex/*` integration branch, run `./scripts/land`,
 complete the protected GitHub merge, and synchronize local `main` with
 `origin/main`. Opening a PR or passing tests alone is never integrated
 completion.
+
+## Cursor Automations role gate (VS Code Copilot is not an automation role)
+
+The single-pass Automations law in `.agents/AGENTS.md` and its
+`.cursor/rules/cursor-automations-single-pass.mdc` mirror apply **only** to
+Cursor Automations and Bugbot Autofix roles (PR Approver, Security Reviewer,
+Bugbot Autofix). VS Code Copilot / interactive Composer chat is not an
+automation role — do not treat those rules as commit/push authorization here.
+Keep their automation-role bullets aligned when editing either file, but do not
+expand them into general Copilot instructions.

@@ -157,6 +157,19 @@ own `cursor` / `cursor-forge` labels in `~/.cursor/mcp.json` or
 [`.cursor/rules/cursor-automations-single-pass.mdc`](../.cursor/rules/cursor-automations-single-pass.mdc)
 encodes PR Approver / Security Reviewer / Bugbot Autofix single-pass discipline.
 
+### Cursor attribution smoke (live check)
+
+After connect, prove the label from inside Cursor (not from docs alone):
+
+1. Call `grok_mcp_discover_self` and confirm `data.request_context.client_id_present`
+   is true and `client_id_normalized` is `cursor` (or `cursor-forge` on the
+   Forge entry).
+2. Note `grok_mcp_status` Top Callers baseline, then run one cheap
+   `agent` call with `mode=fast` and a unique session marker.
+3. Re-check Top Callers: `http:anon|cursor` (or `|cursor-forge`) should
+   increase by one. Bare `http:anon` means some other client omitted
+   `X-Client-ID` — it is not the healthy Cursor path above.
+
 ### Bugbot Autofix live fidelity smoke
 
 After the Autofix fidelity contract is Live, verify Automations still obey it
@@ -197,18 +210,44 @@ project `.cursor/mcp.json` so the two IDEs do not thrash labels.
 
 ### Cursor multi-model vs UniGrok planes
 
-Cursor may list **non-Grok** models for native chat (Claude, GPT, etc.). Those
-paths are **Cursor-native billing and routing** — they are not UniGrok planes
-and will not appear on Control Center → **Planes**.
+Cursor may list **native** models for Composer/chat (including **Grok 4.5**,
+Claude, GPT, etc.). Those paths are **Cursor-native billing and routing** —
+they are not UniGrok credential planes and will not appear on Control Center →
+**Planes**.
 
-| Path | Who bills / routes | Where you see models |
-|------|--------------------|----------------------|
-| Cursor native multi-model | Cursor / that provider | Cursor model picker |
-| UniGrok MCP `agent` | UniGrok CLI sub and/or xAI API key | Control Center **Planes** + MCP |
+| Path | Who bills / routes | Where you see models | Use when |
+|------|--------------------|----------------------|----------|
+| Cursor-native Grok 4.5 (Composer) | Cursor / xAI via Cursor | Cursor model picker | Ordinary IDE-local edits and Automations loops |
+| Cursor native non-Grok | Cursor / that provider | Cursor model picker | You intentionally want a non-Grok host model |
+| UniGrok MCP `agent` (default route) | UniGrok CLI sub and/or xAI API key | Control Center **Planes** + MCP | Shared Grok, `@grok` peer review, dual-plane cost/route receipts |
+| UniGrok MCP `agent` pinned `grok-build-0.1` | UniGrok API plane (model pin; no new plane) | Control Center **Planes** + MCP | Code-heavy implementation via UniGrok |
 
-Use UniGrok when you want shared Grok across every IDE, server-side keys,
-CLI-first policy, exact API cost, and `@grok` peer review. Use Cursor’s own
-picker when you intentionally want a non-Grok host model.
+**Decision card (Cursor Grok 4.5 session):**
+
+- Stay on **Cursor-native Grok 4.5** for ordinary Composer coding and
+  Automations work inside this IDE.
+- Call **UniGrok** (`agent` / `@grok`) when you need cross-IDE continuity,
+  CLI vs API plane truth, metered cost receipts, or a second opinion that
+  other brands can also query through `http://localhost:4765/mcp`.
+- Pin **`grok-build-0.1`** on UniGrok `agent` for code-heavy implementation —
+  it selects an API-plane model, not a separate credential plane.
+- Do not treat Cursor-native Grok 4.5 as a UniGrok plane — Control Center will
+  not show that spend under **Planes**.
+
+#### Live routing receipt (Cursor Build exercise)
+
+Same micro-prompt run once pinned to Build and once on UniGrok `fast`
+(2026-07-15, caller `cursor`):
+
+| Lane | Model | Plane | Cost | Note |
+|------|-------|-------|------|------|
+| UniGrok Build pin | `grok-build-0.1` | API | metered (~$0.004) | Short bullets; weaker plane disclaimer |
+| UniGrok fast | `grok-composer-2.5-fast` | CLI | subscription $0 | Clearer “not a separate plane” bullet |
+| Cursor Composer | Grok 4.5 | Cursor-native | Cursor billing | Applied one Autofix-style docs fix from a cited gap |
+
+This section consolidates the Cursor Ready fragment packets (attribution smoke,
+native vs UniGrok routing, Build pin + receipt). Codex may close or squash
+those drafts when this lands; leave Claude / Copilot / Gemini packets alone.
 
 ## Claude Code (CLI)
 
@@ -264,8 +303,13 @@ check `codex mcp --help`. Keep the server name as `grok`; this repo's
 `.codex/mcp/grok-routing.json` and Codex intelligence config route to the
 `mcp__grok` tool namespace.)
 
-## Antigravity / Gemini (`settings.json` → MCP servers)
+## Antigravity / Gemini (`.gemini/settings.json`)
 
+Antigravity configures its MCP servers in the tracked project file `.gemini/settings.json`.
+The configuration natively sets `allowNonWorkspaceAccess: false` and restricts tool access to `mcp(grok/*)` to ensure the agent cannot mutate the host outside of the worktree.
+
+> [!WARNING]
+> **Tracked Configs Only**: Never replace the repository's `.gemini/config.json` or `.gemini/settings.json` with a private host credential file (like your `~/.gemini/config`). These files must remain public project configuration.
 ```json
 {
   "mcpServers": {
@@ -280,6 +324,12 @@ check `codex mcp --help`. Keep the server name as `grok`; this repo's
   }
 }
 ```
+
+> [!WARNING]
+> **Secret & Worktree Safety**
+> - **No Secrets in Configs**: Never copy `XAI_API_KEY`, Google ADC credentials, or host `~/.gemini/config` files into this repository or the IDE MCP config JSON. 
+> - **Isolated Worktrees**: Operate inside `.worktrees/gemini/<task>/` (or the provider home). Do not pollute Documents with loose checkouts or mutate the primary shared `main` checkout.
+
 
 > [!NOTE]
 > IDEs cache MCP schemas. After adding or changing a tool, reconnect the Forge
@@ -331,6 +381,15 @@ selected route or plane.
 The local CLI plane works **inside the container**: the image bakes the Linux
 `grok` binary (version-pinned in the Dockerfile), while compose persists its
 machine-level OAuth session in the dedicated `unigrok-cli-auth` Docker volume.
+
+**Session continuity note:** UniGrok maps each logical MCP `session` name to a
+native CLI conversation id. The CLI binds an agent type to that native id, so
+composer/`fast` then planning/`reasoning` on the same logical session may hit
+`MODEL_SWITCH_INCOMPATIBLE_AGENT`. Current builds recover by opening a fresh
+native session and replaying server-side history (fork would keep the sticky
+agent). If you still see the raw CLI error after a mode switch, rebuild the
+stable image from current product `main` so recovery code is loaded.
+
 Authenticate that service identity once with:
 
 ```bash

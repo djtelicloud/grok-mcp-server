@@ -19,8 +19,15 @@ Call `agent` with:
 - `mode` (optional): `auto` (default), `fast` (single-turn, cheapest),
   `reasoning` (multi-step planner), `thinking` (reflected agent loop), or
   `research` (citation-grounded fanout).
-- `model` (optional): pin a Grok model id such as `grok-4.5`; leave unset to
-  let routing choose.
+- `model` (optional): pin a **live catalog** Grok model id such as `grok-4.5`
+  or API coding slug `grok-build-0.1`; leave unset to let routing choose.
+  Never invent ids from product names. The Grok Build IDE product is not the
+  same identity as `grok-build-0.1`.
+- `plane` (optional): `auto` (default policy, usually `cli_first`), `cli`
+  (SuperGrok subscription), or `api` (metered developer API). Only these three
+  public plane values exist — never invent foreign provider planes.
+- `fallback_policy` (optional): `cross_plane` (default, bounded recovery) or
+  `same_plane` (forbid billing-boundary cross).
 - `session` (optional): a stable, project-qualified key such as
   `owner-repo:task` for multi-turn continuity. Do not reuse a generic session
   key across repositories.
@@ -38,8 +45,35 @@ search grounding was used.
 
 - Quick factual or single-file questions → `fast`.
 - Design reviews, audits, multi-step analysis → `reasoning`.
-- Tasks needing self-critique → `thinking`.
-- Current-events or source-cited answers → `research` (uses web + X search).
+- Tasks needing self-critique → `thinking` (**API-only**; use `plane="api"` or
+  `plane="auto"` with a configured server API key — never `plane="cli"` +
+  `fallback_policy="same_plane"`).
+- Current-events or source-cited answers → `research` (**API-only** multi-agent
+  fan-out; same plane rule as thinking). Vision routes follow the same rule.
+
+If a receipt shows `cli-incompatible` /
+`same_plane_capability_incompatible`, switch to API (or auto) rather than
+retrying the same CLI pin.
+
+## Multi-agent / research fan-out (not local subagent spawn)
+
+UniGrok’s public multi-agent surface is **not** a Grok-Build-style local
+`spawn_subagent` tree. Use these product facts:
+
+1. **`agent(mode="research")`** — requests **server-side** xAI multi-agent
+   fan-out. `agent_count` is only **4 or 16** (env
+   `UNIGROK_RESEARCH_AGENT_COUNT`; invalid values fall back to 4). Citations
+   return under `citations` when present. Fan-out is **not** orchestrated as
+   local child agents in the UniGrok process.
+2. **`submit_research_job(..., agent_count=4|16)`** — deferred research with
+   the same 4|16 bound; illegal counts are rejected at the tool boundary.
+3. **CLI isolation** — contributor/headless paths that set `cli_isolated`
+   always pass **`--no-subagents`** (plus no-memory / no web / dontAsk) so
+   ambient CLI subagents cannot leak into isolated work.
+
+Other modes (`auto` / `fast` / `reasoning` / `thinking`) do **not** set
+research `agent_count`. Do not invent a public MCP tool named
+`spawn_subagent` for ordinary installs.
 
 ## Parallel ship (contributor, private)
 

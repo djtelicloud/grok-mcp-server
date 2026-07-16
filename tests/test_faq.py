@@ -17,6 +17,7 @@ def test_faq_document_parses_release_versioned_entries():
     assert index.source_version == "0.6.0"
     assert index.get("cursor-connect") is not None
     assert index.get("CURSOR CONNECT") is not None
+    assert index.get("vscode-copilot-connect") is not None
 
 
 def test_faq_document_rejects_entries_without_keywords():
@@ -43,6 +44,36 @@ async def test_agent_faq_lookup_returns_verified_cursor_context():
     assert result["count"] >= 1
     assert result["matches"][0]["id"] == "cursor-connect"
     assert ".cursor/mcp.json" in result["matches"][0]["answer_excerpt"]
+
+
+@pytest.mark.asyncio
+async def test_agent_faq_lookup_returns_verified_vscode_dual_lane_context():
+    result = json.loads(
+        await lookup_unigrok_faq("How do I connect VS Code Copilot to stable and Forge lanes?")
+    )
+
+    assert result["source_uri"] == "grok://faq"
+    assert result["count"] >= 1
+    assert result["matches"][0]["id"] == "vscode-copilot-connect"
+    assert "vscode-forge" in result["matches"][0]["answer_excerpt"]
+    assert "agent(mode=\"fast\")" in result["matches"][0]["answer_excerpt"]
+
+
+@pytest.mark.asyncio
+async def test_agent_faq_lookup_returns_api_only_mode_plane_guidance():
+    result = json.loads(
+        await lookup_unigrok_faq(
+            "Why did thinking or research fail on the CLI plane with same_plane?"
+        )
+    )
+
+    assert result["source_uri"] == "grok://faq"
+    assert result["count"] >= 1
+    assert result["matches"][0]["id"] == "api-only-modes"
+    excerpt = result["matches"][0]["answer_excerpt"]
+    assert "API-native" in excerpt or "API-only" in excerpt or "API" in excerpt
+    assert "same_plane" in excerpt
+    assert "cli-incompatible" in excerpt or "same_plane_capability_incompatible" in excerpt
 
 
 @pytest.mark.asyncio

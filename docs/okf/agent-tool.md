@@ -114,11 +114,14 @@ Dedicated tool wrapping a ReAct AgentLoop in a schema-enforced reflection review
    cached live catalog filters API candidates; mature local evidence can
    replace a stable default only after clearing the quality margin.
 2. **Fast path (`fast`)**: Toolless single turn.
-3. **Reasoning path (`reasoning`)**: Enforces planning model.
-4. **Thinking path (`thinking`)**: Executes thinking loop with reflection review.
+3. **Reasoning path (`reasoning`)**: Enforces planning model. Compatible on the
+   CLI plane when the live CLI catalog has a planning model.
+4. **Thinking path (`thinking`)**: Executes thinking loop with reflection
+   review. **API-native** — not available as a CLI-only pin under
+   `fallback_policy="same_plane"`.
 5. **Research mode (`research`)**: Selects the live Grok 4.20 multi-agent model,
    triggers fan-out (agent count 4 or 16), and collects inline sources in
-   `citations`.
+   `citations`. **API-native** — same plane rule as thinking and vision.
 
 The `routing` object is the explanation source of truth. It never contains the
 prompt: only bounded features, model slugs, evidence counts, catalog state, and
@@ -134,3 +137,99 @@ live catalog returned by the `grok models` readiness probe. Coding prefers
 composer; reasoning prefers the CLI's reported default. Explicit API model
 pins remain on API even when the same slug is also exposed by the CLI
 subscription.
+
+## VS Code + GitHub Copilot integration patterns
+
+For VS Code Copilot and similar MCP clients, the stable HTTP `agent` is the
+default entrypoint. Keep the caller identity stable with
+`X-Client-ID: vscode`, call `grok_mcp_discover_self` early in a session, and
+use live `tools/list` as the contract before assuming a tool exists.
+
+### Mode and plane habits
+
+- Use `mode="fast"` for quick explanations, narrow refactors, and low-stakes
+  second opinions.
+- Use `mode="reasoning"` for design review, repo-wide tradeoffs, or when the
+  model should spend effort before answering.
+- Use `mode="thinking"` only when you explicitly want the slower reflection
+  loop; use `mode="research"` only when grounded fan-out is worth the extra
+  cost and latency. Both are **API-only capabilities**: pair them with
+  `plane="api"` (or `plane="auto"` with a configured API key). Do not combine
+  them with `plane="cli"` + `fallback_policy="same_plane"` — that fails closed
+  with `same_plane_capability_incompatible` / `cli-incompatible`.
+- Leave `plane="auto"` for normal CLI-first behavior. Use
+  `fallback_policy="same_plane"` when you must not cross the billing boundary,
+  especially for pinned API models or explicit CLI-only review flows.
+- Qualify `session` by task or repository so repeated Copilot follow-ups stay
+  attached to the same logical thread.
+- **CLI agent-type stickiness:** a native CLI conversation keeps one agent
+  type. Switching from composer/`fast` to planning/`reasoning` on the same
+  logical session can raise `MODEL_SWITCH_INCOMPATIBLE_AGENT`. Current UniGrok
+  recovers by replaying server history into a **fresh** native session id
+  (not a fork). Keep the logical `session` name stable; only change it if an
+  older image still surfaces the raw CLI error.
+
+### Supplying local evidence
+
+The stable HTTP surface is workspace-neutral. When Copilot needs local repo
+evidence, pass only the selected text through `workspace_context` and label it
+with `workspace_label`. Do not assume MCP registration grants filesystem
+authority over the open folder.
+
+```json
+{
+  "prompt": "Review this refactor plan for risk.",
+  "mode": "reasoning",
+  "session": "djtelicloud/grok-mcp-server:refactor-plan",
+  "workspace_label": "djtelicloud/grok-mcp-server",
+  "workspace_context": "Diff excerpt or error text chosen by Copilot"
+}
+```
+
+### Reading the response metadata
+
+Treat the structured response as the authoritative execution receipt:
+
+- `route`, `plane`, `model`, `why`, and `degraded` explain what ran and why.
+- `cost_usd`, `tokens`, and `latency_sec` support cost-aware IDE behavior.
+- `routing` carries the bounded routing explanation object safe for display and
+  logging.
+- `credentials.notices` is the action list for missing auth or repair steps.
+  Prompt once per notice id and do not ask the user to paste `XAI_API_KEY`
+  into chat or MCP config.
+
+```json
+{
+  "response": "No blocking findings.",
+  "model": "grok-4.5",
+  "route": "agentic",
+  "plane": "CLI",
+  "why": "cost",
+  "degraded": false,
+  "cost_usd": 0.0
+}
+```
+
+### Copilot-friendly request patterns
+
+Use these as bounded templates for common IDE flows:
+
+```json
+{
+  "prompt": "Summarize this stack trace and propose the first fix.",
+  "mode": "fast",
+  "session": "repo:bug-123",
+  "workspace_context": "Selected traceback"
+}
+```
+
+```json
+{
+  "prompt": "Give a second-opinion review of this patch.",
+  "mode": "reasoning",
+  "plane": "cli",
+  "fallback_policy": "same_plane",
+  "session": "repo:review-branch",
+  "workspace_context": "Selected diff hunk"
+}
+```
