@@ -6611,6 +6611,19 @@ class GrokSessionStore:
                     results.append(msg)
                 return results
 
+    @_with_read_retry_async
+    async def count_messages(self, session_name: str) -> int:
+        """Number of persisted messages for a session (compaction drift checks)."""
+        await self._ensure_initialized()
+        async with self._read_conn() as conn:
+            async with conn.execute(
+                "SELECT COUNT(*) FROM messages WHERE session_name = ?",
+                (session_name,),
+            ) as cursor:
+                row = await cursor.fetchone()
+                return int(row[0] if row else 0)
+
+
     # ── Deferred research jobs (consumed by src/jobs.py JobManager) ──────────
     @_with_write_retry_async
     async def create_job(
@@ -7345,6 +7358,18 @@ async def maybe_compact_history(
         logger.warning(f"History compaction skipped for session '{session}': {exc}")
         return history
 
+    active_store = store_param if store_param is not None else store
+    baseline_count: Optional[int] = None
+    if active_store is not None:
+        try:
+            baseline_count = await active_store.count_messages(session)
+        except Exception as count_err:
+            logger.warning(
+                f"History compaction skipped for session '{session}': "
+                f"could not read message count ({count_err})"
+            )
+            return history
+
     total_cost = 0.0
     summary_content = ""
     folded = False
@@ -7425,6 +7450,22 @@ async def maybe_compact_history(
         )
     if not summary_content:
         return history
+
+    if active_store is not None and baseline_count is not None:
+        try:
+            current_count = await active_store.count_messages(session)
+        except Exception as count_err:
+            logger.warning(
+                f"History compaction skipped for session '{session}': "
+                f"could not re-read message count ({count_err})"
+            )
+            return history
+        if current_count != baseline_count:
+            logger.warning(
+                f"History compaction skipped for session '{session}': "
+                f"concurrent history drift ({baseline_count} -> {current_count})"
+            )
+            return history
 
     summary_entry = {
         "role": "system",
