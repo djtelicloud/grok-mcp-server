@@ -242,6 +242,22 @@ def grok_cli_oauth_env(base: Optional[Dict[str, str]] = None) -> Dict[str, str]:
     return env
 
 
+def _persisted_grok_auth_path() -> Path:
+    return Path.home() / ".grok" / "auth.json"
+
+
+def _is_regular_grok_auth_file(path: Path) -> bool:
+    """True only for a non-symlink regular OAuth document.
+
+    ``Path.is_file()`` follows symlinks; a hostile link under ``~/.grok`` must
+    not satisfy CLI-plane readiness or be copied into an isolated runtime.
+    """
+    try:
+        return path.is_file() and not path.is_symlink()
+    except OSError:
+        return False
+
+
 @contextlib.contextmanager
 def _isolated_grok_cli_runtime():
     """Yield an empty CLI workspace and minimal OAuth-only environment.
@@ -253,10 +269,10 @@ def _isolated_grok_cli_runtime():
     never receives a path to the durable auth volume; refresh cannot mutate
     shared credentials. ``GROK_HOME`` stays temporary and config-free.
     """
-    source_auth = Path.home() / ".grok" / "auth.json"
-    if not source_auth.is_file():
+    source_auth = _persisted_grok_auth_path()
+    if not _is_regular_grok_auth_file(source_auth):
         raise RuntimeError(
-            "Isolated Grok CLI execution requires the persisted OAuth file "
+            "Isolated Grok CLI execution requires a non-symlink OAuth file "
             "at ~/.grok/auth.json."
         )
 
@@ -286,7 +302,11 @@ def _isolated_grok_cli_runtime():
             os.O_WRONLY | os.O_CREAT | os.O_EXCL,
             0o600,
         )
-        with os.fdopen(auth_fd, "wb") as destination, source_auth.open("rb") as source:
+        open_flags = os.O_RDONLY
+        if hasattr(os, "O_NOFOLLOW"):
+            open_flags |= os.O_NOFOLLOW
+        source_fd = os.open(source_auth, open_flags)
+        with os.fdopen(auth_fd, "wb") as destination, os.fdopen(source_fd, "rb") as source:
             shutil.copyfileobj(source, destination)
 
         inherited = grok_cli_oauth_env()
@@ -355,8 +375,16 @@ def grok_cli_plane_status(
             "setup_command": setup,
         }
 
-    auth_state = Path.home() / ".grok" / "auth.json"
-    if not auth_state.is_file():
+    auth_state = _persisted_grok_auth_path()
+    if auth_state.is_symlink():
+        return {
+            "state": "needs_auth",
+            "ready": False,
+            "binary": True,
+            "auth": "symlink_refused",
+            "setup_command": setup,
+        }
+    if not _is_regular_grok_auth_file(auth_state):
         return {
             "state": "needs_auth",
             "ready": False,

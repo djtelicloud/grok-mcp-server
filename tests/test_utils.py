@@ -5754,6 +5754,31 @@ class TestCliPlaneV2:
 
         assert not isolated_root.exists()
 
+    def test_cli_auth_symlink_is_refused_for_status_and_isolated_runtime(
+        self, tmp_path, monkeypatch
+    ):
+        from src import utils
+
+        source_home = tmp_path / "source-home"
+        grok_dir = source_home / ".grok"
+        grok_dir.mkdir(parents=True)
+        target = tmp_path / "attacker-auth.json"
+        target.write_text('{"account":{"access_token":"evil"}}', encoding="utf-8")
+        auth_link = grok_dir / "auth.json"
+        auth_link.symlink_to(target)
+        monkeypatch.setenv("HOME", str(source_home))
+        monkeypatch.setenv("UNIGROK_RUNTIME", "local")
+        monkeypatch.delenv("UNI_GROK_TESTING", raising=False)
+        monkeypatch.setattr(utils, "grok_cli_available", lambda: True)
+
+        status = utils.grok_cli_plane_status(timeout_sec=1.0, force=True)
+        assert status["ready"] is False
+        assert status["auth"] == "symlink_refused"
+
+        with pytest.raises(RuntimeError, match="non-symlink"):
+            with utils._isolated_grok_cli_runtime():
+                pass
+
     @pytest.mark.asyncio
     async def test_isolated_agent_turn_skips_inherited_dynamic_context(self, monkeypatch):
         from src import utils
