@@ -37,8 +37,13 @@ invokes the headless CLI with
 `--output-format json` or `streaming-json`, per-session `--session-id` creation
 and `--resume` continuation (with `--fork-session` on collision — the native id
 is stored per session, not a deterministic hash of the name), optional
-`--json-schema`, `--effort`, and `--max-turns`, plus a `grok models` probe for
-plane readiness. Native CLI sessions are the continuity mechanism;
+`--json-schema`, `--effort`, and `--max-turns`. `--session-id` names a new
+native CLI conversation; `--resume` continues an existing one; and
+`--fork-session --session-id ...` is the safe continuation path when the
+resumed session is busy. CLI-plane readiness comes from the bounded
+`grok models` probe that confirms the grok.com login state, while service
+readiness is exposed separately at `GET /readyz`. Native CLI sessions are the
+continuity mechanism;
 the old `grok sessions list` scrape and fragile regex session sync are gone.
 Still-unintegrated CLI surfaces include `grok agent stdio|serve|leader` and
 `--best-of-n`. Treat the CLI as ground truth when unifying the two planes.
@@ -60,7 +65,7 @@ model/cost metadata. Modes: `auto` (default), `fast`, `reasoning`, `thinking`,
 - `src/server.py` — MCP server / tool registration
 - `src/http_server.py` — Streamable HTTP + `/healthz`, `/ui/` test bench
 - `src/cli.py` — `unigrok-mcp` entry point (`main.py` → `src.cli:main`)
-- `src/utils.py` — plane routing (`_call_plane`), session sync
+- `src/utils.py` — plane routing (`_call_plane`), CLI session continuity
 - `src/tools/` — agent tool implementations
 - `src/storage.py`, `src/jobs.py` — session state / async jobs
 - `tests/` — pytest suite (`asyncio_mode = auto`)
@@ -73,6 +78,7 @@ model/cost metadata. Modes: `auto` (default), `fast`, `reasoning`, `thinking`,
 uv run python main.py init        # bootstrap .env + print IDE configs
 docker compose up --build -d      # start shared service on :4765
 curl -s http://localhost:4765/healthz
+curl -s http://localhost:4765/readyz
 uv run pytest -q                  # full test suite
 ./scripts/land                    # test and land committed task work to main
 ```
