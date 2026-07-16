@@ -306,8 +306,16 @@ class TestGradeAndRecord:
             "src.semantic_evals.resolve_model", AsyncMock(return_value="grok-test")
         )
         monkeypatch.setattr(
+            "src.semantic_evals._active_xai_breaker_scope",
+            MagicMock(return_value="credential-a"),
+        )
+        monkeypatch.setattr(
             "src.semantic_evals.get_circuit_breaker_state",
-            MagicMock(return_value={"grok-test": {"open": True}}),
+            MagicMock(
+                return_value={
+                    "grok-test::credential:credential-a": {"open": True}
+                }
+            ),
         )
         parse_mock = AsyncMock()
         monkeypatch.setattr("src.semantic_evals._parse_structured", parse_mock)
