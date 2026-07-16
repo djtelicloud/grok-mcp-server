@@ -1,11 +1,14 @@
 from pathlib import Path
 
 from scripts.supervisor_approval import (
+    GateDecision,
     augment_cursor_evidence,
+    collect_check_states,
     has_exact_cursor_approval,
     decide_gate,
     declared_risk,
     inferred_risk,
+    waiting_for_required_ci,
 )
 
 
@@ -82,6 +85,92 @@ def test_supervisor_status_event_does_not_retrigger_its_own_workflow():
         encoding="utf-8"
     )
     assert "github.event.context != 'Supervisor Approval'" in workflow
+    assert "github.event.check_run.name != 'evaluate'" in workflow
+    assert "CHECK_RUN_HEAD_SHA" in workflow
+
+
+def test_collect_check_states_prefers_newer_finished_success_over_older_in_progress():
+    checks = collect_check_states(
+        [
+            {
+                "name": "build (3.11)",
+                "id": 1,
+                "status": "in_progress",
+                "conclusion": None,
+                "started_at": "2026-07-16T01:00:00Z",
+                "completed_at": None,
+            },
+            {
+                "name": "build (3.11)",
+                "id": 2,
+                "status": "completed",
+                "conclusion": "success",
+                "started_at": "2026-07-16T01:05:00Z",
+                "completed_at": "2026-07-16T01:06:00Z",
+            },
+        ]
+    )
+    assert checks["build (3.11)"] == "success"
+
+
+def test_collect_check_states_prefers_newer_success_over_stale_failure():
+    checks = collect_check_states(
+        [
+            {
+                "name": "build (3.11)",
+                "id": 10,
+                "status": "completed",
+                "conclusion": "failure",
+                "started_at": "2026-07-16T01:00:00Z",
+                "completed_at": "2026-07-16T01:01:00Z",
+            },
+            {
+                "name": "build (3.11)",
+                "id": 11,
+                "status": "completed",
+                "conclusion": "success",
+                "started_at": "2026-07-16T01:10:00Z",
+                "completed_at": "2026-07-16T01:11:00Z",
+            },
+        ]
+    )
+    assert checks["build (3.11)"] == "success"
+
+
+def test_collect_check_states_prefers_newer_in_progress_over_stale_success():
+    checks = collect_check_states(
+        [
+            {
+                "name": "build (3.11)",
+                "id": 20,
+                "status": "completed",
+                "conclusion": "success",
+                "started_at": "2026-07-16T01:00:00Z",
+                "completed_at": "2026-07-16T01:01:00Z",
+            },
+            {
+                "name": "build (3.11)",
+                "id": 21,
+                "status": "in_progress",
+                "conclusion": None,
+                "started_at": "2026-07-16T01:20:00Z",
+                "completed_at": None,
+            },
+        ]
+    )
+    assert checks["build (3.11)"] == "in_progress"
+
+
+def test_waiting_for_required_ci_detects_build_gap():
+    assert waiting_for_required_ci(
+        GateDecision("pending", "waiting for build (3.11), build (3.12)")
+    )
+    assert not waiting_for_required_ci(
+        GateDecision("pending", "waiting for Cursor approval")
+    )
+    assert not waiting_for_required_ci(
+        GateDecision("success", "Cursor failover approved for risk: low")
+    )
 
 
 def test_cursor_approval_must_match_the_current_head():
