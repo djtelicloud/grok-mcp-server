@@ -46,6 +46,7 @@ from xai_sdk.chat import user
 from xai_sdk.tools import code_execution, web_search as xai_web_search, x_search as xai_x_search
 
 from ..identity import (
+    filter_sessions_for_principal,
     get_active_client_id,
     get_active_principal,
     principal_kind,
@@ -151,7 +152,7 @@ async def grok_mcp_status(view: Literal["text", "json"] = "text") -> str:
         except Exception:
             pass
 
-        sessions = await store.list_sessions()
+        sessions = filter_sessions_for_principal(await store.list_sessions())
 
         # Compute SQLite File Sizes
         db_size_kb = 0
@@ -383,9 +384,9 @@ async def grok_mcp_status(view: Literal["text", "json"] = "text") -> str:
 
 
 async def list_chat_sessions() -> str:
-    """List all chat sessions stored under the SQLite session store."""
+    """List chat sessions visible to the active principal (or all when unscoped)."""
     async with GrokInvocationContext("utility", logger, append_signature=False) as ctx:
-        sessions = await store.list_sessions()
+        sessions = filter_sessions_for_principal(await store.list_sessions())
         if not sessions:
             return ctx.format_output("No chat sessions found.")
 

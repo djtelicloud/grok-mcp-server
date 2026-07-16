@@ -14,6 +14,7 @@ from typing import Any, Dict, Optional
 
 from mcp.server.fastmcp import FastMCP
 
+from ..identity import filter_sessions_for_principal, scoped_session
 from ..jobs import get_job_manager
 from ..utils import (
     PathResolver,
@@ -118,11 +119,13 @@ def register_resource_primitives(mcp: FastMCP):
 
     @mcp.resource(
         "grok://sessions",
-        description="All stored chat sessions (name, model, last_active).",
+        description="Chat sessions visible to the active principal (name, model, last_active).",
         mime_type="application/json",
     )
     async def sessions_resource() -> str:
-        return _to_json(await store.list_sessions())
+        return _to_json(
+            filter_sessions_for_principal(await store.list_sessions())
+        )
 
     @mcp.resource(
         "grok://sessions/{name}",
@@ -130,7 +133,7 @@ def register_resource_primitives(mcp: FastMCP):
         mime_type="application/json",
     )
     async def session_history_resource(name: str) -> str:
-        return _to_json(await load_history(name, store))
+        return _to_json(await load_history(scoped_session(name), store))
 
     @mcp.resource(
         "grok://jobs/{job_id}",
@@ -189,7 +192,7 @@ def register_resource_primitives(mcp: FastMCP):
         sections.append("## Git\n" + await _workspace_git_summary())
 
         try:
-            sessions = await store.list_sessions()
+            sessions = filter_sessions_for_principal(await store.list_sessions())
         except Exception as exc:
             logger.debug(f"workspace resource: session listing failed: {exc}")
             sessions = []

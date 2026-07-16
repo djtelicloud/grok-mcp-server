@@ -960,6 +960,28 @@ class TestClientIdDerivation:
             http_module._ACTIVE_CLIENT_ID.reset(client_token)
             reset_active_principal(principal_token)
 
+    def test_filter_sessions_for_principal_uses_principal_not_client(self):
+        from src.identity import filter_sessions_for_principal
+
+        import src.http_server as http_module
+
+        rows = [
+            {"session_name": "oauth%3Agithub%3A42:vscode:a"},
+            {"session_name": "oauth%3Agithub%3A42:cursor:b"},
+            {"session_name": "oauth%3Agithub%3A99:vscode:c"},
+        ]
+        principal_token = set_active_principal("oauth:github:42")
+        client_token = http_module._ACTIVE_CLIENT_ID.set("vscode")
+        try:
+            visible = filter_sessions_for_principal(rows)
+            assert [r["session_name"] for r in visible] == [
+                "oauth%3Agithub%3A42:vscode:a",
+                "oauth%3Agithub%3A42:cursor:b",
+            ]
+        finally:
+            http_module._ACTIVE_CLIENT_ID.reset(client_token)
+            reset_active_principal(principal_token)
+
     def test_scoped_session_untouched_without_client(self):
         import src.http_server as http_module
 

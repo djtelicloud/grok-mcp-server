@@ -121,6 +121,41 @@ async def test_list_chat_sessions_populated():
 
 
 @pytest.mark.asyncio
+async def test_list_chat_sessions_filters_to_active_principal():
+    """With a bound principal, other principals' session rows must not leak."""
+    from src.identity import reset_active_principal, set_active_principal
+
+    token = set_active_principal("oauth:github:42")
+    try:
+        with patch("src.server.store.list_sessions", new_callable=AsyncMock) as mock_list:
+            mock_list.return_value = [
+                {
+                    "session_name": "oauth%3Agithub%3A42:vscode:mine",
+                    "model": "grok-4.5",
+                    "last_active": "2026-07-16T00:00:00",
+                },
+                {
+                    "session_name": "oauth%3Agithub%3A99:vscode:theirs",
+                    "model": "grok-4.3",
+                    "last_active": "2026-07-16T00:00:01",
+                },
+                {
+                    "session_name": "http%3Aanon:cursor:shared",
+                    "model": "grok-composer-2.5-fast",
+                    "last_active": "2026-07-16T00:00:02",
+                },
+            ]
+            res = await list_chat_sessions()
+        assert "oauth%3Agithub%3A42:vscode:mine" in res
+        assert "oauth%3Agithub%3A99:vscode:theirs" not in res
+        assert "http%3Aanon:cursor:shared" not in res
+        assert "grok-4.5" in res
+        assert "grok-4.3" not in res
+    finally:
+        reset_active_principal(token)
+
+
+@pytest.mark.asyncio
 async def test_clear_chat_history():
     """clear_chat_history clears local SQLite store and JSON backups."""
     with patch("src.server.store.delete_session", new_callable=AsyncMock) as mock_delete, \

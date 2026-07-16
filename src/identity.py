@@ -12,7 +12,7 @@ import contextvars
 import hashlib
 import json
 import re
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 from urllib.parse import quote
 
 
@@ -55,6 +55,34 @@ def scoped_session(session: Optional[str]) -> Optional[str]:
     if namespace and session and not session.startswith(f"{namespace}:"):
         return f"{namespace}:{session}"
     return session
+
+
+def principal_session_prefix() -> Optional[str]:
+    """Percent-encoded principal prefix used as the session security boundary.
+
+    Returns ``None`` when no principal is bound (stdio / unscoped callers keep
+    the historical global session view). Client labels are intentionally
+    omitted — they are subordinate and must not widen or shrink authz.
+    """
+    principal = get_active_principal()
+    if not principal:
+        return None
+    return f"{quote(principal, safe='-._~')}:"
+
+
+def filter_sessions_for_principal(
+    rows: Optional[List[Dict[str, Any]]],
+) -> List[Dict[str, Any]]:
+    """Keep only session rows owned by the active principal, when bound."""
+    items = list(rows or [])
+    prefix = principal_session_prefix()
+    if prefix is None:
+        return items
+    return [
+        row
+        for row in items
+        if str(row.get("session_name") or "").startswith(prefix)
+    ]
 
 
 def normalize_caller(value: Any) -> Optional[str]:
