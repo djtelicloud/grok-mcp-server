@@ -846,8 +846,10 @@ async def test_list_project_files_truncates_at_max_results():
     assert len(listed) == 3
     assert "Truncated: showing 3 of" in res
 
-    res_default = await list_project_files(extensions="py", max_results=200)
-    assert "Truncated" not in res_default
+    # Prove the non-truncation path with a high enough ceiling; the live
+    # checkout now has more than 200 ``.py`` files, so the default cap truncates.
+    res_full = await list_project_files(extensions="py", max_results=10_000)
+    assert "Truncated" not in res_full
 
 
 @pytest.mark.asyncio

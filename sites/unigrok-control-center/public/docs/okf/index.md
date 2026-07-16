@@ -8,6 +8,7 @@ topics:
   - "copilot-agent-playbook"
   - "chat-modes"
   - "reasoning-guard"
+  - "silent-team-check"
   - "grok-4.5-pinning"
   - "media-imagine"
   - "metrics-tool"
@@ -45,6 +46,7 @@ authoritative.
 - [VS Code Copilot Agent Playbook](copilot-agent-playbook.md): Stable-lane habits, mode selection, context packaging, and self-verification for Copilot.
 - [Chat & Context Modes](chat-modes.md): Trusted-stdio direct text, stateful threads, files, and vision tools.
 - [Reasoning Guard & Level Enforcement](reasoning-guard.md): Trusted-stdio minimum-profile enforcement and its HTTP boundary.
+- [Silent Team Check](silent-team-check.md): Token-efficient second-opinion habit for non-trivial IDE work.
 - [Model Pinning & Profiles](grok-4.5-pinning.md): API vs CLI paths, fallback parameters, and Grok 4.5 capabilities.
 - [Media Generation](media-imagine.md): Trusted-stdio API-plane image and video schemas.
 - [Observability & Metrics](metrics-tool.md): Aggregated telemetry and status monitoring.
