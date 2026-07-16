@@ -138,12 +138,16 @@ def _validate_patch_targets(patch: str, repo: Path):
         _normalize_patch_target(target, repo)
 
 
-async def _run_git(args: List[str], repo_path: Optional[str] = None, stdin: Optional[bytes] = None) -> str:
-    repo = _repo_root(repo_path)
+async def _git_subprocess(
+    args: List[str],
+    cwd: Path,
+    stdin: Optional[bytes] = None,
+) -> str:
+    """Run git in ``cwd`` without workspace containment checks."""
     proc = await asyncio.create_subprocess_exec(
         "git",
         *args,
-        cwd=str(repo),
+        cwd=str(cwd),
         stdin=asyncio.subprocess.PIPE if stdin is not None else None,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
@@ -155,6 +159,67 @@ async def _run_git(args: List[str], repo_path: Optional[str] = None, stdin: Opti
     if proc.returncode != 0:
         raise RuntimeError((err or out or f"git {' '.join(args)} failed").strip())
     return out.strip()
+
+
+def _assert_git_metadata_contained(repo: Path) -> None:
+    """Refuse git tools when workspace ``.git`` points at a foreign repo.
+
+    A ``gitdir:`` file can redirect git at an external object store while
+    ``rev-parse --show-toplevel`` still reports the workspace cwd. Allow only
+    a normal ``.git`` directory or a linked worktree admin dir under
+    ``<repo>/.git/worktrees/<name>``.
+    """
+    expected = repo.resolve()
+    git_entry = expected / ".git"
+    if git_entry.is_dir():
+        return
+    if not git_entry.is_file():
+        raise PermissionError(
+            "Git tools require a .git directory (or linked worktree) in the workspace."
+        )
+    try:
+        raw = git_entry.read_text(encoding="utf-8", errors="replace").strip()
+    except OSError as exc:
+        raise PermissionError(f"Git metadata could not be read: {exc}") from exc
+    if not raw.lower().startswith("gitdir:"):
+        raise PermissionError("Git metadata gitfile is malformed.")
+    target = raw.split(":", 1)[1].strip()
+    if not target:
+        raise PermissionError("Git metadata gitfile is malformed.")
+    target_path = Path(target)
+    if not target_path.is_absolute():
+        target_path = (git_entry.parent / target_path).resolve()
+    else:
+        target_path = target_path.resolve()
+    parts = target_path.parts
+    if len(parts) < 3 or parts[-2] != "worktrees" or parts[-3] != ".git":
+        raise PermissionError(
+            "Git repository metadata escapes the workspace "
+            "(refusing non-worktree gitdir redirect)."
+        )
+
+
+async def _assert_git_toplevel(repo: Path) -> None:
+    """Confirm ``show-toplevel`` matches the workspace (linked worktrees OK)."""
+    expected = repo.resolve()
+    try:
+        toplevel_raw = await _git_subprocess(["rev-parse", "--show-toplevel"], expected)
+    except RuntimeError as exc:
+        raise PermissionError(
+            f"Git repository root could not be verified under the workspace: {exc}"
+        ) from exc
+    toplevel = Path(toplevel_raw).resolve()
+    if toplevel != expected:
+        raise PermissionError(
+            f"Git repository root escapes the workspace: {toplevel}"
+        )
+
+
+async def _run_git(args: List[str], repo_path: Optional[str] = None, stdin: Optional[bytes] = None) -> str:
+    repo = _repo_root(repo_path)
+    _assert_git_metadata_contained(repo)
+    await _assert_git_toplevel(repo)
+    return await _git_subprocess(args, repo, stdin=stdin)
 
 
 async def git_status(repo_path: Optional[str] = None) -> str:
