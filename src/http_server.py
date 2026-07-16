@@ -1822,6 +1822,23 @@ def _xai_headers() -> Dict[str, str]:
     return {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
 
 
+def _xai_chat_completions_url() -> Optional[str]:
+    """Return the chat-completions URL, or ``None`` when an override is unsafe.
+
+    ``XAI_API_BASE_URL`` is operator-controlled but credential-bearing: the
+    gateway attaches ``XAI_API_KEY``. Unset keeps the built-in xAI default.
+    A set-but-unsafe override fails closed (no silent fallback that would hide
+    a misconfiguration while still shipping the bearer token elsewhere).
+    """
+    raw = os.environ.get("XAI_API_BASE_URL", "").strip()
+    if not raw:
+        return f"{XAI_BASE_URL.rstrip('/')}/chat/completions"
+    base = _validated_https_url(raw)
+    if base is None:
+        return None
+    return f"{base.rstrip('/')}/chat/completions"
+
+
 def _xai_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     allowed = {
         "model",
@@ -1845,7 +1862,13 @@ def _xai_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
 async def post_xai_chat(payload: Dict[str, Any]) -> Response:
     if not os.environ.get("XAI_API_KEY"):
         return _json_error("XAI_API_KEY is not configured.", status_code=503, code="service_unavailable")
-    url = os.environ.get("XAI_API_BASE_URL", XAI_BASE_URL).rstrip("/") + "/chat/completions"
+    url = _xai_chat_completions_url()
+    if url is None:
+        return _json_error(
+            "XAI_API_BASE_URL is not a public HTTPS endpoint.",
+            status_code=503,
+            code="service_unavailable",
+        )
     try:
         async with httpx.AsyncClient(timeout=120.0) as client:
             response = await client.post(url, json=_xai_payload(payload), headers=_xai_headers())
@@ -1875,7 +1898,14 @@ async def stream_xai_chat(payload: Dict[str, Any]) -> AsyncIterator[bytes]:
         yield _sse_error("XAI_API_KEY is not configured.", "service_unavailable")
         yield b"data: [DONE]\n\n"
         return
-    url = os.environ.get("XAI_API_BASE_URL", XAI_BASE_URL).rstrip("/") + "/chat/completions"
+    url = _xai_chat_completions_url()
+    if url is None:
+        yield _sse_error(
+            "XAI_API_BASE_URL is not a public HTTPS endpoint.",
+            "service_unavailable",
+        )
+        yield b"data: [DONE]\n\n"
+        return
     stream_timeout = httpx.Timeout(
         connect=10.0,
         read=_bounded_env_float(
