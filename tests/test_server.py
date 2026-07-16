@@ -1053,6 +1053,27 @@ async def test_bound_principal_cannot_read_shared_provider_file_content():
 
 
 @pytest.mark.asyncio
+async def test_bound_principal_cannot_list_get_or_delete_provider_files():
+    from src.identity import reset_active_principal, set_active_principal
+    from src.tools.system import xai_delete_file, xai_get_file, xai_list_files
+
+    principal_token = set_active_principal("oauth:service:tenant-a")
+    try:
+        with patch("src.tools.system.get_xai_client") as get_client:
+            for coro in (
+                xai_list_files(),
+                xai_get_file("file-owned-by-tenant-b"),
+                xai_delete_file("file-owned-by-tenant-b"),
+            ):
+                with pytest.raises(PermissionError, match="bound HTTP/MCP principals"):
+                    await coro
+    finally:
+        reset_active_principal(principal_token)
+
+    get_client.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_grok_mcp_restart_container_gating(monkeypatch, tmp_path):
     from src.tools.system import grok_mcp_restart_container
     from src.identity import reset_active_principal, set_active_principal

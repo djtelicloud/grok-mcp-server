@@ -8,7 +8,7 @@ from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import ToolAnnotations
 from pydantic import BaseModel, Field
 from ..models.results import ChatResult, AgentResult, ReflectionResult
-from ..identity import caller_from_mcp_context, scoped_session
+from ..identity import caller_from_mcp_context, get_active_principal, scoped_session
 
 from ..utils import (
     store,
@@ -692,6 +692,19 @@ async def chat_with_files(
         model: Grok model id (default `grok-4.5`).
         system_prompt: Optional system instruction prepended to the conversation.
     """
+    if get_active_principal() is not None:
+        error_msg = (
+            "Provider files are unavailable to bound HTTP/MCP principals."
+        )
+        return ChatResult(
+            response=error_msg,
+            text=error_msg,
+            finish_reason="error",
+            cost_usd=0.0,
+            model=model,
+            route="unknown",
+            plane="API",
+        )
     if not file_ids:
         error_msg = "Input Validation Error: file_ids must contain at least one uploaded file ID."
         return ChatResult(
