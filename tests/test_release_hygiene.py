@@ -442,8 +442,17 @@ def test_dual_supervisor_land_law_is_consistent() -> None:
     )
     contributing = (ROOT / "CONTRIBUTING.md").read_text(encoding="utf-8")
 
+    shared_low_risk = next(
+        line for line in shared.splitlines() if line.startswith("- **Low-risk land path")
+    )
+    cursor_low_risk = next(
+        line for line in rules.splitlines() if line.startswith("- **Low-risk land path")
+    )
+    codex_owner = next(
+        line for line in shared.splitlines() if line.startswith("- **Codex Owns")
+    )
+
     assert "Dual supervisor (Codex + Cursor)" in shared
-    assert "Cursor low-risk land" in shared
     assert "Low-risk land path (when Codex busy)" in shared
     assert "Low-risk land path (when Codex busy)" in rules
     assert "One land owner per PR head" in shared or "one land owner" in shared.lower()
@@ -451,3 +460,9 @@ def test_dual_supervisor_land_law_is_consistent() -> None:
     assert "Codex Approval" in design
     assert "risk:low" in design
     assert "dual-supervisor" in contributing.lower() or "Dual supervisor" in contributing
+    assert shared_low_risk == cursor_low_risk
+    assert "Bugbot and Security Reviewer complete" in shared_low_risk
+    assert "Codex Approval" in shared_low_risk
+    assert "scripts/land" in codex_owner
+    assert "merge to shared `main` except through the fully gated dual-supervisor low-risk path" in codex_owner
+    assert "permits only a protected low-risk merge" in codex_owner
