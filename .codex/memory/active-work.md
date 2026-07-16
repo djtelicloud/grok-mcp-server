@@ -1,6 +1,6 @@
 # Codex Active Work
 
-Last updated: 2026-07-16
+Last updated: 2026-07-16T17:46:46Z
 Owner: Codex integration coordinator
 Status: Current critical repairs are merged and Live; the security queue remains active.
 
@@ -47,6 +47,22 @@ credentials, OAuth codes, tokens, or private keys here.
   found on the new Cloud Run revisions after rollout.
 
 ## Active queue and safety posture
+
+- Python-superiority campaign PR #475 is held at exact head
+  `bda882ffbf6e2436b09af5d316a4c3cfb26ae1ad`. Its contributor baseline passed
+  2,202 tests, but its first Forge task (`f29b306130e945f8a34eaa44b91fcb39`)
+  failed before candidate generation because preflight imported
+  `swarm.pareto` instead of this repository's real `src.swarm.pareto` package.
+- Draft #476 repairs that Forge import-provenance bug. Codex's focused suite
+  passed 27 tests and the full suite passed 2,204 tests. Normal Codex must
+  independently review and land it, then refresh the Forge runtime before
+  Grok receives an explicit `CONTINUE` comment on #475. Grok was told to hold
+  its exact head and not open more plan PRs meanwhile.
+- Draft #422 contains the durable campaign gate plus the separate Codex
+  disposition for #475. Public results remain held. Any one-file-to-many-file
+  candidate is one replacement bundle: compare the same public operation and
+  report total bundle LOC, end-to-end latency, and peak memory; never aggregate
+  per-file percentages into a result.
 
 - Stable identity prerequisites are Live, but principal-storage publication
   remains blocked on its owner-scoped schema/migration, legacy-row quarantine,
