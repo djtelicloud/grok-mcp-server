@@ -1,4 +1,4 @@
-# `tests/__init__.py` refactor plan (Loop 196)
+# `scripts/__init__.py` refactor plan (Loop 197)
 
 Status: **in-tree** — plan only (single-branch accumulate; no per-file PR).
 
@@ -20,6 +20,6 @@ Forge MCP Not connected — plan path.
 | Module | Concern |
 |--------|---------|
 | split module | domain seams |
-| `tests/__init__.py` | facade ≤ 20 LOC |
+| `scripts/__init__.py` | facade ≤ 20 LOC |
 
 Move-only. Leave PR #408 alone.
