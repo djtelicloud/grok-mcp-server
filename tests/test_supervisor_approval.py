@@ -159,6 +159,8 @@ def test_supervisor_status_event_does_not_retrigger_its_own_workflow():
     assert "github.event.context != 'Supervisor Approval'" in workflow
     assert "github.event.check_run.name != 'evaluate'" in workflow
     assert "CHECK_RUN_HEAD_SHA" in workflow
+    assert "actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683" in workflow
+    assert "actions/checkout@v" not in workflow
 
 
 def test_collect_check_states_prefers_newer_finished_success_over_older_in_progress():
