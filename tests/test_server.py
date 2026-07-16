@@ -4,11 +4,9 @@ tests/test_server.py
 Unit and integration tests for FastMCP tool endpoints in src/server.py.
 """
 
-import asyncio
 import json
 import os
 import pytest
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch, MagicMock
 
