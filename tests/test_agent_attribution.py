@@ -235,6 +235,8 @@ def test_registry_and_visible_credits_cover_all_provider_products() -> None:
     registry = attribution.load_registry(REGISTRY)
     expected = {
         "Anthropic Claude",
+        "Cursor",
+        "Cursor Composer",
         "GitHub Copilot",
         "Google Gemini",
         "OpenAI Codex",
