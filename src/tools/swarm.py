@@ -876,7 +876,8 @@ async def _reverify(task: Dict[str, Any], target: Path, original: bytes) -> tupl
     """Run the task's test_target against the LIVE workspace; restore original
     bytes on failure."""
     workspace = PathResolver.get_workspace_root()
-    python = str((workspace / ".venv" / "bin" / "python")) if (workspace / ".venv").exists() else "python3"
+    import sys
+    python = str((workspace / ".venv" / "bin" / "python")) if (workspace / ".venv").exists() else sys.executable
     proc = None
     runtime_dir = tempfile.TemporaryDirectory(prefix="unigrok-reverify-")
     env = {
