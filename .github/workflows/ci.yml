@@ -237,7 +237,7 @@ jobs:
             fi
             sleep 2
           done
-          echo "healthz never became ready" >&2
+          echo "healthz, OKF API reference, or Forge async pytest runtime check failed" >&2
           docker logs grok-mcp-ci >&2
           exit 1
 
