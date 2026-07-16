@@ -29,7 +29,8 @@ Full intent map: **Human language** below. Layout for CLI/TUI hosts:
   [`.agents/skills/session-rehydrate/SKILL.md`](skills/session-rehydrate/SKILL.md).
 - Continuity lives in git/disk: private
   `../unigrok-intelligence/codex/continuity/active-work-latest.md` (if present),
-  open PR notes, and `./scripts/land-status` — not chat memory.
+  open PR notes, and `git fetch origin --prune` + `./scripts/land-status`
+  (local-refs snapshot; fetch first) — not chat memory.
 - **Brand next steps are mandatory after the status table.** Every brand must
   know its own strengths and offer **1–2 plain-title next smartest tasks** it
   can actually do (problem or benefit), not a table-only “ready.” Details and
@@ -132,7 +133,8 @@ Not live / Blocked / Who (brand)** plus the **task title**.
 - **Supervisor done (user language)**: **Live** only after protected integration succeeds (`LANDED TO MAIN` internally). Else **Not live** / **Blocked** with one plain reason.
 - **Protect main and peers**: Never overwrite dirty main. Never remove peers’ live scratchpads. Your own finished scratchpad **must** go when the task ends.
 - **Cursor Cloud**: GitHub coding needs no laptop UniGrok env/tunnel. Optional Grok = hosted twin only when connected.
-- **Status Check**: Prefer `./scripts/land-status` silently. Many leftover trees = hygiene debt; clean yours before starting more.
+- **Status Check**: Prefer `git fetch origin --prune` then
+  `./scripts/land-status` silently — the script reads only local refs. Many leftover trees = hygiene debt; clean yours before starting more.
 - **`.worktrees/` is local only** (gitignored scratch).
 - **Workspace Memory**: For implementation, debugging, architecture, and review work, use `.agents/skills/unigrok-workspace-memory/SKILL.md` when available. Recall with the agent worktree's own full HEAD. After `scripts/land` succeeds, record one concise landed outcome; never write Git Notes directly. Memory mirror failure is reportable but does not undo a verified landing.
 

@@ -76,13 +76,19 @@ hive/land authority for public installs.
 
 ### 3. Live gates
 
-From product root:
+From product root — **fetch first**; `land-status` reads only local refs, so
+its snapshot is point-in-time on a moving repo:
 
 ```bash
+git fetch origin --prune
 ./scripts/land-status
 ```
 
-Note: visible main, worktrees, stable/forge readiness.
+Note: visible main, worktrees, stable/forge readiness. State fetch age and
+whether local `main` is behind `origin/main` (`git rev-list --count
+main..origin/main`); if the fetch fails, say so and label the report a stale
+local-refs snapshot instead of presenting it as live.
+
 Primary shared checkout should stay on **clean `main`**. Implementation uses
 **agent-prefixed worktrees** only — under `<repo>/.worktrees/…` or
 `/tmp/unigrok-…` (or provider homes like `~/.gemini/…/worktrees`,
