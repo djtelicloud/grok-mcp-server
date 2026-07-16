@@ -42,6 +42,10 @@ change or finish line, emit one short status:
 For long or continuously monitored work, reuse that format only when the state
 changes. Expand only when the human asks for technical detail.
 
+**Terminal layout:** when speaking in a CLI/TUI, shape that line and any short
+follow-up with portable markdown (not HTML). See
+[v0-terminal-markdown-authoring.md](v0-terminal-markdown-authoring.md).
+
 ## 2. Cursor Cloud vs laptop UniGrok
 
 | Mode | UniGrok |

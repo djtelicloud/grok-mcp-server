@@ -79,6 +79,32 @@
         "Session or task-RAG database dumps",
         "Contributor workspace memory rows"
       ]
+    },
+    {
+      "pack_id": "terminal-markdown-authoring",
+      "version": "v0",
+      "title": "Terminal markdown authoring",
+      "summary": "Portable GFM structure for CLI/TUI chat; human radio is content, themes paint colors; Grok host notes (no HTML webview).",
+      "audience": "public_and_contributor",
+      "body_path": "docs/public-intelligence/packs/v0-terminal-markdown-authoring.md",
+      "source_gym": "Grok Build CLI/TUI sessions clarifying markdown vs HTML artifacts; multi-brand terminal agents (Grok, Claude Code, Codex CLI).",
+      "promoted_from": [
+        ".agents/AGENTS.md",
+        "docs/public-intelligence/packs/v0-human-radio-and-cloud-boundary.md",
+        "Grok user-guide theming (md_* slots)"
+      ],
+      "scrub": {
+        "secrets": true,
+        "private_paths": true,
+        "raw_memory": true,
+        "unreviewed_logs": true
+      },
+      "never_includes": [
+        "API keys or OAuth secrets",
+        "Private unigrok-intelligence playbooks",
+        "Session or task-RAG database dumps",
+        "Contributor workspace memory rows"
+      ]
     }
   ]
 }

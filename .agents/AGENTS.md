@@ -26,6 +26,13 @@ changes or user-requested live updates. Required boot summaries, safety prompts,
 and blocking questions are explicit exceptions.
 - Prefer UniGrok MCP CLI/`fast` for hard judgment; keep visible output tiny.
   Insider silent-think doctrine is private (not public default).
+- **Terminal markdown (layout law):** when the host is a CLI/TUI, author user-
+  facing replies as portable GFM structure (short lead line, sparse bullets or
+  small tables, fenced dumps, paths/links). Do not use raw HTML as the primary
+  chat UI. Themes paint colors; agents do not invent color languages. Full
+  guide: [docs/public-intelligence/packs/v0-terminal-markdown-authoring.md](../docs/public-intelligence/packs/v0-terminal-markdown-authoring.md).
+  Human radio (Ready/Live/titles) remains the content law — this is only how
+  that text is shaped.
 - **Public intelligence packs:** distilled gym wins for clones live under
   `docs/public-intelligence/`. After Live work, ask once: promote a scrubbed
   pack/skill? Never auto-sync private intelligence or raw memory to public.
