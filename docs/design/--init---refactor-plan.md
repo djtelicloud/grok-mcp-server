@@ -1,4 +1,4 @@
-# `evals/__init__.py` refactor plan (Loop 191)
+# `tests/__init__.py` refactor plan (Loop 196)
 
 Status: **in-tree** — plan only (single-branch accumulate; no per-file PR).
 
@@ -6,9 +6,9 @@ Status: **in-tree** — plan only (single-branch accumulate; no per-file PR).
 
 | Metric | Value |
 |--------|------:|
-| LOC | 7 |
+| LOC | 1 |
 | Projected primary LOC | ~20 facade |
-| % LOC change (primary file) | **186%** |
+| % LOC change (primary file) | **1900%** |
 | Hot | n/a |
 
 ## Hive / swarm
@@ -20,6 +20,6 @@ Forge MCP Not connected — plan path.
 | Module | Concern |
 |--------|---------|
 | split module | domain seams |
-| `evals/__init__.py` | facade ≤ 20 LOC |
+| `tests/__init__.py` | facade ≤ 20 LOC |
 
 Move-only. Leave PR #408 alone.
