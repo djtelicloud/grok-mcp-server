@@ -1906,7 +1906,7 @@ function renderFactsPane(method, response, elapsed) {
     if (status) status.style.color = "var(--teal)";
   }
 
-  const payload = extractToolPayload(response);
+  const payload = extractToolPayload(response) || {};
   setText("factTokens", payload.tokens || "-");
   // The wire may deliver cost as a number or a serialized string; only a
   // finite value renders as currency. cost===0 is real (CLI subscription or
@@ -1916,7 +1916,8 @@ function renderFactsPane(method, response, elapsed) {
   const billing = payload.billing_class || payload.routing?.billing_class || "";
   let costLabel = "-";
   if (typeof cost === "number" && Number.isFinite(cost)) {
-    costLabel = (cost === 0 && billing === "subscription")
+    const isSubscription = typeof billing === "string" && billing.trim().toLowerCase() === "subscription";
+    costLabel = (cost === 0 && isSubscription)
       ? "Subscription"
       : `$${cost.toFixed(5)}`;
   }
