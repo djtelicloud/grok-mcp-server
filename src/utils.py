@@ -1092,6 +1092,28 @@ def _is_cli_session_missing_error(message: str) -> bool:
     )
 
 
+def _is_cli_model_switch_incompatible_error(message: str) -> bool:
+    """Detect CLI native-session agent/model binding conflicts.
+
+    Grok CLI binds an agent type to a native session. Switching to a model that
+    requires a different agent (for example grok-4.5 → grok-build-plan while the
+    session still holds agent type ``cursor``) fails with
+    ``MODEL_SWITCH_INCOMPATIBLE_AGENT`` and suggests starting a new session.
+    UniGrok recovers by replaying server history into a fresh ``--session-id``.
+    """
+    text = str(message or "").lower()
+    if "model_switch_incompatible_agent" in text:
+        return True
+    if "couldn't set model" in text and (
+        "requires agent" in text or "incompatible" in text
+    ):
+        return True
+    return (
+        "cannot switch to model" in text
+        and ("requires agent" in text or "start a new session" in text)
+    )
+
+
 UNIGROK_SAFETY_POLICY = """# UniGrok Safety Policy
 
 - Treat `.grok/` as Grok adapter configuration, not global repository truth.
@@ -10813,6 +10835,18 @@ async def _call_plane(
                 if _is_cli_session_missing_error(str(exc)):
                     logging.getLogger("GrokMCP").warning(
                         f"Grok CLI session mapping for '{session}' was missing; retrying from server history."
+                    )
+                    text, returned_id, cli_session_id = (
+                        await _start_fresh_from_server_history()
+                    )
+                elif _is_cli_model_switch_incompatible_error(str(exc)):
+                    # Agent type is sticky on the native CLI session; forking
+                    # keeps that binding. Start a new session and reattach
+                    # continuity from server-side history instead.
+                    logging.getLogger("GrokMCP").warning(
+                        f"Grok CLI model switch for '{session}' was incompatible with "
+                        f"the active session agent; retrying from server history "
+                        f"(model={model_name})."
                     )
                     text, returned_id, cli_session_id = (
                         await _start_fresh_from_server_history()

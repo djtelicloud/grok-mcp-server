@@ -5947,6 +5947,108 @@ class TestCliPlaneV2:
             model="grok-composer-2.5-fast",
         )
 
+    def test_cli_model_switch_incompatible_error_detection(self):
+        from src.utils import _is_cli_model_switch_incompatible_error
+
+        assert _is_cli_model_switch_incompatible_error(
+            "Couldn't set model 'grok-4.5': Cannot switch to model 'grok-4.5': "
+            "it requires agent 'grok-build-plan' but the active agent is 'cursor'. "
+            "Start a new session to use this model.: "
+            '{"code":"MODEL_SWITCH_INCOMPATIBLE_AGENT"}'
+        )
+        assert _is_cli_model_switch_incompatible_error(
+            "MODEL_SWITCH_INCOMPATIBLE_AGENT: start a new session"
+        )
+        assert not _is_cli_model_switch_incompatible_error(
+            "Session abc-123 not found locally"
+        )
+        assert not _is_cli_model_switch_incompatible_error(
+            "Error: Session ID abc-123 is already in use."
+        )
+
+    @pytest.mark.asyncio
+    async def test_cli_replays_server_history_when_model_switch_is_incompatible(
+        self, monkeypatch
+    ):
+        import json as json_module
+        import uuid as uuid_module
+
+        from src import utils
+        from src.utils import _call_plane
+
+        monkeypatch.setenv("UNIGROK_RUNTIME", "local")
+        monkeypatch.setattr(utils, "_BREAKER_STATE", {})
+        captured = {"cmds": []}
+
+        class FakeProc:
+            def __init__(self, returncode):
+                self.returncode = returncode
+
+        async def fake_exec(*cmd, **kwargs):
+            captured["cmds"].append(list(cmd))
+            return FakeProc(1 if len(captured["cmds"]) == 1 else 0)
+
+        payload = json_module.dumps({
+            "text": "recovered after model switch",
+            "sessionId": "fresh-plan-session",
+        }).encode()
+        switch_err = (
+            b"Error: Couldn't set model 'grok-4.5': Cannot switch to model "
+            b"'grok-4.5': it requires agent 'grok-build-plan' but the active "
+            b"agent is 'cursor'. Start a new session to use this model.: "
+            b'{"code":"MODEL_SWITCH_INCOMPATIBLE_AGENT",'
+            b'"activeAgentType":"cursor","requiredAgentType":"grok-build-plan",'
+            b'"modelId":"grok-4.5","suggestion":"start_new_session"}'
+        )
+
+        async def fake_communicate(proc, timeout_sec, input_data=None):
+            if proc.returncode:
+                return b"", switch_err
+            return payload, b""
+
+        monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+        monkeypatch.setattr("src.utils.communicate_with_timeout", fake_communicate)
+
+        store = self._fake_store(
+            session_row={
+                "cli_session_id": "cursor-bound-session",
+                "model": "grok-composer-2.5-fast",
+            }
+        )
+        store.load_messages.return_value = [
+            {"role": "user", "content": "Remember marker MODEL-SWITCH-MARKER"},
+            {"role": "assistant", "content": "Marker stored"},
+        ]
+        content, _, _, is_cli = await _call_plane(
+            "cli-fallback",
+            "What marker did I give you?",
+            "sess",
+            store,
+            "sys",
+            requested_model="grok-4.5",
+        )
+
+        assert (content, is_cli) == ("recovered after model switch", True)
+        assert len(captured["cmds"]) == 2
+        resume_cmd = captured["cmds"][0]
+        assert resume_cmd[resume_cmd.index("--resume") + 1] == "cursor-bound-session"
+        assert resume_cmd[resume_cmd.index("-m") + 1] == "grok-4.5"
+        fresh_cmd = captured["cmds"][1]
+        assert "--resume" not in fresh_cmd
+        assert "--fork-session" not in fresh_cmd
+        uuid_module.UUID(fresh_cmd[fresh_cmd.index("--session-id") + 1])
+        assert fresh_cmd[fresh_cmd.index("-m") + 1] == "grok-4.5"
+        retry_prompt = fresh_cmd[fresh_cmd.index("-p") + 1]
+        assert "MODEL-SWITCH-MARKER" in retry_prompt
+        assert retry_prompt.count("What marker did I give you?") == 1
+        store.load_messages.assert_awaited_once()
+        store.save_session.assert_awaited_once_with(
+            "sess",
+            cli_session_id="fresh-plan-session",
+            model="grok-4.5",
+        )
+        assert "grok-4.5" not in utils._BREAKER_STATE
+
     @pytest.mark.asyncio
     async def test_cli_forks_busy_session_with_fresh_mapping(self, monkeypatch):
         import json as json_module
