@@ -52,12 +52,23 @@ def test_high_control_plane_packet_stays_with_codex():
     assert "Codex Approval" in decision.description
 
 
+def test_exact_head_codex_approval_is_a_safe_cursor_fallback():
+    decision = decide_gate(
+        declared="low",
+        inferred="low",
+        checks={},
+        statuses={"Codex Approval": "success"},
+    )
+    assert decision.state == "success"
+    assert decision.description == "exact-head Codex Approval"
+
+
 def test_high_path_cannot_be_declared_medium():
     decision = decide_gate(
         declared="medium",
         inferred="high",
         checks=_checks(),
-        statuses={},
+        statuses={"Codex Approval": "success"},
     )
     assert decision.state == "failure"
 

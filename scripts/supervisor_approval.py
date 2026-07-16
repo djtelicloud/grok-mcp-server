@@ -210,9 +210,14 @@ def decide_gate(
     if inferred == "medium" and declared == "low":
         return GateDecision("failure", "runtime or non-documentation path requires risk: medium")
 
+    # Codex Approval is published only by the owner-dispatched workflow after
+    # it verifies the current PR head. It is the documented fallback when the
+    # Cursor Approver cannot approve (for example, a cursor-authored PR), and
+    # also remains the authority for high-risk packets.
+    if statuses.get("Codex Approval", "").lower() == "success":
+        return GateDecision("success", "exact-head Codex Approval")
+
     if declared == "high":
-        if statuses.get("Codex Approval", "").lower() == "success":
-            return GateDecision("success", "high-risk packet has exact-head Codex Approval")
         return GateDecision("pending", "high-risk packet is waiting for exact-head Codex Approval")
 
     failed = _check_failure(checks, REQUIRED_CI_CHECKS + CURSOR_CHECKS + (CURSOR_APPROVER_CHECK,))
