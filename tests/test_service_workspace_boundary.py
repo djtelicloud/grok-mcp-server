@@ -214,11 +214,23 @@ def test_stable_and_contributor_compose_files_are_separate():
     assert "grok login --device-auth" in stable
     assert "name: unigrok-cli-auth" in stable
     assert "UNIGROK_SERVICE_MODE=contributor" in contributor
+    assert "UNIGROK_SWARM=off" in contributor
+    assert "ENABLE_GIT_WRITE=0" in contributor
     assert "name: grok-mcp-dev" in contributor
-    assert ".:/workspace" in contributor
+    assert ".:/workspace:ro" in contributor
     assert "${UNIGROK_DEV_PORT:-4766}" in contributor
     assert '127.0.0.1:${UNIGROK_DEV_PORT:-4766}:8080' in contributor
     assert "UNIGROK_TRUSTED_LOOPBACK_PROXY=1" in contributor
+    assert "working_dir: /app" in contributor
+    assert 'command: ["/app/.venv/bin/python", "-P", "/app/main.py", "--http"]' in contributor
+    assert "read_only: true" in contributor
+    assert "PYTHONPATH=/app" in contributor
+    assert "PYTHONPATH=/workspace" not in contributor
+
+    dockerfile = Path("Dockerfile").read_text(encoding="utf-8")
+    assert "chown -R appuser:appuser /app" not in dockerfile
+    assert "chmod -R a-w /app" in dockerfile
+    assert "ENV UNIGROK_STATE_DIR=/state" in dockerfile
 
     dials = Path("docker-compose.dials.yml").read_text(encoding="utf-8")
     assert "UNIGROK_MODE_DIALS=1" in dials

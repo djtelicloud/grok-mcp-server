@@ -6,7 +6,11 @@ services:
     image: grok-mcp:latest
     container_name: grok-mcp-server
     working_dir: /app
-    command: ["/app/.venv/bin/python", "/app/main.py", "--http"]
+    command: ["/app/.venv/bin/python", "-P", "/app/main.py", "--http"]
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec
+      - /run:rw,nosuid,nodev,noexec
     ports:
       # One stable, globally registered service for every local IDE/project.
       - "127.0.0.1:${UNIGROK_PORT:-4765}:8080"
@@ -27,6 +31,8 @@ services:
       - UNIGROK_STATE_DIR=/state
       - WORKSPACE_ROOT=
       - UNIGROK_TRUSTED_LOOPBACK_PROXY=1
+      - PYTHONPATH=/app
+      - PYTHONDONTWRITEBYTECODE=1
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=5)"]
       interval: 30s
