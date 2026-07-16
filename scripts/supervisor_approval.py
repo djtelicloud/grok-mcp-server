@@ -69,11 +69,7 @@ CURSOR_CHECKS = (
 )
 
 CURSOR_APPROVER_CHECK = "Cursor Approval Agent: Pull Request Router and Approver"
-
-# Cursor Security Reviewer automation id (posts PR reviews; often no named check-run).
-SECURITY_REVIEWER_AUTOMATION_IDS = (
-    "f12530a3-7ff4-11f1-ba66-0e7d0216e441",
-)
+CURSOR_APPROVER_ACTORS = frozenset({"cursor", "cursor[bot]"})
 
 # Bugbot concludes NEUTRAL when it finds nothing actionable; treat as pass.
 BUGBOT_PASSING_CONCLUSIONS = frozenset({"success", "neutral"})
@@ -88,15 +84,13 @@ def _is_passing_check(name: str, state: str) -> bool:
 
 def augment_cursor_evidence(
     checks: dict[str, str],
-    reviews: list[dict[str, Any]],
 ) -> dict[str, str]:
-    """Normalize Cursor Automation evidence into the gate's expected check names.
+    """Normalize only evidence that GitHub actually published.
 
-    Live observation: Security Reviewer and Approver often leave PR reviews (or
-    exit clean) without publishing the exact GitHub check-run names the gate
-    historically required. Bugbot also reports NEUTRAL when clean. Without this
-    normalization, Supervisor Approval stays pending forever on green Ready
-    packets.
+    The live Security Reviewer currently publishes no durable exact-head clean
+    receipt. Until it emits the named check-run on the current head, that
+    required check must remain missing and the low/medium failover path must
+    stay pending. Bugbot completion and unrelated PR text are not substitutes.
     """
 
     out = dict(checks)
@@ -104,26 +98,6 @@ def augment_cursor_evidence(
     bugbot = _state_for_check(out, "Cursor Bugbot")
     if bugbot in BUGBOT_PASSING_CONCLUSIONS:
         out["Cursor Bugbot"] = "success"
-
-    security_name = "Cursor Security Agent: Security Reviewer"
-    security_state = _state_for_check(out, security_name)
-    security_blocked = False
-    security_seen = False
-    for item in reviews:
-        body = item.get("body") or ""
-        if not any(aid in body for aid in SECURITY_REVIEWER_AUTOMATION_IDS):
-            continue
-        security_seen = True
-        if item.get("state") == "CHANGES_REQUESTED":
-            security_blocked = True
-
-    if security_blocked:
-        out[security_name] = "failure"
-    elif security_state == "success" or security_seen:
-        out[security_name] = "success"
-    elif security_state == "missing" and bugbot in BUGBOT_PASSING_CONCLUSIONS:
-        # Security automation ran/exited without a published check-run.
-        out[security_name] = "success"
 
     return out
 
@@ -187,7 +161,7 @@ def _check_failure(checks: dict[str, str], names: tuple[str, ...]) -> str | None
 
 def has_exact_cursor_approval(reviews: list[dict[str, Any]], head_sha: str) -> bool:
     return any(
-        item.get("user", {}).get("login") in {"cursor", "cursor[bot]"}
+        item.get("user", {}).get("login") in CURSOR_APPROVER_ACTORS
         and item.get("state") == "APPROVED"
         and item.get("commit_id") == head_sha
         for item in reviews
@@ -347,7 +321,7 @@ def evaluate_pr(client: GitHubClient, repository: str, pr_number: int) -> tuple[
     if has_exact_cursor_approval(reviews, head_sha):
         statuses["Cursor Approval"] = "success"
 
-    checks = augment_cursor_evidence(checks, reviews)
+    checks = augment_cursor_evidence(checks)
 
     body = pr.get("body") or ""
     declared = declared_risk(body, labels)
