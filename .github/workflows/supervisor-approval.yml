@@ -21,10 +21,12 @@ permissions:
 
 jobs:
   evaluate:
+    # Skip the job's own "evaluate" check-run completions so an early pending
+    # publish cannot self-retrigger forever. Other check-runs still re-evaluate.
     if: >-
       ${{
         github.event_name == 'pull_request_target' ||
-        (github.event_name == 'check_run' && !contains(github.event.check_run.name, 'Supervisor Gate')) ||
+        (github.event_name == 'check_run' && github.event.check_run.name != 'evaluate' && !contains(github.event.check_run.name, 'Supervisor Gate')) ||
         (github.event_name == 'status' && github.event.context != 'Supervisor Approval') ||
         github.event_name == 'workflow_dispatch'
       }}
@@ -44,6 +46,7 @@ jobs:
           PULL_REQUEST_NUMBER: ${{ github.event.pull_request.number }}
           MANUAL_PULL_REQUEST_NUMBER: ${{ inputs.pr_number }}
           CHECK_RUN_PULL_REQUESTS: ${{ toJson(github.event.check_run.pull_requests) }}
+          CHECK_RUN_HEAD_SHA: ${{ github.event.check_run.head_sha }}
         shell: bash
         run: |
           set -euo pipefail
@@ -55,6 +58,10 @@ jobs:
             number="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/pulls" --jq '.[0].number // empty')"
           else
             number="$(jq -r '.[0].number // empty' <<< "${CHECK_RUN_PULL_REQUESTS}")"
+            # Some completed checks omit pull_requests; recover via head SHA.
+            if [[ -z "${number}" && -n "${CHECK_RUN_HEAD_SHA}" ]]; then
+              number="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${CHECK_RUN_HEAD_SHA}/pulls" --jq '.[0].number // empty')"
+            fi
           fi
           if [[ -n "${number}" ]]; then
             echo "number=${number}" >> "${GITHUB_OUTPUT}"
