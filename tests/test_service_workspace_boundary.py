@@ -292,15 +292,21 @@ async def test_discover_self_bootstrap_ok_with_client_id(monkeypatch):
             "setup_command": "unused",
         },
     )
-    principal = set_active_principal("http:anon")
-    caller = set_active_caller("http:anon|claude-code")
-    token = _ACTIVE_CLIENT_ID.set("claude-code")
+    principal_token = None
+    caller_token = None
+    client_token = None
     try:
+        principal_token = set_active_principal("http:anon")
+        caller_token = set_active_caller("http:anon|claude-code")
+        client_token = _ACTIVE_CLIENT_ID.set("claude-code")
         result = await grok_mcp_discover_self()
     finally:
-        _ACTIVE_CLIENT_ID.reset(token)
-        reset_active_caller(caller)
-        reset_active_principal(principal)
+        if client_token is not None:
+            _ACTIVE_CLIENT_ID.reset(client_token)
+        if caller_token is not None:
+            reset_active_caller(caller_token)
+        if principal_token is not None:
+            reset_active_principal(principal_token)
 
     assert result.data["request_context"]["client_id_present"] is True
     assert result.data["request_context"]["client_id_normalized"] == "claude-code"
