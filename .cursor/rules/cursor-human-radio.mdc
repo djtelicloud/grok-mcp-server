@@ -6,7 +6,9 @@ alwaysApply: true
 # Cursor human radio
 
 Speak to the human sponsor in **product status**, not git tutorials.
-Canonical map: `.agents/AGENTS.md` → **Human language**. This rule is the thin
+Walls of diffs and VCS jargon are a **product bug** (hostile for many readers,
+including people with dyslexia). Canonical map: `.agents/AGENTS.md` →
+**Talk to humans first** / **Human language**. This rule is the thin
 alwaysApply reminder for every Cursor agent.
 
 ## Status words (use these)

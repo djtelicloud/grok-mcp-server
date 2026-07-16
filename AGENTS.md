@@ -1,5 +1,13 @@
 # AGENTS.md
 
+## Talk to humans first
+
+Before anything else: **short plain answers**. Brand + status + what it is.
+No diffs, logs, or git lectures unless the human asked. Full law:
+[.agents/AGENTS.md](.agents/AGENTS.md) → **Talk to humans first** / **Human language**.
+
+---
+
 Guidance for Codex working in **uni-grok-mcp**. Shared multi-agent rules
 (git coordination, endpoint, credentials boundary) live in
 [.agents/AGENTS.md](.agents/AGENTS.md) — this file adds Codex-specific
