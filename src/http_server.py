@@ -455,6 +455,7 @@ _PUBLIC_AUTH_EXEMPT_PATHS = (
 # when reached through a non-loopback Host.
 _LOCAL_OPERATOR_PATHS = ("/runtimez", "/metrics")
 _LOCAL_OPERATOR_PREFIXES = ("/ui", "/docs")
+_AUTH_REQUIRED_LOCAL_OPERATOR_PATHS = frozenset({"/runtimez", "/metrics"})
 
 
 def _scope_host_is_loopback(scope: Dict[str, Any]) -> bool:
@@ -510,8 +511,11 @@ def _is_local_operator_request(scope: Dict[str, Any]) -> bool:
     if not _is_verified_local_request(scope):
         return False
     path = scope.get("path", "")
-    return path in _LOCAL_OPERATOR_PATHS or any(
+    is_operator = path in _LOCAL_OPERATOR_PATHS or any(
         _path_matches_prefix(path, prefix) for prefix in _LOCAL_OPERATOR_PREFIXES
+    )
+    return is_operator and not (
+        _auth_is_active() and path in _AUTH_REQUIRED_LOCAL_OPERATOR_PATHS
     )
 
 
@@ -519,6 +523,11 @@ def _request_may_bypass_auth(scope: Dict[str, Any]) -> bool:
     # The broad development bypass is stricter than the operator-static
     # exemption: an asserted Docker proxy boundary may expose /ui, /runtimez,
     # and local-only /metrics, but it never disables auth for /mcp or /v1.
+    if (
+        _auth_is_active()
+        and scope.get("path", "") in _AUTH_REQUIRED_LOCAL_OPERATOR_PATHS
+    ):
+        return False
     return _allow_unauthenticated() and _is_direct_loopback_request(scope)
 
 

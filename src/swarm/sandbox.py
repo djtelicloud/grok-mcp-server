@@ -28,6 +28,11 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from ..subprocess_security import (
+    create_scrubbed_subprocess_exec,
+    scrubbed_subprocess_run,
+)
+
 _EXCLUDED_DIRS = {
     ".git", ".venv", "chats", "node_modules", "__pycache__",
     ".pytest_cache", ".mypy_cache", ".ruff_cache", ".idea", ".vscode",
@@ -177,7 +182,7 @@ class SwarmSandbox:
         venv_python = self.work / ".venv" / "bin" / "python"
         if venv_python.is_file():
             try:
-                probe = subprocess.run(
+                probe = scrubbed_subprocess_run(
                     [str(venv_python), "-c", "import sys; raise SystemExit(0)"],
                     stdin=subprocess.DEVNULL,
                     stdout=subprocess.DEVNULL,
@@ -229,7 +234,7 @@ class SwarmSandbox:
     ) -> Tuple[int, str, str]:
         """Run one untrusted child: own session, RLIMITs, allowlisted env,
         process-group SIGKILL on timeout (rc -9)."""
-        proc = await asyncio.create_subprocess_exec(
+        proc = await create_scrubbed_subprocess_exec(
             *argv,
             cwd=str(self.work),
             env=self.child_env(),

@@ -599,7 +599,7 @@ def test_runtimez_reports_the_current_phoneword_dial(monkeypatch):
     }
 
 
-def test_runtimez_stays_open_on_localhost_with_gateway_auth(monkeypatch):
+def test_runtimez_requires_auth_on_localhost_when_keys_set(monkeypatch):
     monkeypatch.delenv("UNIGROK_RUNTIME", raising=False)
     monkeypatch.setenv("UNIGROK_API_KEYS", "client-secret")
 
@@ -608,12 +608,16 @@ def test_runtimez_stays_open_on_localhost_with_gateway_auth(monkeypatch):
         base_url="http://localhost:8080",
         client=("127.0.0.1", 50000),
     ) as client:
-        res = client.get("/runtimez")
+        denied = client.get("/runtimez")
+        allowed = client.get(
+            "/runtimez", headers={"Authorization": "Bearer client-secret"}
+        )
 
-    assert res.status_code == 200
+    assert denied.status_code == 401
+    assert allowed.status_code == 200
 
 
-def test_local_unauthenticated_override_is_loopback_only(monkeypatch):
+def test_local_unauthenticated_override_does_not_open_sensitive_status(monkeypatch):
     monkeypatch.setenv("UNIGROK_RUNTIME", "local")
     monkeypatch.setenv("UNIGROK_API_KEYS", "client-secret")
     monkeypatch.setenv("UNIGROK_ALLOW_UNAUTHENTICATED", "1")
@@ -623,7 +627,8 @@ def test_local_unauthenticated_override_is_loopback_only(monkeypatch):
         base_url="http://localhost:8080",
         client=("127.0.0.1", 50000),
     ) as client:
-        loopback = client.get("/metrics")
+        loopback_metrics = client.get("/metrics")
+        loopback_ui = client.get("/ui/")
     with TestClient(
         create_app(),
         base_url="https://gateway.example.com",
@@ -631,7 +636,8 @@ def test_local_unauthenticated_override_is_loopback_only(monkeypatch):
     ) as client:
         remote = client.get("/metrics")
 
-    assert loopback.status_code == 200
+    assert loopback_metrics.status_code == 401
+    assert loopback_ui.status_code == 200
     assert remote.status_code == 401
 
 
@@ -690,9 +696,9 @@ def test_trusted_compose_proxy_never_bypasses_inference_auth(monkeypatch):
         metrics = client.get("/metrics")
 
     assert ui.status_code == 200
-    assert runtime.status_code == 200
+    assert runtime.status_code == 401
     assert inference.status_code == 401
-    assert metrics.status_code == 200
+    assert metrics.status_code == 401
 
 
 def test_readyz_accepts_cli_auth_without_xai_api_key(monkeypatch, tmp_path):
@@ -1875,13 +1881,17 @@ def test_metrics_is_verified_local_operator_only(monkeypatch):
         base_url="http://localhost:8080",
         client=("127.0.0.1", 50000),
     ) as client:
-        local = client.get("/metrics")
+        local_denied = client.get("/metrics")
+        local_allowed = client.get(
+            "/metrics", headers={"Authorization": "Bearer metrics-secret"}
+        )
 
     assert denied.status_code == 401
     assert allowed.status_code == 403
     assert allowed.json()["error"]["code"] == "forbidden"
-    assert local.status_code == 200
-    assert local.json()["format"] == "unigrok-json-v1"
+    assert local_denied.status_code == 401
+    assert local_allowed.status_code == 200
+    assert local_allowed.json()["format"] == "unigrok-json-v1"
 
 
 def test_metrics_aggregates_planes_and_runtime(monkeypatch):

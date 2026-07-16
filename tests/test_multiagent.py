@@ -483,10 +483,21 @@ class TestBudgetEnforcement:
     @pytest.mark.asyncio
     async def test_store_failure_degrades_open(self, monkeypatch):
         monkeypatch.setenv("UNIGROK_CALLER_BUDGETS", json.dumps({"codex-cli": 1.0}))
+        monkeypatch.delenv("UNIGROK_BUDGET_FAIL_CLOSED", raising=False)
         broken_store = MagicMock()
         broken_store.get_caller_cost_today = AsyncMock(side_effect=RuntimeError("db gone"))
 
         await enforce_caller_budget(broken_store, "codex-cli")  # no raise
+
+    @pytest.mark.asyncio
+    async def test_store_failure_can_fail_closed(self, monkeypatch):
+        monkeypatch.setenv("UNIGROK_CALLER_BUDGETS", json.dumps({"codex-cli": 1.0}))
+        monkeypatch.setenv("UNIGROK_BUDGET_FAIL_CLOSED", "1")
+        broken_store = MagicMock()
+        broken_store.get_caller_cost_today = AsyncMock(side_effect=RuntimeError("db gone"))
+
+        with pytest.raises(CallerBudgetExceeded, match="budget check failed"):
+            await enforce_caller_budget(broken_store, "codex-cli")
 
     @pytest.mark.asyncio
     async def test_malformed_budgets_env_ignored(self, cstore, monkeypatch):

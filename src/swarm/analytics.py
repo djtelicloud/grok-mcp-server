@@ -18,6 +18,7 @@ import sys
 import tokenize
 from typing import Any, Dict, Iterable, List, Optional
 
+from ..subprocess_security import create_scrubbed_subprocess_exec
 from ..utils import redact_secrets
 
 MAX_SOURCE_BYTES = 256 * 1024
@@ -267,7 +268,7 @@ async def add_ruff_summary(source: str, analytics: Dict[str, Any]) -> Dict[str, 
         analytics["ruff"] = {"available": False, "counts_by_code": {}}
         return analytics
     try:
-        proc = await asyncio.create_subprocess_exec(
+        proc = await create_scrubbed_subprocess_exec(
             binary,
             "check",
             "--isolated",
