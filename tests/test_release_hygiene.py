@@ -431,6 +431,27 @@ def test_agent_rules_allow_draft_pr_submission_but_reserve_final_integration():
     assert "scripts/land" in copilot_rules
 
 
+def test_cursor_python_superiority_loop_requires_measured_serial_evidence():
+    agent = (
+        ROOT / ".cursor" / "agents" / "python-superiority.md"
+    ).read_text(encoding="utf-8")
+    rule = (
+        ROOT / ".cursor" / "rules" / "cursor-python-superiority.mdc"
+    ).read_text(encoding="utf-8")
+
+    assert "Never fall back to a plan-only PR" in agent
+    assert "one open draft PR" in agent
+    assert "plan_swarm_campaign" in agent
+    assert "start_code_swarm" in agent
+    assert "Forge task id" in agent
+    assert "| Latency (ms) | measured | measured | measured % |" in agent
+    assert "| Peak memory (bytes) | measured | measured | measured % |" in agent
+    assert "No PR is the correct result" in agent
+    assert "alwaysApply: true" in rule
+    assert ".cursor/agents/python-superiority.md" in rule
+    assert "projected, not measured" in rule
+
+
 def test_dual_supervisor_land_law_is_consistent() -> None:
     """Cursor may land green low/medium work; high-risk stays Codex."""
     shared = (ROOT / ".agents" / "AGENTS.md").read_text(encoding="utf-8")

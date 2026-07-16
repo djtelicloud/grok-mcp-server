@@ -1,0 +1,18 @@
+---
+description: Evidence gate for Cursor Python superiority campaign branches
+alwaysApply: true
+---
+
+# Python superiority evidence gate
+
+When the task or branch uses `python-superiority` or
+`cursor/python-superiority-loop-*`, load and obey
+`.cursor/agents/python-superiority.md`.
+
+- Forge unavailable means **Blocked**; never substitute a plan-only PR.
+- Projected LOC, parse time, and compile time are not performance evidence.
+- One file cycle and at most one open campaign draft PR at a time.
+- An optimization PR requires measured baseline/champion latency and memory,
+  exact oracle and full-suite results, and the Forge task id.
+- A no-win cycle opens no PR. A refactor-plan PR must state why function-level
+  Swarm search is blocked and label all forecasts **projected, not measured**.
