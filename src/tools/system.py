@@ -116,8 +116,13 @@ def _resolve_workspace_file(
 
 
 async def grok_mcp_status(view: Literal["text", "json"] = "text") -> str:
-    """Inspect health and usage; ``view=json`` returns stable structured metrics."""
+    """Inspect health and usage; ``view=json`` returns stable structured metrics.
+
+    Bound HTTP/MCP principals get a redacted readiness view only — cross-caller
+    telemetry, spend, breakers, and operator snapshots stay local/unbound.
+    """
     async with GrokInvocationContext("utility", logger, append_signature=False) as ctx:
+        bound_principal = get_active_principal() is not None
         server_version = __version__
         proj_root = PathResolver.get_service_root()
         grok_cli = PathResolver.get_grok_cli_path()
@@ -138,6 +143,39 @@ async def grok_mcp_status(view: Literal["text", "json"] = "text") -> str:
             }
         cli_auth = f"{cli_plane['state']} ({cli_plane['auth']})"
         credential_planes = credential_plane_contract(cli_plane)
+
+        if bound_principal:
+            if view == "json":
+                return json.dumps(
+                    {
+                        "server_version": server_version,
+                        "service_mode": (
+                            "contributor" if PathResolver.contributor_mode() else "stable"
+                        ),
+                        "workspace_attached": PathResolver.get_workspace_root() is not None,
+                        "credential_planes": credential_planes,
+                        "metrics_redacted": True,
+                        "reason": "operator_metrics_require_unbound_local_session",
+                    },
+                    separators=(",", ":"),
+                )
+            redacted = (
+                "# UniGrok MCP Server Status\n\n"
+                f"**Server Version:** `{server_version}`\n"
+                f"**Service Mode:** `{'contributor' if PathResolver.contributor_mode() else 'stable'}`\n"
+                f"**Workspace Attached:** "
+                f"`{'yes' if PathResolver.get_workspace_root() is not None else 'no'}`\n"
+                f"**CLI Authentication:** `{cli_auth}`\n"
+                f"**Developer API Key:** `{'Configured' if XAI_API_KEY else 'Missing'}`\n\n"
+                "### Credential Planes\n"
+                f"- **Policy:** `{credential_planes['policy']}`\n"
+                f"- **Preferred Plane:** `{credential_planes['preferred_plane']}`\n"
+                f"- **Effective Plane:** `{credential_planes['effective_plane'] or 'none'}`\n"
+                f"- **Service Usable:** `{'yes' if credential_planes['service_usable'] else 'no'}`\n\n"
+                "Operator telemetry (spend, callers, breakers, metrics snapshot) "
+                "is available only from an unbound local session.\n"
+            )
+            return ctx.format_output(redacted)
 
         git_sha = "Unknown"
         try:
