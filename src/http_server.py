@@ -1859,14 +1859,31 @@ def _xai_chat_completions_url() -> Optional[str]:
 
     ``XAI_API_BASE_URL`` is operator-controlled but credential-bearing: the
     gateway attaches ``XAI_API_KEY``. Unset keeps the built-in xAI default.
-    A set-but-unsafe override fails closed (no silent fallback that would hide
-    a misconfiguration while still shipping the bearer token elsewhere).
+    A set-but-unsafe or unapproved override fails closed (no silent fallback
+    that would hide a misconfiguration while still shipping the bearer token
+    elsewhere). Additional origins require an explicit trusted process-level
+    allowlist; installed launches never import that authority from caller cwd.
     """
     raw = os.environ.get("XAI_API_BASE_URL", "").strip()
     if not raw:
         return f"{XAI_BASE_URL.rstrip('/')}/chat/completions"
     base = _validated_https_url(raw)
     if base is None:
+        return None
+    parsed = urlsplit(base)
+    origin = f"{parsed.scheme.lower()}://{parsed.netloc.lower()}"
+    allowed_origins = {"https://api.x.ai"}
+    for item in os.environ.get("UNIGROK_ALLOWED_XAI_API_ORIGINS", "").split(","):
+        validated = _validated_https_url(item.strip())
+        if validated is None:
+            continue
+        candidate = urlsplit(validated)
+        if candidate.path not in ("", "/"):
+            continue
+        allowed_origins.add(
+            f"{candidate.scheme.lower()}://{candidate.netloc.lower()}"
+        )
+    if origin not in allowed_origins:
         return None
     return f"{base.rstrip('/')}/chat/completions"
 
@@ -1957,7 +1974,7 @@ async def post_xai_chat(payload: Dict[str, Any]) -> Response:
     url = _xai_chat_completions_url()
     if url is None:
         return _json_error(
-            "XAI_API_BASE_URL is not a public HTTPS endpoint.",
+            "XAI_API_BASE_URL is not an approved public HTTPS endpoint.",
             status_code=503,
             code="service_unavailable",
         )
@@ -2003,7 +2020,7 @@ async def stream_xai_chat(payload: Dict[str, Any]) -> AsyncIterator[bytes]:
     url = _xai_chat_completions_url()
     if url is None:
         yield _sse_error(
-            "XAI_API_BASE_URL is not a public HTTPS endpoint.",
+            "XAI_API_BASE_URL is not an approved public HTTPS endpoint.",
             "service_unavailable",
         )
         yield b"data: [DONE]\n\n"

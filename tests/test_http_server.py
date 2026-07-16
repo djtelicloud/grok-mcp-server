@@ -2051,6 +2051,7 @@ def test_xai_chat_completions_url_defaults_and_rejects_unsafe_overrides(monkeypa
     from src.http_server import XAI_BASE_URL, _xai_chat_completions_url
 
     monkeypatch.delenv("XAI_API_BASE_URL", raising=False)
+    monkeypatch.delenv("UNIGROK_ALLOWED_XAI_API_ORIGINS", raising=False)
     assert _xai_chat_completions_url() == f"{XAI_BASE_URL.rstrip('/')}/chat/completions"
 
     monkeypatch.setenv("XAI_API_BASE_URL", "https://api.x.ai/v1")
@@ -2061,9 +2062,44 @@ def test_xai_chat_completions_url_defaults_and_rejects_unsafe_overrides(monkeypa
         "https://169.254.169.254/v1",
         "https://evil.internal/v1",
         "https://localhost/v1",
+        "https://attacker.example/v1",
     ):
         monkeypatch.setenv("XAI_API_BASE_URL", unsafe)
         assert _xai_chat_completions_url() is None, unsafe
+
+    monkeypatch.setenv(
+        "UNIGROK_ALLOWED_XAI_API_ORIGINS", "https://trusted-proxy.example"
+    )
+    monkeypatch.setenv("XAI_API_BASE_URL", "https://trusted-proxy.example/v1")
+    assert (
+        _xai_chat_completions_url()
+        == "https://trusted-proxy.example/v1/chat/completions"
+    )
+
+
+@pytest.mark.asyncio
+async def test_post_xai_chat_rejects_unapproved_https_origin_before_auth(monkeypatch):
+    from src.http_server import post_xai_chat
+    import json
+
+    captured = {"constructed": False}
+
+    class ForbiddenClient:
+        def __init__(self, **kwargs):
+            captured["constructed"] = True
+            raise AssertionError("unapproved origin must fail before client construction")
+
+    monkeypatch.setenv("XAI_API_KEY", "trusted-parent-key")
+    monkeypatch.setenv("XAI_API_BASE_URL", "https://attacker.example/v1")
+    monkeypatch.delenv("UNIGROK_ALLOWED_XAI_API_ORIGINS", raising=False)
+    monkeypatch.setattr("src.http_server.httpx.AsyncClient", ForbiddenClient)
+
+    res = await post_xai_chat({"model": "grok-4.3", "messages": []})
+    assert res.status_code == 503
+    body = json.loads(res.body.decode())
+    assert body["error"]["code"] == "service_unavailable"
+    assert "approved public HTTPS" in body["error"]["message"]
+    assert captured["constructed"] is False
 
 
 @pytest.mark.asyncio
@@ -2120,6 +2156,6 @@ async def test_stream_xai_chat_rejects_unsafe_base_url_without_calling_out(monke
         async for chunk in stream_xai_chat({"model": "grok-4.3", "messages": []})
     ]
     body = b"".join(chunks).decode("utf-8")
-    assert "XAI_API_BASE_URL is not a public HTTPS endpoint." in body
+    assert "XAI_API_BASE_URL is not an approved public HTTPS endpoint." in body
     assert body.endswith("data: [DONE]\n\n")
     assert called["stream"] is False
