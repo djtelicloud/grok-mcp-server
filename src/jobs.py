@@ -16,7 +16,12 @@ import uuid
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
-from .identity import get_active_caller, normalize_caller, scoped_session
+from .identity import (
+    get_active_caller,
+    get_active_principal,
+    normalize_caller,
+    scoped_session,
+)
 from .utils import (
     AGENTIC_TOOLS_SCHEMA,
     _DISTILL_SYS_PROMPT,
@@ -36,6 +41,16 @@ from .utils import (
 )
 
 logger = logging.getLogger("GrokMCP.Jobs")
+
+
+def resolve_job_owner(caller: Optional[str] = None) -> Optional[str]:
+    """Return the durable job owner for the current request.
+
+    Authenticated HTTP always uses the server-bound stable principal. Caller
+    labels remain attribution-only and cannot replace that owner. Unbound
+    local/stdio callers retain their historical explicit-label behavior.
+    """
+    return get_active_principal() or normalize_caller(caller) or get_active_caller()
 
 
 def _job_timeout_sec() -> float:
@@ -104,12 +119,12 @@ class JobManager:
     ) -> Dict[str, Any]:
         """Create a job row and launch its background defer task.
 
-        caller (the submitting agent's identity) is persisted on the row —
-        explicit param first, else whatever the transport bound to the
-        current async context; None stays None."""
+        The server-bound authenticated principal is persisted when present;
+        otherwise the explicit local/stdio caller label is used, followed by
+        the transport's reporting identity. None stays None."""
         job_id = uuid.uuid4().hex
         resolved = (model or "").strip() or await resolve_model("planning")
-        caller = normalize_caller(caller) or get_active_caller()
+        caller = resolve_job_owner(caller)
         await self._store.create_job(job_id, prompt=prompt, model=resolved, caller=caller)
         task = asyncio.create_task(self._run_job(job_id, prompt, resolved, agent_count))
         self._tasks[job_id] = task
@@ -186,9 +201,8 @@ class JobManager:
         defer-slot semaphore as research jobs — a distill run pins one timed
         thread for the parse call.
 
-        caller attribution matches submit(): explicit param first, else
-        whatever the transport bound to the current async context (the
-        gateway's X-Caller / MCP clientInfo); None stays None.
+        Owner attribution matches submit(): a bound authenticated principal
+        wins; unbound local/stdio keeps its explicit/reporting caller label.
         """
         session_name = str(session or "").strip()
         if not session_name:
@@ -198,7 +212,7 @@ class JobManager:
         session_name = scoped_session(session_name) or session_name
         job_id = uuid.uuid4().hex
         model = await resolve_model("coding")
-        caller = normalize_caller(caller) or get_active_caller()
+        caller = resolve_job_owner(caller)
         await self._store.create_job(
             job_id,
             prompt=f"[distill] session:{session_name}",
@@ -327,8 +341,8 @@ class JobManager:
     def _caller_may_view(
         row_caller: Optional[str], requester: Optional[str]
     ) -> bool:
-        """When a requester identity is bound, only that caller's rows are
-        visible. Unbound requesters keep the historical open local view."""
+        """When an owner identity is bound, only that owner's rows are visible.
+        Unbound requesters keep the historical open local view."""
         req = normalize_caller(requester)
         if not req:
             return True

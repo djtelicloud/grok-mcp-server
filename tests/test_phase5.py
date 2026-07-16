@@ -187,6 +187,38 @@ class TestJobManager:
             await s.close()
 
     @pytest.mark.asyncio
+    async def test_submit_persists_stable_principal_over_caller_label(self, tmp_path):
+        """Authenticated HTTP ownership is never replaced by clientInfo."""
+        from src.identity import (
+            reset_active_caller,
+            reset_active_principal,
+            set_active_caller,
+            set_active_principal,
+        )
+
+        s = GrokSessionStore(db_path=tmp_path / "jm_owner.db")
+        manager = JobManager(job_store=s)
+        client = _FakeJobClient(
+            _FakeDeferChat(response=SimpleNamespace(content="ok", cost_usd=None))
+        )
+        principal_token = set_active_principal(
+            "oauth:https%3A%2F%2Fcontrol.grokmcp.org:stable-subject"
+        )
+        caller_token = set_active_caller("principal|spoofable-client-label")
+        try:
+            with patch("src.jobs.get_xai_client", return_value=client):
+                submitted = await manager.submit("owned job", caller="spoofable-client-label")
+                await manager.wait(submitted["job_id"])
+            row = await s.get_job(submitted["job_id"])
+            assert row["caller"] == (
+                "oauth:https%3A%2F%2Fcontrol.grokmcp.org:stable-subject"
+            )
+        finally:
+            reset_active_caller(caller_token)
+            reset_active_principal(principal_token)
+            await s.close()
+
+    @pytest.mark.asyncio
     async def test_defer_failure_persists_error(self, tmp_path):
         """A failing defer() never crashes the server: the exception is
         stored on the row as status=error."""
@@ -437,21 +469,33 @@ class TestResearchTools:
                     "updated_at": "t",
                     "result": "ok",
                     "cost": 0.0,
-                    "caller": "claude-code",
+                    "caller": "oauth:https%3A%2F%2Fcontrol.grokmcp.org:stable-subject",
                 }
             ]
         )
         monkeypatch.setattr(manager._store, "list_jobs", list_mock)
-        from src.utils import reset_active_caller, set_active_caller
+        from src.identity import (
+            reset_active_caller,
+            reset_active_principal,
+            set_active_caller,
+            set_active_principal,
+        )
 
         token = set_active_caller("claude-code")
+        principal_token = set_active_principal(
+            "oauth:https%3A%2F%2Fcontrol.grokmcp.org:stable-subject"
+        )
         try:
             res = await list_research_jobs(limit=5)
         finally:
+            reset_active_principal(principal_token)
             reset_active_caller(token)
         assert res["count"] == 1
         assert res["jobs"][0]["job_id"] == "j-mine"
-        list_mock.assert_awaited_once_with(5, caller="claude-code")
+        list_mock.assert_awaited_once_with(
+            5,
+            caller="oauth:https%3A%2F%2Fcontrol.grokmcp.org:stable-subject",
+        )
 
     @pytest.mark.asyncio
     async def test_get_own_job_visible_to_matching_caller(self, monkeypatch):
@@ -669,6 +713,33 @@ class TestResourcesAndPrompts:
         contents = list(await mcp.read_resource("grok://jobs/definitely-missing"))
         payload = json.loads(contents[0].content)
         assert payload["status"] == "not_found"
+
+    @pytest.mark.asyncio
+    async def test_job_resource_hides_foreign_principal(self):
+        from src.identity import reset_active_principal, set_active_principal
+        from src.server import mcp
+        from src.utils import store
+
+        job_id = "phase5-resource-foreign-owner"
+        await store.create_job(
+            job_id,
+            prompt="private research",
+            model="grok-test",
+            caller="oauth:https%3A%2F%2Fcontrol.grokmcp.org:principal-a",
+        )
+        await store.update_job(
+            job_id, status="done", result="principal-a-private-result", cost=0.1
+        )
+        token = set_active_principal(
+            "oauth:https%3A%2F%2Fcontrol.grokmcp.org:principal-b"
+        )
+        try:
+            contents = list(await mcp.read_resource(f"grok://jobs/{job_id}"))
+        finally:
+            reset_active_principal(token)
+        payload = json.loads(contents[0].content)
+        assert payload["status"] == "not_found"
+        assert "principal-a-private-result" not in contents[0].content
 
     @pytest.mark.asyncio
     async def test_prompts_registered_and_render(self):

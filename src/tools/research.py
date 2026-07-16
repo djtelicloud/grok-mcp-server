@@ -7,8 +7,8 @@ from typing import Any, Dict, Optional
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import ToolAnnotations
 
-from ..identity import caller_from_mcp_context, get_active_caller, normalize_caller
-from ..jobs import get_job_manager
+from ..identity import caller_from_mcp_context
+from ..jobs import get_job_manager, resolve_job_owner
 
 logger = logging.getLogger("GrokMCP")
 
@@ -16,9 +16,9 @@ READONLY_TOOL = ToolAnnotations(readOnlyHint=True)
 
 
 def _job_requester(ctx: Optional[Context]) -> Optional[str]:
-    """Match submit()'s attribution: explicit MCP clientInfo, else bound caller."""
+    """Resolve the same durable owner used when the job was submitted."""
     explicit = caller_from_mcp_context(ctx) if ctx is not None else None
-    return normalize_caller(explicit) or get_active_caller()
+    return resolve_job_owner(explicit)
 
 
 async def submit_research_job(
@@ -46,8 +46,9 @@ async def submit_research_job(
         return {"error": "Input Validation Error: prompt must not be empty."}
     if agent_count is not None and agent_count not in (4, 16):
         return {"error": "Input Validation Error: agent_count must be either 4 or 16."}
-    # ctx is FastMCP-injected (hidden from the tool schema): the clientInfo
-    # name identifies which agent submitted the job on the persisted row.
+    # ctx is FastMCP-injected (hidden from the tool schema). JobManager uses
+    # the stable authenticated principal when present; clientInfo remains only
+    # the historical owner label for unbound local/stdio callers.
     return await get_job_manager().submit(
         text,
         model=model,
@@ -67,8 +68,8 @@ async def get_research_job(
     UNIGROK_JOB_TIMEOUT_SEC, meaning the task that owned it did not survive a
     server restart and the job will never finish on its own.
 
-    When the request has a bound caller identity, only that caller's jobs are
-    visible (foreign ids look like `not_found`).
+    When the request has a bound authenticated principal, only that principal's
+    jobs are visible (foreign ids look like `not_found`).
 
     Args:
         job_id: ID returned by `submit_research_job`.
@@ -86,8 +87,8 @@ async def list_research_jobs(
 ) -> Dict[str, Any]:
     """List the most recent deferred research jobs, newest first.
 
-    When the request has a bound caller identity, the list is scoped to that
-    caller. Unbound local callers keep the historical open listing.
+    When the request has a bound authenticated principal, the list is scoped to
+    that principal. Unbound local callers keep the historical open listing.
 
     Args:
         limit: Maximum number of jobs to return (clamped to 1-100, default 20).

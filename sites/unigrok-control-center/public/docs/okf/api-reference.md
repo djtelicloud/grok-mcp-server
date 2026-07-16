@@ -933,6 +933,20 @@ then whole records are admitted while they fit beside the query and the
 
 ## jobs.py {#jobs}
 
+### Function: `resolve_job_owner` {#jobs-resolve_job_owner}
+
+```python
+def resolve_job_owner(caller: Optional[str]=None) -> Optional[str]
+```
+
+**Keywords:** resolve, job, owner
+
+Return the durable job owner for the current request.
+
+Authenticated HTTP always uses the server-bound stable principal. Caller
+labels remain attribution-only and cannot replace that owner. Unbound
+local/stdio callers retain their historical explicit-label behavior.
+
 ### Class: `JobManager` {#jobs-jobmanager}
 
 ```python
@@ -965,9 +979,9 @@ async def JobManager.submit(self, prompt: str, model: Optional[str]=None, agent_
 
 Create a job row and launch its background defer task.
 
-caller (the submitting agent's identity) is persisted on the row —
-explicit param first, else whatever the transport bound to the
-current async context; None stays None.
+The server-bound authenticated principal is persisted when present;
+otherwise the explicit local/stdio caller label is used, followed by
+the transport's reporting identity. None stays None.
 
 ### Method: `JobManager.submit_distill` {#jobs-jobmanager-submit_distill}
 
@@ -987,9 +1001,8 @@ source='session:<name>'). Rides the same jobs-table lifecycle and
 defer-slot semaphore as research jobs — a distill run pins one timed
 thread for the parse call.
 
-caller attribution matches submit(): explicit param first, else
-whatever the transport bound to the current async context (the
-gateway's X-Caller / MCP clientInfo); None stays None.
+Owner attribution matches submit(): a bound authenticated principal
+wins; unbound local/stdio keeps its explicit/reporting caller label.
 
 ### Method: `JobManager.describe` {#jobs-jobmanager-describe}
 
@@ -3336,8 +3349,8 @@ queued/running job whose `updated_at` is older than
 UNIGROK_JOB_TIMEOUT_SEC, meaning the task that owned it did not survive a
 server restart and the job will never finish on its own.
 
-When the request has a bound caller identity, only that caller's jobs are
-visible (foreign ids look like `not_found`).
+When the request has a bound authenticated principal, only that principal's
+jobs are visible (foreign ids look like `not_found`).
 
 Args:
     job_id: ID returned by `submit_research_job`.
@@ -3352,8 +3365,8 @@ async def list_research_jobs(limit: int=20, ctx: Optional[Context]=None) -> Dict
 
 List the most recent deferred research jobs, newest first.
 
-When the request has a bound caller identity, the list is scoped to that
-caller. Unbound local callers keep the historical open listing.
+When the request has a bound authenticated principal, the list is scoped to
+that principal. Unbound local callers keep the historical open listing.
 
 Args:
     limit: Maximum number of jobs to return (clamped to 1-100, default 20).
