@@ -22,8 +22,12 @@ Call `agent` with:
 - `model` (optional): pin a **live catalog** Grok model id such as `grok-4.5`
   or API coding slug `grok-build-0.1`; leave unset to let routing choose.
   Never invent ids from product names. The Grok Build IDE product is not the
-  same identity as `grok-build-0.1`. Prefer `plane` + `fallback_policy` when
-  the billing plane must not cross (`cli` vs `api`, `cli_first` default).
+  same identity as `grok-build-0.1`.
+- `plane` (optional): `auto` (default policy, usually `cli_first`), `cli`
+  (SuperGrok subscription), or `api` (metered developer API). Only these three
+  public plane values exist — never invent foreign provider planes.
+- `fallback_policy` (optional): `cross_plane` (default, bounded recovery) or
+  `same_plane` (forbid billing-boundary cross).
 - `session` (optional): a stable, project-qualified key such as
   `owner-repo:task` for multi-turn continuity. Do not reuse a generic session
   key across repositories.
