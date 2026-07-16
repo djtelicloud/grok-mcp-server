@@ -271,7 +271,13 @@ async def test_discover_self_bootstrap_warns_without_client_id(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_discover_self_bootstrap_ok_with_client_id(monkeypatch):
-    from src.identity import _ACTIVE_CLIENT_ID
+    from src.identity import (
+        _ACTIVE_CLIENT_ID,
+        reset_active_caller,
+        reset_active_principal,
+        set_active_caller,
+        set_active_principal,
+    )
 
     monkeypatch.setenv("UNIGROK_SERVICE_MODE", "stable")
     monkeypatch.delenv("WORKSPACE_ROOT", raising=False)
@@ -286,18 +292,42 @@ async def test_discover_self_bootstrap_ok_with_client_id(monkeypatch):
             "setup_command": "unused",
         },
     )
+    principal = set_active_principal("http:anon")
+    caller = set_active_caller("http:anon|claude-code")
     token = _ACTIVE_CLIENT_ID.set("claude-code")
     try:
         result = await grok_mcp_discover_self()
     finally:
         _ACTIVE_CLIENT_ID.reset(token)
+        reset_active_caller(caller)
+        reset_active_principal(principal)
 
     assert result.data["request_context"]["client_id_present"] is True
     assert result.data["request_context"]["client_id_normalized"] == "claude-code"
+    assert result.data["request_context"]["caller"] == "http:anon|claude-code"
+    assert result.data["request_context"]["principal_kind"] == "anon"
     warning_ids = {w["id"] for w in result.data["bootstrap"]["warnings"]}
     assert "missing_client_id" not in warning_ids
     if result.data["bootstrap"]["can_chat"]:
         assert result.data["bootstrap"]["status"] in {"OK", "WARN"}
+
+
+@pytest.mark.asyncio
+async def test_discover_self_exposes_null_caller_when_unbound(monkeypatch):
+    monkeypatch.setenv("UNIGROK_SERVICE_MODE", "stable")
+    monkeypatch.delenv("WORKSPACE_ROOT", raising=False)
+    monkeypatch.setattr(
+        "src.tools.system.grok_cli_plane_status",
+        lambda timeout_sec=5.0: {
+            "state": "ready",
+            "ready": True,
+            "binary": True,
+            "auth": "oauth",
+            "setup_command": "unused",
+        },
+    )
+    result = await grok_mcp_discover_self()
+    assert result.data["request_context"]["caller"] is None
 
 
 def test_markdown_inline_label_strips_backticks_and_control():

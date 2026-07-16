@@ -45,7 +45,12 @@ from ..utils import (
 from xai_sdk.chat import user
 from xai_sdk.tools import code_execution, web_search as xai_web_search, x_search as xai_x_search
 
-from ..identity import get_active_client_id, principal_kind, scoped_session
+from ..identity import (
+    get_active_caller,
+    get_active_client_id,
+    principal_kind,
+    scoped_session,
+)
 
 logger = logging.getLogger("GrokMCP")
 
@@ -1021,6 +1026,9 @@ def _build_discover_request_context(*, contributor: bool) -> dict[str, Any]:
     return {
         "client_id_present": bool(client_id),
         "client_id_normalized": client_id,
+        # Composed telemetry/budget identity (e.g. http:anon|cursor), matching
+        # CallerContextMiddleware — not a security principal by itself.
+        "caller": get_active_caller(),
         "principal_kind": principal_kind(),
         "host_port": host_port,
         "surface": surface,
