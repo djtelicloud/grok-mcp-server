@@ -6,30 +6,40 @@ import asyncio
 
 import pytest
 
-from src.utils import dispatch_internal_tool, register_internal_tool
+from src.utils import (
+    _INTERNAL_TOOL_REGISTRY,
+    dispatch_internal_tool,
+    register_internal_tool,
+)
 
 
 @pytest.mark.asyncio
 async def test_dispatch_extends_timeout_for_run_local_tests(monkeypatch):
     seen: dict[str, float] = {}
+    original = _INTERNAL_TOOL_REGISTRY.get("run_local_tests")
 
     async def fake_tests(max_seconds: int = 60, **_kwargs):
         await asyncio.sleep(0.05)
         return f"ok:{max_seconds}"
 
     register_internal_tool("run_local_tests", fake_tests)
+    try:
+        real_wait_for = asyncio.wait_for
 
-    real_wait_for = asyncio.wait_for
+        async def capture_wait_for(awaitable, timeout=None):
+            seen["timeout"] = float(timeout)
+            return await real_wait_for(awaitable, timeout=timeout)
 
-    async def capture_wait_for(awaitable, timeout=None):
-        seen["timeout"] = float(timeout)
-        return await real_wait_for(awaitable, timeout=timeout)
-
-    monkeypatch.setattr(asyncio, "wait_for", capture_wait_for)
-    obs = await dispatch_internal_tool(
-        "run_local_tests",
-        {"max_seconds": 90, "target": "tests"},
-        timeout_sec=30.0,
-    )
-    assert obs.success is True
-    assert seen["timeout"] == pytest.approx(95.0)
+        monkeypatch.setattr(asyncio, "wait_for", capture_wait_for)
+        obs = await dispatch_internal_tool(
+            "run_local_tests",
+            {"max_seconds": 90, "target": "tests"},
+            timeout_sec=30.0,
+        )
+        assert obs.success is True
+        assert seen["timeout"] == pytest.approx(95.0)
+    finally:
+        if original is not None:
+            register_internal_tool("run_local_tests", original)
+        else:
+            _INTERNAL_TOOL_REGISTRY.pop("run_local_tests", None)
