@@ -8311,11 +8311,21 @@ async def dispatch_internal_tool(
             tool_name=name, success=False,
             content=f"Tool '{name}' not found in internal registry."
         )
+    # run_local_tests advertises up to 300s; do not hard-cancel it at the
+    # AgentLoop's default 30s per-tool ceiling.
+    effective_timeout = float(timeout_sec)
+    if name == "run_local_tests":
+        try:
+            requested = int((arguments or {}).get("max_seconds") or 60)
+        except (TypeError, ValueError):
+            requested = 60
+        requested = min(max(requested, 5), 300)
+        effective_timeout = max(effective_timeout, float(requested) + 5.0)
     t0 = time.time()
     try:
         result = await asyncio.wait_for(
             _INTERNAL_TOOL_REGISTRY[name](**arguments),
-            timeout=timeout_sec
+            timeout=effective_timeout
         )
         content = bound_tool_output(str(result))
         if name in _MUTATING_INTERNAL_TOOLS:
@@ -8333,7 +8343,7 @@ async def dispatch_internal_tool(
     except asyncio.TimeoutError:
         return ToolObservation(
             tool_name=name, success=False,
-            content=f"Tool '{name}' timed out after {timeout_sec}s.",
+            content=f"Tool '{name}' timed out after {effective_timeout}s.",
             elapsed=time.time() - t0
         )
     except Exception as e:

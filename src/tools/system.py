@@ -34,6 +34,7 @@ from ..utils import (
     register_internal_tool,
     run_blocking,
     communicate_with_timeout,
+    _terminate_and_reap_subprocess,
     get_runtime_stats,
     get_circuit_breaker_state,
     get_routing_advisor,
@@ -782,15 +783,15 @@ async def run_local_tests(
             cwd=str(project_root),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            start_new_session=True,
         )
+        proc._unigrok_process_group = True
         try:
             stdout, stderr = await communicate_with_timeout(proc, timeout)
         except asyncio.TimeoutError:
-            try:
-                proc.kill()
-            except ProcessLookupError:
-                pass
-            await proc.wait()
+            # communicate_with_timeout already reaps the process group; keep a
+            # best-effort second pass if the parent handle survived.
+            await _terminate_and_reap_subprocess(proc)
             return ctx.format_output(
                 f"Local tests timed out after {timeout}s.\nCommand: {' '.join(cmd)}"
             )
