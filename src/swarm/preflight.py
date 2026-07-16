@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import json
 import statistics
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from time import monotonic
 from typing import Any, Dict, List, Tuple
 
@@ -41,12 +41,21 @@ class PreflightError(RuntimeError):
         self.oracle = dict(oracle)
 
 
-def module_name_for(target_rel: str) -> str:
-    """Dotted module name for a workspace-relative path, tolerating the
-    src/ layout. Non-standard layouts fail the provenance probe loudly
-    rather than guessing."""
+def module_name_for(target_rel: str, workspace_root: Path | None = None) -> str:
+    """Dotted module name for a workspace-relative path.
+
+    A conventional ``src/`` layout puts import packages below that directory,
+    while some repositories make ``src`` the import package itself.  Preserve
+    the prefix when the sandbox copy proves the latter via ``src/__init__.py``.
+    Non-standard layouts still fail the provenance probe loudly rather than
+    guessing.
+    """
     parts = list(PurePosixPath(target_rel).with_suffix("").parts)
-    if parts and parts[0] == "src":
+    src_is_package = bool(
+        workspace_root is not None
+        and (Path(workspace_root) / "src" / "__init__.py").is_file()
+    )
+    if parts and parts[0] == "src" and not src_is_package:
         parts = parts[1:]
     if not parts:
         raise PreflightError(f"cannot derive a module name from {target_rel!r}", {})
@@ -80,7 +89,7 @@ async def run_preflight(
     oracle: Dict[str, Any] = {}
 
     # 1. Import provenance — the shadowing must provably work.
-    module = module_name_for(target_rel)
+    module = module_name_for(target_rel, sandbox.work)
     oracle["module"] = module
     # Compare realpaths: macOS symlinks /var -> /private/var, so a raw
     # startswith on the work-dir string would spuriously fail.

@@ -2618,14 +2618,18 @@ the .oracle attribute so status can show how far preflight got.
 ### Function: `module_name_for` {#swarm-preflight-module_name_for}
 
 ```python
-def module_name_for(target_rel: str) -> str
+def module_name_for(target_rel: str, workspace_root: Path | None=None) -> str
 ```
 
 **Keywords:** module, name, for
 
-Dotted module name for a workspace-relative path, tolerating the
-src/ layout. Non-standard layouts fail the provenance probe loudly
-rather than guessing.
+Dotted module name for a workspace-relative path.
+
+A conventional ``src/`` layout puts import packages below that directory,
+while some repositories make ``src`` the import package itself.  Preserve
+the prefix when the sandbox copy proves the latter via ``src/__init__.py``.
+Non-standard layouts still fail the provenance probe loudly rather than
+guessing.
 
 ### Function: `noise_floor_pct` {#swarm-preflight-noise_floor_pct}
 
