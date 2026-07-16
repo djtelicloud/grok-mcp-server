@@ -1309,7 +1309,7 @@ def _bounded_redacted(text: str, limit: int) -> str:
 
 
 _PROVIDER_CONTENT_WITHHELD = "[CONTENT_WITHHELD_BY_SECRET_GUARD]"
-_SESSION_STORE_SCHEMA_HEAD = 17
+_SESSION_STORE_SCHEMA_HEAD = 18
 _PROVIDER_HARVEST_MAX_LEASE_SECONDS = 300.0
 _PROVIDER_HARVEST_MAX_BACKOFF_SECONDS = 86_400.0
 _PROVIDER_HARVEST_CORRUPT_SCAN_OVERHEAD = 25
@@ -3525,6 +3525,29 @@ class GrokSessionStore:
                             "refusing to stamp v17"
                         )
                     await self._conn.execute("PRAGMA user_version = 17;")
+                    await self._conn.commit()
+                except Exception:
+                    await self._conn.rollback()
+                    raise
+
+            if version < 18:
+                # Caller-scoped deferred-job reads must remain indexed as the
+                # durable job history grows. The ordering columns match
+                # list_jobs so SQLite can satisfy filtering, sorting, and
+                # LIMIT from one composite index.
+                await self._conn.execute("BEGIN IMMEDIATE;")
+                try:
+                    await self._conn.execute(
+                        "CREATE INDEX IF NOT EXISTS idx_jobs_caller_created_at_id "
+                        "ON jobs(caller, created_at DESC, id DESC);"
+                    )
+                    async with self._conn.execute(
+                        "PRAGMA index_info(idx_jobs_caller_created_at_id);"
+                    ) as cursor:
+                        index_columns = [row["name"] for row in await cursor.fetchall()]
+                    if index_columns != ["caller", "created_at", "id"]:
+                        raise RuntimeError("jobs caller index is incompatible")
+                    await self._conn.execute("PRAGMA user_version = 18;")
                     await self._conn.commit()
                 except Exception:
                     await self._conn.rollback()
@@ -6698,17 +6721,15 @@ class GrokSessionStore:
         bounded = max(1, min(int(limit or 20), 100))
         async with self._read_conn() as conn:
             if caller:
-                async with conn.execute(
+                query = (
                     "SELECT * FROM jobs WHERE caller = ? "
-                    "ORDER BY created_at DESC, id DESC LIMIT ?",
-                    (caller, bounded),
-                ) as cursor:
-                    rows = await cursor.fetchall()
-                    return [dict(row) for row in rows]
-            async with conn.execute(
-                "SELECT * FROM jobs ORDER BY created_at DESC, id DESC LIMIT ?",
-                (bounded,),
-            ) as cursor:
+                    "ORDER BY created_at DESC, id DESC LIMIT ?"
+                )
+                params = (caller, bounded)
+            else:
+                query = "SELECT * FROM jobs ORDER BY created_at DESC, id DESC LIMIT ?"
+                params = (bounded,)
+            async with conn.execute(query, params) as cursor:
                 rows = await cursor.fetchall()
                 return [dict(row) for row in rows]
 
