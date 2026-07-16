@@ -281,8 +281,13 @@ def _isolated_grok_cli_runtime():
             directory.mkdir(mode=0o700, parents=True, exist_ok=True)
 
         isolated_auth = root / "auth.json"
-        shutil.copyfile(source_auth, isolated_auth)
-        isolated_auth.chmod(0o600)
+        auth_fd = os.open(
+            isolated_auth,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+            0o600,
+        )
+        with os.fdopen(auth_fd, "wb") as destination, source_auth.open("rb") as source:
+            shutil.copyfileobj(source, destination)
 
         inherited = grok_cli_oauth_env()
         allowed_env = {
