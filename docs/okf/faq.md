@@ -235,6 +235,42 @@ What to do:
 This is not a CLI outage. Compatible CLI chat can still be Ready while
 API-only modes correctly refuse a CLI-only pin.
 
+## Why did CLI reasoning fail after a fast/composer turn on the same session? {#cli-model-switch-session}
+
+**Keywords:** MODEL_SWITCH_INCOMPATIBLE_AGENT, agent type sticky, native
+session, grok-build-plan, cursor agent, composer, reasoning, same_plane,
+session recovery, start_new_session
+
+The Grok CLI binds an **agent type** to each native CLI conversation. A
+`mode="fast"` / composer turn may leave the native session on agent type
+`cursor`. A later `mode="reasoning"` turn on the **same logical `session`**
+needs `grok-4.5` with agent type `grok-build-plan`. The CLI then rejects the
+model switch with `MODEL_SWITCH_INCOMPATIBLE_AGENT` and suggests starting a
+new native session.
+
+UniGrok recovers automatically when the stable service is on a build that
+includes the model-switch recovery path (`src/utils.py`):
+
+1. Detect `MODEL_SWITCH_INCOMPATIBLE_AGENT` (and related “couldn't set model /
+   requires agent” wording).
+2. Open a **fresh** native CLI `--session-id` (do not `--fork-session` — fork
+   keeps the sticky agent binding).
+3. Replay bounded **server-side** history into that fresh session so the
+   logical MCP `session` name still continues.
+
+What callers should do:
+
+1. Prefer keeping a stable logical `session` name; let UniGrok rebind the
+   native CLI id under the hood.
+2. If an older image still surfaces the raw CLI error, rebuild/restart the
+   stable container from current `main`, or use a **new** logical `session`
+   name for the planning turn as a temporary workaround.
+3. Do not treat this as a billing-plane failure — both turns can stay on CLI
+   with `fallback_policy="same_plane"`.
+
+Fresh sessions are always fine: `mode="reasoning"` + `plane="cli"` +
+`same_plane` succeeds when the live CLI catalog has a planning model.
+
 ## What should an IDE agent do when a credential plane is unavailable? {#credential-plane-actions}
 
 **Keywords:** credentials, missing api key, cli auth, install cli, permission
