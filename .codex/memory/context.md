@@ -5,6 +5,8 @@ proof; verify current files before editing.
 
 Every new Codex chat must also read `active-work.md`. Contributor-memory MCP
 recall supplements that project-local handoff; it does not replace it.
+Read `.codex/desktop-session-contract.md` for the Codex Desktop capability,
+collaboration-mode, UniGrok-mode, and credential-plane boundaries.
 
 - This repository is a UniGrok MCP server exposed through Codex as a trusted
   local project.

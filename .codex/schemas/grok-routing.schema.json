@@ -7,20 +7,161 @@
     "schema_version",
     "purpose",
     "server",
+    "logical_tools",
+    "model_plane_contract",
     "routes",
     "safety"
   ],
   "properties": {
+    "$schema": {
+      "const": "../schemas/grok-routing.schema.json"
+    },
     "schema_version": {
-      "const": 1
+      "const": 2
+    },
+    "purpose": {
+      "const": "Codex-to-UniGrok MCP routing for this project"
     },
     "server": {
       "const": "grok"
     },
+    "logical_tools": {
+      "type": "object",
+      "required": [
+        "agent",
+        "discovery",
+        "status"
+      ],
+      "properties": {
+        "agent": {
+          "const": "agent"
+        },
+        "discovery": {
+          "const": "grok_mcp_discover_self"
+        },
+        "status": {
+          "const": "grok_mcp_status"
+        }
+      },
+      "additionalProperties": false
+    },
+    "model_plane_contract": {
+      "type": "object",
+      "required": [
+        "catalog_source",
+        "catalog_policy",
+        "default_request",
+        "pin_policy",
+        "fallback_policy",
+        "required_receipt_fields"
+      ],
+      "properties": {
+        "catalog_source": {
+          "const": "grok_mcp_discover_self(include_models=true)"
+        },
+        "catalog_policy": {
+          "type": "string",
+          "minLength": 1
+        },
+        "default_request": {
+          "type": "object",
+          "required": [
+            "mode",
+            "plane",
+            "model",
+            "fallback_policy"
+          ],
+          "properties": {
+            "mode": {
+              "const": "auto"
+            },
+            "plane": {
+              "const": "auto"
+            },
+            "model": {
+              "type": "null"
+            },
+            "fallback_policy": {
+              "const": "same_plane"
+            }
+          },
+          "additionalProperties": false
+        },
+        "pin_policy": {
+          "type": "string",
+          "minLength": 1
+        },
+        "fallback_policy": {
+          "type": "object",
+          "required": [
+            "same_plane",
+            "cross_plane"
+          ],
+          "properties": {
+            "same_plane": {
+              "type": "string",
+              "minLength": 1
+            },
+            "cross_plane": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false
+        },
+        "required_receipt_fields": {
+          "const": [
+            "model",
+            "resolved_plane",
+            "billing_class",
+            "cost_usd",
+            "fallback_policy",
+            "finish_reason"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
     "routes": {
       "type": "array",
       "minItems": 1
+    },
+    "do_not_answer_directly_when": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "safety": {
+      "type": "object",
+      "required": [
+        "prefer_local_read_tools_first",
+        "do_not_send_secrets",
+        "warn_before_external_model_review_of_nonpublic_content",
+        "discover_tools_before_using_provider_specific_deferred_routes",
+        "public_http_mcp_entrypoint"
+      ],
+      "properties": {
+        "prefer_local_read_tools_first": {
+          "const": true
+        },
+        "do_not_send_secrets": {
+          "const": true
+        },
+        "warn_before_external_model_review_of_nonpublic_content": {
+          "const": true
+        },
+        "discover_tools_before_using_provider_specific_deferred_routes": {
+          "const": true
+        },
+        "public_http_mcp_entrypoint": {
+          "const": "agent"
+        }
+      },
+      "additionalProperties": false
     }
-  }
+  },
+  "additionalProperties": false
 }
-
