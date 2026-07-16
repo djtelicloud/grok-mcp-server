@@ -1,0 +1,65 @@
+---
+description: Silent index-diff hive checks for Cursor agents (token-efficient team vote)
+alwaysApply: true
+---
+
+# Cursor hive silent-check
+
+Insider habit for this UniGrok checkout. Not a public MCP product default.
+Doctrine lives private: `../unigrok-intelligence/playbooks/index-diff-hive.md`
+and `silent-think-harness.md`. This rule is the thin IDE emit only.
+
+## When to poll
+
+Run a **silent** UniGrok `agent` hive poll when the turn involves hard product,
+design, routing, or multi-claim decisions (what to ship, kill, or revise).
+
+**Skip** for pure CI/fix loops, typo edits, status lookups, and "just do it"
+implementation once the claim set is already settled.
+
+Agents: Composer, Bugbot Autofix, Approver, Security Reviewer, Automations
+coordinator, Cloud Agents — same gate. Prefer one poll per claim-SHA, not per
+subagent essay.
+
+## How to poll (token law)
+
+1. Emit a short claim index (`L1: …` … `LN: …`), N ≤ 12.
+2. Call MCP `agent` with `plane=cli`, `mode=fast`, `fallback_policy=same_plane`.
+3. Prompt must force **index-diff only**:
+
+```text
+PROTOCOL: index-diff only. No prose.
+Output EXACTLY: L<n>|<GOOD|BAD|UGLY|STUPID|KEEP|KILL>|<≤12 words>
+Max N lines. No fences.
+```
+
+4. Never use `thinking` / `research` for routine hive. Escalate one deeper call
+   **only** on contested lines (mean score between KEEP and KILL bands).
+5. If MCP is down, skip once and answer the user; do not block the turn.
+
+Prove work with receipt metadata (`plane`, `cost_usd`, model) — not printed CoT.
+
+## What the human sees
+
+One footer line at the end of the reply (or Ready packet), never a vote dump:
+
+```text
+Hive: KEEP n/n · CLI · $0
+```
+
+or, if contested:
+
+```text
+Hive: REVISE L3,L7 · CLI · $0
+```
+
+Expand votes / claim SHA only when the user asks. Optional private harvest under
+`../unigrok-intelligence/harvest/index-diff-hive/` — never into public product
+docs.
+
+## Non-collision
+
+- New file only: `.cursor/rules/cursor-hive-silent-check.mdc`
+- Do not edit `docs/ide-setup.md` or sibling Cursor rule PRs in the same packet
+- Sibling of agent-matrix / routing / Autofix / auth / cloud-local rules; point,
+  do not merge doctrine into them here
