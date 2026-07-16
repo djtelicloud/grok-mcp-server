@@ -453,7 +453,7 @@ _PUBLIC_AUTH_EXEMPT_PATHS = (
 # are local operator surfaces. They stay convenient at localhost, including
 # when client bearer keys are configured, but are never exempt in Cloud Run or
 # when reached through a non-loopback Host.
-_LOCAL_OPERATOR_PATHS = ("/runtimez",)
+_LOCAL_OPERATOR_PATHS = ("/runtimez", "/metrics")
 _LOCAL_OPERATOR_PREFIXES = ("/ui", "/docs")
 
 
@@ -517,8 +517,8 @@ def _is_local_operator_request(scope: Dict[str, Any]) -> bool:
 
 def _request_may_bypass_auth(scope: Dict[str, Any]) -> bool:
     # The broad development bypass is stricter than the operator-static
-    # exemption: an asserted Docker proxy boundary may expose /ui and
-    # /runtimez, but it never disables auth for /mcp, /v1, or /metrics.
+    # exemption: an asserted Docker proxy boundary may expose /ui, /runtimez,
+    # and local-only /metrics, but it never disables auth for /mcp or /v1.
     return _allow_unauthenticated() and _is_direct_loopback_request(scope)
 
 
@@ -1586,12 +1586,19 @@ async def metrics(request: Request) -> Response:
     The JSON shape needs no extra dependencies and any JSON-capable collector
     can scrape it; the Prometheus variant renders the SAME snapshot as text
     exposition 0.0.4 via stdlib string building (see
-    _render_prometheus_metrics). Auth-protected like every non-probe route
-    (the auth middleware only exempts /healthz and /readyz). Combines the
-    telemetry table (per-plane and per-caller aggregates) with in-process
-    runtime state: circuit breakers, the timed-thread gauge, and the routing
-    advisor's current view.
+    _render_prometheus_metrics). Available only over the verified local
+    operator path; bearer or OAuth status scope never grants remote access to
+    its cross-caller aggregates. Combines the telemetry table (per-plane and
+    per-caller aggregates) with in-process runtime state: circuit breakers,
+    the timed-thread gauge, and the routing advisor's current view.
     """
+    if not _is_verified_local_request(request.scope):
+        return _json_error(
+            "Metrics are available only to a verified local operator.",
+            status_code=403,
+            code="forbidden",
+        )
+
     try:
         rows = await store.get_telemetry_stats()
     except Exception as exc:
@@ -2317,10 +2324,9 @@ def create_public_mcp() -> FastMCP:
         return path.read_text(encoding="utf-8")
 
     # Expose status and onboarding helper tools to the HTTP /mcp endpoint
-    from .tools.system import grok_mcp_status, grok_mcp_discover_self, grok_mcp_restart_container
+    from .tools.system import grok_mcp_status, grok_mcp_discover_self
     mcp.add_tool(grok_mcp_status, name="grok_mcp_status")
     mcp.add_tool(grok_mcp_discover_self, name="grok_mcp_discover_self")
-    mcp.add_tool(grok_mcp_restart_container, name="grok_mcp_restart_container")
 
     # Repository evidence is useful to IDE agents developing UniGrok, but it
     # must never become part of the globally registered stable service or a

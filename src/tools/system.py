@@ -45,7 +45,12 @@ from ..utils import (
 from xai_sdk.chat import user
 from xai_sdk.tools import code_execution, web_search as xai_web_search, x_search as xai_x_search
 
-from ..identity import get_active_client_id, principal_kind, scoped_session
+from ..identity import (
+    get_active_client_id,
+    get_active_principal,
+    principal_kind,
+    scoped_session,
+)
 
 logger = logging.getLogger("GrokMCP")
 
@@ -1378,6 +1383,24 @@ async def grok_mcp_restart_container() -> SystemResult:
     Only works if running in a context where docker compose is available and enabled.
     """
     async with GrokInvocationContext("utility", logger, append_signature=False) as ctx:
+        if get_active_principal():
+            err_msg = (
+                "Container restart is unavailable over HTTP/MCP. "
+                "Use a trusted unbound local stdio session."
+            )
+            return SystemResult(
+                response=err_msg,
+                text=f"# Docker Restart Status\n\n⛔ {err_msg}",
+                data={"status": "http_forbidden"},
+                model="unknown",
+                finish_reason="error",
+                cost_usd=0.0,
+                tokens=0,
+                latency_sec=ctx.elapsed,
+                route="utility",
+                plane="local",
+            )
+
         enabled = os.environ.get("UNIGROK_ENABLE_CONTAINER_RESTART", "").strip().lower() in ("1", "true")
         if not enabled:
             err_msg = "Container restart is disabled on this server. Enable it by setting UNIGROK_ENABLE_CONTAINER_RESTART=1."

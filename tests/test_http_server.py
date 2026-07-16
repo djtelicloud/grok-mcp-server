@@ -434,7 +434,7 @@ def test_oauth_metadata_challenge_omits_mcp_document_for_query_variant(monkeypat
     assert response.headers["WWW-Authenticate"] == 'Bearer scope="unigrok:connect"'
 
 
-def test_oauth_introspection_allows_valid_status_token(monkeypatch):
+def test_oauth_status_token_does_not_grant_metrics_operator_access(monkeypatch):
     monkeypatch.setenv("UNIGROK_RUNTIME", "cloudrun")
     monkeypatch.delenv("UNIGROK_API_KEYS", raising=False)
     monkeypatch.setenv(
@@ -450,7 +450,8 @@ def test_oauth_introspection_allows_valid_status_token(monkeypatch):
     with TestClient(create_app(), base_url="https://mcp.grokmcp.org") as client:
         response = client.get("/metrics", headers={"Authorization": "Bearer token-value"})
 
-    assert response.status_code == 200
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "forbidden"
 
 
 def test_oauth_subject_cannot_evade_budget_attribution_with_client_headers():
@@ -691,7 +692,7 @@ def test_trusted_compose_proxy_never_bypasses_inference_auth(monkeypatch):
     assert ui.status_code == 200
     assert runtime.status_code == 200
     assert inference.status_code == 401
-    assert metrics.status_code == 401
+    assert metrics.status_code == 200
 
 
 def test_readyz_accepts_cli_auth_without_xai_api_key(monkeypatch, tmp_path):
@@ -1092,7 +1093,6 @@ async def test_public_mcp_exposes_only_agent():
         "review_pull_request",
         "grok_mcp_status",
         "grok_mcp_discover_self",
-        "grok_mcp_restart_container",
     ]
 
 
@@ -1776,20 +1776,31 @@ def test_agent_stream_error_still_terminates_with_done(monkeypatch):
     assert body.rstrip().endswith("data: [DONE]")
 
 
-def test_metrics_is_auth_protected(monkeypatch):
-    """/metrics sits behind the bearer auth like every non-probe route: 401
-    without a token, 200 with a configured key."""
-    monkeypatch.delenv("UNIGROK_RUNTIME", raising=False)
+def test_metrics_is_verified_local_operator_only(monkeypatch):
+    """Bearer authentication alone never grants global metrics access."""
+    monkeypatch.setenv("UNIGROK_RUNTIME", "local")
     monkeypatch.setenv("UNIGROK_API_KEYS", "metrics-secret")
     monkeypatch.delenv("UNIGROK_ALLOW_UNAUTHENTICATED", raising=False)
 
-    with TestClient(create_app()) as client:
+    with TestClient(
+        create_app(),
+        base_url="https://gateway.example.com",
+        client=("203.0.113.20", 50000),
+    ) as client:
         denied = client.get("/metrics")
         allowed = client.get("/metrics", headers={"Authorization": "Bearer metrics-secret"})
+    with TestClient(
+        create_app(),
+        base_url="http://localhost:8080",
+        client=("127.0.0.1", 50000),
+    ) as client:
+        local = client.get("/metrics")
 
     assert denied.status_code == 401
-    assert allowed.status_code == 200
-    assert allowed.json()["format"] == "unigrok-json-v1"
+    assert allowed.status_code == 403
+    assert allowed.json()["error"]["code"] == "forbidden"
+    assert local.status_code == 200
+    assert local.json()["format"] == "unigrok-json-v1"
 
 
 def test_metrics_aggregates_planes_and_runtime(monkeypatch):
@@ -1808,7 +1819,11 @@ def test_metrics_aggregates_planes_and_runtime(monkeypatch):
 
     monkeypatch.setattr(http_module.store, "get_telemetry_stats", AsyncMock(return_value=rows))
 
-    with TestClient(create_app()) as client:
+    with TestClient(
+        create_app(),
+        base_url="http://localhost:8080",
+        client=("127.0.0.1", 50000),
+    ) as client:
         res = client.get("/metrics")
 
     assert res.status_code == 200
@@ -1839,7 +1854,11 @@ def test_metrics_survives_telemetry_read_failure(monkeypatch):
         AsyncMock(side_effect=RuntimeError("db offline")),
     )
 
-    with TestClient(create_app()) as client:
+    with TestClient(
+        create_app(),
+        base_url="http://localhost:8080",
+        client=("127.0.0.1", 50000),
+    ) as client:
         res = client.get("/metrics")
 
     assert res.status_code == 200
