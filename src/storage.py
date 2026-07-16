@@ -205,13 +205,19 @@ class SessionStoreProtocol(Protocol):
 
     # ── Knowledge facts ──────────────────────────────────────────────────────
     async def save_fact(
-        self, fact: str, scope: str = "global", source: str = ""
+        self,
+        fact: str,
+        scope: str = "global",
+        source: str = "",
+        caller: Optional[str] = None,
     ) -> Optional[int]: ...
     async def search_facts(
         self, query: str, scope: Optional[str] = None, limit: int = 5
     ) -> List[Dict[str, Any]]: ...
     async def touch_facts(self, fact_ids: List[int]) -> None: ...
-    async def delete_fact(self, fact_id: int) -> bool: ...
+    async def delete_fact(
+        self, fact_id: int, caller: Optional[str] = None
+    ) -> bool: ...
     async def count_facts(self) -> int: ...
     async def list_facts(
         self, limit: int = 20, scope: Optional[str] = None

@@ -18,7 +18,7 @@ from src.utils import GrokSessionStore
 # The current schema head. Bump this alongside any new migration — the
 # sequential-chain test below will fail loudly if the source and this pin
 # ever disagree.
-SCHEMA_HEAD = 17
+SCHEMA_HEAD = 18
 
 # Every table a fully migrated store must carry (sqlite internals and the
 # optional knowledge_fts shadow tables excluded — FTS5 availability is a
@@ -574,10 +574,10 @@ class TestV17ProviderAttemptCertification:
 
     @pytest.mark.asyncio
     async def test_future_schema_head_is_rejected_without_schema_mutation(self, tmp_path):
-        db_path = tmp_path / "future-v18.db"
+        db_path = tmp_path / "future-v19.db"
         conn = sqlite3.connect(db_path)
         try:
-            conn.execute("PRAGMA user_version = 18;")
+            conn.execute("PRAGMA user_version = 19;")
             conn.commit()
             tables_before = {
                 row[0]
@@ -590,7 +590,7 @@ class TestV17ProviderAttemptCertification:
 
         store = GrokSessionStore(db_path=db_path)
         try:
-            with pytest.raises(RuntimeError, match="unsupported.*18"):
+            with pytest.raises(RuntimeError, match="unsupported.*19"):
                 await store._ensure_initialized()
             assert store._conn is None
             assert store._initialized is False
@@ -598,7 +598,7 @@ class TestV17ProviderAttemptCertification:
             await store.close()
         conn = sqlite3.connect(db_path)
         try:
-            assert conn.execute("PRAGMA user_version;").fetchone()[0] == 18
+            assert conn.execute("PRAGMA user_version;").fetchone()[0] == 19
             assert {
                 row[0]
                 for row in conn.execute(

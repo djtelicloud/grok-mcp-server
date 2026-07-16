@@ -12,7 +12,7 @@ from typing import Any, Dict, Optional
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import ToolAnnotations
 
-from ..identity import caller_from_mcp_context
+from ..identity import caller_from_mcp_context, get_active_caller, normalize_caller
 from ..jobs import get_job_manager
 from ..utils import (
     _normalize_fact_scope,
@@ -20,6 +20,12 @@ from ..utils import (
     store,
     sync_fact_to_collection,
 )
+
+
+def _fact_requester(ctx: Optional[Context] = None) -> Optional[str]:
+    """Match remember/forget attribution: MCP clientInfo, else bound caller."""
+    explicit = caller_from_mcp_context(ctx) if ctx is not None else None
+    return normalize_caller(explicit) or get_active_caller()
 
 logger = logging.getLogger("GrokMCP")
 
@@ -43,7 +49,9 @@ def _fact_view(row: Dict[str, Any]) -> Dict[str, Any]:
     return view
 
 
-async def remember_fact(fact: str, scope: str = "global") -> Dict[str, Any]:
+async def remember_fact(
+    fact: str, scope: str = "global", ctx: Optional[Context] = None
+) -> Dict[str, Any]:
     """Save one durable fact to the local workspace knowledge memory.
 
     Facts are distilled knowledge — decisions, constraints, preferences,
@@ -63,7 +71,9 @@ async def remember_fact(fact: str, scope: str = "global") -> Dict[str, Any]:
     # _normalize_fact_scope) so the stored row, the cloud mirror, and the
     # echoed result all agree on the same value.
     scope_value = _normalize_fact_scope(scope)
-    fact_id = await store.save_fact(text, scope=scope_value, source="manual")
+    fact_id = await store.save_fact(
+        text, scope=scope_value, source="manual", caller=_fact_requester(ctx)
+    )
     if fact_id is None:
         return {"error": "Input Validation Error: fact must not be empty."}
     # Best-effort cloud mirror — a no-op unless UNIGROK_COLLECTIONS=1 and
@@ -100,8 +110,13 @@ async def search_knowledge(query: str, limit: int = 5) -> Dict[str, Any]:
     return {"facts": results, "count": len(results)}
 
 
-async def forget_fact(fact_id: int) -> Dict[str, Any]:
+async def forget_fact(
+    fact_id: int, ctx: Optional[Context] = None
+) -> Dict[str, Any]:
     """Permanently delete one fact from the workspace knowledge memory.
+
+    When the request has a bound caller identity, only that caller's facts
+    may be deleted (foreign or legacy-unowned ids look like `not_found`).
 
     Args:
         fact_id: The id returned by `remember_fact` or `search_knowledge`.
@@ -110,7 +125,7 @@ async def forget_fact(fact_id: int) -> Dict[str, Any]:
         target = int(fact_id)
     except (TypeError, ValueError):
         return {"error": "Input Validation Error: fact_id must be an integer."}
-    deleted = await store.delete_fact(target)
+    deleted = await store.delete_fact(target, caller=_fact_requester(ctx))
     return {"fact_id": target, "status": "deleted" if deleted else "not_found"}
 
 

@@ -1309,7 +1309,7 @@ def _bounded_redacted(text: str, limit: int) -> str:
 
 
 _PROVIDER_CONTENT_WITHHELD = "[CONTENT_WITHHELD_BY_SECRET_GUARD]"
-_SESSION_STORE_SCHEMA_HEAD = 17
+_SESSION_STORE_SCHEMA_HEAD = 18
 _PROVIDER_HARVEST_MAX_LEASE_SECONDS = 300.0
 _PROVIDER_HARVEST_MAX_BACKOFF_SECONDS = 86_400.0
 _PROVIDER_HARVEST_CORRUPT_SCAN_OVERHEAD = 25
@@ -3525,6 +3525,28 @@ class GrokSessionStore:
                             "refusing to stamp v17"
                         )
                     await self._conn.execute("PRAGMA user_version = 17;")
+                    await self._conn.commit()
+                except Exception:
+                    await self._conn.rollback()
+                    raise
+
+            if version < 18:
+                # Knowledge rows record the saving caller so forget_fact can
+                # refuse foreign deletes when a requester identity is bound.
+                await self._conn.execute("BEGIN IMMEDIATE;")
+                try:
+                    try:
+                        await self._conn.execute(
+                            "ALTER TABLE knowledge ADD COLUMN caller TEXT DEFAULT NULL;"
+                        )
+                    except aiosqlite.OperationalError as ddl_err:
+                        if "duplicate column" not in str(ddl_err).lower():
+                            raise
+                    await self._conn.execute(
+                        "CREATE INDEX IF NOT EXISTS idx_knowledge_caller_id "
+                        "ON knowledge(caller, id DESC);"
+                    )
+                    await self._conn.execute("PRAGMA user_version = 18;")
                     await self._conn.commit()
                 except Exception:
                     await self._conn.rollback()
@@ -6230,6 +6252,7 @@ class GrokSessionStore:
         fact: str,
         scope: str = "global",
         source: str = "",
+        caller: Optional[str] = None,
     ) -> Optional[int]:
         """Persist one distilled fact, redacted and bounded at rest.
 
@@ -6237,6 +6260,9 @@ class GrokSessionStore:
         touches it (uses+1, last_used_at bump) instead of inserting a
         duplicate, so re-distilling a session never multiplies rows. Returns
         the row id (existing or new); None for empty facts.
+
+        ``caller`` (or the active caller) is recorded on insert so
+        forget_fact can scope deletes when a requester identity is bound.
         """
         await self._ensure_initialized()
         text = _bounded_redacted(str(fact or ""), 1000)
@@ -6246,6 +6272,7 @@ class GrokSessionStore:
         # rest like fact/source (see _normalize_fact_scope).
         scope_value = _normalize_fact_scope(scope)
         source_value = _bounded_redacted(str(source or ""), 200)
+        owner = normalize_caller(caller) or get_active_caller()
         terms = " ".join(_task_terms(text))
         now_str = datetime.now().isoformat()
         async with self._lock:
@@ -6264,9 +6291,9 @@ class GrokSessionStore:
                     )
                 else:
                     cursor = await self._conn.execute(
-                        "INSERT INTO knowledge (scope, fact, source, terms, created_at, last_used_at, uses) "
-                        "VALUES (?, ?, ?, ?, ?, ?, 0)",
-                        (scope_value, text, source_value, terms, now_str, now_str),
+                        "INSERT INTO knowledge (scope, fact, source, terms, created_at, last_used_at, uses, caller) "
+                        "VALUES (?, ?, ?, ?, ?, ?, 0, ?)",
+                        (scope_value, text, source_value, terms, now_str, now_str, owner),
                     )
                     fact_id = int(cursor.lastrowid)
                     if self._knowledge_fts:
@@ -6413,12 +6440,31 @@ class GrokSessionStore:
             await self._on_write_completed()
 
     @_with_write_retry_async
-    async def delete_fact(self, fact_id: int) -> bool:
-        """Remove one fact (and its index row); True when a row was deleted."""
+    async def delete_fact(
+        self, fact_id: int, caller: Optional[str] = None
+    ) -> bool:
+        """Remove one fact (and its index row); True when a row was deleted.
+
+        When ``caller`` is bound, only that caller's rows delete. Legacy rows
+        with a NULL caller look like ``not_found`` to bound requesters.
+        """
         await self._ensure_initialized()
+        requester = normalize_caller(caller)
         async with self._lock:
             await self._conn.execute("BEGIN IMMEDIATE;")
             try:
+                if requester:
+                    async with self._conn.execute(
+                        "SELECT caller FROM knowledge WHERE id = ?",
+                        (int(fact_id),),
+                    ) as cursor:
+                        row = await cursor.fetchone()
+                    if row is None:
+                        await self._conn.commit()
+                        return False
+                    if normalize_caller(row["caller"] if isinstance(row, dict) else row[0]) != requester:
+                        await self._conn.commit()
+                        return False
                 cursor = await self._conn.execute(
                     "DELETE FROM knowledge WHERE id = ?", (int(fact_id),)
                 )
