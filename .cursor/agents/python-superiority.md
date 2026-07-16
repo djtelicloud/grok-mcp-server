@@ -8,8 +8,9 @@ description: >-
 
 # Python superiority loop
 
-Optimize one production Python file at a time with measured Forge Swarm
-evidence. This is a search-and-measure campaign, not a documentation factory.
+Optimize one logical production target at a time with measured Forge Swarm
+evidence. A target may remain one file or become a bounded split bundle. This
+is a search-and-measure campaign, not a documentation factory.
 
 ## Non-negotiable gates
 
@@ -29,6 +30,9 @@ evidence. This is a search-and-measure campaign, not a documentation factory.
 6. Treat Forge status JSON as the source of truth. Projected LOC, complexity,
    parse time, compile time, and proposed architecture are not measured
    performance improvements.
+7. When one original file becomes multiple files, treat the new files as one
+   comparison bundle. Measure the same public entry point end to end on both
+   revisions; never sum or average isolated per-file performance percentages.
 
 ## Cycle outcomes
 
@@ -42,8 +46,10 @@ Open one draft PR only when all of the following are true:
 - the focused tests and full repository suite pass on the applied champion;
 - the same benchmark command and fixture measured baseline and champion;
 - the result is stable enough to distinguish from noise; and
-- the diff changes one production Python target (supporting tests may change
-  only when they prove the same target's behavior).
+- the diff changes one logical production target. A split may create multiple
+  implementation files only when the PR includes an explicit bundle manifest
+  and preserves the original public behavior; supporting tests must prove that
+  same target boundary.
 
 The PR body must include the exact Forge task id, target path, focus node,
 benchmark command, sample count, current head SHA, and this table populated
@@ -51,14 +57,30 @@ with measured values:
 
 | Metric | Baseline | Champion | Change |
 | --- | ---: | ---: | ---: |
-| Latency (ms) | measured | measured | measured % |
-| Peak memory (bytes) | measured | measured | measured % |
+| End-to-end latency (ms) | measured | measured | measured % |
+| Bundle peak memory (bytes) | measured | measured | measured % |
 | Focused oracle | exact command | pass | n/a |
 | Full suite | exact command | pass | n/a |
 
 Do not write `n/a`, `projected`, or estimates into the latency or memory cells.
 If the champion has no meaningful measured win, record **No change** locally
 and open no PR.
+
+### Split refactors (one file to many)
+
+The PR must define one comparison unit:
+
+- original file and exact base SHA;
+- candidate head SHA and every file in the replacement bundle;
+- stable public import, callable, or request path exercised on both revisions;
+- identical fixture, Python version, environment, warmup, and sample count; and
+- one correctness oracle that crosses the whole bundle boundary.
+
+Measure warm end-to-end operation latency and peak memory for the whole logical
+operation. If import or startup cost matters, measure it separately in a fresh
+process on both revisions. File-level parse/compile timings may be diagnostic,
+but they must not be summed, averaged, or presented as the bundle's performance
+result. LOC may be totaled across the bundle only as a structural metric.
 
 ### Refactor plan
 
@@ -86,4 +108,9 @@ and continue only after the current cycle is closed. No PR is the correct result
 
 Before pushing, recheck that no other open `cursor/python-superiority-loop-*`
 draft exists. Push the one task branch, open or update one draft PR, and hand
-the exact head to Codex as **Ready for supervisor**. Never land or merge it.
+the exact head to Codex as **Ready for supervisor**. Grok's PR body, canvas, and
+Forge receipt are contributor evidence; they are not final approval. Codex must
+independently check out the exact base and head, rerun the oracle and benchmark,
+and create a separate report from
+`.codex/threads/templates/python-superiority-review.md`. Do not rewrite Grok's
+report to reconcile discrepancies. Never land or merge from this campaign.

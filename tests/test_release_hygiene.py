@@ -438,18 +438,33 @@ def test_cursor_python_superiority_loop_requires_measured_serial_evidence():
     rule = (
         ROOT / ".cursor" / "rules" / "cursor-python-superiority.mdc"
     ).read_text(encoding="utf-8")
+    review = (
+        ROOT
+        / ".codex"
+        / "threads"
+        / "templates"
+        / "python-superiority-review.md"
+    ).read_text(encoding="utf-8")
 
     assert "Never fall back to a plan-only PR" in agent
     assert "one open draft PR" in agent
     assert "plan_swarm_campaign" in agent
     assert "start_code_swarm" in agent
     assert "Forge task id" in agent
-    assert "| Latency (ms) | measured | measured | measured % |" in agent
-    assert "| Peak memory (bytes) | measured | measured | measured % |" in agent
+    assert "| End-to-end latency (ms) | measured | measured | measured % |" in agent
+    assert "| Bundle peak memory (bytes) | measured | measured | measured % |" in agent
+    assert "never sum or average isolated per-file performance percentages" in agent
+    assert "independently check out the exact base and head" in agent
     assert "No PR is the correct result" in agent
     assert "alwaysApply: true" in rule
     assert ".cursor/agents/python-superiority.md" in rule
     assert "projected, not measured" in rule
+    assert "one logical bundle" in rule
+    assert "Do not edit or normalize Grok's reporting" in review
+    assert "Exact base SHA" in review
+    assert "Candidate bundle files" in review
+    assert "Do not sum or" in review
+    assert "approve measured win" in review
 
 
 def test_dual_supervisor_land_law_is_consistent() -> None:
