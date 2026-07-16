@@ -1,11 +1,14 @@
 from pathlib import Path
 
 from scripts.supervisor_approval import (
+    GateDecision,
     augment_cursor_evidence,
+    collect_check_states,
     has_exact_cursor_approval,
     decide_gate,
     declared_risk,
     inferred_risk,
+    waiting_for_required_ci,
 )
 
 
@@ -82,6 +85,30 @@ def test_supervisor_status_event_does_not_retrigger_its_own_workflow():
         encoding="utf-8"
     )
     assert "github.event.context != 'Supervisor Approval'" in workflow
+    assert "github.event.check_run.name != 'evaluate'" in workflow
+    assert "CHECK_RUN_HEAD_SHA" in workflow
+
+
+def test_collect_check_states_prefers_finished_success_over_in_progress():
+    checks = collect_check_states(
+        [
+            {"name": "build (3.11)", "status": "in_progress", "conclusion": None},
+            {"name": "build (3.11)", "status": "completed", "conclusion": "success"},
+        ]
+    )
+    assert checks["build (3.11)"] == "success"
+
+
+def test_waiting_for_required_ci_detects_build_gap():
+    assert waiting_for_required_ci(
+        GateDecision("pending", "waiting for build (3.11), build (3.12)")
+    )
+    assert not waiting_for_required_ci(
+        GateDecision("pending", "waiting for Cursor approval")
+    )
+    assert not waiting_for_required_ci(
+        GateDecision("success", "Cursor failover approved for risk: low")
+    )
 
 
 def test_cursor_approval_must_match_the_current_head():

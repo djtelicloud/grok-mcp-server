@@ -13,6 +13,7 @@ import json
 import os
 import re
 import sys
+import time
 from dataclasses import dataclass
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -273,6 +274,42 @@ class GitHubClient:
             page += 1
 
 
+def _check_state_rank(state: str) -> int:
+    """Prefer finished conclusions when duplicate check-runs share a name."""
+
+    normalized = state.lower()
+    if normalized in {"failure", "cancelled", "timed_out", "action_required", "error"}:
+        return 0
+    if normalized in {"success", "neutral"}:
+        return 1
+    if normalized in {"pending", "queued", "in_progress", "waiting", "requested", "missing"}:
+        return 3
+    return 2
+
+
+def collect_check_states(check_runs: list[dict[str, Any]]) -> dict[str, str]:
+    """Collapse check-runs by name, keeping the most decisive finished state."""
+
+    checks: dict[str, str] = {}
+    for item in check_runs:
+        name = item.get("name")
+        if not name:
+            continue
+        state = (item.get("conclusion") or item.get("status") or "missing").lower()
+        current = checks.get(name)
+        if current is None or _check_state_rank(state) < _check_state_rank(current):
+            checks[name] = state
+    return checks
+
+
+def waiting_for_required_ci(decision: GateDecision) -> bool:
+    """True when the gate is only waiting for required CI to finish."""
+
+    if decision.state != "pending":
+        return False
+    return any(name in decision.description for name in REQUIRED_CI_CHECKS)
+
+
 def evaluate_pr(client: GitHubClient, repository: str, pr_number: int) -> tuple[str, GateDecision]:
     prefix = f"/repos/{repository}"
     pr = client.request("GET", f"{prefix}/pulls/{pr_number}")
@@ -286,10 +323,7 @@ def evaluate_pr(client: GitHubClient, repository: str, pr_number: int) -> tuple[
     check_runs = client.request("GET", f"{prefix}/commits/{head_sha}/check-runs?per_page=100").get("check_runs", [])
     combined_status = client.request("GET", f"{prefix}/commits/{head_sha}/status")
 
-    checks = {
-        item["name"]: (item.get("conclusion") or item.get("status") or "missing")
-        for item in check_runs
-    }
+    checks = collect_check_states(check_runs)
     statuses = {item["context"]: item.get("state", "") for item in combined_status.get("statuses", [])}
     if has_exact_cursor_approval(reviews, head_sha):
         statuses["Cursor Approval"] = "success"
@@ -330,6 +364,12 @@ def main() -> int:
     parser.add_argument("--repo", required=True)
     parser.add_argument("--pr-number", required=True, type=int)
     parser.add_argument("--server-url", default="https://github.com")
+    parser.add_argument(
+        "--ci-retry-seconds",
+        type=int,
+        default=int(os.environ.get("SUPERVISOR_CI_RETRY_SECONDS", "45")),
+        help="Seconds to wait once when required CI is still missing",
+    )
     args = parser.parse_args()
 
     token = os.environ.get("GITHUB_TOKEN")
@@ -340,6 +380,14 @@ def main() -> int:
     client = GitHubClient(token)
     try:
         head_sha, decision = evaluate_pr(client, args.repo, args.pr_number)
+        if head_sha and waiting_for_required_ci(decision) and args.ci_retry_seconds > 0:
+            print(
+                f"Supervisor Approval: {decision.state} — {decision.description}; "
+                f"retrying after {args.ci_retry_seconds}s",
+                flush=True,
+            )
+            time.sleep(args.ci_retry_seconds)
+            head_sha, decision = evaluate_pr(client, args.repo, args.pr_number)
         if head_sha:
             publish_status(client, args.repo, args.pr_number, head_sha, decision, args.server_url)
         print(f"Supervisor Approval: {decision.state} — {decision.description}")
