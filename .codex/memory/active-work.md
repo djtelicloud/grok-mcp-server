@@ -7,6 +7,14 @@ Live. The remote MCP and Control Center remain live in `us-central1` with
 east-region rollback assets. Stage 1 live generation and training remain
 blocked.
 
+## Current Codex review packet
+
+- Draft PR #225 preserves the sponsor-approved, theme-safe in-chat conversation
+  canvas as a Codex-only reference fragment. It changes no MCP runtime,
+  release, cloud, or deployment behavior. The focused contract tests and the
+  attribution check passed; it remains pending normal exact-head review and
+  protected integration.
+
 This is the project-scoped handoff for new Codex chats. Verify drift-prone Git,
 CI, runtime, DNS, cloud, and benchmark state live before acting. Never record
 credentials, OAuth codes, tokens, or private keys here.
