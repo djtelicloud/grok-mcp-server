@@ -114,11 +114,14 @@ Dedicated tool wrapping a ReAct AgentLoop in a schema-enforced reflection review
    cached live catalog filters API candidates; mature local evidence can
    replace a stable default only after clearing the quality margin.
 2. **Fast path (`fast`)**: Toolless single turn.
-3. **Reasoning path (`reasoning`)**: Enforces planning model.
-4. **Thinking path (`thinking`)**: Executes thinking loop with reflection review.
+3. **Reasoning path (`reasoning`)**: Enforces planning model. Compatible on the
+   CLI plane when the live CLI catalog has a planning model.
+4. **Thinking path (`thinking`)**: Executes thinking loop with reflection
+   review. **API-native** — not available as a CLI-only pin under
+   `fallback_policy="same_plane"`.
 5. **Research mode (`research`)**: Selects the live Grok 4.20 multi-agent model,
    triggers fan-out (agent count 4 or 16), and collects inline sources in
-   `citations`.
+   `citations`. **API-native** — same plane rule as thinking and vision.
 
 The `routing` object is the explanation source of truth. It never contains the
 prompt: only bounded features, model slugs, evidence counts, catalog state, and
@@ -150,7 +153,10 @@ use live `tools/list` as the contract before assuming a tool exists.
   model should spend effort before answering.
 - Use `mode="thinking"` only when you explicitly want the slower reflection
   loop; use `mode="research"` only when grounded fan-out is worth the extra
-  cost and latency.
+  cost and latency. Both are **API-only capabilities**: pair them with
+  `plane="api"` (or `plane="auto"` with a configured API key). Do not combine
+  them with `plane="cli"` + `fallback_policy="same_plane"` — that fails closed
+  with `same_plane_capability_incompatible` / `cli-incompatible`.
 - Leave `plane="auto"` for normal CLI-first behavior. Use
   `fallback_policy="same_plane"` when you must not cross the billing boundary,
   especially for pinned API models or explicit CLI-only review flows.

@@ -45,8 +45,15 @@ search grounding was used.
 
 - Quick factual or single-file questions → `fast`.
 - Design reviews, audits, multi-step analysis → `reasoning`.
-- Tasks needing self-critique → `thinking`.
-- Current-events or source-cited answers → `research` (uses web + X search).
+- Tasks needing self-critique → `thinking` (**API-only**; use `plane="api"` or
+  `plane="auto"` with a configured server API key — never `plane="cli"` +
+  `fallback_policy="same_plane"`).
+- Current-events or source-cited answers → `research` (**API-only** multi-agent
+  fan-out; same plane rule as thinking). Vision routes follow the same rule.
+
+If a receipt shows `cli-incompatible` /
+`same_plane_capability_incompatible`, switch to API (or auto) rather than
+retrying the same CLI pin.
 
 ## Multi-agent / research fan-out (not local subagent spawn)
 

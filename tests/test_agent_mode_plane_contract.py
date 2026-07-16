@@ -87,6 +87,18 @@ def test_using_unigrok_skill_documents_modes_and_planes() -> None:
         assert mode in skill
     for token in ("cli", "api", "same_plane", "cross_plane", "cli_first"):
         assert token in skill
+    # Live product law: thinking/research are API-native under same_plane pins.
+    assert "API-only" in skill
+    assert "same_plane_capability_incompatible" in skill or "cli-incompatible" in skill
+
+
+def test_agent_tool_and_faq_document_api_only_mode_plane_law() -> None:
+    agent_tool = (ROOT / "docs" / "okf" / "agent-tool.md").read_text(encoding="utf-8")
+    faq = (ROOT / "docs" / "okf" / "faq.md").read_text(encoding="utf-8")
+    assert "API-native" in agent_tool or "API-only" in agent_tool
+    assert "same_plane_capability_incompatible" in agent_tool
+    assert "{#api-only-modes}" in faq
+    assert "cli-incompatible" in faq
 
 
 def test_agent_docstrings_name_all_modes() -> None:

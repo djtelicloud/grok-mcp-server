@@ -60,6 +60,23 @@ async def test_agent_faq_lookup_returns_verified_vscode_dual_lane_context():
 
 
 @pytest.mark.asyncio
+async def test_agent_faq_lookup_returns_api_only_mode_plane_guidance():
+    result = json.loads(
+        await lookup_unigrok_faq(
+            "Why did thinking or research fail on the CLI plane with same_plane?"
+        )
+    )
+
+    assert result["source_uri"] == "grok://faq"
+    assert result["count"] >= 1
+    assert result["matches"][0]["id"] == "api-only-modes"
+    excerpt = result["matches"][0]["answer_excerpt"]
+    assert "API-native" in excerpt or "API-only" in excerpt or "API" in excerpt
+    assert "same_plane" in excerpt
+    assert "cli-incompatible" in excerpt or "same_plane_capability_incompatible" in excerpt
+
+
+@pytest.mark.asyncio
 async def test_agent_faq_lookup_leaves_non_matches_for_normal_reasoning():
     result = json.loads(await lookup_unigrok_faq("Write a poem about ocean currents"))
 
