@@ -149,9 +149,14 @@ def verified_landing_receipt(repo: Path, landed_sha: str) -> tuple[Dict[str, Any
 
 
 def _note_write_enabled() -> bool:
+    """Same write gate as git mutators: local runtime + ENABLE_GIT_WRITE=1.
+
+    Contributor Docker often sets UNIGROK_RUNTIME=http; notes must not claim
+    write while git_commit/git_apply_patch refuse under that runtime.
+    """
     return (
         workspace_memory_mode() != "off"
-        and get_unigrok_runtime() != "cloudrun"
+        and get_unigrok_runtime() == "local"
         and os.environ.get("ENABLE_GIT_WRITE") == "1"
     )
 
@@ -179,7 +184,7 @@ def _note_envelope(row: Dict[str, Any]) -> Dict[str, Any]:
 def _write_git_note(repo: Path, row: Dict[str, Any]) -> None:
     if not _note_write_enabled():
         raise WorkspaceMemoryError(
-            "Git Notes mirror requires ENABLE_GIT_WRITE=1 outside Cloud Run"
+            "Git Notes mirror requires UNIGROK_RUNTIME=local and ENABLE_GIT_WRITE=1"
         )
     lock_path = _common_git_dir(repo) / "unigrok-memory.lock"
     lock_path.parent.mkdir(parents=True, exist_ok=True)
