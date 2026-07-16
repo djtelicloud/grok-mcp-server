@@ -311,6 +311,26 @@ def test_cloudrun_tool_advertising_omits_local_tools(monkeypatch):
     assert "git_apply_patch" not in names
 
 
+def test_bound_principal_tool_advertising_omits_shared_provider_file_read(monkeypatch):
+    from src.identity import reset_active_principal, set_active_principal
+
+    monkeypatch.setenv("UNIGROK_RUNTIME", "cloudrun")
+    principal_token = set_active_principal("oauth:service:tenant-a")
+    try:
+        names = _tool_names()
+    finally:
+        reset_active_principal(principal_token)
+
+    assert "get_file_content" not in names
+    assert "generate_image" in names
+
+
+def test_unbound_operator_tool_advertising_keeps_provider_file_read(monkeypatch):
+    monkeypatch.setenv("UNIGROK_RUNTIME", "cloudrun")
+
+    assert "get_file_content" in _tool_names()
+
+
 def test_local_tool_advertising_gates_mutating_git(monkeypatch):
     monkeypatch.setenv("UNIGROK_RUNTIME", "local")
     monkeypatch.delenv("ENABLE_GIT_WRITE", raising=False)

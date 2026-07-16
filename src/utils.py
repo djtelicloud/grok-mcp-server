@@ -13342,18 +13342,23 @@ def _build_custom_tools(include_escalation: bool = False) -> list:
             ))
 
         # 3. get_file_content
-        custom_tools.append(sdk_tool(
-            name="get_file_content",
-            description="Download the raw text content of an uploaded file from xAI using its file ID.",
-            parameters={
-                "type": "object",
-                "properties": {
-                    "file_id": {"type": "string", "description": "The ID of the file to download."},
-                    "max_bytes": {"type": "integer", "description": "Max bytes to download (default 4000)."}
-                },
-                "required": ["file_id"]
-            }
-        ))
+        # Provider file IDs live in a shared server-side xAI account. Until
+        # durable file ownership is tracked, a bound HTTP/MCP principal must
+        # never be offered a tool that can dereference another caller's ID.
+        # Trusted unbound stdio/operator use retains the historical surface.
+        if get_active_principal() is None:
+            custom_tools.append(sdk_tool(
+                name="get_file_content",
+                description="Download the raw text content of an uploaded file from xAI using its file ID.",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "file_id": {"type": "string", "description": "The ID of the file to download."},
+                        "max_bytes": {"type": "integer", "description": "Max bytes to download (default 4000)."}
+                    },
+                    "required": ["file_id"]
+                }
+            ))
 
         # 4. read_local_file
         if allow_local_tools:

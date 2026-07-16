@@ -567,6 +567,10 @@ async def xai_get_file(file_id: str) -> str:
 
 async def xai_get_file_content(file_id: str, max_bytes: int = 500000) -> str:
     """Download the raw content of an uploaded file from xAI."""
+    if get_active_principal() is not None:
+        raise PermissionError(
+            "Provider file content is unavailable to bound HTTP/MCP principals."
+        )
     async with GrokInvocationContext("utility", logger, append_signature=False) as ctx:
         def _get_bytes():
             client = get_xai_client()
