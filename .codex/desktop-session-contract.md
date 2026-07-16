@@ -39,6 +39,24 @@
   user or applicable project instructions authorize parallel agents. Preserve
   one integration owner and non-overlapping path ownership.
 
+## In-chat visual artifacts
+
+- Small interactive answers belong in a focused HTML fragment, not a full
+  webpage. The reference fragment is
+  [`.codex/chat-fragments/conversation-canvas.html`](chat-fragments/conversation-canvas.html).
+  It shows the intended three-step pattern: choose an intent, see the flow,
+  then request one bounded follow-up.
+- The chat host owns its light or dark theme. Scope custom CSS to the artifact
+  root and use its semantic variables (`--foreground`, `--card`, `--border`,
+  `--primary`) with UniGrok's `--cyan` and `--teal` only as optional accents.
+  Never set black text or a dark background as a fixed default.
+- Keep a fragment self-contained: no external network calls, scripts, fonts,
+  or assets. Its one permitted integration is a checked
+  `window.openai?.sendFollowUpMessage` call that turns the selected state into
+  a clear next request.
+- Use the in-app Browser for a real local web page or app. Use Markdown,
+  images, PDFs, or docs when a static result is clearer than interaction.
+
 ## Codex collaboration modes
 
 - **Default mode** favors execution: make safe, scoped assumptions, implement
