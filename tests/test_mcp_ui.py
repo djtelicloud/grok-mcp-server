@@ -486,6 +486,7 @@ def test_mcp_ui_error_surfaces_tell_the_truth():
     assert 'id="factFinishReason"' in index.text
     assert 'id="factDegraded"' in index.text
     assert "payload.finish_reason" in script.text
+    assert "extractToolPayload(response) || {}" in script.text
     # AgentResult finish_reason=error is a normal tools/call payload — must not
     # paint SUCCESS, and the transcript must use an error bubble.
     assert 'payload.finish_reason === "error"' in script.text

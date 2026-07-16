@@ -1896,7 +1896,7 @@ function renderFactsPane(method, response, elapsed) {
     return;
   }
 
-  const payload = extractToolPayload(response);
+  const payload = extractToolPayload(response) || {};
   // Status must reflect AgentResult.finish_reason too: credential/plane
   // failures return a normal tools/call payload (not result.isError), so a
   // green SUCCESS receipt would lie about the outcome.
