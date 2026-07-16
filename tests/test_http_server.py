@@ -779,6 +779,7 @@ def test_upstream_provider_secret_registry_completely_classifies_server_envs():
     assert set(NON_BEARER_SERVER_OWNED_ENV_NAMES) == {
         "GOOGLE_APPLICATION_CREDENTIALS",
         "UNIGROK_API_KEYS",
+        "UNIGROK_PRINCIPAL_XAI_KEYS_JSON",
     }
     assert not (
         set(UPSTREAM_PROVIDER_SECRET_ENV_NAMES)

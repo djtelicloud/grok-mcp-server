@@ -134,9 +134,10 @@ def test_management_key_alone_never_satisfies_inference_readiness(monkeypatch):
     from src import utils
 
     monkeypatch.delenv("XAI_API_KEY", raising=False)
+    monkeypatch.delenv("UNIGROK_PRINCIPAL_XAI_KEYS_JSON", raising=False)
     monkeypatch.setenv("XAI_MANAGEMENT_API_KEY", "xai-management-only")
     monkeypatch.setattr(utils, "XAI_API_KEY", "")
-    monkeypatch.setattr(utils, "_client", None)
+    utils._clients.clear()
 
     assert utils.xai_api_key_configured() is False
     contract = build_credential_plane_contract(
@@ -149,7 +150,7 @@ def test_management_key_alone_never_satisfies_inference_readiness(monkeypatch):
         },
     )
     assert contract["service_usable"] is False
-    with pytest.raises(ValueError, match="XAI_API_KEY is not configured"):
+    with pytest.raises(ValueError, match="No effective xAI API key is configured"):
         utils.get_xai_client()
 
 
@@ -163,10 +164,11 @@ def test_inference_key_alone_never_satisfies_management_readiness(monkeypatch):
             created.update(kwargs)
 
     monkeypatch.setenv("XAI_API_KEY", "xai-inference-only")
+    monkeypatch.delenv("UNIGROK_PRINCIPAL_XAI_KEYS_JSON", raising=False)
     monkeypatch.delenv("XAI_MANAGEMENT_API_KEY", raising=False)
     monkeypatch.delenv("XAI_MANAGEMENT_KEY", raising=False)
     monkeypatch.setattr(utils, "XAI_API_KEY", "xai-inference-only")
-    monkeypatch.setattr(utils, "_client", None)
+    utils._clients.clear()
     monkeypatch.setattr("xai_sdk.Client", FakeClient)
 
     assert utils.xai_api_key_configured() is True

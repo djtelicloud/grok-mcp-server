@@ -41,11 +41,12 @@ AMBIENT_SERVER_SECRET_ENV_NAMES = (
     "DOCKER_AUTH_CONFIG",
 )
 # These server-owned values must be scrubbed from Grok CLI subprocesses, but
-# they are not upstream provider bearer secrets: one is a credential-file path
-# and the other is the gateway's own client-token allowlist.
+# they are not single upstream provider bearer secrets: a credential-file path,
+# the gateway client-token allowlist, and the principal-to-xAI-key JSON map.
 NON_BEARER_SERVER_OWNED_ENV_NAMES = (
     "GOOGLE_APPLICATION_CREDENTIALS",
     "UNIGROK_API_KEYS",
+    "UNIGROK_PRINCIPAL_XAI_KEYS_JSON",
 )
 SERVER_OWNED_SECRET_ENV_NAMES = (
     *UPSTREAM_PROVIDER_SECRET_ENV_NAMES,

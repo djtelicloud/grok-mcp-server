@@ -1126,6 +1126,95 @@ async def fetch_provider_api_usage() -> Dict[str, Any]
 
 Optionally fetch today's team-wide API spend from xAI Management API.
 
+## principal_xai.py {#principal_xai}
+
+### Class: `PrincipalXAIConfigurationError` {#principal_xai-principalxaiconfigurationerror}
+
+```python
+class PrincipalXAIConfigurationError
+```
+
+**Keywords:** principal, xai, configuration, error
+
+Secret-safe principal-key configuration failure.
+
+### Function: `default_xai_api_key` {#principal_xai-default_xai_api_key}
+
+```python
+def default_xai_api_key(environ: Mapping[str, str] | None=None) -> str
+```
+
+**Keywords:** default, xai, api, key
+
+Owner / service default key (Live cloud twin path).
+
+### Function: `load_principal_xai_key_table` {#principal_xai-load_principal_xai_key_table}
+
+```python
+def load_principal_xai_key_table(environ: Mapping[str, str] | None=None) -> Dict[str, str]
+```
+
+**Keywords:** load, principal, xai, key, table
+
+Load optional principal → key map (never log values).
+
+### Function: `resolve_xai_api_key` {#principal_xai-resolve_xai_api_key}
+
+```python
+def resolve_xai_api_key(*, principal: Optional[str]=None, environ: Mapping[str, str] | None=None) -> Tuple[str, str]
+```
+
+**Keywords:** resolve, xai, api, key
+
+Return ``(key, source)`` where source is ``owner_default`` or ``principal``.
+
+Principal overrides apply only for authenticated OAuth principals. Anonymous
+loopback and static API-key principals keep the owner default (static keys
+already *are* a principal form of auth for the gateway, not per-human BYOK).
+
+### Function: `inference_client_cache_id` {#principal_xai-inference_client_cache_id}
+
+```python
+def inference_client_cache_id(*, principal: Optional[str]=None, environ: Mapping[str, str] | None=None) -> str
+```
+
+**Keywords:** inference, client, cache, id
+
+Non-secret cache id for the active inference credential path.
+
+Uses principal identity + resolution source only. Credential generation is
+tracked separately with a process-keyed HMAC and is never exposed.
+
+### Function: `resolve_inference_credential` {#principal_xai-resolve_inference_credential}
+
+```python
+def resolve_inference_credential(*, principal: Optional[str]=None, environ: Mapping[str, str] | None=None) -> Tuple[str, str, str, str]
+```
+
+**Keywords:** resolve, inference, credential
+
+Resolve one atomic key/source/cache-slot/rotation-generation tuple.
+
+### Function: `active_xai_credential_source` {#principal_xai-active_xai_credential_source}
+
+```python
+def active_xai_credential_source(*, principal: Optional[str]=None, environ: Mapping[str, str] | None=None) -> str
+```
+
+**Keywords:** active, xai, credential, source
+
+Return a secret-safe source label for execution receipts.
+
+### Function: `principal_xai_status` {#principal_xai-principal_xai_status}
+
+```python
+def principal_xai_status(*, principal: Optional[str]=None, environ: Mapping[str, str] | None=None) -> Dict[str, Any]
+```
+
+**Keywords:** principal, xai, status
+
+Secret-safe status for diagnostics (never includes key material).
+
 ## provider_harvest.py {#provider_harvest}
 
 ### Function: `worker_episode_collection_name` {#provider_harvest-worker_episode_collection_name}
@@ -3958,6 +4047,9 @@ worker and deadlock all SDK bridging in the server. The dedicated threads
 are capped (UNIGROK_MAX_TIMED_THREADS, default 64): at capacity the call
 fails fast with RuntimeError instead of spawning yet another thread.
 
+Copy caller contextvars into the worker so bound principals, callers, and
+request ids remain available to credential factories and telemetry.
+
 ### Function: `communicate_with_timeout` {#utils-communicate_with_timeout}
 
 ```python
@@ -4050,6 +4142,16 @@ Guarantee a bound request id for the duration of one agent call.
 Respects an inherited id (gateway traceparent, an outer agent call);
 otherwise generates a fresh one and RESETS it on exit so two sequential
 calls in the same task never share a correlation id.
+
+### Function: `xai_api_key_configured` {#utils-xai_api_key_configured}
+
+```python
+def xai_api_key_configured() -> bool
+```
+
+**Keywords:** xai, api, key, configured
+
+True when the active principal has a usable xAI key (owner or override).
 
 ### Function: `prefer_cli_for_route` {#utils-prefer_cli_for_route}
 
@@ -4183,7 +4285,10 @@ def get_xai_inference_client()
 
 **Keywords:** get, xai, inference, client
 
-Return the cached inference-only xAI SDK client.
+Return a cached inference-only xAI SDK client for the active key.
+
+Owner default is ``XAI_API_KEY``. Optional OAuth principal overrides come
+from ``UNIGROK_PRINCIPAL_XAI_KEYS_JSON`` (see ``src.principal_xai``).
 
 The installed SDK reads ``XAI_MANAGEMENT_KEY`` whenever its management
 argument is falsey.  Pass a fixed, non-provider isolation canary instead of

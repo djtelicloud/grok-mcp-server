@@ -143,3 +143,14 @@ def test_redact_secrets_removes_unknown_secret_shaped_env_value(monkeypatch):
     assert redact_secrets("failure: future-provider-secret") == (
         "failure: [REDACTED]"
     )
+
+
+def test_redact_secrets_removes_individual_principal_xai_keys(monkeypatch):
+    monkeypatch.setenv(
+        "UNIGROK_PRINCIPAL_XAI_KEYS_JSON",
+        '{"oauth:github:42":"opaque-principal-credential"}',
+    )
+
+    assert redact_secrets("failure: opaque-principal-credential") == (
+        "failure: [REDACTED]"
+    )

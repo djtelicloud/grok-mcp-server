@@ -2350,6 +2350,7 @@ class TestSymmetricXaiPlaneFailover:
                 "billing_source": "subscription_unmetered",
                 "usage_source": "subscription_unmetered",
                 "cost_usd": 0.0,
+                "credential_source": "subscription_oauth",
             }
         ]
 
@@ -3195,6 +3196,46 @@ class TestSymmetricXaiPlaneFailover:
         assert attempt["billing_source"] == "partial"
         assert telemetry["token_kind"] == "partial"
         assert telemetry["billing_source"] == "partial"
+
+    def test_execution_receipts_name_secret_safe_credential_source(
+        self, monkeypatch
+    ):
+        from src.identity import reset_active_principal, set_active_principal
+        from src.utils import _xai_execution_attempt_receipt
+
+        monkeypatch.setenv("XAI_API_KEY", "xai-owner-default")
+        monkeypatch.setenv(
+            "UNIGROK_PRINCIPAL_XAI_KEYS_JSON",
+            '{"oauth:github|user:42":"xai-personal"}',
+        )
+        token = set_active_principal("oauth:github|user:42")
+        try:
+            api_attempt = _xai_execution_attempt_receipt(
+                1,
+                plane="API",
+                model="grok-build-0.1",
+                outcome="completed",
+                purpose="fast",
+                tokens=3,
+                cost_usd=0.001,
+                usage_source="provider_exact",
+            )
+            cli_attempt = _xai_execution_attempt_receipt(
+                2,
+                plane="CLI",
+                model="grok-4.5",
+                outcome="completed",
+                purpose="fallback",
+                usage_source="subscription_unmetered",
+            )
+        finally:
+            reset_active_principal(token)
+
+        assert api_attempt["credential_source"] == "principal"
+        assert cli_attempt["credential_source"] == "subscription_oauth"
+        serialized = json.dumps([api_attempt, cli_attempt])
+        assert "xai-personal" not in serialized
+        assert "xai-owner-default" not in serialized
 
     @pytest.mark.parametrize(
         "attempt_planes",
@@ -5303,6 +5344,9 @@ class TestUtilsQuickWins:
             "GOOGLE_API_KEY": "google-api",
             "GOOGLE_APPLICATION_CREDENTIALS": "/private/vertex-adc.json",
             "UNIGROK_API_KEYS": "gateway-client-secret",
+            "UNIGROK_PRINCIPAL_XAI_KEYS_JSON": (
+                '{"oauth:github|user:1":"teammate-xai-key"}'
+            ),
         }
         for name, value in server_secrets.items():
             monkeypatch.setenv(name, value)

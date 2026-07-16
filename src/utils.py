@@ -549,8 +549,12 @@ async def run_blocking(fn: Callable, *args, timeout: Optional[float] = None, **k
     worker and deadlock all SDK bridging in the server. The dedicated threads
     are capped (UNIGROK_MAX_TIMED_THREADS, default 64): at capacity the call
     fails fast with RuntimeError instead of spawning yet another thread.
+
+    Copy caller contextvars into the worker so bound principals, callers, and
+    request ids remain available to credential factories and telemetry.
     """
     call = functools.partial(fn, *args, **kwargs)
+    ctx = contextvars.copy_context()
     loop = asyncio.get_running_loop()
     if timeout is not None:
         global _TIMED_THREADS_IN_FLIGHT, _TIMED_THREADS_PEAK
@@ -576,7 +580,7 @@ async def run_blocking(fn: Callable, *args, timeout: Optional[float] = None, **k
             global _TIMED_THREADS_IN_FLIGHT
             try:
                 try:
-                    result = call()
+                    result = ctx.run(call)
                 except BaseException as exc:  # noqa: BLE001 — delivered to the caller
                     result, delivered_exc = None, exc
                 else:
@@ -594,7 +598,7 @@ async def run_blocking(fn: Callable, *args, timeout: Optional[float] = None, **k
                 _TIMED_THREADS_IN_FLIGHT -= 1
             raise
         return await asyncio.wait_for(future, timeout=timeout)
-    return await loop.run_in_executor(_local_executor(), call)
+    return await loop.run_in_executor(_local_executor(), ctx.run, call)
 
 
 def _owned_descendant_pids(root_pid: int) -> List[int]:
@@ -915,7 +919,10 @@ CLI_MODEL_IDS = tuple(FALLBACK_GROK_CLI_MODELS)
 
 
 def xai_api_key_configured() -> bool:
-    return bool(_normalize_xai_api_key(os.environ.get("XAI_API_KEY") or XAI_API_KEY))
+    """True when the active principal has a usable xAI key (owner or override)."""
+    from src.principal_xai import effective_xai_api_key
+
+    return bool(effective_xai_api_key())
 
 
 def cli_plane_ready_for_local_runtime() -> bool:
@@ -1293,6 +1300,15 @@ def redact_secrets(text: str) -> str:
         values = [raw_value.strip()]
         if name.upper() == "UNIGROK_API_KEYS":
             values.extend(part.strip() for part in raw_value.split(","))
+        elif name.upper() == "UNIGROK_PRINCIPAL_XAI_KEYS_JSON":
+            try:
+                from src.principal_xai import load_principal_xai_key_table
+
+                values.extend(load_principal_xai_key_table().values())
+            except Exception:
+                # The complete raw JSON remains an exact redaction candidate.
+                # Invalid configuration is handled fail-closed at inference.
+                pass
         for value in values:
             if len(value) >= 8:
                 exact_values.add(value)
@@ -1975,7 +1991,9 @@ async def build_model_catalog(include_cli: bool = True) -> Dict[str, Any]:
 # Global xAI client connection pools.  The inference client is intentionally
 # incapable of carrying management authority; Collections call sites receive
 # the operation-scoped management facade below.
-_client = None
+# Inference clients keyed by non-secret key fingerprint so optional principal
+# overrides (UNIGROK_PRINCIPAL_XAI_KEYS_JSON) do not share the owner client.
+_clients: dict[str, Any] = {}
 _management_client = None
 # Both factories are called from executor threads — guard each check-then-set
 # so concurrent first calls cannot leak duplicate Client instances or cross
@@ -2063,7 +2081,10 @@ def xai_management_key_state() -> XAIManagementKeyState:
 
 
 def get_xai_inference_client():
-    """Return the cached inference-only xAI SDK client.
+    """Return a cached inference-only xAI SDK client for the active key.
+
+    Owner default is ``XAI_API_KEY``. Optional OAuth principal overrides come
+    from ``UNIGROK_PRINCIPAL_XAI_KEYS_JSON`` (see ``src.principal_xai``).
 
     The installed SDK reads ``XAI_MANAGEMENT_KEY`` whenever its management
     argument is falsey.  Pass a fixed, non-provider isolation canary instead of
@@ -2072,25 +2093,39 @@ def get_xai_inference_client():
     client's channel or inference call paths.
     """
 
-    global _client
-    if _client is None:
+    from src.principal_xai import resolve_inference_credential
+
+    api_key, _source, cache_slot, generation = resolve_inference_credential()
+    if not api_key:
+        raise ValueError(
+            "No effective xAI API key is configured for the active principal."
+        )
+
+    # Include a process-keyed credential generation so a rotated key never
+    # reuses the prior SDK client. Older generations remain alive until normal
+    # service shutdown, avoiding a close-vs-in-flight race during local tests
+    # or unusual in-process environment replacement. Production Secret Manager
+    # env rotation deploys a new Cloud Run revision/process.
+    cache_id = f"{cache_slot}:{generation}"
+    client = _clients.get(cache_id)
+    if client is None:
         with _client_lock:
-            if _client is None:
-                if not XAI_API_KEY:
-                    raise ValueError("XAI_API_KEY is not configured in the environment.")
+            client = _clients.get(cache_id)
+            if client is None:
                 from xai_sdk import Client
 
                 raw_client = Client(
-                    api_key=XAI_API_KEY,
+                    api_key=api_key,
                     management_api_key=_XAI_INFERENCE_MANAGEMENT_ISOLATION_KEY,
                 )
-                _client = _InferenceOnlyXAIClient(raw_client)
+                client = _InferenceOnlyXAIClient(raw_client)
+                _clients[cache_id] = client
     if _eval_record_enabled():
         # Opt-in eval recording tap (UNIGROK_EVAL_RECORD=1): a thin per-call
         # proxy that appends completed responses to a cassette event log.
         # OFF by default — this branch never runs without the env flag.
-        return _EvalRecordingClient(_client)
-    return _client
+        return _EvalRecordingClient(client)
+    return client
 
 
 def get_xai_client():
@@ -2132,14 +2167,13 @@ def get_xai_management_client():
 def close_xai_inference_client():
     """Close only the inference client cache."""
 
-    global _client
     with _client_lock:
-        if _client is not None:
+        for client in list(_clients.values()):
             try:
-                _client.close()
+                client.close()
             except Exception:
                 pass
-            _client = None
+        _clients.clear()
 
 
 def close_xai_management_client():
@@ -8648,6 +8682,7 @@ def _xai_execution_attempt_receipt(
     tokens: Optional[int] = None,
     cost_usd: Optional[float] = None,
     usage_source: Optional[str] = None,
+    credential_source: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Build one honest physical xAI attempt receipt."""
 
@@ -8691,6 +8726,14 @@ def _xai_execution_attempt_receipt(
         ),
         "cost_usd": 0.0 if is_cli_attempt else cost_usd,
     }
+    if credential_source is None:
+        if is_cli_attempt:
+            credential_source = "subscription_oauth"
+        else:
+            from src.principal_xai import active_xai_credential_source
+
+            credential_source = active_xai_credential_source()
+    attempt["credential_source"] = credential_source
     # The CLI exposes no token usage. Omitting the field distinguishes that
     # fact from a provider-reported exact zero-token API response.
     if not is_cli_attempt and tokens is not None:
@@ -10825,7 +10868,6 @@ async def _call_plane(
     # API branch streams for real via chat.stream(), forwarding each chunk as
     # a {"type": "content_delta", "text": ...} event before returning the
     # complete response as usual.
-    from xai_sdk import Client
     from xai_sdk.chat import user, system, assistant
 
     if _attempt_reporting is not None:
