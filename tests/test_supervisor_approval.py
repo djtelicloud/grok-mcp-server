@@ -1,6 +1,11 @@
 from pathlib import Path
 
-from scripts.supervisor_approval import decide_gate, declared_risk, inferred_risk
+from scripts.supervisor_approval import (
+    has_exact_cursor_approval,
+    decide_gate,
+    declared_risk,
+    inferred_risk,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -68,6 +73,7 @@ def test_risk_declaration_is_unambiguous():
     assert declared_risk("risk: low\nrisk: high", []) is None
     assert inferred_risk(["src/utils.py"]) == "medium"
     assert inferred_risk(["scripts/land"]) == "high"
+    assert inferred_risk(["scripts/supervisor_approval.py"]) == "high"
 
 
 def test_supervisor_status_event_does_not_retrigger_its_own_workflow():
@@ -75,3 +81,10 @@ def test_supervisor_status_event_does_not_retrigger_its_own_workflow():
         encoding="utf-8"
     )
     assert "github.event.context != 'Supervisor Approval'" in workflow
+
+
+def test_cursor_approval_must_match_the_current_head():
+    reviews = [{"user": {"login": "cursor[bot]"}, "state": "APPROVED", "commit_id": "old"}]
+    assert not has_exact_cursor_approval(reviews, "new")
+    reviews[0]["commit_id"] = "new"
+    assert has_exact_cursor_approval(reviews, "new")
