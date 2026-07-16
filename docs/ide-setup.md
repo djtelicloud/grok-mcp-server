@@ -162,13 +162,14 @@ encodes PR Approver / Security Reviewer / Bugbot Autofix single-pass discipline.
 After connect, prove the label from inside Cursor (not from docs alone):
 
 1. Call `grok_mcp_discover_self` and confirm `data.request_context.client_id_present`
-   is true and `client_id_normalized` is `cursor` (or `cursor-forge` on the
-   Forge entry).
+   is true and `data.request_context.client_id_normalized` is `cursor` (or
+   `cursor-forge` on the Forge entry).
 2. Note `grok_mcp_status` Top Callers baseline, then run one cheap
    `agent` call with `mode=fast` and a unique session marker.
-3. Re-check Top Callers: `http:anon|cursor` (or `|cursor-forge`) should
-   increase by one. Bare `http:anon` means some other client omitted
-   `X-Client-ID` — it is not the healthy Cursor path above.
+3. Re-check **Top Callers Today**: `http:anon|cursor` (or `|cursor-forge`)
+   should increase by one. If the Cursor call increments bare `http:anon`,
+   that Cursor request omitted `X-Client-ID` (usually due to its config) and
+   is not the healthy path above.
 
 ### Bugbot Autofix live fidelity smoke
 
