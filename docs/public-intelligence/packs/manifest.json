@@ -58,7 +58,7 @@
       "version": "v0",
       "title": "Rehydrate with brand next steps",
       "summary": "Boot summary table plus 1–2 brand-strength next smartest tasks; table-only rehydrate is incomplete.",
-      "audience": "public_and_contributor",
+      "audience": "contributor",
       "body_path": "docs/public-intelligence/packs/v0-rehydrate-brand-next-steps.md",
       "source_gym": "Multi-brand rehydrate sessions where Gemini/Antigravity and Copilot/Kimi stopped at the status table while Claude/Cursor/Grok offered real next work.",
       "promoted_from": [

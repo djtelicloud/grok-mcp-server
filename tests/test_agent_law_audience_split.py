@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -79,6 +80,26 @@ def test_public_pack_public_vs_insider_exists() -> None:
     assert "Task titles, not numbers" in text
     assert "can_mutate_workspace" in text
     assert "session-rehydrate" in text
+
+
+def test_rehydrate_pack_manifest_matches_contributor_only_header() -> None:
+    manifest = json.loads(
+        (
+            ROOT
+            / "docs"
+            / "public-intelligence"
+            / "packs"
+            / "manifest.json"
+        ).read_text(encoding="utf-8")
+    )
+    pack = next(
+        item
+        for item in manifest["packs"]
+        if item["pack_id"] == "rehydrate-brand-next-steps"
+    )
+    body = (ROOT / pack["body_path"]).read_text(encoding="utf-8")
+    assert pack["audience"] == "contributor"
+    assert "**Audience:** contributor agents developing UniGrok" in body
 
 
 @pytest.mark.asyncio

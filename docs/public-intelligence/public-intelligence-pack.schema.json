@@ -29,7 +29,7 @@
     "summary": { "type": "string", "minLength": 1, "maxLength": 500 },
     "audience": {
       "type": "string",
-      "enum": ["public", "public_and_contributor"]
+      "enum": ["public", "contributor", "public_and_contributor"]
     },
     "body_path": {
       "type": "string",
