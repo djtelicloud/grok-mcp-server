@@ -4600,6 +4600,25 @@ class TestCircuitBreaker:
             check_circuit_breaker("model-shared", credential_scope="opaque-a")
         check_circuit_breaker("model-shared", credential_scope="opaque-b")
 
+    def test_breaker_scope_bounds_invalid_principal_map(self, monkeypatch):
+        from src.principal_xai import PrincipalXAIConfigurationError
+        from src.utils import (
+            _active_xai_breaker_scope,
+            get_circuit_breaker_state,
+            record_xai_failure,
+        )
+
+        monkeypatch.setenv("UNIGROK_PRINCIPAL_XAI_KEYS_JSON", "{")
+        scope = _active_xai_breaker_scope()
+        assert scope == "configuration_error"
+        for _ in range(5):
+            record_xai_failure(
+                "model-config",
+                credential_scope=scope,
+                error=PrincipalXAIConfigurationError("invalid_json"),
+            )
+        assert "model-config|configuration_error" not in get_circuit_breaker_state()
+
     def test_breaker_half_opens_after_cooldown(self, monkeypatch):
         import src.utils as utils_module
         from src.utils import check_circuit_breaker, get_circuit_breaker_state, record_xai_failure

@@ -173,6 +173,33 @@ def load_principal_xai_key_table(
     )
 
 
+def principal_xai_secret_values(
+    environ: Mapping[str, str] | None = None,
+) -> tuple[str, ...]:
+    """Extract bounded map values for redaction and credential-alias denial.
+
+    This deliberately does not validate principal keys: provider secrets must
+    remain protected even when the surrounding configuration fails closed.
+    """
+    source = os.environ if environ is None else environ
+    raw = str(source.get(_PRINCIPAL_KEYS_ENV, "") or "")
+    if not raw.strip():
+        return ()
+    if len(raw.encode("utf-8")) > _MAX_PRINCIPAL_KEY_MAP_BYTES:
+        raise PrincipalXAIConfigurationError("too_large")
+
+    class _ObjectPairs(list[tuple[str, Any]]):
+        pass
+
+    try:
+        data = json.loads(raw, object_pairs_hook=_ObjectPairs)
+    except (TypeError, ValueError):
+        return ()
+    if not isinstance(data, _ObjectPairs):
+        return ()
+    return tuple(value.strip() for _key, value in data if isinstance(value, str))
+
+
 def _lookup_principal_key(
     principal: str, table: Mapping[str, str]
 ) -> Optional[str]:

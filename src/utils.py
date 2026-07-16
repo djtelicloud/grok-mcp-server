@@ -1328,14 +1328,17 @@ def redact_secrets(text: str) -> str:
         if name.upper() == "UNIGROK_API_KEYS":
             values.extend(part.strip() for part in raw_value.split(","))
         elif name.upper() == "UNIGROK_PRINCIPAL_XAI_KEYS_JSON":
-            try:
-                from src.principal_xai import load_principal_xai_key_table
+            from src.principal_xai import (
+                PrincipalXAIConfigurationError,
+                principal_xai_secret_values,
+            )
 
-                values.extend(load_principal_xai_key_table().values())
-            except Exception:
-                # The complete raw JSON remains an exact redaction candidate.
-                # Invalid configuration is handled fail-closed at inference.
-                pass
+            try:
+                values.extend(principal_xai_secret_values())
+            except PrincipalXAIConfigurationError:
+                # An oversized secret container cannot be safely enumerated.
+                # Suppress the entire sink rather than risk leaking one value.
+                return "[REDACTED]" if redacted else ""
         elif name.upper() == "UNIGROK_API_KEY_RECORDS":
             try:
                 records = json.loads(raw_value)
@@ -2510,9 +2513,19 @@ _BREAKER_LOCK = threading.Lock()
 def _active_xai_breaker_scope() -> str:
     """Return an opaque process-local scope for the active API credential."""
 
-    from src.principal_xai import resolve_inference_credential
+    from src.principal_xai import (
+        PrincipalXAIConfigurationError,
+        resolve_inference_credential,
+    )
 
-    key, _source, _cache_slot, generation = resolve_inference_credential()
+    try:
+        key, _source, _cache_slot, generation = resolve_inference_credential()
+    except PrincipalXAIConfigurationError:
+        # Keep malformed configuration fail-closed without turning status,
+        # routing, compaction, or background jobs into an unhandled exception.
+        # No provider call can proceed because effective key resolution still
+        # rejects the same map at the execution boundary.
+        return "configuration_error"
     return generation if key else "missing"
 
 
@@ -2547,8 +2560,18 @@ def check_circuit_breaker(model: str, *, credential_scope: Optional[str] = None)
         )
 
 
-def record_xai_failure(model: str, *, credential_scope: Optional[str] = None):
-    """Count a failed xAI call; open the breaker at the consecutive threshold."""
+def record_xai_failure(
+    model: str,
+    *,
+    credential_scope: Optional[str] = None,
+    error: Optional[BaseException] = None,
+):
+    """Count a provider failure, excluding local credential configuration."""
+    if error is not None:
+        from src.principal_xai import PrincipalXAIConfigurationError
+
+        if isinstance(error, PrincipalXAIConfigurationError):
+            return
     threshold = _breaker_threshold()
     with _BREAKER_LOCK:
         state = _BREAKER_STATE.setdefault(
@@ -7725,7 +7748,9 @@ async def maybe_compact_history(
             )
             summary = str(getattr(response, "content", "") or "").strip()
         except Exception as exc:
-            record_xai_failure(model, credential_scope=api_breaker_scope)
+            record_xai_failure(
+                model, credential_scope=api_breaker_scope, error=exc
+            )
             logger.warning(f"History compaction failed for session '{session}': {exc}")
             return history
         total_cost += float(getattr(response, "cost_usd", 0.0) or 0.0)
@@ -9089,7 +9114,9 @@ class AgentLoop:
                     return sampled
                 except Exception as _sample_err:
                     record_xai_failure(
-                        self.model, credential_scope=api_breaker_scope
+                        self.model,
+                        credential_scope=api_breaker_scope,
+                        error=_sample_err,
                     )
                     await _emit_physical_attempt(
                         self.attempt_recorder,
@@ -10473,6 +10500,20 @@ def _warn_collections_once(exc: Exception):
         )
 
 
+def _collections_allowed_for_active_credential() -> bool:
+    """Keep owner Collections isolated from principal-bound inference keys."""
+    from src.principal_xai import (
+        PrincipalXAIConfigurationError,
+        resolve_inference_credential,
+    )
+
+    try:
+        _key, source, _cache_slot, _generation = resolve_inference_credential()
+    except PrincipalXAIConfigurationError:
+        return False
+    return source != "principal"
+
+
 def _resolve_knowledge_collection_id(client: Any) -> Optional[str]:
     """Find-or-create the named knowledge collection; the id is cached for
     the process lifetime. Runs on an executor thread (SDK calls are sync)."""
@@ -10504,7 +10545,7 @@ async def sync_fact_to_collection(
     capable; never raises and never blocks the caller beyond the bounded
     UNIGROK_COLLECTIONS_TIMEOUT. This is the adapter seam: local-first
     callers (distill job, remember_fact) fire it after the local save."""
-    if not _collections_enabled():
+    if not _collections_enabled() or not _collections_allowed_for_active_credential():
         return False
 
     def _upload():
@@ -10534,7 +10575,7 @@ async def search_knowledge_collection(query: str, limit: int = 5) -> List[Dict[s
     """Best-effort search passthrough over the knowledge collection; results
     (chunk content + score, origin='collection') merge into search_knowledge.
     Returns [] unless enabled and capable; never raises."""
-    if not _collections_enabled():
+    if not _collections_enabled() or not _collections_allowed_for_active_credential():
         return []
 
     def _search():
@@ -11381,7 +11422,7 @@ async def _call_plane(
             )
         except Exception as exc:
             record_xai_failure(
-                model_name, credential_scope=api_breaker_scope
+                model_name, credential_scope=api_breaker_scope, error=exc
             )
             await _emit_physical_attempt(
                 attempt_recorder,

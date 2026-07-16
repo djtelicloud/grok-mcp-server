@@ -31,7 +31,11 @@ from starlette.staticfiles import StaticFiles
 from .version import UI_ASSET_VERSION
 
 from .credentials import UPSTREAM_PROVIDER_SECRET_ENV_NAMES
-from .principal_xai import PrincipalXAIConfigurationError, effective_xai_api_key
+from .principal_xai import (
+    PrincipalXAIConfigurationError,
+    effective_xai_api_key,
+    principal_xai_secret_values,
+)
 from .identity import (
     _ACTIVE_CLIENT_ID,
     _ACTIVE_SESSION_ID,
@@ -471,6 +475,13 @@ def _token_is_allowed(token: Optional[str]) -> bool:
     # also copied the same value into UNIGROK_API_KEYS.
     for env_name in UPSTREAM_PROVIDER_SECRET_ENV_NAMES:
         upstream_secret = os.environ.get(env_name, "").strip()
+        if upstream_secret and _tokens_match(token, upstream_secret):
+            return False
+    try:
+        mapped_upstream_secrets = principal_xai_secret_values()
+    except PrincipalXAIConfigurationError:
+        return False
+    for upstream_secret in mapped_upstream_secrets:
         if upstream_secret and _tokens_match(token, upstream_secret):
             return False
     return any(_tokens_match(token, secret) for _, secret in _api_key_records())
@@ -1820,6 +1831,15 @@ async def metrics(request: Request) -> Response:
 
 
 async def get_xai_model_ids() -> List[str]:
+    try:
+        api_key = _raw_proxy_xai_key()
+    except PrincipalXAIConfigurationError:
+        api_key = ""
+    if not api_key:
+        # Raw API slugs are executable only with this principal's effective
+        # credential. Keep the virtual agent visible without advertising
+        # static fallback models that the same request cannot call.
+        return [UNIGROK_AGENT_MODEL]
     discovery = await discover_xai_api_models()
     names = [item["id"] for item in discovery["models"] if item.get("id")]
     return sorted({UNIGROK_AGENT_MODEL, *names})
@@ -2210,7 +2230,7 @@ async def post_xai_chat(payload: Dict[str, Any]) -> Response:
                 {"error": {"message": _request_error_message("Upstream returned invalid JSON."), "type": "bad_gateway"}},
                 status_code=502
             )
-    except httpx.HTTPError:
+    except Exception:
         return JSONResponse(
             {"error": {"message": _request_error_message("Upstream transport error."), "type": "bad_gateway"}},
             status_code=502

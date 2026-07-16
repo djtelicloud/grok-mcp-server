@@ -1009,6 +1009,61 @@ def test_upstream_provider_secret_is_not_client_auth(monkeypatch, secret_env):
     assert res.status_code == 401
 
 
+def test_principal_xai_secret_is_not_client_auth(monkeypatch):
+    monkeypatch.setenv("UNIGROK_RUNTIME", "cloudrun")
+    monkeypatch.setenv(
+        "UNIGROK_PRINCIPAL_XAI_KEYS_JSON",
+        json.dumps({"not-a-valid-principal": "mapped-upstream-secret"}),
+    )
+    _set_static_keys(monkeypatch, "client-secret,mapped-upstream-secret")
+
+    with TestClient(create_app()) as client:
+        res = client.get(
+            "/v1/models",
+            headers={"Authorization": "Bearer mapped-upstream-secret"},
+        )
+
+    assert res.status_code == 401
+
+
+def test_oversized_principal_map_secret_is_not_client_auth(monkeypatch):
+    monkeypatch.setenv("UNIGROK_RUNTIME", "cloudrun")
+    entries = {f"invalid-{index}": f"mapped-secret-{index}" for index in range(257)}
+    entries["invalid-256"] = "mapped-overflow-secret"
+    monkeypatch.setenv("UNIGROK_PRINCIPAL_XAI_KEYS_JSON", json.dumps(entries))
+    _set_static_keys(monkeypatch, "client-secret,mapped-overflow-secret")
+
+    with TestClient(create_app()) as client:
+        res = client.get(
+            "/v1/models",
+            headers={"Authorization": "Bearer mapped-overflow-secret"},
+        )
+
+    assert res.status_code == 401
+
+
+def test_too_large_principal_map_fails_gateway_auth_closed(monkeypatch):
+    monkeypatch.setenv("UNIGROK_RUNTIME", "cloudrun")
+    monkeypatch.setenv(
+        "UNIGROK_PRINCIPAL_XAI_KEYS_JSON",
+        json.dumps(
+            {
+                "invalid-target": "mapped-too-large-secret",
+                "padding": "x" * 66_000,
+            }
+        ),
+    )
+    _set_static_keys(monkeypatch, "client-secret,mapped-too-large-secret")
+
+    with TestClient(create_app()) as client:
+        res = client.get(
+            "/v1/models",
+            headers={"Authorization": "Bearer mapped-too-large-secret"},
+        )
+
+    assert res.status_code == 401
+
+
 def test_upstream_provider_secret_registry_completely_classifies_server_envs():
     assert set(UPSTREAM_PROVIDER_SECRET_ENV_NAMES) == {
         "XAI_API_KEY",
@@ -1111,6 +1166,28 @@ def test_models_lists_unigrok_agent(monkeypatch):
     assert res.status_code == 200
     ids = {item["id"] for item in res.json()["data"]}
     assert {"unigrok-agent", "grok-4.3"}.issubset(ids)
+
+
+@pytest.mark.asyncio
+async def test_model_ids_omit_raw_slugs_without_active_principal_key(monkeypatch):
+    from src.http_server import get_xai_model_ids
+    from src.identity import reset_active_principal, set_active_principal
+
+    mapped = "oauth:https%3A%2F%2Fcontrol.grokmcp.org:github%3A42"
+    unmapped = "oauth:https%3A%2F%2Fcontrol.grokmcp.org:github%3A99"
+    monkeypatch.delenv("XAI_API_KEY", raising=False)
+    monkeypatch.setenv(
+        "UNIGROK_PRINCIPAL_XAI_KEYS_JSON",
+        json.dumps({mapped: "xai-mapped-principal"}),
+    )
+    discovery = AsyncMock()
+    monkeypatch.setattr("src.http_server.discover_xai_api_models", discovery)
+    token = set_active_principal(unmapped)
+    try:
+        assert await get_xai_model_ids() == ["unigrok-agent"]
+    finally:
+        reset_active_principal(token)
+    discovery.assert_not_awaited()
 
 
 def test_agent_chat_completion_uses_shared_harness(monkeypatch):
@@ -2333,6 +2410,16 @@ async def test_post_xai_chat_502_bad_gateway_on_errors(monkeypatch):
     body = json.loads(res.body.decode())
     assert body["error"]["type"] == "bad_gateway"
     assert body["error"]["message"].startswith("Upstream transport error.")
+
+    # Non-httpx client failures retain the same bounded gateway response.
+    async def mock_post_runtime_error(*args, **kwargs):
+        raise RuntimeError("client setup failed")
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", mock_post_runtime_error)
+    res_runtime = await post_xai_chat({"model": "grok-4.3", "messages": []})
+    assert res_runtime.status_code == 502
+    body_runtime = json.loads(res_runtime.body.decode())
+    assert body_runtime["error"]["type"] == "bad_gateway"
 
     # 2. Simulate JSON decoding error
     class MockResponse:

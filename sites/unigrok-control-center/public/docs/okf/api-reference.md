@@ -1172,6 +1172,19 @@ def load_principal_xai_key_table(environ: Mapping[str, str] | None=None) -> Dict
 
 Load optional principal → key map (never log values).
 
+### Function: `principal_xai_secret_values` {#principal_xai-principal_xai_secret_values}
+
+```python
+def principal_xai_secret_values(environ: Mapping[str, str] | None=None) -> tuple[str, ...]
+```
+
+**Keywords:** principal, xai, secret, values
+
+Extract bounded map values for redaction and credential-alias denial.
+
+This deliberately does not validate principal keys: provider secrets must
+remain protected even when the surrounding configuration fails closed.
+
 ### Function: `resolve_xai_api_key` {#principal_xai-resolve_xai_api_key}
 
 ```python
@@ -4440,12 +4453,12 @@ re-opens it via record_xai_failure.
 ### Function: `record_xai_failure` {#utils-record_xai_failure}
 
 ```python
-def record_xai_failure(model: str, *, credential_scope: Optional[str]=None)
+def record_xai_failure(model: str, *, credential_scope: Optional[str]=None, error: Optional[BaseException]=None)
 ```
 
 **Keywords:** record, xai, failure
 
-Count a failed xAI call; open the breaker at the consecutive threshold.
+Count a provider failure, excluding local credential configuration.
 
 ### Function: `record_xai_success` {#utils-record_xai_success}
 

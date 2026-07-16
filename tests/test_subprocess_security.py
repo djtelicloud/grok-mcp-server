@@ -1,4 +1,5 @@
 import asyncio
+import json
 import subprocess
 
 import pytest
@@ -109,6 +110,42 @@ def test_redact_secrets_removes_unstructured_exact_value(monkeypatch):
     monkeypatch.setenv("GOOGLE_API_KEY", "plain-provider-secret")
 
     assert redact_secrets("failure: plain-provider-secret") == "failure: [REDACTED]"
+
+
+def test_redact_secrets_removes_invalid_principal_map_values(monkeypatch):
+    monkeypatch.setenv(
+        "UNIGROK_PRINCIPAL_XAI_KEYS_JSON",
+        '{"not-a-valid-principal":"mapped-opaque-secret",'
+        '"not-a-valid-principal":"duplicate-opaque-secret"}',
+    )
+
+    assert redact_secrets(
+        "failure: mapped-opaque-secret duplicate-opaque-secret"
+    ) == "failure: [REDACTED] [REDACTED]"
+
+
+def test_redact_secrets_removes_overflow_principal_map_values(monkeypatch):
+    entries = {f"invalid-{index}": f"mapped-secret-{index}" for index in range(257)}
+    entries["invalid-256"] = "mapped-overflow-secret"
+    monkeypatch.setenv("UNIGROK_PRINCIPAL_XAI_KEYS_JSON", json.dumps(entries))
+
+    assert redact_secrets("failure: mapped-overflow-secret") == (
+        "failure: [REDACTED]"
+    )
+
+
+def test_redact_secrets_fails_closed_for_too_large_principal_map(monkeypatch):
+    monkeypatch.setenv(
+        "UNIGROK_PRINCIPAL_XAI_KEYS_JSON",
+        json.dumps(
+            {
+                "invalid-target": "mapped-too-large-secret",
+                "padding": "x" * 66_000,
+            }
+        ),
+    )
+
+    assert redact_secrets("failure: mapped-too-large-secret") == "[REDACTED]"
 
 
 def test_redact_secrets_removes_individual_gateway_keys(monkeypatch):
