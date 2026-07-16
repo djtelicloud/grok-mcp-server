@@ -50,7 +50,8 @@ def module_name_for(target_rel: str, workspace_root: Path | None = None) -> str:
     Non-standard layouts still fail the provenance probe loudly rather than
     guessing.
     """
-    parts = list(PurePosixPath(target_rel).with_suffix("").parts)
+    normalized = str(target_rel).replace("\\", "/")
+    parts = list(PurePosixPath(normalized).with_suffix("").parts)
     src_is_package = bool(
         workspace_root is not None
         and (Path(workspace_root) / "src" / "__init__.py").is_file()
@@ -87,6 +88,9 @@ async def run_preflight(
     allow_unstable_bench: bool = False,
 ) -> Dict[str, Any]:
     oracle: Dict[str, Any] = {}
+    # Task rows are canonical POSIX-relative paths, but normalize historical
+    # Windows rows defensively so module and coverage matching stay portable.
+    target_rel = str(target_rel).replace("\\", "/")
 
     # 1. Import provenance — the shadowing must provably work.
     module = module_name_for(target_rel, sandbox.work)

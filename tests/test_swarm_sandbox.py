@@ -200,6 +200,15 @@ class TestPreflight:
 
         assert module_name_for("src/swarm/pareto.py", tmp_path) == "swarm.pareto"
 
+    def test_windows_separators_are_normalized_for_both_src_layouts(self, tmp_path):
+        (tmp_path / "src").mkdir()
+        (tmp_path / "src" / "__init__.py").write_text("")
+        target = r"src\swarm\pareto.py"
+
+        assert module_name_for(target, tmp_path) == "src.swarm.pareto"
+        (tmp_path / "src" / "__init__.py").unlink()
+        assert module_name_for(target, tmp_path) == "swarm.pareto"
+
     @pytest.mark.asyncio
     async def test_happy_path(self, sandbox):
         oracle = await _preflight(sandbox)
