@@ -89,14 +89,76 @@ def test_supervisor_status_event_does_not_retrigger_its_own_workflow():
     assert "CHECK_RUN_HEAD_SHA" in workflow
 
 
-def test_collect_check_states_prefers_finished_success_over_in_progress():
+def test_collect_check_states_prefers_newer_finished_success_over_older_in_progress():
     checks = collect_check_states(
         [
-            {"name": "build (3.11)", "status": "in_progress", "conclusion": None},
-            {"name": "build (3.11)", "status": "completed", "conclusion": "success"},
+            {
+                "name": "build (3.11)",
+                "id": 1,
+                "status": "in_progress",
+                "conclusion": None,
+                "started_at": "2026-07-16T01:00:00Z",
+                "completed_at": None,
+            },
+            {
+                "name": "build (3.11)",
+                "id": 2,
+                "status": "completed",
+                "conclusion": "success",
+                "started_at": "2026-07-16T01:05:00Z",
+                "completed_at": "2026-07-16T01:06:00Z",
+            },
         ]
     )
     assert checks["build (3.11)"] == "success"
+
+
+def test_collect_check_states_prefers_newer_success_over_stale_failure():
+    checks = collect_check_states(
+        [
+            {
+                "name": "build (3.11)",
+                "id": 10,
+                "status": "completed",
+                "conclusion": "failure",
+                "started_at": "2026-07-16T01:00:00Z",
+                "completed_at": "2026-07-16T01:01:00Z",
+            },
+            {
+                "name": "build (3.11)",
+                "id": 11,
+                "status": "completed",
+                "conclusion": "success",
+                "started_at": "2026-07-16T01:10:00Z",
+                "completed_at": "2026-07-16T01:11:00Z",
+            },
+        ]
+    )
+    assert checks["build (3.11)"] == "success"
+
+
+def test_collect_check_states_prefers_newer_in_progress_over_stale_success():
+    checks = collect_check_states(
+        [
+            {
+                "name": "build (3.11)",
+                "id": 20,
+                "status": "completed",
+                "conclusion": "success",
+                "started_at": "2026-07-16T01:00:00Z",
+                "completed_at": "2026-07-16T01:01:00Z",
+            },
+            {
+                "name": "build (3.11)",
+                "id": 21,
+                "status": "in_progress",
+                "conclusion": None,
+                "started_at": "2026-07-16T01:20:00Z",
+                "completed_at": None,
+            },
+        ]
+    )
+    assert checks["build (3.11)"] == "in_progress"
 
 
 def test_waiting_for_required_ci_detects_build_gap():

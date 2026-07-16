@@ -274,32 +274,37 @@ class GitHubClient:
             page += 1
 
 
-def _check_state_rank(state: str) -> int:
-    """Prefer finished conclusions when duplicate check-runs share a name."""
+def _check_run_generation_key(item: dict[str, Any]) -> tuple[str, int]:
+    """Newest generation wins for duplicate check-run names.
 
-    normalized = state.lower()
-    if normalized in {"failure", "cancelled", "timed_out", "action_required", "error"}:
-        return 0
-    if normalized in {"success", "neutral"}:
-        return 1
-    if normalized in {"pending", "queued", "in_progress", "waiting", "requested", "missing"}:
-        return 3
-    return 2
+    Use completed_at when present, otherwise started_at, then check-run id so a
+    newer success (or in-progress rerun) is never overridden by an older run.
+    """
+
+    clock = str(item.get("completed_at") or item.get("started_at") or "")
+    raw_id = item.get("id")
+    try:
+        run_id = int(raw_id) if raw_id is not None else 0
+    except (TypeError, ValueError):
+        run_id = 0
+    return (clock, run_id)
 
 
 def collect_check_states(check_runs: list[dict[str, Any]]) -> dict[str, str]:
-    """Collapse check-runs by name, keeping the most decisive finished state."""
+    """Collapse check-runs by name, keeping the newest generation only."""
 
-    checks: dict[str, str] = {}
+    newest: dict[str, dict[str, Any]] = {}
     for item in check_runs:
         name = item.get("name")
         if not name:
             continue
-        state = (item.get("conclusion") or item.get("status") or "missing").lower()
-        current = checks.get(name)
-        if current is None or _check_state_rank(state) < _check_state_rank(current):
-            checks[name] = state
-    return checks
+        current = newest.get(name)
+        if current is None or _check_run_generation_key(item) > _check_run_generation_key(current):
+            newest[name] = item
+    return {
+        name: (item.get("conclusion") or item.get("status") or "missing").lower()
+        for name, item in newest.items()
+    }
 
 
 def waiting_for_required_ci(decision: GateDecision) -> bool:
