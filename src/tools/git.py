@@ -3,7 +3,7 @@ import os
 import re
 import shlex
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
@@ -25,6 +25,17 @@ DESTRUCTIVE_TOOL = ToolAnnotations(destructiveHint=True)
 PATCH_LIMIT_BYTES = 512 * 1024
 BRANCH_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,180}$")
 REF_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/\-~^]{0,180}$")
+_GIT_REPO_LOCKS: Dict[str, asyncio.Lock] = {}
+
+
+def _git_repo_lock(repo: Path) -> asyncio.Lock:
+    """Per-repo lock so check+apply (and other write pairs) stay atomic."""
+    key = str(repo.resolve())
+    lock = _GIT_REPO_LOCKS.get(key)
+    if lock is None:
+        lock = asyncio.Lock()
+        _GIT_REPO_LOCKS[key] = lock
+    return lock
 
 
 def _git_read_unavailable() -> Optional[str]:
@@ -217,8 +228,11 @@ async def git_apply_patch(patch: str, repo_path: Optional[str] = None) -> str:
         raise ValueError("Patch exceeds 512KB limit.")
     repo = _repo_root(repo_path)
     _validate_patch_targets(patch, repo)
-    await _run_git(["apply", "--check", "-"], repo_path, stdin=payload)
-    await _run_git(["apply", "-"], repo_path, stdin=payload)
+    # Hold the repo lock across check+apply so concurrent writers cannot both
+    # pass --check and then race on apply (TOCTOU under ENABLE_GIT_WRITE).
+    async with _git_repo_lock(repo):
+        await _run_git(["apply", "--check", "-"], str(repo), stdin=payload)
+        await _run_git(["apply", "-"], str(repo), stdin=payload)
     return "Patch applied successfully."
 
 
