@@ -10,20 +10,25 @@ credentials, OAuth codes, tokens, or private keys here.
 
 ## Current integration state
 
-- Protected `origin/main` and the locked local `main` checkout agree at
-  `d87bd1473246893eae8e5960a4862e366619b59a`.
+- Protected `origin/main` and the locked local `main` checkout agree. Verify
+  their exact SHA live; this handoff deliberately does not hard-code its own
+  later documentation merge.
 - PR #316 is merged. Installed CLI startup no longer imports caller-cwd dotenv
   policy, credential dotenv files are owner-only and validated before loading,
   credential-bearing xAI proxy origins are allowlisted, and write-token
   workflows pin third-party actions to immutable commits.
-- Exact-head CI, CodeQL, Codex Approval, Supervisor Approval, Security Reviewer,
-  and Bugbot passed for PR #316. The exact local suite passed 2,163 tests.
+- PR #325 is merged. Child processes now scrub canonical and unknown
+  secret-shaped environment credentials by default, preserve only the reviewed
+  Claude OAuth exception, and configured caller budgets reject when spend
+  accounting is unavailable. Exact-head CI, CodeQL, Codex Approval, Supervisor
+  Approval, Security Reviewer, and Bugbot passed; the local suite passed 2,173
+  tests.
 - Stable `:4765` and contributor `:4766` are healthy and ready on the current
   image with read-only root filesystems.
 - Remote MCP is Live at 100% in both regions on image digest
-  `sha256:3cbde9349bead22c133bd2a12a2ca59dfd372f4ce9b632aee322ffe6d6667f7e`:
-  `us-central1` revision `unigrok-remote-mcp-00013-qfz` and `us-east1`
-  revision `unigrok-remote-mcp-00017-5bp`.
+  `sha256:8dcfad6810f33c1c4d8d5cc354334f005c4cfd27ad7707ecfc920c699dca3280`:
+  `us-central1` revision `unigrok-remote-mcp-00014-s4s` and `us-east1`
+  revision `unigrok-remote-mcp-00018-bj9`.
 - Public health, readiness, OAuth protected-resource metadata, and protected
   `/metrics` and `/mcp` rejection probes pass. No error logs were found on the
   new Cloud Run revisions after rollout.
@@ -41,8 +46,9 @@ credentials, OAuth codes, tokens, or private keys here.
 
 ## Scratchpad safety
 
-- Codex removed the finished land-gate, distill-scope, and compaction-fence
-  worktrees only after proving each clean and merged into `main`.
+- Codex removed the finished land-gate, distill-scope, compaction-fence,
+  installed-startup, subprocess-security, and prior handoff worktrees only
+  after proving each clean and merged or patch-equivalent to `main`.
 - Codex removed the mount-free `grok-mcp-ci-local` verification container after
   the production local runtimes were healthy.
 - Preserve the locked protected `main`, active Codex/Cursor/Claude/Grok
