@@ -163,7 +163,7 @@ def test_trusted_env_rejects_unsafe_modes_links_and_non_files(monkeypatch, tmp_p
         path = tmp_path / f"mode-{mode:o}.env"
         path.write_text("XAI_API_KEY=not-loaded\n", encoding="utf-8")
         path.chmod(mode)
-        with pytest.raises(RuntimeError, match="mode 0600"):
+        with pytest.raises(RuntimeError, match="mode 0600.*chmod 600"):
             cli._load_trusted_env(path)
 
     safe = tmp_path / "safe.env"

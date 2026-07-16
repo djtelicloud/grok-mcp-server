@@ -62,7 +62,10 @@ def _validate_secret_env_stat(path: Path, file_stat: os.stat_result) -> None:
     if getuid is not None and file_stat.st_uid != getuid():
         raise RuntimeError(f"Refusing unsafe environment file (wrong owner): {path}")
     if stat.S_IMODE(file_stat.st_mode) & 0o077:
-        raise RuntimeError(f"Refusing unsafe environment file (must be mode 0600): {path}")
+        raise RuntimeError(
+            "Refusing unsafe environment file (must be mode 0600): "
+            f"{path}. Verify its ownership and contents, then run chmod 600 on it."
+        )
 
 
 def _open_secret_env(path: Path, flags: int) -> int:
