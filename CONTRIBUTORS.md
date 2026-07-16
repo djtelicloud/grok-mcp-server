@@ -23,6 +23,8 @@ this repository unless the verified registry explicitly says otherwise:
 | Google Gemini | Google | Gemini | `Agent-Assisted-By` |
 | xAI Grok | xAI | Grok | `Agent-Assisted-By` or advisory `Agent-Reviewed-By` |
 | GitHub Copilot | GitHub | Copilot in a local IDE | `Agent-Assisted-By` |
+| Cursor Composer | Cursor | Composer | `Agent-Assisted-By` |
+| Cursor | Cursor | Cursor Automations / Agent | `Agent-Assisted-By` |
 
 Exact or qualified model labels, surfaces, roles, and evidence belong in each
 commit and pull request. See [the attribution policy](docs/agent-attribution.md)

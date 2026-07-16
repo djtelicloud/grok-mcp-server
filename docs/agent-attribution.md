@@ -21,6 +21,7 @@ help uses a repeatable `Agent-Assisted-By` trailer. Advisory review uses
 Agent-Assisted-By: OpenAI Codex | model=GPT-5 | model-source=user-reported | surface=Codex Desktop | role=implementation
 Agent-Assisted-By: Anthropic Claude | model=Fable 5 Ultracode | model-source=user-reported | surface=Claude Code | role=research
 Agent-Assisted-By: Google Gemini | model=Gemini 3.1 Pro | model-source=user-reported | surface=Antigravity | role=data-design
+Agent-Assisted-By: Cursor Composer | model=Grok 4.5 | model-source=provider-session | surface=Cursor | role=implementation
 Agent-Reviewed-By: xAI Grok | model=grok-4.5 | model-source=runtime-receipt | surface=UniGrok CLI | role=advisory-review | evidence=receipt-sha256:0123456789abcdef
 ```
 
