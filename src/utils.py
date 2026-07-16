@@ -1383,7 +1383,7 @@ def _bounded_redacted(text: str, limit: int) -> str:
 
 
 _PROVIDER_CONTENT_WITHHELD = "[CONTENT_WITHHELD_BY_SECRET_GUARD]"
-_SESSION_STORE_SCHEMA_HEAD = 17
+_SESSION_STORE_SCHEMA_HEAD = 18
 _PROVIDER_HARVEST_MAX_LEASE_SECONDS = 300.0
 _PROVIDER_HARVEST_MAX_BACKOFF_SECONDS = 86_400.0
 _PROVIDER_HARVEST_CORRUPT_SCAN_OVERHEAD = 25
@@ -3652,6 +3652,29 @@ class GrokSessionStore:
                     await self._conn.execute("PRAGMA user_version = 17;")
                     await self._conn.commit()
                 except Exception:
+                    await self._conn.rollback()
+                    raise
+
+            if version < 18:
+                # Caller-scoped deferred-job reads must remain indexed as the
+                # durable job history grows. The ordering columns match
+                # list_jobs so SQLite can satisfy filtering, sorting, and
+                # LIMIT from one composite index.
+                await self._conn.execute("BEGIN IMMEDIATE;")
+                try:
+                    await self._conn.execute(
+                        "CREATE INDEX IF NOT EXISTS idx_jobs_caller_created_at_id "
+                        "ON jobs(caller, created_at DESC, id DESC);"
+                    )
+                    async with self._conn.execute(
+                        "PRAGMA index_info(idx_jobs_caller_created_at_id);"
+                    ) as cursor:
+                        index_columns = [row["name"] for row in await cursor.fetchall()]
+                    if index_columns != ["caller", "created_at", "id"]:
+                        raise RuntimeError("jobs caller index is incompatible")
+                    await self._conn.execute("PRAGMA user_version = 18;")
+                    await self._conn.commit()
+                except BaseException:
                     await self._conn.rollback()
                     raise
 
@@ -6905,7 +6928,9 @@ class GrokSessionStore:
                         str(model or "unknown"),
                         now_str,
                         now_str,
-                        normalize_caller(caller) or get_active_caller(),
+                        normalize_principal(caller)
+                        or get_active_principal()
+                        or get_active_caller(),
                         normalize_request_id(request_id) or get_request_id() or None,
                     ),
                 )
@@ -6957,13 +6982,22 @@ class GrokSessionStore:
                 return dict(row) if row else None
 
     @_with_read_retry_async
-    async def list_jobs(self, limit: int = 20) -> List[Dict[str, Any]]:
+    async def list_jobs(
+        self, limit: int = 20, caller: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
         await self._ensure_initialized()
         bounded = max(1, min(int(limit or 20), 100))
         async with self._read_conn() as conn:
-            async with conn.execute(
-                "SELECT * FROM jobs ORDER BY created_at DESC, id DESC LIMIT ?", (bounded,)
-            ) as cursor:
+            if caller:
+                query = (
+                    "SELECT * FROM jobs WHERE caller = ? "
+                    "ORDER BY created_at DESC, id DESC LIMIT ?"
+                )
+                params = (caller, bounded)
+            else:
+                query = "SELECT * FROM jobs ORDER BY created_at DESC, id DESC LIMIT ?"
+                params = (bounded,)
+            async with conn.execute(query, params) as cursor:
                 rows = await cursor.fetchall()
                 return [dict(row) for row in rows]
 
