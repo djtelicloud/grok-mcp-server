@@ -476,7 +476,7 @@ def test_cursor_python_superiority_loop_requires_measured_serial_evidence():
     assert "entire candidate bundle" in pr_review
     assert "needs changes" in pr_review
     assert "Public-results status: `held`" in pr_review
-    assert "should not\nmerge #475" in pr_review
+    assert "should not merge #475" in " ".join(pr_review.split())
 
 
 def test_dual_supervisor_land_law_is_consistent() -> None:

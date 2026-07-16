@@ -1,6 +1,6 @@
 # Codex Active Work
 
-Last updated: 2026-07-16T17:46:46Z
+Last updated: 2026-07-16T17:50:41Z
 Owner: Codex integration coordinator
 Status: Current critical repairs are merged and Live; the security queue remains active.
 
@@ -49,10 +49,13 @@ credentials, OAuth codes, tokens, or private keys here.
 ## Active queue and safety posture
 
 - Python-superiority campaign PR #475 is held at exact head
-  `bda882ffbf6e2436b09af5d316a4c3cfb26ae1ad`. Its contributor baseline passed
-  2,202 tests, but its first Forge task (`f29b306130e945f8a34eaa44b91fcb39`)
-  failed before candidate generation because preflight imported
-  `swarm.pareto` instead of this repository's real `src.swarm.pareto` package.
+  `8e7331c2cc1abaf55da23c053abe7f8bf53dbcee`. Its contributor baseline at the
+  prior head passed 2,202 tests, but two Forge tasks
+  (`f29b306130e945f8a34eaa44b91fcb39` and
+  `eca231fdad094aab9e909728f13035df`) failed before candidate generation
+  because preflight stripped the repository's required `src.` package prefix.
+  Grok's new unconditional keep-`src` commit is narrower than #476 and is not
+  the approved repair.
 - Draft #476 repairs that Forge import-provenance bug. Codex's focused suite
   passed 27 tests and the full suite passed 2,204 tests. Normal Codex must
   independently review and land it, then refresh the Forge runtime before

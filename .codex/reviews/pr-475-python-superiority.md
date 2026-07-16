@@ -4,8 +4,9 @@
 
 - PR: `djtelicloud/grok-mcp-server#475`
 - Exact base SHA: `ea15d046c25b6e58a9a3d8d118d4191c161efc07`
-- Exact candidate SHA: `bda882ffbf6e2436b09af5d316a4c3cfb26ae1ad`
-- Forge task id: `f29b306130e945f8a34eaa44b91fcb39`
+- Exact candidate SHA: `8e7331c2cc1abaf55da23c053abe7f8bf53dbcee`
+- Forge task ids: `f29b306130e945f8a34eaa44b91fcb39`,
+  `eca231fdad094aab9e909728f13035df`
 - Verdict: `needs changes`
 - Public-results status: `held`
 
@@ -15,23 +16,32 @@ landing loop as approved work.
 
 ## Inspected packet
 
-- 75 commits and 69 changed files, all under `docs/design/`
-- 1,800 added lines; no production, test, oracle, or benchmark code
+- 76 commits and 70 changed files: 69 plans under `docs/design/` plus one
+  production edit in `src/swarm/preflight.py`
+- 1,807 added lines and 5 deleted lines; no new test, oracle, or benchmark code
 - Cursor campaign report: 201 plans done, 9 skipped, 0 pending
 - 126 historical per-file draft PRs plus the 75 in-tree continuation commits
 - no unresolved review threads on #475 at review time
-- contributor exact-head baseline: 2,202 tests passed in 102.31 seconds
-- exact-head CI was still running; Bugbot had passed
+- contributor baseline at prior head `bda882ffbf6e2436b09af5d316a4c3cfb26ae1ad`:
+  2,202 tests passed in 102.31 seconds
+- exact-head attribution failed across the plan history; the remaining new-head
+  CI was still running at review time
 
 The original campaign window contained no Swarm task. After Codex requested a
 real measured candidate, Grok started task
 `f29b306130e945f8a34eaa44b91fcb39` for
-`src/swarm/pareto.py::fast_non_dominated_sort`. Forge failed during import
-provenance before generation because it derived `swarm.pareto` instead of this
-repository's real package `src.swarm.pareto`; the task spent $0 and produced no
-candidate. That is an infrastructure refusal, not optimization evidence or a
-candidate-performance verdict. The adapter repair is isolated in draft #476
-for normal Codex review.
+`src/swarm/pareto.py::fast_non_dominated_sort`, then task
+`eca231fdad094aab9e909728f13035df` for
+`src/routing.py::extract_routing_features`. Both failed during import
+provenance before generation because Forge stripped the required `src.` package
+prefix. Neither produced a candidate or performance verdict.
+
+Grok then committed an unconditional keep-`src` repair at the current #475
+head. That fixes UniGrok but regresses conventional repositories where `src/`
+is a package container rather than the package name, and it adds no regression
+tests or generated API mirror update. Codex's draft #476 instead detects
+`src/__init__.py` inside the sandbox, covers both layouts, and passed the full
+2,204-test suite. #476 supersedes the #475 repair for normal-Codex integration.
 
 ## Quantitative plan audit
 
@@ -115,7 +125,8 @@ completion.
 
 ## Approval boundary
 
-No #475 plan or historical per-file draft is approved by this review. Public
-linking remains held. Normal Codex may review and land the separate evidence
-gate in #422 after its own exact-head checks and protections pass; it should not
-merge #475 based on this packet.
+No #475 plan, historical per-file draft, or unconditional import-layout repair
+is approved by this review. Public linking remains held. Normal Codex may
+review and land the separate evidence gate in #422 and the layout-safe Forge
+repair in #476 after their own exact-head checks and protections pass; it
+should not merge #475 based on this packet.
