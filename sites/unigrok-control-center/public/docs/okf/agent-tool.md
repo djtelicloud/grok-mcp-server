@@ -162,6 +162,12 @@ use live `tools/list` as the contract before assuming a tool exists.
   especially for pinned API models or explicit CLI-only review flows.
 - Qualify `session` by task or repository so repeated Copilot follow-ups stay
   attached to the same logical thread.
+- **CLI agent-type stickiness:** a native CLI conversation keeps one agent
+  type. Switching from composer/`fast` to planning/`reasoning` on the same
+  logical session can raise `MODEL_SWITCH_INCOMPATIBLE_AGENT`. Current UniGrok
+  recovers by replaying server history into a **fresh** native session id
+  (not a fork). Keep the logical `session` name stable; only change it if an
+  older image still surfaces the raw CLI error.
 
 ### Supplying local evidence
 
