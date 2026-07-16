@@ -44,4 +44,5 @@ manifest, and open a product PR. Never force-push private history public.
 
 - Public vs private git: [docs/design/public-private-git-split.md](../design/public-private-git-split.md)
 - Human language for agents: [.agents/AGENTS.md](../../.agents/AGENTS.md)
+- Terminal markdown authoring (CLI/TUI layout): [packs/v0-terminal-markdown-authoring.md](packs/v0-terminal-markdown-authoring.md)
 - Insider capsules (not public consumer DB): [docs/okf/intelligence-capsule-v1.md](../okf/intelligence-capsule-v1.md)
