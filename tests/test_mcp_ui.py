@@ -47,9 +47,9 @@ def test_mcp_ui_static_files_are_served(monkeypatch):
     assert index.status_code == 200
     assert "<title>UniGrok Gateway Console v0.6.0</title>" in index.text
     assert '<span class="version-badge">v0.6.0</span>' in index.text
-    assert 'script type="module" src="./app.js?v=grok-v0.6.0-r10"' in index.text
-    assert '<link rel="stylesheet" href="./styles.css?v=grok-v0.6.0-r10" />' in index.text
-    assert '<link rel="stylesheet" href="./tokens.css?v=grok-v0.6.0-r10" />' in index.text
+    assert 'script type="module" src="./app.js?v=grok-v0.6.0-r12"' in index.text
+    assert '<link rel="stylesheet" href="./styles.css?v=grok-v0.6.0-r12" />' in index.text
+    assert '<link rel="stylesheet" href="./tokens.css?v=grok-v0.6.0-r12" />' in index.text
     assert "Console" in index.text
     assert 'id="surfaceModeBadge"' in index.text
     assert 'id="tab-btn-schemas"' not in index.text
@@ -463,7 +463,7 @@ def test_mcp_ui_markdown_renderer_is_shared_and_escape_first():
     assert "\\u000E-\\u001F" in renderer.text
     # app.js imports the shared renderer at the current cache-bust version and
     # no longer defines its own.
-    assert 'from "./markdown.js?v=grok-v0.6.0-r10"' in script.text
+    assert 'from "./markdown.js?v=grok-v0.6.0-r12"' in script.text
     assert "import { parseMarkdown" in script.text
     assert "function parseMarkdown" not in script.text
     assert "renderMarkdownInto" in script.text
@@ -490,6 +490,16 @@ def test_mcp_ui_error_surfaces_tell_the_truth():
     assert "describeNotReady" in script.text
     # The connection-lost wording is reserved for actual fetch failures.
     assert "No connection detected" in script.text
+
+
+def test_mcp_ui_fact_cost_tells_the_truth_for_zero():
+    """cost_usd=0 must not render as '-' (unknown); subscription $0 says so."""
+    with TestClient(create_app(), base_url="http://localhost:8080") as client:
+        script = client.get("/ui/app.js")
+    assert "cost !== 0" not in script.text
+    assert 'cost === 0 && billing === "subscription"' in script.text
+    assert '"Subscription"' in script.text
+    assert "cost.toFixed(5)" in script.text
 
 
 def test_mcp_ui_swarm_messages_tell_the_truth():
