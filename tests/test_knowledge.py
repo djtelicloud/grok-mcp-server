@@ -591,6 +591,33 @@ class TestRankedContextFile:
 
         assert "alpha.py" in context
 
+    @pytest.mark.asyncio
+    async def test_symlink_escape_is_not_injected(self, tmp_path, monkeypatch):
+        """Workspace symlinks that resolve outside the tree must never enter
+        auto-context (e.g. leak.json → host auth.json)."""
+        from src.utils import get_dynamic_context
+
+        monkeypatch.setattr(PathResolver, "get_workspace_root", staticmethod(lambda: tmp_path))
+        secret = tmp_path.parent / "outside-secret.json"
+        secret.write_text('{"token":"super-secret-token-xyz"}\n', encoding="utf-8")
+        leak = tmp_path / "leak.json"
+        leak.symlink_to(secret)
+        (tmp_path / "safe.py").write_text("safe workspace file\n", encoding="utf-8")
+        _fake_git(monkeypatch, b"M  leak.json\nM  safe.py\n")
+
+        try:
+            git_cache.clear()
+            context, injected, _ = await get_dynamic_context(prompt="read leak.json token")
+        finally:
+            git_cache.clear()
+
+        assert "super-secret-token-xyz" not in context
+        assert "outside-secret" not in context
+        assert "leak.json" not in context
+        assert injected is True
+        assert "safe.py" in context
+        assert "safe workspace file" in context
+
 
 class TestKnowledgeContextInjection:
     @pytest.fixture

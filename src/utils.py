@@ -8178,6 +8178,32 @@ def _rank_candidate_files(
     return best
 
 
+def _bound_dynamic_context_path(path_str: str, project_root: Path) -> Optional[Path]:
+    """Return a workspace-bound file path for auto-context injection, or None.
+
+    Soft-fail: absolute/`..` escapes, symlink leaves, and anything
+    PathResolver.validate_path rejects are omitted rather than injected.
+    """
+    raw = (path_str or "").strip().strip('"')
+    if not raw:
+        return None
+    # Git porcelain can emit odd shapes; never join absolute host paths.
+    candidate = Path(raw)
+    if candidate.is_absolute():
+        return None
+    if ".." in candidate.parts:
+        return None
+    joined = project_root / candidate
+    try:
+        if joined.is_symlink():
+            # Auto-context must not follow workspace symlinks (e.g. *.json →
+            # host auth.json) into the system prompt.
+            return None
+        return PathResolver.validate_path(raw)
+    except (PermissionError, OSError, ValueError):
+        return None
+
+
 async def get_dynamic_context(
     mcp_instance: Any = None, prompt: Optional[str] = None
 ) -> tuple[str, bool, str]:
@@ -8211,7 +8237,8 @@ async def get_dynamic_context(
     workspace = PathResolver.get_workspace_root()
     if workspace is None:  # defensive: local_context_enabled already checks
         raise RuntimeError("local context enabled without an attached workspace")
-    project_root = str(workspace)
+    project_root_path = workspace.resolve()
+    project_root = str(project_root_path)
     recent_file = None
     recent_code = ""
     context_injected = False
@@ -8276,10 +8303,10 @@ async def get_dynamic_context(
 
         # ALL matching modified files become ranking candidates (the old
         # code injected modified_files[0] unconditionally — the known
-        # weakness this ranking fixes).
+        # weakness this ranking fixes). Bound every path before ranking.
         for rel_path in modified_files:
-            target_path = Path(project_root) / rel_path
-            if target_path.exists():
+            target_path = _bound_dynamic_context_path(rel_path, project_root_path)
+            if target_path is not None and target_path.is_file():
                 candidate_paths.append(target_path)
         if not candidate_paths:
             # Fallback: files from the last commit in the branch
@@ -8296,8 +8323,10 @@ async def get_dynamic_context(
                     for line in lines[1:]:
                         line = line.strip()
                         if line.endswith(('.py', '.js', '.ts', '.tsx', '.json', '.html', '.css', '.md', '.sh')):
-                            target_path = Path(project_root) / line
-                            if target_path.exists():
+                            target_path = _bound_dynamic_context_path(
+                                line, project_root_path
+                            )
+                            if target_path is not None and target_path.is_file():
                                 candidate_paths.append(target_path)
     except Exception as e:
         logging.getLogger("GrokMCP").warning(f"Git dynamic context resolution unavailable: {e}")
@@ -8325,10 +8354,16 @@ async def get_dynamic_context(
                 except Exception:
                     return 0.0
 
-            candidate_paths = [
-                p.resolve()
-                for p in sorted(candidate_files[:20], key=_mtime, reverse=True)
-            ]
+            bound: List[Path] = []
+            for p in sorted(candidate_files[:20], key=_mtime, reverse=True):
+                try:
+                    rel = p.resolve().relative_to(project_root_path)
+                except (ValueError, OSError):
+                    continue
+                target = _bound_dynamic_context_path(str(rel), project_root_path)
+                if target is not None and target.is_file():
+                    bound.append(target)
+            candidate_paths = bound
         except Exception as e:
             logging.getLogger("GrokMCP").error(f"Fallback context resolution failed: {e}", exc_info=True)
 
@@ -8339,16 +8374,27 @@ async def get_dynamic_context(
         recent_file = candidate_paths[0]
         if prompt_terms and len(candidate_paths) > 1:
             recent_file = _rank_candidate_files(
-                prompt_terms, candidate_paths, Path(project_root)
+                prompt_terms, candidate_paths, project_root_path
             )
         context_injected = True
 
-    if recent_file and recent_file.exists():
+    if recent_file is not None:
+        # Re-bound immediately before open (defense in depth vs. ranking quirks).
+        try:
+            rel = recent_file.resolve().relative_to(project_root_path)
+            recent_file = _bound_dynamic_context_path(str(rel), project_root_path)
+        except (ValueError, OSError):
+            recent_file = None
+            context_injected = False
+    if recent_file and recent_file.is_file():
         try:
             with open(recent_file, 'r', errors='ignore') as f:
                 recent_code = "".join(f.readlines()[:100])
         except Exception as e:
             logging.getLogger("GrokMCP").error(f"Failed to read file context: {e}", exc_info=True)
+            recent_file = None
+            recent_code = ""
+            context_injected = False
 
     context = (
         "# UniGrok Workspace Context\n"
