@@ -3108,7 +3108,7 @@ Commit explicit paths only. Requires local git write mode.
 ### Function: `remember_fact` {#tools-knowledge-remember_fact}
 
 ```python
-async def remember_fact(fact: str, scope: str='global') -> Dict[str, Any]
+async def remember_fact(fact: str, scope: str='global', ctx: Optional[Context]=None) -> Dict[str, Any]
 ```
 
 **Keywords:** remember, fact
@@ -3146,12 +3146,15 @@ Args:
 ### Function: `forget_fact` {#tools-knowledge-forget_fact}
 
 ```python
-async def forget_fact(fact_id: int) -> Dict[str, Any]
+async def forget_fact(fact_id: int, ctx: Optional[Context]=None) -> Dict[str, Any]
 ```
 
 **Keywords:** forget, fact
 
 Permanently delete one fact from the workspace knowledge memory.
+
+When the request has a bound caller identity, only that caller's facts
+may be deleted (foreign or legacy-unowned ids look like `not_found`).
 
 Args:
     fact_id: The id returned by `remember_fact` or `search_knowledge`.
@@ -4531,7 +4534,7 @@ Release a failed lease into bounded backoff without discarding it.
 ### Method: `GrokSessionStore.save_fact` {#utils-groksessionstore-save_fact}
 
 ```python
-async def GrokSessionStore.save_fact(self, fact: str, scope: str='global', source: str='') -> Optional[int]
+async def GrokSessionStore.save_fact(self, fact: str, scope: str='global', source: str='', caller: Optional[str]=None) -> Optional[int]
 ```
 
 **Keywords:** grok, session, store, save, fact
@@ -4542,6 +4545,9 @@ Deduped on exact (scope, fact) text: re-saving an existing fact
 touches it (uses+1, last_used_at bump) instead of inserting a
 duplicate, so re-distilling a session never multiplies rows. Returns
 the row id (existing or new); None for empty facts.
+
+``caller`` (or the active caller) is recorded on insert so
+forget_fact can scope deletes when a requester identity is bound.
 
 ### Method: `GrokSessionStore.search_facts` {#utils-groksessionstore-search_facts}
 
@@ -4575,12 +4581,15 @@ actually injected into a prompt).
 ### Method: `GrokSessionStore.delete_fact` {#utils-groksessionstore-delete_fact}
 
 ```python
-async def GrokSessionStore.delete_fact(self, fact_id: int) -> bool
+async def GrokSessionStore.delete_fact(self, fact_id: int, caller: Optional[str]=None) -> bool
 ```
 
 **Keywords:** grok, session, store, delete, fact
 
 Remove one fact (and its index row); True when a row was deleted.
+
+When ``caller`` is bound, only that caller's rows delete. Legacy rows
+with a NULL caller look like ``not_found`` to bound requesters.
 
 ### Method: `GrokSessionStore.list_facts` {#utils-groksessionstore-list_facts}
 

@@ -88,7 +88,7 @@ class TestSwarmMigration:
         async with s._read_conn() as conn:
             async with conn.execute("PRAGMA user_version;") as cursor:
                 version = (await cursor.fetchone())[0]
-        assert version == 17
+        assert version == 18
         await s.close()
 
         # Reopen: migration gates must all no-op and the tables survive.
@@ -97,7 +97,7 @@ class TestSwarmMigration:
         assert (await s2.get_swarm_task("task-reopen"))["status"] == "queued"
         async with s2._read_conn() as conn:
             async with conn.execute("PRAGMA user_version;") as cursor:
-                assert (await cursor.fetchone())[0] == 17
+                assert (await cursor.fetchone())[0] == 18
         await s2.close()
 
 
