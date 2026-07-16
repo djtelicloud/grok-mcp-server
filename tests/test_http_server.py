@@ -587,6 +587,32 @@ def test_runtimez_reports_no_secret_runtime_status(monkeypatch):
     assert "secret-value" not in res.text
 
 
+def test_runtimez_reports_invalid_principal_key_map_as_unavailable(monkeypatch):
+    monkeypatch.delenv("UNIGROK_RUNTIME", raising=False)
+    monkeypatch.delenv("UNIGROK_API_KEYS", raising=False)
+    monkeypatch.setenv("XAI_API_KEY", "secret-owner-value")
+    monkeypatch.setenv("UNIGROK_PRINCIPAL_XAI_KEYS_JSON", "{")
+    monkeypatch.setattr(
+        "src.http_server.grok_cli_plane_status",
+        lambda **_: {
+            "state": "disabled",
+            "ready": False,
+            "binary": False,
+            "auth": "unavailable",
+            "setup_command": "",
+        },
+    )
+
+    with TestClient(create_app()) as client:
+        response = client.get("/runtimez")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["api_plane"]["xai_api_key"] is False
+    assert payload["credential_planes"]["api"]["available"] is False
+    assert "secret-owner-value" not in response.text
+
+
 def test_runtimez_reports_the_current_phoneword_dial(monkeypatch):
     monkeypatch.setenv("UNIGROK_MODE_DIALS", "1")
     monkeypatch.delenv("UNIGROK_API_KEYS", raising=False)

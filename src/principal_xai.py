@@ -137,6 +137,24 @@ def effective_xai_api_key(
     return key
 
 
+def xai_api_service_configured(
+    environ: Mapping[str, str] | None = None,
+) -> bool:
+    """Return service-wide API-plane availability without request variance.
+
+    Invalid configured maps fail closed. A valid owner key or at least one
+    valid principal entry means the service has an API credential path, even
+    when the current request principal does not personally have one.
+    """
+
+    source = os.environ if environ is None else environ
+    try:
+        table = load_principal_xai_key_table(source)
+    except PrincipalXAIConfigurationError:
+        return False
+    return bool(default_xai_api_key(source) or table)
+
+
 def inference_client_cache_id(
     *,
     principal: Optional[str] = None,
@@ -176,7 +194,7 @@ def _credential_generation(cache_slot: str, key: str) -> str:
         return "missing"
     with _CREDENTIAL_GENERATIONS_LOCK:
         current = _CREDENTIAL_GENERATIONS.get(cache_slot)
-        if current is not None and secrets.compare_digest(current[0], key):
+        if current is not None and current[0] == key:
             return current[1]
         generation = secrets.token_hex(16)
         _CREDENTIAL_GENERATIONS[cache_slot] = (key, generation)

@@ -459,8 +459,10 @@ def credential_plane_contract(
 ) -> Dict[str, Any]:
     """Return the shared non-secret plane health and action contract."""
 
+    from src.principal_xai import xai_api_service_configured
+
     return build_credential_plane_contract(
-        api_configured=xai_api_key_configured(),
+        api_configured=xai_api_service_configured(),
         cli_status=cli_status if cli_status is not None else grok_cli_plane_status(),
         cloudrun=is_cloudrun_runtime(),
         containerized=Path("/.dockerenv").exists(),
@@ -920,9 +922,15 @@ CLI_MODEL_IDS = tuple(FALLBACK_GROK_CLI_MODELS)
 
 def xai_api_key_configured() -> bool:
     """True when the active principal has a usable xAI key (owner or override)."""
-    from src.principal_xai import effective_xai_api_key
+    from src.principal_xai import (
+        PrincipalXAIConfigurationError,
+        effective_xai_api_key,
+    )
 
-    return bool(effective_xai_api_key())
+    try:
+        return bool(effective_xai_api_key())
+    except PrincipalXAIConfigurationError:
+        return False
 
 
 def cli_plane_ready_for_local_runtime() -> bool:

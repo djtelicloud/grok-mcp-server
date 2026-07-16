@@ -1172,6 +1172,20 @@ Principal overrides apply only for authenticated OAuth principals. Anonymous
 loopback and static API-key principals keep the owner default (static keys
 already *are* a principal form of auth for the gateway, not per-human BYOK).
 
+### Function: `xai_api_service_configured` {#principal_xai-xai_api_service_configured}
+
+```python
+def xai_api_service_configured(environ: Mapping[str, str] | None=None) -> bool
+```
+
+**Keywords:** xai, api, service, configured
+
+Return service-wide API-plane availability without request variance.
+
+Invalid configured maps fail closed. A valid owner key or at least one
+valid principal entry means the service has an API credential path, even
+when the current request principal does not personally have one.
+
 ### Function: `inference_client_cache_id` {#principal_xai-inference_client_cache_id}
 
 ```python

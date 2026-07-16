@@ -1220,7 +1220,7 @@ async def runtimez(request: Request) -> JSONResponse:
                 ),
             },
             "api_plane": {
-                "xai_api_key": bool(os.environ.get("XAI_API_KEY", "").strip()),
+                "xai_api_key": bool(credential_planes["api"]["available"]),
             },
             "gateway_auth": {
                 "enabled": _auth_is_active() and not _request_may_bypass_auth(request.scope),

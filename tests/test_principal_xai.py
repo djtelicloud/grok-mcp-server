@@ -16,6 +16,7 @@ from src.principal_xai import (
     principal_xai_status,
     resolve_inference_credential,
     resolve_xai_api_key,
+    xai_api_service_configured,
 )
 
 
@@ -172,6 +173,37 @@ def test_principal_map_bounds_fail_closed(
     with pytest.raises(PrincipalXAIConfigurationError) as raised:
         resolve_xai_api_key(principal="oauth:user:1")
     assert raised.value.code == code
+
+
+def test_service_availability_is_not_request_principal_dependent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("XAI_API_KEY", raising=False)
+    monkeypatch.setenv(
+        "UNIGROK_PRINCIPAL_XAI_KEYS_JSON",
+        '{"oauth:github:42":"xai-principal-only"}',
+    )
+    token = set_active_principal("oauth:github:99")
+    try:
+        assert xai_api_service_configured() is True
+        assert effective_xai_api_key() == ""
+    finally:
+        reset_active_principal(token)
+
+
+def test_invalid_map_reports_api_unavailable_without_raising_health_probe(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from src import utils
+
+    monkeypatch.setenv("XAI_API_KEY", "xai-owner-default")
+    monkeypatch.setenv("UNIGROK_PRINCIPAL_XAI_KEYS_JSON", "{")
+
+    assert xai_api_service_configured() is False
+    assert utils.xai_api_key_configured() is False
+    assert utils.credential_plane_contract(
+        cli_status={"state": "disabled", "ready": False}
+    )["api"]["available"] is False
 
 
 def test_rotation_changes_generation_but_not_principal_cache_slot(
