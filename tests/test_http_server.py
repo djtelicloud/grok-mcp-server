@@ -1910,11 +1910,11 @@ def test_credential_bearing_httpx_clients_disable_proxy_env():
     import ast
 
     root = Path(__file__).resolve().parents[1]
-    sources = (
+    sources = [
         root / "src" / "http_server.py",
         root / "src" / "metrics.py",
         root / "src" / "providers" / "base.py",
-    )
+    ]
     found = 0
     for path in sources:
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
