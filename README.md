@@ -30,14 +30,14 @@ http://localhost:4765/mcp
 
 ## Get running in three minutes
 
-You need [Docker Desktop](https://www.docker.com/products/docker-desktop/) and Git. For
-Grok access you need **one** of:
+You need [Docker Desktop](https://www.docker.com/products/docker-desktop/) and Git, plus
+Grok access. UniGrok runs on two Grok planes, in this order:
 
-- a Grok subscription (flat-rate, recommended), or
-- an [xAI developer API key](https://console.x.ai/) (metered).
+1. **Grok Build subscription** — the default, flat-rate plane. This is all you need.
+2. **xAI developer API key** ([console.x.ai](https://console.x.ai/)) — optional, metered;
+   adds vision, image/video, X search, and silent failover.
 
-No Grok yet? You can start with [Cursor](https://cursor.com/referral?code=VJWHUMXIKTHG)
-(referral link) and come back once you have a Grok credential.
+Set up plane 1 to get going; add plane 2 whenever you want the extras.
 
 ### 1. Download and build
 
@@ -79,6 +79,9 @@ curl --fail --silent http://localhost:4765/readyz
 ```
 
 You are ready when the response says `"status":"ready"`.
+
+> New to Grok-powered coding? [Cursor](https://cursor.com/referral?code=VJWHUMXIKTHG)
+> (referral link) is an easy on-ramp — set up a Grok plane above whenever you're ready.
 
 ## Connect your IDE
 
