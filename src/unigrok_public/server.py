@@ -635,7 +635,7 @@ def _auto_approve(client: str, scope: str) -> dict[str, Any] | None:
         }
     if client == "antigravity":
         if scope == "global":
-            target = "~/.gemini/config/config.json (Antigravity user settings)"
+            target = "~/.gemini/config/config.json"
             merge_into = "userSettings.globalPermissionGrants.allow"
             entry: dict[str, Any] = {
                 "userSettings": {
@@ -663,7 +663,7 @@ def _auto_approve(client: str, scope: str) -> dict[str, Any] | None:
             ),
             "entry": entry,
             "gemini_cli_alternative": {
-                "target": "~/.gemini/settings.json (Gemini CLI)",
+                "target": "~/.gemini/settings.json",
                 "note": (
                     "Gemini CLI has no permission grants; set trust:true on the grok "
                     "mcpServers entry instead. That trusts the whole grok server — "
