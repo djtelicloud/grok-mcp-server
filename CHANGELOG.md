@@ -2,6 +2,16 @@
 
 All notable changes to the public UniGrok gateway.
 
+## [Unreleased]
+
+### Changed
+- Antigravity auto-approve now uses `globalPermissionGrants.allow` with per-tool
+  grants (`mcp(grok/agent)`, `mcp(grok/agent_result)`) — the battle-tested pack
+  format — instead of whole-server `trust: true`. Global scope targets
+  `~/.gemini/config/config.json` under `userSettings`, project scope
+  `.gemini/settings.json`. The trust flag remains as a documented fallback for
+  Gemini CLI, which has no permission grants.
+
 ## [1.1.0] - 2026-07-17
 
 ### Added
