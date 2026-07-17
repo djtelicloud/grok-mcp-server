@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import json
 from pathlib import Path
 
 import pytest
@@ -299,8 +300,21 @@ def test_client_onboarding_detection_and_safe_non_filesystem_fallback() -> None:
     assert server._client_kind("Visual Studio Code") == "github_copilot"
     assert server._client_kind("unknown") == "generic"
     cursor = server._client_onboarding_plan("cursor", "global")
-    assert cursor["files"] == []
-    assert cursor["client_settings_instruction"]
+    # Cursor now gets the ported client setup: an mcp.json merge entry pointing at the
+    # Grok gateway and a routing rule (no longer an empty client_settings-only plan).
+    assert cursor["client_settings_instruction"] is None
+    entry = cursor["mcp_server"]
+    assert entry["target"] == "~/.cursor/mcp.json"
+    assert entry["entry"]["mcpServers"]["grok"]["headers"]["X-Client-ID"] == "cursor"
+    assert entry["entry"]["mcpServers"]["grok"]["url"].endswith("/mcp")
+    rule_paths = [f["path"] for f in cursor["files"]]
+    assert ".cursor/rules/using-unigrok.mdc" in rule_paths
+    # The emitted MCP config carries NO credential — only the URL and the non-secret
+    # X-Client-ID telemetry header (Cursor is a client, never an execution plane).
+    grok_server = entry["entry"]["mcpServers"]["grok"]
+    assert set(grok_server) == {"url", "headers"}
+    assert set(grok_server["headers"]) == {"X-Client-ID"}
+    assert "CURSOR_API_KEY" not in json.dumps(cursor)
 
 
 @pytest.mark.asyncio
