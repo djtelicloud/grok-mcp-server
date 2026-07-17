@@ -420,6 +420,57 @@ include only bounded project context that is actually needed, and report the sel
 model, credential plane, and any metered cost from the returned receipt.
 """
 
+# Cursor client integration (ported from the old public version's .cursor/ setup).
+# Cursor is an IDE CLIENT that connects TO UniGrok over HTTP MCP — never an execution
+# plane. The X-Client-ID header is a telemetry label, not authentication.
+CURSOR_MCP_URL = "http://localhost:4765/mcp"
+CURSOR_RULE = """---
+description: >-
+  When and how to reach UniGrok's Grok gateway from Cursor. Use for @grok, a Grok
+  second opinion, web/X research, cross-project memory, or adversarial code review.
+alwaysApply: true
+---
+
+# Using UniGrok from Cursor
+
+UniGrok is a local Grok gateway. Its `agent` tool is your `@grok`.
+
+- Reach for the UniGrok `agent` tool when you want: web/X research, hard reasoning or
+  plan critique, cross-project memory (named sessions and durable facts), or code you
+  want adversarially reviewed before delivery (`level: "ultra"` runs a parallel hive).
+- UniGrok picks the model, effort, and plane for you and returns a plane and cost
+  receipt on every answer. Relay the cost to the user; never hide metered spend.
+- For ordinary local edits, use Cursor's native agent. Escalate to the UniGrok `agent`
+  tool for dual-plane routing, research, memory, or review.
+- Identity: keep `"X-Client-ID": "cursor"` in `.cursor/mcp.json`. It is a telemetry
+  label, not authentication.
+- Never place `XAI_API_KEY` in Cursor configuration — credentials live inside UniGrok.
+"""
+
+
+def _cursor_mcp_server(scope: str) -> dict[str, Any]:
+    """The .cursor/mcp.json merge entry that points Cursor at the Grok gateway.
+
+    Emitted as a MERGE (never a full-file overwrite) so existing Cursor MCP servers
+    survive. The calling IDE performs the merge with a conflict preview.
+    """
+    return {
+        "target": "~/.cursor/mcp.json" if scope == "global" else ".cursor/mcp.json",
+        "merge_into": "mcpServers",
+        "merge_policy": (
+            "Add this server to the existing mcpServers object; do not overwrite other "
+            "servers. If a 'grok' server already exists, show a diff before replacing."
+        ),
+        "entry": {
+            "mcpServers": {
+                "grok": {
+                    "url": CURSOR_MCP_URL,
+                    "headers": {"X-Client-ID": "cursor"},
+                }
+            }
+        },
+    }
+
 CLIENT_ADAPTERS: dict[str, dict[str, Any]] = {
     "antigravity": {
         "label": "Google Antigravity / Gemini",
@@ -555,7 +606,7 @@ def _client_onboarding_plan(client: str, scope: str) -> dict[str, Any]:
             "files": [],
         }
     if scope == "project":
-        return {
+        plan = {
             **common,
             "status": "approved_plan",
             "recommended": False,
@@ -570,8 +621,12 @@ def _client_onboarding_plan(client: str, scope: str) -> dict[str, Any]:
                 "AGENTS.md",
             ],
         }
+        if client == "cursor":
+            plan["files"].append(_owned_file(".cursor/rules/using-unigrok.mdc", CURSOR_RULE))
+            plan["mcp_server"] = _cursor_mcp_server("project")
+        return plan
     files = _global_files(client)
-    return {
+    plan = {
         **common,
         "status": "approved_plan",
         "recommended": True,
@@ -583,11 +638,20 @@ def _client_onboarding_plan(client: str, scope: str) -> dict[str, Any]:
         "client_settings_instruction": (
             "Add a concise, user-invoked UniGrok instruction through the client's global "
             "customization UI; do not create repository files."
-            if not files
+            if not files and client != "cursor"
             else None
         ),
         "reload": adapter["reload"],
     }
+    if client == "cursor":
+        # Ported Cursor client setup: the one essential artifact is the mcp.json entry
+        # that points Cursor at the Grok gateway; the routing rule is the useful extra.
+        plan["mcp_server"] = _cursor_mcp_server("global")
+        plan["files"] = [*files, _owned_file(".cursor/rules/using-unigrok.mdc", CURSOR_RULE)]
+        plan["reload"] = (
+            "Reload Cursor after adding the MCP server, then call grok_mcp_discover_self."
+        )
+    return plan
 
 PROJECT_ONBOARDING = {
     "recommended_scope": "global_client_namespace",
