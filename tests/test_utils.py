@@ -5171,6 +5171,29 @@ class TestReadPoolAndPassiveRecovery:
         # And the store remains usable after close (lazy re-init + fresh pool).
         assert (await store.get_session("sess-close"))["model"] == "grok-4.3"
 
+    @pytest.mark.asyncio
+    async def test_read_pool_concurrency_is_exclusive(self, store):
+        await store.save_session("sess-concurrent", model="grok-4.3")
+        conns_seen = []
+        locks_held = []
+
+        async def worker():
+            async with store._read_conn() as conn:
+                conns_seen.append(conn)
+                slot = None
+                for k, v in store._read_conns.items():
+                    if v is conn:
+                        slot = k
+                        break
+                assert slot is not None
+                assert store._read_locks[slot].locked()
+                locks_held.append(slot)
+                await asyncio.sleep(0.05)
+
+        await asyncio.gather(worker(), worker())
+        assert len(conns_seen) == 2
+        assert set(locks_held) == {0, 1}
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Now#6 (defensive) — xAI 2026 request surface + quick wins

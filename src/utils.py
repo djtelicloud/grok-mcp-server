@@ -2680,6 +2680,7 @@ class GrokSessionStore:
         # db so reads never serialize through the write lock. _read_lock
         # guards only the checkout/lazy open, never the query itself.
         self._read_conns: Dict[int, Any] = {}
+        self._read_locks: Dict[int, asyncio.Lock] = {}
         self._read_lock = asyncio.Lock()
         self._read_rr = 0
         # knowledge_fts availability for THIS process/db pairing — set on
@@ -2713,6 +2714,7 @@ class GrokSessionStore:
         async with self._read_lock:
             conns = [conn for conn in self._read_conns.values() if conn is not None]
             self._read_conns = {}
+            self._read_locks = {}
             self._read_rr = 0
         for conn in conns:
             with contextlib.suppress(Exception):
@@ -2745,7 +2747,15 @@ class GrokSessionStore:
             async with self._lock:
                 yield self._conn
             return
-        yield await self._checkout_read_conn()
+
+        async with self._read_lock:
+            slot = self._read_rr % self._read_pool_size()
+            if slot not in self._read_locks:
+                self._read_locks[slot] = asyncio.Lock()
+            slot_lock = self._read_locks[slot]
+
+        async with slot_lock:
+            yield await self._checkout_read_conn()
 
     async def _reset_connection_unlocked(self):
         conn = self._conn
