@@ -22,7 +22,9 @@ http://localhost:4765/mcp
 
 <div align="center">
 
-<img src="assets/control-center-demo.gif" alt="UniGrok Control Center — live receipts, benchmarks, and plane routing" width="100%" />
+<img src="assets/control-center-live.png" alt="UniGrok Control Center — live route mix, model mix, callers, cost, and fallback receipts" width="100%" />
+
+<sub>The local Control Center at <code>http://localhost:4765/ui/</code> — live routing, cost, and benchmark receipts.</sub>
 
 </div>
 
@@ -126,6 +128,12 @@ you. Every answer comes back with a plane and cost receipt.
 | 🧠 | **Sessions and memory** — named sessions and facts you control, kept locally |
 | 🎨 | **Images, video, vision, files, web + X search** when you add an API key |
 | 🔐 | **One credential boundary** — keys live in UniGrok, not in every project |
+
+<div align="center">
+
+<img src="assets/og-banner.png" alt="UniGrok — one Grok gateway, every coding agent · open source, local first, MCP native" width="100%" />
+
+</div>
 
 ## What's new in 1.1
 
