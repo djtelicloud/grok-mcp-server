@@ -1,79 +1,16 @@
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-
-# Virtual environments
-venv/
-.venv
-env/
+.git
+.github
 .env
-.env.*
-secrets/
-.agents/
-.claude/
-.codex/
-.gemini/
-.gcloud/
-.google/
-.vertex/
-.openai/
-.anthropic/
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# OS
+.venv
 .DS_Store
-Thumbs.db
-
-# Git
-.git/
-.gitignore
-
-# Documentation
+**/.DS_Store
+**/__pycache__/
+**/*.py[cod]
+.pytest_cache
+.ruff_cache
+tests
+dist
+build
 *.md
-docs/
-!docs/
-!docs/okf/
-!docs/okf/**
+!README.md
 
-# Runtime adapter configuration is required by the bare image, but OAuth is not.
-.grok/**
-!.grok/hyperparams/
-!.grok/hyperparams/**
-!.grok/prompts/
-!.grok/prompts/**
-
-# Test files
-test_*.py
-*_test.py
-demo_*.py
-
-# Logs
-*.log
-
-# Temporary files
-*.tmp
-*.temp

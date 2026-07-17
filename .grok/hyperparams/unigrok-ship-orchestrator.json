@@ -1,7 +1,0 @@
-{
-  "temperature": 0.35,
-  "top_p": 0.9,
-  "thinking_mode": true,
-  "system_prompt_ref": "grok_adapter.md",
-  "notes": "Prefer for multi-lane ship sessions: dual product+intelligence planning, handoff discipline, cost-aware UniGrok mode routing. Not a public model id pin."
-}

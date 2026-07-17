@@ -1,110 +1,37 @@
 [project]
-name = "mcp-grok"
-version = "0.6.0"
-description = "Universal local MCP gateway for xAI Grok across IDEs"
+name = "grok-mcp-server"
+version = "1.1.0"
+description = "A workspace-neutral dual-plane Grok CLI and xAI API MCP harness"
 readme = "README.md"
-requires-python = ">=3.11"
-license = "MIT"
-license-files = ["LICENSE"]
-keywords = ["mcp", "grok", "xai", "agents", "codex", "claude", "vscode"]
-classifiers = [
-    "Development Status :: 4 - Beta",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
-]
+requires-python = ">=3.12"
+license = { file = "LICENSE" }
 dependencies = [
-    # Stateful session cleanup uses a narrowly isolated, version-checked SDK
-    # 1.28 private registry adapter. Review that adapter before widening this.
-    "mcp[cli]>=1.28.1,<1.29",
-    "httpx>=0.28.1",
-    "google-auth[requests]>=2.56.0,<3",
-    "cryptography>=49,<50",
-    "python-dotenv>=1.2.2",
-    "pydantic>=2.13.4",
-    "pydantic-settings>=2.14.2",
-    "jsonschema>=4.23,<5",
-    "starlette>=1.3.1",
-    "uvicorn>=0.51.0",
-    "xai-sdk>=1.17.0",
-    "aiosqlite>=0.20.0",
-    "tiktoken>=0.7.0",
-    "tree-sitter>=0.26.0,<0.27",
-    "tree-sitter-python>=0.25,<0.26",
+  "mcp==1.28.1",
+  "xai-sdk==1.17.0",
 ]
-
-[project.optional-dependencies]
-# Contributor Forge executes user-selected pytest targets and coverage-based
-# Swarm preflight checks. Ruff is its optional cheapest-first correctness gate.
-# These are not required by the stable inference gateway.
-forge = [
-    "coverage>=7.15.1",
-    "pytest>=9.1.1",
-    "pytest-asyncio>=1.4.0",
-    "ruff>=0.9",
-]
-# Source-checkout synthetic-data campaign runners use Vertex through standard
-# Google ADC. The eval runner is intentionally not shipped in the wheel; keep
-# this SDK outside the stable UniGrok runtime dependency set.
-campaign = [
-    "google-genai>=1.25,<2",
-]
-
-[project.scripts]
-unigrok-mcp = "src.cli:main"
-
-[project.urls]
-Homepage = "https://github.com/djtelicloud/grok-mcp-server"
-Repository = "https://github.com/djtelicloud/grok-mcp-server"
-Issues = "https://github.com/djtelicloud/grok-mcp-server/issues"
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-# Code is imported as "src.*" (see src/__init__.py), so ship the src
-# directory itself as the top-level package for the entry point to resolve.
-packages = ["src"]
-
-[tool.hatch.build.targets.wheel.force-include]
-# The installed HTTP server resolves these assets beside the installed src
-# package. Keep the wheel behavior aligned with source and Docker checkouts.
-"mcp_ui" = "mcp_ui"
-"docs/okf" = "docs/okf"
-".grok/hyperparams" = ".grok/hyperparams"
-".grok/prompts" = ".grok/prompts"
-"example.env" = "example.env"
-
-[tool.hatch.build.targets.sdist]
-exclude = [
-    "/.codex",
-    "/.grok/auth.json",
-    "/.pytest_cache",
-    "/.ruff_cache",
-    "/.venv",
-    "/build",
-    "/dist",
-    "/htmlcov",
-    "/node_modules",
-    "/sites/**/.next",
-    "/sites/**/.npm",
-    "/sites/**/.sites-runtime",
-    "/sites/**/.vinext",
-    "/sites/**/.wrangler",
-    "/sites/**/coverage",
-    "/sites/**/dist",
-    "/sites/**/node_modules",
-    "/sites/**/npm-cache",
-    "/**/.DS_Store",
-    "/**/__pycache__",
-]
+packages = ["src/unigrok_public"]
 
 [dependency-groups]
 dev = [
-    "coverage>=7.15.1",
-    "pytest>=9.1.1",
-    "httpx2>=2.7.0",
-    "pytest-asyncio>=1.4.0",
-    "ruff>=0.9",
+  "pytest>=8.3,<9",
+  "pytest-asyncio>=0.25,<2",
+  "ruff>=0.11,<1",
 ]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC", "S"]
+ignore = ["S603"]

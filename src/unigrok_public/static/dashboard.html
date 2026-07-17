@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>UniGrok Control Center</title>
+  <style>
+    :root{color-scheme:dark;--bg:#080b14;--panel:#11172a;--line:#263252;--text:#edf2ff;
+      --muted:#95a4c8;--cyan:#58e6d9;--blue:#58a6ff;--purple:#bc8cff;--green:#3fb950;
+      --amber:#f0b95b;--red:#ff6b7a}*{box-sizing:border-box}body{margin:0;background:
+      radial-gradient(circle at 15% 0,#192755 0,transparent 32%),
+      radial-gradient(circle at 90% 10%,#30205b 0,transparent 28%),var(--bg);
+      color:var(--text);font:14px/1.45 Inter,ui-sans-serif,system-ui,sans-serif;min-height:100vh}
+    main{width:min(1380px,94vw);margin:auto;padding:34px 0 60px}header{display:flex;align-items:end;
+      justify-content:space-between;gap:24px;margin-bottom:25px}h1{font-size:clamp(30px,5vw,58px);
+      letter-spacing:-.055em;margin:0;background:linear-gradient(100deg,#fff 10%,var(--cyan),var(--purple));
+      -webkit-background-clip:text;color:transparent}.eyebrow{color:var(--cyan);font-weight:800;
+      letter-spacing:.16em;text-transform:uppercase}.sub{color:var(--muted);font-size:16px;margin-top:7px}
+    .status{display:flex;gap:9px;flex-wrap:wrap;justify-content:flex-end}.pill{border:1px solid var(--line);
+      background:#0d1324cc;border-radius:99px;padding:7px 12px;color:var(--muted)}.pill.ok{color:#baf7c7;
+      border-color:#256c3a}.grid{display:grid;grid-template-columns:repeat(12,1fr);gap:14px}.card{grid-column:span 3;
+      background:linear-gradient(145deg,#141c33e8,#0d1222e8);border:1px solid var(--line);border-radius:18px;
+      padding:18px;box-shadow:0 18px 50px #0005;min-width:0}.card.wide{grid-column:span 6}.card.full{grid-column:1/-1}
+    .label{color:var(--muted);font-size:12px;font-weight:750;letter-spacing:.09em;text-transform:uppercase}
+    .metric{font-size:34px;font-weight:850;letter-spacing:-.04em;margin-top:6px}.metric small{font-size:14px;
+      color:var(--muted);letter-spacing:0}.bars{display:grid;gap:10px;margin-top:15px}.bar-row{display:grid;
+      grid-template-columns:minmax(90px,1fr) 4fr 60px;gap:10px;align-items:center}.bar-label{overflow:hidden;
+      text-overflow:ellipsis;white-space:nowrap;color:#cad5f2}.track{height:10px;border-radius:9px;background:#202b47;
+      overflow:hidden}.fill{height:100%;border-radius:9px;background:linear-gradient(90deg,var(--blue),var(--purple))}
+    .value{text-align:right;color:var(--muted);font-variant-numeric:tabular-nums}table{width:100%;border-collapse:collapse;
+      margin-top:12px}th,td{text-align:left;padding:10px;border-bottom:1px solid #202a44;white-space:nowrap}
+    th{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.07em}td{font-variant-numeric:tabular-nums}
+    .scroll{overflow:auto}.empty{color:var(--muted);padding:18px 0}.breakers{display:flex;gap:10px;flex-wrap:wrap;
+      margin-top:13px}.breaker{border:1px solid var(--line);border-radius:12px;padding:10px 12px;color:var(--muted)}
+    .breaker.open{border-color:#8a3042;color:#ffc1ca}.footer{color:var(--muted);margin-top:18px;font-size:12px}
+    @media(max-width:950px){.card,.card.wide{grid-column:span 6}}@media(max-width:620px){header{display:block}
+      .status{justify-content:flex-start;margin-top:16px}.card,.card.wide{grid-column:1/-1}}
+  </style>
+</head>
+<body><main>
+  <header><div><div class="eyebrow">UniGrok 1.0 · public core</div><h1>Control Center</h1>
+    <div class="sub">Live routing, reliability, cost, and benchmark truth—without prompt capture.</div></div>
+    <div class="status"><span id="service" class="pill">Service …</span><span id="cli" class="pill">CLI …</span>
+      <span id="api" class="pill">API …</span><span id="updated" class="pill">Loading …</span></div></header>
+  <section class="grid">
+    <article class="card"><div class="label">Samples</div><div id="samples" class="metric">0</div></article>
+    <article class="card"><div class="label">Verified success</div><div id="success" class="metric">—</div></article>
+    <article class="card"><div class="label">P95 latency</div><div id="p95" class="metric">0 <small>ms</small></div></article>
+    <article class="card"><div class="label">Recorded API cost</div><div id="cost" class="metric">$0</div></article>
+    <article class="card wide"><div class="label">Route mix</div><div id="routes" class="bars"></div></article>
+    <article class="card wide"><div class="label">Model mix</div><div id="models" class="bars"></div></article>
+    <article class="card wide"><div class="label">Top callers</div><div id="callers" class="bars"></div></article>
+    <article class="card wide"><div class="label">Fallback categories</div><div id="fallbacks" class="bars"></div></article>
+    <article class="card full"><div class="label">Circuit breakers</div><div id="breakers" class="breakers"></div></article>
+    <article class="card full"><div class="label">Recent receipts</div><div class="scroll"><table><thead><tr>
+      <th>ID</th><th>Caller</th><th>Route</th><th>Plane</th><th>Model</th><th>Latency</th><th>Cost</th>
+      <th>Fallback</th><th>Verified</th></tr></thead><tbody id="recent"></tbody></table></div></article>
+  </section><div class="footer">Refreshes every 10 seconds · telemetry stores receipts and explicit outcomes, never prompts.</div>
+</main><script>
+const $=id=>document.getElementById(id), esc=s=>String(s??'—').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function bars(id,items){const root=$(id),max=Math.max(1,...items.map(x=>x.calls||0));root.innerHTML=items.length?
+  items.slice(0,8).map(x=>`<div class="bar-row"><div class="bar-label" title="${esc(x.name)}">${esc(x.name)}</div>
+  <div class="track"><div class="fill" style="width:${100*(x.calls||0)/max}%"></div></div><div class="value">${x.calls||0}</div></div>`).join(''):
+  '<div class="empty">No samples yet.</div>'}
+async function refresh(){try{const [ready,b]=await Promise.all([fetch('/readyz').then(r=>r.json()),fetch('/benchmarkz').then(r=>r.json())]);
+  const t=b.telemetry||{};$('service').textContent='Service ready';$('service').className='pill ok';
+  for(const p of ['cli','api']){const on=!!ready.planes?.[p]?.ready;$(p).textContent=`${p.toUpperCase()} ${on?'ready':'offline'}`;$(p).className='pill '+(on?'ok':'')}
+  $('updated').textContent=new Date().toLocaleTimeString();$('samples').textContent=t.sample_size||0;
+  $('success').textContent=t.verified_success_rate==null?'—':`${Math.round(t.verified_success_rate*100)}%`;
+  $('p95').innerHTML=`${t.latency_ms?.p95||0} <small>ms</small>`;$('cost').textContent=`$${Number(t.cost_usd||0).toFixed(4)}`;
+  bars('routes',t.routes||[]);bars('models',t.models||[]);bars('callers',t.callers||[]);bars('fallbacks',(t.fallbacks||[]).filter(x=>x.name!=='unknown'));
+  const bs=b.circuit_breakers||{};$('breakers').innerHTML=Object.keys(bs).length?Object.entries(bs).map(([k,v])=>
+    `<div class="breaker ${v.open?'open':''}"><b>${esc(k)}</b> · ${v.open?'OPEN':'closed'} · failures ${v.failures} · trips ${v.trips}</div>`).join(''):'<div class="empty">No provider calls recorded.</div>';
+  $('recent').innerHTML=(t.recent||[]).map(r=>`<tr><td>${r.id}</td><td>${esc(r.caller)}</td><td>${esc(r.route)}</td><td>${esc(r.resolved_plane)}</td>
+    <td>${esc(r.model)}</td><td>${r.latency_ms||0} ms</td><td>$${Number(r.cost_usd||0).toFixed(4)}</td><td>${esc(r.fallback_reason)}</td>
+    <td>${r.verified?(r.success?'pass':'fail'):'unverified'}</td></tr>`).join('');
+}catch(e){$('service').textContent='Service unavailable';$('service').className='pill';$('updated').textContent='Retrying …'}}
+refresh();setInterval(refresh,10000);
+</script></body></html>

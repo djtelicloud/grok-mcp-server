@@ -1,9 +1,0 @@
-{
-  "allowNonWorkspaceAccess": false,
-  "toolPermission": "request-review",
-  "globalPermissionGrants": {
-    "allow": [
-      "mcp(grok/*)"
-    ]
-  }
-}

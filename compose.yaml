@@ -1,0 +1,67 @@
+name: unigrok
+
+services:
+  grok-mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: unigrok:1.1.0
+    container_name: unigrok
+    ports:
+      - "127.0.0.1:${UNIGROK_PORT:-4765}:8080"
+    environment:
+      UNIGROK_HOST: 0.0.0.0
+      PORT: 8080
+      UNIGROK_AUTH_PATH: /home/appuser/.grok/auth.json
+      UNIGROK_BUILD_TIMEOUT: ${UNIGROK_BUILD_TIMEOUT:-120}
+      UNIGROK_API_TIMEOUT: ${UNIGROK_API_TIMEOUT:-120}
+      UNIGROK_CATALOG_TTL: ${UNIGROK_CATALOG_TTL:-60}
+      UNIGROK_STATE_PATH: /state/unigrok-public.db
+      UNIGROK_MAX_WORKSPACE_CONTEXT_CHARS: ${UNIGROK_MAX_WORKSPACE_CONTEXT_CHARS:-100000}
+      UNIGROK_ENABLE_METERED_API: ${UNIGROK_ENABLE_METERED_API:-true}
+      UNIGROK_API_MODEL: ${UNIGROK_API_MODEL:-}
+      XAI_API_KEY: ${XAI_API_KEY:-}
+    volumes:
+      - grok-cli-auth:/home/appuser/.grok
+      - grok-public-state:/state
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=256m,uid=1000,gid=1000,mode=0700
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    init: true
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=5)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  grok-cli-auth:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: unigrok:1.1.0
+    profiles: ["auth"]
+    command: ["grok", "login", "--device-auth"]
+    environment:
+      HOME: /home/appuser
+      GROK_AUTH_PATH: /home/appuser/.grok/auth.json
+    volumes:
+      - grok-cli-auth:/home/appuser/.grok
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m,uid=1000,gid=1000,mode=0700
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  grok-cli-auth:
+    name: unigrok-cli-auth
+  grok-public-state:
+    name: unigrok-public-state

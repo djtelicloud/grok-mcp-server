@@ -1,4 +1,0 @@
-#!/bin/sh
-set -eu
-echo "NOT LANDED: local landing is disabled until verification runs outside candidate and shared Git control planes" >&2
-exit 1

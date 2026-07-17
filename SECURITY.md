@@ -1,42 +1,31 @@
 # Security Policy
 
-## Supported Releases
+## Public runtime boundary
 
-Security fixes are applied to the latest `0.6.x` release line. Users should
-upgrade to the newest patch release before reporting an issue.
+The default Docker deployment binds to `127.0.0.1`. Grok Build ACP runs inside a
+disposable, empty directory with a temporary home. Project discovery, user
+configuration, local files, Git, shell commands, edits, external MCP servers, memory,
+subagents, and private intelligence are outside the public contract.
 
-The stable Core gateway is supported under the deployment boundary below.
-Contributor-only Forge/Swarm features are beta and require an explicitly
-trusted workspace; they do not carry the same remote/multi-user guarantee.
+The two xAI credentials are isolated:
 
-## Reporting a Vulnerability
+- The CLI subprocess receives only its Grok OAuth authentication path. Provider API
+  keys, management credentials, and subordinate-provider credentials are removed.
+- The API SDK receives `XAI_API_KEY` from the server environment. The key is never
+  returned by status, discovery, model lists, errors, or tool results.
 
-Please use GitHub's private vulnerability reporting or a private Security
-Advisory for this repository. Do not open a public issue containing exploit
-details, API keys, bearer tokens, Grok CLI credentials, private prompts, or
-runtime logs with user data.
+Public media inputs must be HTTPS URLs. File upload accepts caller-supplied base64
+bytes and a plain filename; it never accepts a local path. Remote code execution runs
+only in xAI's server-side sandbox.
 
-Include the affected version or commit, deployment mode, reproduction steps,
-impact, and any suggested mitigation. If private reporting is unavailable,
-contact the repository maintainer privately and wait for a coordinated fix
-before public disclosure.
+API calls are metered. Ordinary automatic routing prefers the Grok Build subscription,
+and the default `same_plane` policy cannot cross the credential or billing boundary.
 
-The project aims to acknowledge complete reports within three business days
-and provide an initial severity/status assessment within seven. Remediation
-and disclosure timing depend on impact and provider coordination. When a
-release contains a qualifying vulnerability fix, the maintainer will publish
-a GitHub Security Advisory and request a CVE when appropriate.
+Do not expose this local service directly to a LAN or the internet. A remote
+deployment requires separately reviewed TLS, authentication, authorization, origin
+validation, rate limiting, request-size limits, and tenant isolation.
 
-## Deployment Boundary
+## Reporting
 
-UniGrok binds Docker Compose to `127.0.0.1` by default. Before binding to a LAN
-or public interface, terminate TLS at a trusted proxy, restrict allowed
-origins, and configure one reviewed client-authentication boundary: static
-deployments may use `UNIGROK_API_KEYS`; the private remote deployment uses
-scoped OAuth with `UNIGROK_OAUTH_INTROSPECTION_URL`. Do not keep a static-key
-bypass on the production OAuth service. Rotate any credential that may have
-been exposed. Keep local git mutation and container restart capabilities
-disabled unless the process is running in a trusted local environment.
-
-See [docs/threat-model.md](docs/threat-model.md) for actors, assets, identity
-composition, credential flows, and residual risks.
+Use GitHub private vulnerability reporting or a private Security Advisory. Do not
+publish credentials, tokens, private prompts, or user data in a public issue.
