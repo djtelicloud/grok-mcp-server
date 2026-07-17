@@ -696,3 +696,26 @@ def test_media_generation_detector_and_guard() -> None:
     msg = _media_unavailable_result("image")
     assert "XAI_API_KEY" in msg["text"] and msg["cost_usd"] == 0.0
     assert "won't fake" in msg["text"]
+
+
+def test_per_client_auto_approve_uses_native_mechanism() -> None:
+    from unigrok_public import server
+
+    cc = server._client_onboarding_plan("claude_code", "global")["auto_approve"]
+    assert cc["merge_into"] == "permissions.allow"
+    assert cc["entry"]["permissions"]["allow"] == ["mcp__grok__agent", "mcp__grok__agent_result"]
+
+    cx = server._client_onboarding_plan("codex", "global")["auto_approve"]
+    assert cx["target"].endswith("config.toml")
+    assert 'approval_mode = "auto"' in cx["toml"]
+
+    ag = server._client_onboarding_plan("antigravity", "global")["auto_approve"]
+    assert ag["entry"]["mcpServers"]["grok"]["trust"] is True
+
+    # Clients without a verified mechanism must NOT fabricate one.
+    assert "auto_approve" not in server._client_onboarding_plan("github_copilot", "global")
+    assert "auto_approve" not in server._client_onboarding_plan("generic", "global")
+    # None of the auto-approve configs carry a credential.
+    for c in ("claude_code", "codex", "antigravity"):
+        blob = json.dumps(server._client_onboarding_plan(c, "global"))
+        assert "XAI_API_KEY" not in blob and "CURSOR_API_KEY" not in blob

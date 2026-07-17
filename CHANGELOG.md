@@ -5,6 +5,10 @@ All notable changes to the public UniGrok gateway.
 ## [1.1.0] - 2026-07-17
 
 ### Added
+- Per-IDE "never prompt for @grok" auto-approve in the onboarding plan, each via its
+  native mechanism: Claude Code `permissions.allow` (per-tool `mcp__grok__agent`), Codex
+  `config.toml` MCP tool `approval_mode = "auto"`, Gemini/Antigravity server `trust: true`,
+  Cursor the beforeMCPExecution hook. GitHub Copilot/generic get none (no verified format).
 - Cursor client onboarding: `grok_mcp_onboard_client` now emits a `.cursor/mcp.json` merge entry (points Cursor at the Grok gateway with `X-Client-ID: cursor`, carries no credentials), a `.cursor/rules/using-unigrok.mdc` routing rule, and a `.cursor/hooks.json` + `before-unigrok-agent.py` beforeMCPExecution hook that auto-approves ONLY the `agent` tool so `@grok` never stalls on a permission prompt. Cursor is a client, not an execution plane — ported from the old public version's static `.cursor/` setup.
 - Depth modes `deep` (cached j-space harness prompt, harness-leak guard, final polish loop) and `hive` (draft → parallel persona votes with numbered-line dif-vote anchors → always-on xhigh merge; voters split across CLI/API planes; per-stage plane+cost receipts)
 - Public level ladder `none`→`ultra` via `level` parameter and `voters` override

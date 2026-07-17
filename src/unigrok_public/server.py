@@ -528,6 +528,63 @@ def _cursor_hooks(scope: str) -> dict[str, Any]:
         },
     }
 
+
+def _auto_approve(client: str, scope: str) -> dict[str, Any] | None:
+    """Per-IDE 'never prompt for @grok' config, using each client's REAL mechanism.
+
+    Verified formats: Claude Code permissions.allow globs (mcp__grok__agent), Codex
+    config.toml MCP tool approval mode, Gemini/Antigravity server trust flag. Each
+    assumes the UniGrok MCP server is registered under the name `grok`. Emitted as an
+    optional merge the IDE previews before applying.
+    """
+    if client == "claude_code":
+        target = "~/.claude/settings.json" if scope == "global" else ".claude/settings.json"
+        return {
+            "mechanism": "permissions allowlist (per-tool)",
+            "target": target,
+            "merge_into": "permissions.allow",
+            "merge_policy": (
+                "Append these entries to permissions.allow; keep existing entries. "
+                "Auto-approves ONLY UniGrok's agent and agent_result tools."
+            ),
+            "entry": {"permissions": {"allow": ["mcp__grok__agent", "mcp__grok__agent_result"]}},
+            "assumes_server_name": "grok",
+        }
+    if client == "codex":
+        return {
+            "mechanism": "MCP tool approval mode (config.toml)",
+            "target": "~/.codex/config.toml",
+            "merge_policy": (
+                "Merge under the grok MCP server; set the agent tool to auto approval. "
+                "Keep other servers and settings intact."
+            ),
+            "toml": (
+                "[mcp_servers.grok.tools.agent]\n"
+                'approval_mode = "auto"\n'
+                "[mcp_servers.grok.tools.agent_result]\n"
+                'approval_mode = "auto"\n'
+            ),
+            "assumes_server_name": "grok",
+        }
+    if client == "antigravity":
+        target = (
+            "~/.gemini/config/mcp_config.json (Antigravity) or ~/.gemini/settings.json "
+            "(Gemini CLI)"
+        )
+        return {
+            "mechanism": "server trust flag (bypasses confirmations for the whole server)",
+            "target": target,
+            "merge_into": "mcpServers.grok",
+            "merge_policy": (
+                "Set trust:true on the grok MCP server entry. Gemini/Antigravity has no "
+                "per-tool option, so this trusts the whole grok server — safe because it "
+                "is your own local gateway. Keep other servers untouched."
+            ),
+            "entry": {"mcpServers": {"grok": {"trust": True}}},
+            "assumes_server_name": "grok",
+        }
+    return None
+
 CLIENT_ADAPTERS: dict[str, dict[str, Any]] = {
     "antigravity": {
         "label": "Google Antigravity / Gemini",
@@ -719,6 +776,12 @@ def _client_onboarding_plan(client: str, scope: str) -> dict[str, Any]:
             "Reload Cursor after adding the MCP server and hook, then call "
             "grok_mcp_discover_self."
         )
+    else:
+        # Same "never prompt for @grok" outcome for the other IDEs, each via its own
+        # native mechanism (optional; the IDE previews before applying).
+        auto_approve = _auto_approve(client, "global")
+        if auto_approve is not None:
+            plan["auto_approve"] = auto_approve
     return plan
 
 PROJECT_ONBOARDING = {
