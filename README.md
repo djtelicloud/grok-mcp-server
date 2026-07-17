@@ -39,6 +39,10 @@ Grok access. UniGrok runs on two Grok planes, in this order:
 
 Set up plane 1 to get going; add plane 2 whenever you want the extras.
 
+> In a hurry? `npx @djtelicloud/unigrok` prints these setup steps in your terminal.
+> (A full launcher that runs the setup for you is planned; today UniGrok installs via
+> Docker, below.)
+
 ### 1. Download and build
 
 ```bash
