@@ -315,6 +315,15 @@ def test_client_onboarding_detection_and_safe_non_filesystem_fallback() -> None:
     assert set(grok_server) == {"url", "headers"}
     assert set(grok_server["headers"]) == {"X-Client-ID"}
     assert "CURSOR_API_KEY" not in json.dumps(cursor)
+    # Cursor's "plugin": the beforeMCPExecution hook that auto-approves ONLY the agent
+    # tool, plus the hook script shipped as an owned file.
+    hooks = cursor["hooks"]
+    assert hooks["target"] == "~/.cursor/hooks.json"
+    before = hooks["entry"]["hooks"]["beforeMCPExecution"][0]
+    assert before["matcher"] == "agent"
+    assert "~/.cursor/hooks/before-unigrok-agent.py" in rule_paths
+    # The hook auto-allows the agent tool and defers (ask) on anything else.
+    assert '"allow"' in server.CURSOR_AGENT_HOOK and '"ask"' in server.CURSOR_AGENT_HOOK
 
 
 @pytest.mark.asyncio

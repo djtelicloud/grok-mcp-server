@@ -5,7 +5,7 @@ All notable changes to the public UniGrok gateway.
 ## [1.1.0] - 2026-07-17
 
 ### Added
-- Cursor client onboarding: `grok_mcp_onboard_client` now emits a `.cursor/mcp.json` merge entry (points Cursor at the Grok gateway with `X-Client-ID: cursor`, carries no credentials) plus a `.cursor/rules/using-unigrok.mdc` routing rule. Cursor is a client, not an execution plane — ported from the old public version's static `.cursor/` setup.
+- Cursor client onboarding: `grok_mcp_onboard_client` now emits a `.cursor/mcp.json` merge entry (points Cursor at the Grok gateway with `X-Client-ID: cursor`, carries no credentials), a `.cursor/rules/using-unigrok.mdc` routing rule, and a `.cursor/hooks.json` + `before-unigrok-agent.py` beforeMCPExecution hook that auto-approves ONLY the `agent` tool so `@grok` never stalls on a permission prompt. Cursor is a client, not an execution plane — ported from the old public version's static `.cursor/` setup.
 - Depth modes `deep` (cached j-space harness prompt, harness-leak guard, final polish loop) and `hive` (draft → parallel persona votes with numbered-line dif-vote anchors → always-on xhigh merge; voters split across CLI/API planes; per-stage plane+cost receipts)
 - Public level ladder `none`→`ultra` via `level` parameter and `voters` override
 - Auto++ router: three flat-rate parallel intent votes (route/depth/voter-count) replacing the metered routing pass on unclear tasks, with dynamic voter sizing
