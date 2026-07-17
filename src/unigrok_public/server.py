@@ -529,13 +529,79 @@ def _cursor_hooks(scope: str) -> dict[str, Any]:
     }
 
 
+COPILOT_INSTRUCTIONS = """---
+applyTo: "**"
+---
+
+# Using UniGrok from GitHub Copilot
+
+UniGrok is a local Grok gateway. Its `agent` tool is your `@grok`.
+
+- Reach for the UniGrok `agent` tool when you want: web/X research, hard reasoning or
+  plan critique, cross-project memory (named sessions and durable facts), or code you
+  want adversarially reviewed before delivery (`level: "ultra"` runs a parallel hive).
+- UniGrok picks the model, effort, and plane for you and returns a plane and cost
+  receipt on every answer. Relay the cost to the user; never hide metered spend.
+- For ordinary local edits, use Copilot's native tools. Escalate to the UniGrok `agent`
+  tool for dual-plane routing, research, memory, or review.
+- Identity: keep `"X-Client-ID": "github-copilot"` in the MCP server headers. It is a
+  telemetry label, not authentication.
+- Never place `XAI_API_KEY` in Copilot, VS Code, or repository configuration —
+  credentials live inside UniGrok.
+"""
+
+
+def _copilot_mcp_server(scope: str) -> dict[str, Any]:
+    """The Copilot CLI mcp-config.json merge entry pointing Copilot at the gateway.
+
+    gh Copilot CLI reads ~/.copilot/mcp-config.json (user) and .copilot/mcp-config.json
+    (repository); both use an mcpServers object. VS Code uses .vscode/mcp.json with a
+    `servers` key instead — emitted as an alternative so either surface works. Merge
+    only; never overwrite other servers.
+    """
+    return {
+        "target": (
+            "~/.copilot/mcp-config.json" if scope == "global" else ".copilot/mcp-config.json"
+        ),
+        "merge_into": "mcpServers",
+        "merge_policy": (
+            "Add this server to the existing mcpServers object; do not overwrite other "
+            "servers. If a 'grok' server already exists, show a diff before replacing. "
+            "COPILOT_HOME relocates the user-level directory when set."
+        ),
+        "entry": {
+            "mcpServers": {
+                "grok": {
+                    "type": "http",
+                    "url": CURSOR_MCP_URL,
+                    "headers": {"X-Client-ID": "github-copilot"},
+                }
+            }
+        },
+        "vscode_alternative": {
+            "target": ".vscode/mcp.json",
+            "merge_into": "servers",
+            "entry": {
+                "servers": {
+                    "grok": {
+                        "type": "http",
+                        "url": CURSOR_MCP_URL,
+                        "headers": {"X-Client-ID": "github-copilot"},
+                    }
+                }
+            },
+        },
+    }
+
+
 def _auto_approve(client: str, scope: str) -> dict[str, Any] | None:
     """Per-IDE 'never prompt for @grok' config, using each client's REAL mechanism.
 
     Verified formats: Claude Code permissions.allow globs (mcp__grok__agent), Codex
-    config.toml MCP tool approval mode, Gemini/Antigravity server trust flag. Each
-    assumes the UniGrok MCP server is registered under the name `grok`. Emitted as an
-    optional merge the IDE previews before applying.
+    config.toml MCP tool approval mode, Gemini/Antigravity server trust flag, and gh
+    Copilot CLI --allow-tool session flags. Each assumes the UniGrok MCP server is
+    registered under the name `grok`. Emitted as an optional merge the IDE previews
+    before applying.
     """
     if client == "claude_code":
         target = "~/.claude/settings.json" if scope == "global" else ".claude/settings.json"
@@ -581,6 +647,20 @@ def _auto_approve(client: str, scope: str) -> dict[str, Any] | None:
                 "is your own local gateway. Keep other servers untouched."
             ),
             "entry": {"mcpServers": {"grok": {"trust": True}}},
+            "assumes_server_name": "grok",
+        }
+    if client == "github_copilot":
+        return {
+            "mechanism": "session flags (gh Copilot CLI --allow-tool)",
+            "target": "copilot invocation (no persistent allowlist file is documented)",
+            "merge_policy": (
+                "Launch Copilot CLI with these flags, or wrap them in a shell alias. "
+                "grok(agent) scopes approval to UniGrok's agent tools only; plain "
+                "--allow-tool 'grok' would trust the whole server."
+            ),
+            "command": (
+                "copilot --allow-tool 'grok(agent)' --allow-tool 'grok(agent_result)'"
+            ),
             "assumes_server_name": "grok",
         }
     return None
@@ -742,6 +822,11 @@ def _client_onboarding_plan(client: str, scope: str) -> dict[str, Any]:
             )
             plan["mcp_server"] = _cursor_mcp_server("project")
             plan["hooks"] = _cursor_hooks("project")
+        if client == "github_copilot":
+            plan["files"].append(
+                _owned_file(".github/instructions/unigrok.instructions.md", COPILOT_INSTRUCTIONS)
+            )
+            plan["mcp_server"] = _copilot_mcp_server("project")
         return plan
     files = _global_files(client)
     plan = {
@@ -782,6 +867,15 @@ def _client_onboarding_plan(client: str, scope: str) -> dict[str, Any]:
         auto_approve = _auto_approve(client, "global")
         if auto_approve is not None:
             plan["auto_approve"] = auto_approve
+        if client == "github_copilot":
+            # gh Copilot CLI reads ~/.copilot/mcp-config.json; VS Code uses .vscode/
+            # mcp.json (carried as vscode_alternative). Project instructions live in
+            # the namespaced .github/instructions file, offered at project scope.
+            plan["mcp_server"] = _copilot_mcp_server("global")
+            plan["reload"] = (
+                "Restart Copilot CLI (or check /mcp show) after adding the MCP server, "
+                "then call grok_mcp_discover_self."
+            )
     return plan
 
 PROJECT_ONBOARDING = {

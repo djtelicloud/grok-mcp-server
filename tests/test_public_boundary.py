@@ -712,10 +712,20 @@ def test_per_client_auto_approve_uses_native_mechanism() -> None:
     ag = server._client_onboarding_plan("antigravity", "global")["auto_approve"]
     assert ag["entry"]["mcpServers"]["grok"]["trust"] is True
 
+    gh = server._client_onboarding_plan("github_copilot", "global")
+    assert "--allow-tool 'grok(agent)'" in gh["auto_approve"]["command"]
+    assert gh["mcp_server"]["target"] == "~/.copilot/mcp-config.json"
+    assert gh["mcp_server"]["entry"]["mcpServers"]["grok"]["url"].endswith("/mcp")
+    assert gh["mcp_server"]["vscode_alternative"]["target"] == ".vscode/mcp.json"
+    gh_proj = server._client_onboarding_plan("github_copilot", "project")
+    assert gh_proj["mcp_server"]["target"] == ".copilot/mcp-config.json"
+    assert any(
+        f["path"] == ".github/instructions/unigrok.instructions.md" for f in gh_proj["files"]
+    )
+
     # Clients without a verified mechanism must NOT fabricate one.
-    assert "auto_approve" not in server._client_onboarding_plan("github_copilot", "global")
     assert "auto_approve" not in server._client_onboarding_plan("generic", "global")
     # None of the auto-approve configs carry a credential.
-    for c in ("claude_code", "codex", "antigravity"):
+    for c in ("claude_code", "codex", "antigravity", "github_copilot"):
         blob = json.dumps(server._client_onboarding_plan(c, "global"))
         assert "XAI_API_KEY" not in blob and "CURSOR_API_KEY" not in blob
