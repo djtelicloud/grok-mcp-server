@@ -598,8 +598,9 @@ def _auto_approve(client: str, scope: str) -> dict[str, Any] | None:
     """Per-IDE 'never prompt for @grok' config, using each client's REAL mechanism.
 
     Verified formats: Claude Code permissions.allow globs (mcp__grok__agent), Codex
-    config.toml MCP tool approval mode, Gemini/Antigravity server trust flag, and gh
-    Copilot CLI --allow-tool session flags. Each assumes the UniGrok MCP server is
+    config.toml MCP tool approval mode, Antigravity globalPermissionGrants allow
+    entries (mcp(grok/agent); trust flag fallback for Gemini CLI), and gh Copilot
+    CLI --allow-tool session flags. Each assumes the UniGrok MCP server is
     registered under the name `grok`. Emitted as an optional merge the IDE previews
     before applying.
     """
@@ -633,20 +634,43 @@ def _auto_approve(client: str, scope: str) -> dict[str, Any] | None:
             "assumes_server_name": "grok",
         }
     if client == "antigravity":
-        target = (
-            "~/.gemini/config/mcp_config.json (Antigravity) or ~/.gemini/settings.json "
-            "(Gemini CLI)"
-        )
+        if scope == "global":
+            target = "~/.gemini/config/config.json"
+            merge_into = "userSettings.globalPermissionGrants.allow"
+            entry: dict[str, Any] = {
+                "userSettings": {
+                    "globalPermissionGrants": {
+                        "allow": ["mcp(grok/agent)", "mcp(grok/agent_result)"]
+                    }
+                }
+            }
+        else:
+            target = ".gemini/settings.json"
+            merge_into = "globalPermissionGrants.allow"
+            entry = {
+                "globalPermissionGrants": {
+                    "allow": ["mcp(grok/agent)", "mcp(grok/agent_result)"]
+                }
+            }
         return {
-            "mechanism": "server trust flag (bypasses confirmations for the whole server)",
+            "mechanism": "permission grants allowlist (per-tool)",
             "target": target,
-            "merge_into": "mcpServers.grok",
+            "merge_into": merge_into,
             "merge_policy": (
-                "Set trust:true on the grok MCP server entry. Gemini/Antigravity has no "
-                "per-tool option, so this trusts the whole grok server — safe because it "
-                "is your own local gateway. Keep other servers untouched."
+                "Append these grants to the allow list; keep existing entries. "
+                "Auto-approves ONLY UniGrok's agent and agent_result tools; use "
+                "mcp(grok/*) instead to cover every grok tool."
             ),
-            "entry": {"mcpServers": {"grok": {"trust": True}}},
+            "entry": entry,
+            "gemini_cli_alternative": {
+                "target": "~/.gemini/settings.json",
+                "note": (
+                    "Gemini CLI has no permission grants; set trust:true on the grok "
+                    "mcpServers entry instead. That trusts the whole grok server — "
+                    "acceptable because it is your own local gateway."
+                ),
+                "entry": {"mcpServers": {"grok": {"trust": True}}},
+            },
             "assumes_server_name": "grok",
         }
     if client == "github_copilot":

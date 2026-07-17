@@ -710,7 +710,17 @@ def test_per_client_auto_approve_uses_native_mechanism() -> None:
     assert 'approval_mode = "auto"' in cx["toml"]
 
     ag = server._client_onboarding_plan("antigravity", "global")["auto_approve"]
-    assert ag["entry"]["mcpServers"]["grok"]["trust"] is True
+    assert ag["entry"]["userSettings"]["globalPermissionGrants"]["allow"] == [
+        "mcp(grok/agent)",
+        "mcp(grok/agent_result)",
+    ]
+    assert ag["gemini_cli_alternative"]["entry"]["mcpServers"]["grok"]["trust"] is True
+    ag_proj = server._auto_approve("antigravity", "project")
+    assert ag_proj["target"] == ".gemini/settings.json"
+    assert ag_proj["entry"]["globalPermissionGrants"]["allow"] == [
+        "mcp(grok/agent)",
+        "mcp(grok/agent_result)",
+    ]
 
     gh = server._client_onboarding_plan("github_copilot", "global")
     assert "--allow-tool 'grok(agent)'" in gh["auto_approve"]["command"]
