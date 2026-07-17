@@ -5,6 +5,10 @@ All notable changes to the public UniGrok gateway.
 ## [1.1.0] - 2026-07-17
 
 ### Added
+- GitHub Copilot client onboarding: gh Copilot CLI `~/.copilot/mcp-config.json`
+  merge entry (repo-level `.copilot/mcp-config.json` at project scope, `.vscode/mcp.json`
+  alternative for VS Code), a namespaced `.github/instructions/unigrok.instructions.md`
+  routing rule, and `--allow-tool 'grok(agent)'` session flags for auto-approve.
 - Per-IDE "never prompt for @grok" auto-approve in the onboarding plan, each via its
   native mechanism: Claude Code `permissions.allow` (per-tool `mcp__grok__agent`), Codex
   `config.toml` MCP tool `approval_mode = "auto"`, Gemini/Antigravity server `trust: true`,
