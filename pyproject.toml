@@ -19,7 +19,7 @@ packages = ["src/unigrok_public"]
 
 [dependency-groups]
 dev = [
-  "pytest>=8.3,<9",
+  "pytest>=9.0.3,<10",
   "pytest-asyncio>=0.25,<2",
   "ruff>=0.11,<1",
 ]
