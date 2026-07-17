@@ -429,6 +429,50 @@ _PLACEHOLDER_RE = re.compile(
     r"(?:i\s+)?will\s+(?:follow\s+up|report|return|provide|deliver|share)|"
     r"not\s+yet|no\s+(?:result|answer)\s+yet)\b"
 )
+# Generic promise prefix: any "I'll/let me <verb>" opener, not just the curated
+# _PROMISE_ACTION list. "need/require/want" are excluded because "I'll need X from
+# you" is a legitimate blocker statement, not a deferred deliverable.
+_GENERIC_PROMISE_PREFIX_RE = re.compile(
+    rf"""(?ix)^\s*(?:[>*#-]+\s*)?{_PROMISE_WRAPPER}(?:
+      i(?:['’]ll|\s+will)
+      | i(?:['’]m|\s+am)\s+(?:going|about)\s+to
+      | let\s+me
+      | we(?:['’]ll|\s+will|\s+are\s+going\s+to)
+    )\s+(?!(?:need|require|want)\b)\w"""
+)
+_SUBSTANTIVE_LINE_RE = re.compile(r"(?m)^\s*(?:#{1,6}\s|```|[-*+]\s|\d+[.)]\s|\|)")
+_PREAMBLE_DELIVERY_SPLIT_RE = re.compile(r"(?:[:—–]|\s+-\s+|\.\s+)\s*(?P<value>\S[\s\S]*)")
+_FORWARD_REFERENCE_RE = re.compile(
+    r"(?i)^(?:then\b|next\b|after\s|and\s+then\b|i(?:['’]ll|\s+will)\b|"
+    r"let\s+me\b|we(?:['’]ll|\s+will)\b|starting\b|beginning\b)"
+)
+
+
+def _is_bare_promise_preamble(text: str) -> bool:
+    """A short single-paragraph promise that never delivers a body.
+
+    Catches preambles whose verb falls outside _PROMISE_ACTION — live CLI fast-route
+    sample: "I'll ground the checklist in the actual flow, then start the answer at
+    '## Checklist'" followed by nothing. Anything with real structure (headings,
+    lists, code), a clarifying question, or delivered content after a delimiter is
+    left alone.
+    """
+    if len(text) > 300 or "\n\n" in text or "?" in text:
+        return False
+    if not _GENERIC_PROMISE_PREFIX_RE.match(text):
+        return False
+    if _SUBSTANTIVE_LINE_RE.search(text):
+        return False
+    delivery = _PREAMBLE_DELIVERY_SPLIT_RE.search(text)
+    if delivery:
+        value = delivery.group("value").strip()
+        if (
+            len(value) >= 16
+            and not _PLACEHOLDER_RE.match(value)
+            and not _FORWARD_REFERENCE_RE.match(value)
+        ):
+            return False
+    return True
 
 
 def _prompt_requests_plan(prompt: str) -> bool:
@@ -484,7 +528,7 @@ def is_nonanswer_completion(content: Any, *, prompt: str = "") -> bool:
         return not (_prompt_requests_plan(prompt) and _looks_like_plan(text))
     if _COMPLETION_EVIDENCE_RE.search(text) or _prompt_requests_plan(prompt):
         return False
-    return _looks_like_plan(text)
+    return _looks_like_plan(text) or _is_bare_promise_preamble(text)
 
 
 def completion_recovery_prompt(original_prompt: str) -> str:

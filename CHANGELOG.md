@@ -4,6 +4,24 @@ All notable changes to the public UniGrok gateway.
 
 ## [Unreleased]
 
+### Fixed
+- Non-answer detection + one same-plane recovery + bounded cross-plane fallback now
+  guard every prose-producing route, including the non-agentic fast paths (`chat`,
+  hive merge, deep-mode polish) that previously accepted a preamble-only completion
+  as `final_answer` (live repro 2026-07-17: `"I'll ground the checklist in the
+  actual flow, then start the answer at '## Checklist'"` with no body shipped as
+  the final reply). Bounded internal JSON votes opt out via
+  `nonanswer_recovery=False` — a malformed vote still just drops.
+- `is_nonanswer_completion` gains a generic bare-preamble guard: a short
+  single-paragraph `"I'll/let me <verb> ..."` promise with no delivered body is a
+  non-answer even when the verb is outside the curated action list. Clarifying
+  questions, stated blockers (`I'll need X from you`), and delivered content after
+  a delimiter are untouched.
+- `chat` now uses `cross_plane` fallback, matching the documented
+  `one_same_plane_retry_before_bounded_api_fallback` contract that `agent` follows.
+- Deep-mode final polish failures no longer discard the already-good answer; the
+  unpolished text ships instead.
+
 ### Changed
 - Antigravity auto-approve now uses `globalPermissionGrants.allow` with per-tool
   grants (`mcp(grok/agent)`, `mcp(grok/agent_result)`) — the battle-tested pack
