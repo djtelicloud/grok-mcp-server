@@ -1,6 +1,0 @@
-{
-  "temperature": 0.4,
-  "top_p": 0.95,
-  "thinking_mode": false,
-  "system_prompt_ref": "grok_adapter.md"
-}

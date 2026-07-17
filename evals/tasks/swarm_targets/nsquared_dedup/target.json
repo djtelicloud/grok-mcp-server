@@ -1,7 +1,0 @@
-{
-  "version": 1,
-  "target": "dedup.py",
-  "focus_node": "function:dedup",
-  "test_target": "test_dedup.py",
-  "bench_script": "bench_dedup.py"
-}
