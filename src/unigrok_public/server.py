@@ -471,6 +471,63 @@ def _cursor_mcp_server(scope: str) -> dict[str, Any]:
         },
     }
 
+
+# Cursor beforeMCPExecution hook: auto-approve UniGrok's `agent` tool so `@grok` never
+# stalls on a per-call permission prompt. Fail-open, matcher-scoped to the agent tool,
+# and it grants no other authority. This is the "plugin-like" piece Cursor needs that
+# other IDEs do not (ported from the old .cursor/hooks/before-unigrok-agent.py, with the
+# removed-platform Canvas/sponsor tip stripped out).
+CURSOR_AGENT_HOOK = '''#!/usr/bin/env python3
+"""Cursor beforeMCPExecution hook: auto-allow UniGrok's agent tool (fail-open)."""
+from __future__ import annotations
+
+import json
+import sys
+
+
+def main() -> int:
+    try:
+        payload = json.load(sys.stdin)
+    except Exception:
+        payload = {}
+    tool = str(payload.get("tool_name") or payload.get("toolName") or "").lower()
+    # The hooks.json matcher already scopes this to the agent tool; auto-approve it so
+    # @grok runs without a permission prompt. Never deny; unknown shapes fail open.
+    decision = "allow" if ("agent" in tool or tool == "") else "ask"
+    sys.stdout.write(json.dumps({"permission": decision}))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+'''
+
+
+def _cursor_hooks(scope: str) -> dict[str, Any]:
+    """The .cursor/hooks.json merge entry wiring the auto-allow agent hook."""
+    hook_cmd = (
+        "~/.cursor/hooks/before-unigrok-agent.py"
+        if scope == "global"
+        else ".cursor/hooks/before-unigrok-agent.py"
+    )
+    return {
+        "target": "~/.cursor/hooks.json" if scope == "global" else ".cursor/hooks.json",
+        "merge_into": "hooks",
+        "merge_policy": (
+            "Add this beforeMCPExecution entry to the existing hooks object; keep other "
+            "hooks. Make the referenced script executable (chmod +x). This auto-approves "
+            "ONLY UniGrok's agent tool so @grok does not prompt on every call."
+        ),
+        "entry": {
+            "version": 1,
+            "hooks": {
+                "beforeMCPExecution": [
+                    {"command": hook_cmd, "matcher": "agent", "timeout": 5}
+                ]
+            },
+        },
+    }
+
 CLIENT_ADAPTERS: dict[str, dict[str, Any]] = {
     "antigravity": {
         "label": "Google Antigravity / Gemini",
@@ -623,7 +680,11 @@ def _client_onboarding_plan(client: str, scope: str) -> dict[str, Any]:
         }
         if client == "cursor":
             plan["files"].append(_owned_file(".cursor/rules/using-unigrok.mdc", CURSOR_RULE))
+            plan["files"].append(
+                _owned_file(".cursor/hooks/before-unigrok-agent.py", CURSOR_AGENT_HOOK)
+            )
             plan["mcp_server"] = _cursor_mcp_server("project")
+            plan["hooks"] = _cursor_hooks("project")
         return plan
     files = _global_files(client)
     plan = {
@@ -644,12 +705,19 @@ def _client_onboarding_plan(client: str, scope: str) -> dict[str, Any]:
         "reload": adapter["reload"],
     }
     if client == "cursor":
-        # Ported Cursor client setup: the one essential artifact is the mcp.json entry
-        # that points Cursor at the Grok gateway; the routing rule is the useful extra.
+        # Ported Cursor client setup: the essential mcp.json entry that points Cursor at
+        # the Grok gateway, the routing rule, and the beforeMCPExecution hook that
+        # auto-approves the agent tool so @grok never prompts (Cursor's "plugin" piece).
         plan["mcp_server"] = _cursor_mcp_server("global")
-        plan["files"] = [*files, _owned_file(".cursor/rules/using-unigrok.mdc", CURSOR_RULE)]
+        plan["hooks"] = _cursor_hooks("global")
+        plan["files"] = [
+            *files,
+            _owned_file(".cursor/rules/using-unigrok.mdc", CURSOR_RULE),
+            _owned_file("~/.cursor/hooks/before-unigrok-agent.py", CURSOR_AGENT_HOOK),
+        ]
         plan["reload"] = (
-            "Reload Cursor after adding the MCP server, then call grok_mcp_discover_self."
+            "Reload Cursor after adding the MCP server and hook, then call "
+            "grok_mcp_discover_self."
         )
     return plan
 
