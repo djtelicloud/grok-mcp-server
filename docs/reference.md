@@ -2,6 +2,7 @@
 
 The README is the public quick start. This page contains the complete tool surface and
 runtime contract for agents, integrators, and advanced users.
+Known limits of the current release are tracked in [Known limits](known-limits.md).
 
 ## How an IDE agent should drive `agent`
 

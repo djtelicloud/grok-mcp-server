@@ -1,0 +1,24 @@
+name: Feature request
+description: Propose a new capability or an improvement to an existing one.
+title: "[feature] "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you hitting?
+      description: Describe the situation where UniGrok falls short — the workflow matters more than the proposed mechanism.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: What should happen instead? If it touches levels, planes, or onboarding, say which.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Workarounds you tried, or why existing levels / tools don't cover it.
