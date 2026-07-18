@@ -8,6 +8,7 @@ import ipaddress
 import json
 import os
 import re
+import secrets
 import shutil
 import signal
 import tempfile
@@ -420,6 +421,170 @@ include only bounded project context that is actually needed, and report the sel
 model, credential plane, and any metered cost from the returned receipt.
 """
 
+# --- Public visuals pack -------------------------------------------------------
+# Genericized house-style guidance installed alongside using-unigrok so @grok output
+# renders cleanly on any host. Public-safe: no private paths, insider palette, or
+# served-UI code. One core + a thin per-host adapter selected by client.
+VISUALS_CORE = """---
+name: unigrok-visuals
+description: >-
+  UniGrok house style for anything @grok renders in a chat. Activate before building
+  any visual output (widget, canvas, artifact, diagram, or styled document): pick the
+  render tier the host actually supports, inherit the host theme, keep a markdown twin.
+---
+
+# UniGrok visuals
+
+One styling system, one capability ladder, host-selected target. Make @grok's
+output look good in this chat without assuming what the host can render.
+
+## Capability ladder
+
+- **L0 Markdown** — prose, tables, code, task lists. Always available; the floor
+  every visual degrades to.
+- **L1 Diagram-in-markdown** — Mermaid fences, inline SVG. When the host renders
+  them (some show the code instead — keep the fence readable either way).
+- **L2 Host-native rich surface** — an in-chat widget/canvas. Only when the host
+  documents it and you detected it. Never assume it exists.
+- **L3 Hosted / file-backed artifact** — a self-contained page opened in a panel
+  or a file the user opens. For a deliverable worth keeping or sharing.
+
+Selection order: detect capabilities -> fall back to host id -> fail open to L0.
+An unknown host is L0 + L1 only. Load the matching `hosts/<host>.md` adapter for
+how L2/L3 are invoked here.
+
+Rule of thumb: words and tables -> L0; a small diagram -> L1; something
+interactive in the message -> L2 if present; a page to keep -> L3.
+
+## Theme: inherit first, brand second
+
+1. Inherit host theme variables when present (`--background`, `--foreground`,
+   `--card`, `--border`, plus host-specific vars the adapter names). Scope under
+   one root; no global selectors, no `<html>`/`<body>` in fragments.
+2. Define UniGrok semantic aliases and map them onto the host so content never
+   hard-codes color: `--ug-bg --ug-surface --ug-border --ug-text --ug-text-soft
+   --ug-accent --ug-accent-2 --ug-accent-3`.
+3. Public brand defaults only when the host owns no theme: page `#080b14`,
+   hairline `#263252` borders, ~14-18px radii, accents cyan `#58e6d9` / blue
+   `#58a6ff` / purple `#bc8cff`, `font-family: Inter, ui-sans-serif, system-ui,
+   -apple-system, "Segoe UI", sans-serif` (system fallback, no required remote font).
+
+Never force dark navy onto a light-theme host (contrast fails); use `color-mix()`
+fallbacks. Color is never the only signal — pair it with text, weight, or an icon.
+
+## Safety
+
+- Emit no secrets, tokens, env keys, cookies, or PII into any visual, and never
+  ask the user to paste them in. Strip them from rendered pages.
+- Widget/canvas JS: no arbitrary `fetch` to user data, no local file reads from
+  the widget context. Treat untrusted user HTML as data — sanitize before rendering.
+- External scripts only from a documented allowlist, only at L2/L3 on a host that
+  supports it. Unknown host -> no external script; prefer self-contained assets.
+- This is chat-render guidance only; never write into a served product UI.
+
+## Degradation (non-negotiable)
+
+Every visual has an L0 twin — if the rich surface fails, the content is still fully
+readable as markdown/table/code. Unknown or undetected host behaves as markdown +
+Mermaid + "open this file" for anything richer.
+
+## Accessibility
+
+Meet WCAG AA contrast against the real background in light and dark. Honor
+`prefers-reduced-motion`; keyboard focus and labels on interactive controls;
+`aria-label` on regions; `role="img"` + `<title>`/`<desc>` on SVG; alt text on
+generated images.
+"""
+
+VISUALS_HOSTS: dict[str, str] = {
+    "claude_code": """# Host adapter — Claude Code / Claude Desktop
+
+Tiers: L0, L1, L2, L3 (full ladder).
+
+- L2 inline widget (`show_widget`): inherit host CSS vars (`--text-primary`,
+  `--surface-1`, `--surface-2`, `--border`, `--radius`, `--font-sans`); prose in the
+  response text, only the visual in the widget; feature-detect `sendPrompt(text)`.
+- L2 + CDN: libraries load only from the sandbox allowlist; the `<script src>` must
+  precede any inline script using its global.
+- L3 hosted artifact: self-contained page (inline CSS/JS, data-URI assets) opened in
+  a panel and shareable. Ephemeral explain -> widget; keepable deliverable -> artifact.
+""",
+    "codex": """# Host adapter — Codex (ChatGPT / Codex)
+
+Tiers: L0, L1, and L2 conditionally (canvas chat fragment).
+
+- L2 canvas fragment is host-conditional: inherit host CSS vars, follow-ups via
+  `sendPrompt(text)` if defined else `window.openai?.sendFollowUpMessage` else no-op,
+  scope under one root, flat and theme-inheriting.
+- Never hard-require the canvas — if absent, degrade to markdown / Mermaid / a file.
+Public docs for this surface are thin: treat L2 as "use if detected," always ship L0.
+""",
+    "antigravity": """# Host adapter — Antigravity (Gemini)
+
+Tiers: L0, L1, L3-as-artifact/file/image. Antigravity Artifacts are agent proof
+(plans, walkthroughs, screenshots, recordings) — NOT interactive HTML widgets.
+
+- Do not emit live in-chat HTML or invent a canvas widget API.
+- Richer visuals -> host Artifacts, a written file the user opens, or a generated
+  image (only when explicitly wanted; image/vision is optional, never required).
+Feature-detect documented surfaces only; degrade to markdown + Mermaid + file.
+""",
+    "cursor": """# Host adapter — Cursor
+
+Tiers: L0, L1, L3 (Canvas). Cursor chat is NOT an HTML widget host — pasted
+`<div>`/`<iframe>` becomes plain text. Never emit raw HTML/iframe into chat.
+
+- Mermaid in markdown for small diagrams (first choice).
+- Canvas (`.canvas.tsx`, import only `cursor/canvas`, data inline, no `fetch`) as a
+  side artifact for dashboards/tables/interactive views; prefer SDK blocks; flat and
+  minimal; write to the managed canvas path and markdown-link it in chat.
+- GenerateImage only when a mockup/image is explicitly requested.
+Large table of tool results -> use a Canvas. Everything keeps an L0 twin.
+""",
+    "github_copilot": """# Host adapter — GitHub Copilot
+
+Tiers: L0, L1 (surface-dependent), L3-as-file. Copilot chat has no live widget host.
+
+- Markdown is the workhorse.
+- Always emit a valid ```mermaid fence — render is surface-dependent (VS Code chat
+  often renders; github.com shows code to paste), so it must read as code either way.
+- Richer visuals -> a self-contained file written to the workspace with the path to
+  open; no external CDN dependency by default (works offline / in locked-down setups).
+Do not claim inline widgets. Unknown/other hosts use this Copilot-class profile.
+""",
+    "generic": """# Host adapter — Generic / Grok
+
+Tiers: L0, L1 (conservative until a rich surface is documented).
+
+- Markdown primary; Mermaid/SVG-in-markdown for diagrams, readable as code if
+  unrendered.
+- Do not assume a native rich (L2) widget/canvas surface. When a stable documented
+  surface exists, add it here using the same ladder — same system, host-selected target.
+""",
+}
+
+VISUALS_HOST_FILE: dict[str, str] = {
+    "claude_code": "claude.md",
+    "codex": "codex.md",
+    "antigravity": "antigravity.md",
+    "cursor": "cursor.md",
+    "github_copilot": "copilot.md",
+    "generic": "grok.md",
+}
+
+# Cursor consumes rules, not skill dirs; Copilot consumes instruction files. Wrap the
+# same adapter bodies with the frontmatter each host expects.
+VISUALS_CURSOR_RULE = (
+    "---\n"
+    "description: >-\n"
+    "  How @grok output should render in Cursor: prefer Mermaid in chat and Canvas as a\n"
+    "  side artifact; never paste raw HTML/iframe into the chat bubble.\n"
+    "alwaysApply: true\n"
+    "---\n\n"
+    + VISUALS_HOSTS["cursor"]
+)
+VISUALS_COPILOT_INSTRUCTIONS = '---\napplyTo: "**"\n---\n\n' + VISUALS_HOSTS["github_copilot"]
+
 # Cursor client integration (ported from the old public version's .cursor/ setup).
 # Cursor is an IDE CLIENT that connects TO UniGrok over HTTP MCP — never an execution
 # plane. The X-Client-ID header is a telemetry label, not authentication.
@@ -767,6 +932,16 @@ def _owned_file(path: str, content: str) -> dict[str, str]:
     }
 
 
+def _visuals_skill_files(client: str, skill_dir: str) -> list[dict[str, str]]:
+    """Visuals core + the matching host adapter for a filesystem skill directory."""
+    fname = VISUALS_HOST_FILE.get(client, VISUALS_HOST_FILE["generic"])
+    host_body = VISUALS_HOSTS.get(client, VISUALS_HOSTS["generic"])
+    return [
+        _owned_file(f"{skill_dir}/SKILL.md", VISUALS_CORE),
+        _owned_file(f"{skill_dir}/hosts/{fname}", host_body),
+    ]
+
+
 def _global_files(client: str) -> list[dict[str, str]]:
     if client == "antigravity":
         manifest = json.dumps(
@@ -778,21 +953,26 @@ def _global_files(client: str) -> list[dict[str, str]]:
             },
             indent=2,
         ) + "\n"
+        root = "~/.gemini/config/plugins/unigrok"
         return [
-            _owned_file("~/.gemini/config/plugins/unigrok/plugin.json", manifest),
-            _owned_file(
-                "~/.gemini/config/plugins/unigrok/skills/using-unigrok/SKILL.md",
-                GLOBAL_SKILL,
-            ),
+            _owned_file(f"{root}/plugin.json", manifest),
+            _owned_file(f"{root}/skills/using-unigrok/SKILL.md", GLOBAL_SKILL),
             _owned_file(
                 "~/.gemini/config/global_workflows/ask-grok.md",
                 ANTIGRAVITY_WORKFLOW,
             ),
+            *_visuals_skill_files("antigravity", f"{root}/skills/unigrok-visuals"),
         ]
     if client == "codex":
-        return [_owned_file("~/.codex/skills/using-unigrok/SKILL.md", GLOBAL_SKILL)]
+        return [
+            _owned_file("~/.codex/skills/using-unigrok/SKILL.md", GLOBAL_SKILL),
+            *_visuals_skill_files("codex", "~/.codex/skills/unigrok-visuals"),
+        ]
     if client == "claude_code":
-        return [_owned_file("~/.claude/skills/using-unigrok/SKILL.md", GLOBAL_SKILL)]
+        return [
+            _owned_file("~/.claude/skills/using-unigrok/SKILL.md", GLOBAL_SKILL),
+            *_visuals_skill_files("claude_code", "~/.claude/skills/unigrok-visuals"),
+        ]
     return []
 
 
@@ -832,6 +1012,7 @@ def _client_onboarding_plan(client: str, scope: str) -> dict[str, Any]:
             "precedence": "project customizations override the global baseline",
             "files": [
                 _owned_file(".agents/skills/using-unigrok/SKILL.md", GLOBAL_SKILL),
+                *_visuals_skill_files(client, ".agents/skills/unigrok-visuals"),
             ],
             "optional_paths": [
                 ".agents/rules/<rule-name>.md",
@@ -842,6 +1023,9 @@ def _client_onboarding_plan(client: str, scope: str) -> dict[str, Any]:
         if client == "cursor":
             plan["files"].append(_owned_file(".cursor/rules/using-unigrok.mdc", CURSOR_RULE))
             plan["files"].append(
+                _owned_file(".cursor/rules/unigrok-visuals.mdc", VISUALS_CURSOR_RULE)
+            )
+            plan["files"].append(
                 _owned_file(".cursor/hooks/before-unigrok-agent.py", CURSOR_AGENT_HOOK)
             )
             plan["mcp_server"] = _cursor_mcp_server("project")
@@ -849,6 +1033,12 @@ def _client_onboarding_plan(client: str, scope: str) -> dict[str, Any]:
         if client == "github_copilot":
             plan["files"].append(
                 _owned_file(".github/instructions/unigrok.instructions.md", COPILOT_INSTRUCTIONS)
+            )
+            plan["files"].append(
+                _owned_file(
+                    ".github/instructions/unigrok-visuals.instructions.md",
+                    VISUALS_COPILOT_INSTRUCTIONS,
+                )
             )
             plan["mcp_server"] = _copilot_mcp_server("project")
         return plan
@@ -879,6 +1069,7 @@ def _client_onboarding_plan(client: str, scope: str) -> dict[str, Any]:
         plan["files"] = [
             *files,
             _owned_file(".cursor/rules/using-unigrok.mdc", CURSOR_RULE),
+            _owned_file(".cursor/rules/unigrok-visuals.mdc", VISUALS_CURSOR_RULE),
             _owned_file("~/.cursor/hooks/before-unigrok-agent.py", CURSOR_AGENT_HOOK),
         ]
         plan["reload"] = (
@@ -3315,7 +3506,25 @@ async def xai_delete_file(file_id: str, confirm_delete: bool = False) -> dict[st
 @mcp.custom_route("/ui/", methods=["GET"], include_in_schema=False)
 @mcp.custom_route("/ui", methods=["GET"], include_in_schema=False)
 async def control_center(_: Request) -> HTMLResponse:
-    return HTMLResponse((STATIC_ROOT / "dashboard.html").read_text(encoding="utf-8"))
+    # The dashboard is a single self-contained page with one inline <script>.
+    # Serve it under a per-response nonce so the CSP can forbid all other script
+    # execution (blocking injected-script exfiltration of the rendered telemetry)
+    # without moving to an external bundle. Dynamic style="width:.." bars still
+    # require 'unsafe-inline' for styles.
+    nonce = secrets.token_urlsafe(16)
+    html = (STATIC_ROOT / "dashboard.html").read_text(encoding="utf-8")
+    html = html.replace("<script>", f'<script nonce="{nonce}">', 1)
+    csp = (
+        "default-src 'self'; "
+        f"script-src 'self' 'nonce-{nonce}'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "connect-src 'self'; "
+        "img-src 'self' data:; "
+        "base-uri 'none'; "
+        "frame-ancestors 'none'; "
+        "form-action 'none'"
+    )
+    return HTMLResponse(html, headers={"content-security-policy": csp})
 
 
 @mcp.custom_route("/.well-known/webmcp", methods=["GET"], include_in_schema=False)
@@ -3460,11 +3669,58 @@ class CallerIdentityMiddleware:
                 _CALLER_ID_CONTEXT.reset(token)
 
 
+_BASELINE_CSP = b"default-src 'none'; frame-ancestors 'none'; base-uri 'none'"
+_SECURITY_HEADERS: tuple[tuple[bytes, bytes], ...] = (
+    (b"x-content-type-options", b"nosniff"),
+    (b"x-frame-options", b"DENY"),
+    (b"referrer-policy", b"no-referrer"),
+    (b"cross-origin-opener-policy", b"same-origin"),
+    (b"cross-origin-resource-policy", b"same-origin"),
+    (
+        b"permissions-policy",
+        b"accelerometer=(), camera=(), geolocation=(), gyroscope=(), "
+        b"magnetometer=(), microphone=(), payment=(), usb=()",
+    ),
+)
+
+
+class SecurityHeadersMiddleware:
+    """Add baseline hardening headers to every HTTP response.
+
+    Sets clickjacking, MIME-sniffing, referrer, cross-origin isolation, and
+    permissions protections universally. A restrictive baseline CSP is added
+    only when the response does not already declare its own (e.g. /ui serves a
+    richer nonce-based policy that must win).
+    """
+
+    def __init__(self, app: Any) -> None:
+        self.app = app
+
+    async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
+        if scope.get("type") != "http":
+            await self.app(scope, receive, send)
+            return
+
+        async def send_with_headers(message: dict[str, Any]) -> None:
+            if message["type"] == "http.response.start":
+                headers = message.setdefault("headers", [])
+                present = {key.lower() for key, _ in headers}
+                for key, value in _SECURITY_HEADERS:
+                    if key not in present:
+                        headers.append((key, value))
+                if b"content-security-policy" not in present:
+                    headers.append((b"content-security-policy", _BASELINE_CSP))
+            await send(message)
+
+        await self.app(scope, receive, send_with_headers)
+
+
 def main() -> None:
     import uvicorn
 
     app = mcp.streamable_http_app()
     app.add_middleware(CallerIdentityMiddleware)
+    app.add_middleware(SecurityHeadersMiddleware)
     uvicorn.run(app, host=mcp.settings.host, port=mcp.settings.port)
 
 
