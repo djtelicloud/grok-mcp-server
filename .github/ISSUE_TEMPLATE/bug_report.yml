@@ -1,0 +1,61 @@
+name: Bug report
+description: Something misbehaved — a wrong answer, a crash, a fallback you didn't expect.
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Receipts make depth/hive bugs reproducible — the `usage`,
+        `resolved_plane`, and `hive.stages` fields in the tool result tell us most of the story.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What did you ask UniGrok to do, and what went wrong?
+      placeholder: e.g. `level: ultra` returned a merge with an empty vote stage
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: dropdown
+    id: level
+    attributes:
+      label: Level / depth used
+      description: The `level` (or legacy `depth`) you set, or "unset" if you let UniGrok choose.
+      options:
+        - unset (auto)
+        - none / minimal / low
+        - medium / high / xhigh
+        - max (deep harness)
+        - ultra (hive)
+        - legacy depth param (deep / hive)
+    validations:
+      required: true
+  - type: textarea
+    id: receipts
+    attributes:
+      label: Receipts from the result
+      description: >
+        Paste the relevant result fields: `resolved_plane`, `fallback_occurred` /
+        `fallback_reason`, `resolved_depth`, `usage`, and `hive.stages` if present.
+        Redact anything sensitive.
+      render: json
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, how you run the gateway (docker compose / other), version or commit, and which IDE/client is connected.
+      placeholder: |
+        macOS 15, docker compose, v1.1.0, Claude Code via /mcp
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Smallest sequence that triggers it. If it only reproduces sometimes, say roughly how often.
