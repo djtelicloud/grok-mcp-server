@@ -459,3 +459,101 @@ def test_done_vote_parse_and_prompt() -> None:
     assert parse_done_vote('{"done":"maybe"}') is None
     prompt = build_done_vote_prompt("solve x", "the answer is 42")
     assert "## Request" in prompt and "## Reply" in prompt
+
+
+def _deep_polish_turn_fixture(monkeypatch: pytest.MonkeyPatch, polish_behavior):
+    """Drive _execute_team_turn in deep mode with a stubbed _run_unified.
+
+    First call produces the main (messy but substantive) deep answer; the
+    second call is the polish pass, whose behavior the test injects.
+    """
+    messy = "## Ranking note (internal)\n1. 60\n2. 59\n\nThe answer is 60."
+    calls: list[str] = []
+    catalogs = {
+        "cli": {"ready": True, "models": ["grok-test"], "default_model": "grok-test"},
+        "api": {"ready": False, "models": []},
+    }
+
+    async def fake_catalogs():
+        return catalogs
+
+    async def fake_run_unified(prompt: str, **kwargs: object) -> dict:
+        calls.append(prompt)
+        if len(calls) == 1:
+            return {
+                "text": messy,
+                "model": "grok-test",
+                "resolved_plane": "cli",
+                "cost_usd": 0.0,
+            }
+        return await polish_behavior(prompt)
+
+    monkeypatch.setattr(server, "_catalogs", fake_catalogs)
+    monkeypatch.setattr(server, "_run_unified", fake_run_unified)
+    return messy, calls
+
+
+async def _run_deep_turn() -> dict:
+    return await server._execute_team_turn(
+        prompt="What is the maximum sum?",
+        session=None,
+        workspace_context="",
+        workspace_label="",
+        caller_instructions="",
+        memory_scope=None,
+        use_memory=False,
+        model=None,
+        effort=None,
+        mode="reasoning",
+        plane="auto",
+        fallback_policy="cross_plane",
+        turns=1,
+        allow_web=False,
+        allow_x_search=False,
+        allow_code=False,
+        depth="deep",
+    )
+
+
+@pytest.mark.asyncio
+async def test_deep_polish_nonanswer_keeps_unpolished_text(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A polish pass that returns a bare-promise non-answer must not clobber
+    the already-good deep answer (hosted @grok review of PR #500, blocking)."""
+
+    async def polish_returns_nonanswer(prompt: str) -> dict:
+        return {
+            "text": "I'll tidy up the draft and share the polished version.",
+            "model": "grok-test",
+            "resolved_plane": "cli",
+            "cost_usd": 0.0,
+        }
+
+    messy, calls = _deep_polish_turn_fixture(monkeypatch, polish_returns_nonanswer)
+    result = await _run_deep_turn()
+    assert len(calls) == 2
+    assert result["text"] == messy
+    assert result["final_polish"] == {
+        "attempted": True,
+        "applied": False,
+        "plane": "cli",
+    }
+
+
+@pytest.mark.asyncio
+async def test_deep_polish_exception_keeps_unpolished_text(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def polish_raises(prompt: str) -> dict:
+        raise RuntimeError("polish plane fell over")
+
+    messy, calls = _deep_polish_turn_fixture(monkeypatch, polish_raises)
+    result = await _run_deep_turn()
+    assert len(calls) == 2
+    assert result["text"] == messy
+    assert result["final_polish"] == {
+        "attempted": True,
+        "applied": False,
+        "plane": None,
+    }

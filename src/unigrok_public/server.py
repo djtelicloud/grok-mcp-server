@@ -2411,7 +2411,13 @@ async def _execute_team_turn(
         except Exception:
             polish = {}
         polished_text = str(polish.get("text") or "").strip()
-        if polished_text and not leaks_deep_harness(polished_text):
+        # A polish pass that returns a non-answer is a polish failure, not a
+        # better answer — keep the unpolished text, same as the exception path.
+        if (
+            polished_text
+            and not leaks_deep_harness(polished_text)
+            and not is_nonanswer_completion(polished_text)
+        ):
             result["text"] = polished_text
         result["cost_usd"] = float(result.get("cost_usd") or 0.0) + float(
             polish.get("cost_usd") or 0.0
