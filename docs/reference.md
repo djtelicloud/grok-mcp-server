@@ -14,6 +14,9 @@ runtime contract for agents, integrators, and advanced users.
   auto-routing. Use `ultra` when you want an artifact adversarially reviewed and are
   fine spending a few cents of API voters; on hard tasks it is typically 2–5× faster
   than a single high-effort call. `voters` (int) overrides the hive reviewer count.
+- **`depth`** (optional, compatibility): `auto` (default) · `deep` (silent
+  deep-reasoning harness) · `hive` (draft → persona votes → merge). Prefer `level` —
+  `max` and `ultra` engage the same harnesses; `depth` remains for existing callers.
 - **Receipts:** every result reports `resolved_plane`, `cost_usd`, `orchestration.route`,
   `fallback_reason`, `resolved_depth`; hive adds `hive.stages` with per-stage plane+cost.
   Relay cost/plane to the user; do not hide metered spend.
@@ -63,6 +66,26 @@ Transport: Streamable HTTP. The MCP handshake, `/healthz`, `/readyz`, `/runtimez
 
 The complete 29-tool surface remains visible when the API is not configured. API tools
 then return a clear setup error instead of disappearing from client discovery.
+
+## PR reviews on comment (`@grok review`)
+
+A repository maintainer (author association `OWNER`, `MEMBER`, or `COLLABORATOR`)
+comments `@grok review` on a pull request — or dispatches the **UniGrok PR Review**
+workflow with a PR number — and `.github/workflows/grok-review.yml` runs a read-only
+Grok review and posts the result back to the PR.
+
+- The job checks out only trusted default-branch code; code from the reviewed PR is
+  never executed, installed, or imported.
+- One live review per PR: job-level concurrency cancels a superseded in-flight run
+  when a newer `@grok review` lands, while unrelated PR comments never touch it.
+- Hosted mode is selected with repository variables (`UNIGROK_REVIEW_RUNNER_JSON`,
+  `UNIGROK_REVIEW_MCP_URL`, `UNIGROK_REVIEW_PLANE`) and mints a short-lived service
+  token at runtime from the `UNIGROK_MCP_TOKEN_SECRET` repository secret — no static
+  API keys live in the workflow. With the variables unset, the workflow falls back to
+  a self-hosted runner talking to the loopback gateway.
+
+The `review_pull_request` MCP tool is the same capability for IDE callers: it reviews
+a bounded caller-supplied diff without GitHub or Git access.
 
 ## Routing and billing
 
