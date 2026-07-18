@@ -8,6 +8,7 @@ body:
       value: |
         Thanks for reporting. Receipts make depth/hive bugs reproducible — the `usage`,
         `resolved_plane`, and `hive.stages` fields in the tool result tell us most of the story.
+        Not sure whether it is a bug? Check [known limits](https://github.com/djtelicloud/grok-mcp-server/blob/main/docs/known-limits.md) first.
   - type: textarea
     id: what-happened
     attributes:
