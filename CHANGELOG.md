@@ -4,12 +4,33 @@ All notable changes to the public UniGrok gateway.
 
 ## [Unreleased]
 
+### Added
+- `grok_mcp_onboard_client` installs a public **unigrok-visuals** skill pack for
+  every client alongside `using-unigrok`: one capability-ladder core (markdown →
+  Mermaid/SVG → host-native rich surface → hosted artifact) plus a thin adapter
+  per host (Claude Code, Codex, Antigravity, Cursor, GitHub Copilot,
+  generic/Grok), emitted into each host's native skill or rules location at
+  global and project scope.
+
+### Security
+- Control center (`/ui`) responses carry a per-response script nonce and a
+  stricter Content-Security-Policy; a new `SecurityHeadersMiddleware` adds
+  baseline hardening (X-Frame-Options, nosniff, COOP/CORP, permissions-policy,
+  default-deny CSP) to every HTTP response that has no route-specific CSP.
+
 ### Documentation
 - Document the `@grok review` PR workflow (maintainer comment trigger, read-only
   default-branch execution, job-level concurrency, hosted vs lab configuration) in
   `docs/reference.md`, with a matching README feature-table row.
 - Document the `depth` compatibility parameter (`auto`/`deep`/`hive`) alongside the
   preferred `level` ladder in `docs/reference.md`.
+- Contributor and reporting setup: issue templates (bug reports capture the
+  level/depth knobs and receipt fields, feature, docs; security routed to
+  `SECURITY.md`) and a `CONTRIBUTING.md` covering local checks plus the CI and
+  `@grok review` expectations.
+- `docs/known-limits.md`: what has limited soak in 1.1.0, which behaviors are
+  expected rather than bugs, and how to report a depth-mode miss — linked from
+  the README, `docs/reference.md`, and the bug-report form.
 
 ### Fixed
 - Non-answer detection + one same-plane recovery + bounded cross-plane fallback now

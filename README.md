@@ -243,6 +243,7 @@ See [SECURITY.md](SECURITY.md) for the complete public runtime boundary.
 | Drive `agent` from an IDE agent | [Technical reference](docs/reference.md#how-an-ide-agent-should-drive-agent) |
 | Develop or acceptance-test UniGrok | [Development guide](docs/development.md) |
 | See what has limited soak and how to report a miss | [Known limits](docs/known-limits.md) |
+| See what changed between versions | [Changelog](CHANGELOG.md) |
 | Report a security issue | [Security policy](SECURITY.md) |
 
 ## License
