@@ -1,0 +1,23 @@
+name: Docs issue
+description: Something in the README, reference, or onboarding docs is wrong, missing, or confusing.
+title: "[docs] "
+labels: ["documentation"]
+body:
+  - type: input
+    id: location
+    attributes:
+      label: Where
+      description: File and section (e.g. `docs/reference.md`, the `level` ladder).
+    validations:
+      required: true
+  - type: textarea
+    id: issue
+    attributes:
+      label: What's wrong or missing
+      description: Quote the confusing passage if short, or describe what you looked for and couldn't find.
+    validations:
+      required: true
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: Suggested fix (optional)
