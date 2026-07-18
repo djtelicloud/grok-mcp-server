@@ -66,4 +66,6 @@ jobs:
           UNIGROK_MCP_RESOURCE_URL: ${{ vars.UNIGROK_MCP_RESOURCE_URL || 'https://mcp.grokmcp.org/mcp' }}
           # Optional lab/static override only — unused when mint secret is set.
           UNIGROK_CLIENT_TOKEN: ${{ secrets.UNIGROK_CLIENT_TOKEN }}
-        run: uv run python scripts/github-grok-review.py
+        # --frozen: use the committed lock as-is (matches ci.yml's uv sync --frozen);
+        # plain `uv run` re-resolves and mutates uv.lock when pyproject/lock diverge.
+        run: uv run --frozen python scripts/github-grok-review.py
