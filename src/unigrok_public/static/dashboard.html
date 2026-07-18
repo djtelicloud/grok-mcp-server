@@ -67,7 +67,7 @@ async function refresh(){try{const [ready,b]=await Promise.all([fetch('/readyz')
   for(const p of ['cli','api']){const on=!!ready.planes?.[p]?.ready;$(p).textContent=`${p.toUpperCase()} ${on?'ready':'offline'}`;$(p).className='pill '+(on?'ok':'')}
   $('updated').textContent=new Date().toLocaleTimeString();$('samples').textContent=t.sample_size||0;
   $('success').textContent=t.verified_success_rate==null?'—':`${Math.round(t.verified_success_rate*100)}%`;
-  $('p95').innerHTML=`${t.latency_ms?.p95||0} <small>ms</small>`;$('cost').textContent=`$${Number(t.cost_usd||0).toFixed(4)}`;
+  $('p95').innerHTML=`${Math.round(t.latency_ms?.p95||0).toLocaleString('en-US')} <small>ms</small>`;$('cost').textContent=`$${Number(t.cost_usd||0).toFixed(4)}`;
   bars('routes',t.routes||[]);bars('models',t.models||[]);bars('callers',t.callers||[]);bars('fallbacks',(t.fallbacks||[]).filter(x=>x.name!=='unknown'));
   const bs=b.circuit_breakers||{};$('breakers').innerHTML=Object.keys(bs).length?Object.entries(bs).map(([k,v])=>
     `<div class="breaker ${v.open?'open':''}"><b>${esc(k)}</b> · ${v.open?'OPEN':'closed'} · failures ${v.failures} · trips ${v.trips}</div>`).join(''):'<div class="empty">No provider calls recorded.</div>';
