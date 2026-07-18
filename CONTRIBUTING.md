@@ -24,7 +24,9 @@ Security issues go through [SECURITY.md](SECURITY.md), not public issues.
    docker compose config --quiet
    ```
 
-3. Open a PR with a short description of the problem and the change. Keep PRs
+3. If the change is behavior-visible, add a line to the `[Unreleased]` section of
+   [CHANGELOG.md](CHANGELOG.md) (Added/Changed/Fixed/Security/Documentation as fits).
+4. Open a PR with a short description of the problem and the change. Keep PRs
    single-purpose — small ones land fast.
 
 Every PR gets CI plus an automated `@grok` review pass; you can re-trigger a review by
