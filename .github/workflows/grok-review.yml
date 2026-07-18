@@ -1,0 +1,71 @@
+name: UniGrok PR Review
+
+on:
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Pull request number
+        required: true
+        type: number
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: unigrok-review-${{ github.event.pull_request.number || github.event.issue.number || inputs.pr_number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'issue_comment' &&
+       github.event.issue.pull_request &&
+       contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association) &&
+       contains(github.event.comment.body, '@grok review'))
+    name: UniGrok review
+    # Production (hosted): set repository variables
+    #   UNIGROK_REVIEW_RUNNER_JSON = "ubuntu-latest"
+    #   UNIGROK_REVIEW_MCP_URL     = https://mcp.grokmcp.org/mcp
+    #   UNIGROK_REVIEW_PLANE       = api
+    # Auth: set repository secret UNIGROK_MCP_TOKEN_SECRET to the same value as
+    # Control Center MCP_TOKEN_SECRET (Secret Manager:
+    # unigrok-control-center-mcp-token-secret). The job mints a ~120s
+    # service:github-review-broker token at runtime — never put XAI_API_KEY
+    # here and do not install static UNIGROK_API_KEYS on the Cloud Run twin.
+    # Lab fallback when vars unset: self-hosted + loopback CLI (Mac required).
+    # See docs/design/hosted-review-p0.md and docs/chatgpt-github-app.md.
+    runs-on: ${{ fromJSON(vars.UNIGROK_REVIEW_RUNNER_JSON || '["self-hosted","unigrok-review"]') }}
+    timeout-minutes: 15
+    steps:
+      # Run only trusted default-branch code. Never check out, execute, install,
+      # or import code from the reviewed PR.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.3.2
+        with:
+          enable-cache: true
+
+      - name: Run read-only Grok review
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          INPUT_PR_NUMBER: ${{ inputs.pr_number }}
+          # Hosted production: set UNIGROK_REVIEW_MCP_URL to https://mcp.grokmcp.org/mcp
+          UNIGROK_MCP_URL: ${{ vars.UNIGROK_REVIEW_MCP_URL || 'http://127.0.0.1:4765/mcp' }}
+          UNIGROK_REVIEW_PLANE: ${{ vars.UNIGROK_REVIEW_PLANE || 'cli' }}
+          # OAuth service mint (production). Same secret as Control MCP_TOKEN_SECRET.
+          UNIGROK_MCP_TOKEN_SECRET: ${{ secrets.UNIGROK_MCP_TOKEN_SECRET }}
+          UNIGROK_OAUTH_ISSUER: ${{ vars.UNIGROK_OAUTH_ISSUER || 'https://control.grokmcp.org' }}
+          UNIGROK_MCP_RESOURCE_URL: ${{ vars.UNIGROK_MCP_RESOURCE_URL || 'https://mcp.grokmcp.org/mcp' }}
+          # Optional lab/static override only — unused when mint secret is set.
+          UNIGROK_CLIENT_TOKEN: ${{ secrets.UNIGROK_CLIENT_TOKEN }}
+        # --frozen: use the committed lock as-is (matches ci.yml's uv sync --frozen);
+        # plain `uv run` re-resolves and mutates uv.lock when pyproject/lock diverge.
+        run: uv run --frozen python scripts/github-grok-review.py
