@@ -1740,6 +1740,7 @@ async def _run_unified(
     allow_code: bool,
     system_context: str | None = None,
     max_output_tokens: int | None = None,
+    nonanswer_recovery: bool = True,
 ) -> dict[str, Any]:
     # Silent-think doctrine (compute != print): reasoning effort stays high while a
     # tiny output cap is applied to KNOWN-SMALL emits (votes) so metered API output
@@ -1816,7 +1817,11 @@ async def _run_unified(
 
     async def _call_with_recovery(target: Literal["cli", "api"]) -> dict[str, Any]:
         initial = await _call(target, prompt)
-        if not agentic or not is_nonanswer_completion(initial.get("text"), prompt=prompt):
+        # Non-answer detection guards every prose-producing path, fast or agentic;
+        # only bounded internal JSON votes opt out (a malformed vote just drops).
+        if not nonanswer_recovery or not is_nonanswer_completion(
+            initial.get("text"), prompt=prompt
+        ):
             return initial
         retry = await _call(target, completion_recovery_prompt(prompt))
         if is_nonanswer_completion(retry.get("text"), prompt=prompt):
@@ -2057,6 +2062,7 @@ async def _hive_route(prompt: str) -> dict[str, Any] | None:
                 allow_x_search=False,
                 allow_code=False,
                 max_output_tokens=HIVE_VOTE_MAX_OUTPUT_TOKENS,
+                nonanswer_recovery=False,
             )
         except Exception:
             return None
@@ -2096,6 +2102,7 @@ async def _shadow_done_vote(request: str, reply: str) -> dict[str, Any] | None:
             allow_web=False,
             allow_x_search=False,
             allow_code=False,
+            nonanswer_recovery=False,
         )
     except Exception:
         return None
@@ -2176,6 +2183,7 @@ async def _run_hive(
                 # Silent-think: the vote is one-line JSON (~40 tokens). Cap the metered
                 # API emit generously; a truncated vote just drops and is filtered.
                 max_output_tokens=HIVE_VOTE_MAX_OUTPUT_TOKENS,
+                nonanswer_recovery=False,
             )
         except Exception:
             return None
@@ -2386,20 +2394,30 @@ async def _execute_team_turn(
         }
     if depth == "deep" and needs_final_polish(str(result.get("text") or "")):
         # One cleanup loop: strip deliberation residue while keeping the answer.
-        polish = await _run_unified(
-            final_polish_prompt(str(result.get("text") or "")),
-            model=None,
-            effort="low",
-            plane="auto",
-            fallback_policy="cross_plane",
-            agentic=False,
-            max_turns=1,
-            allow_web=False,
-            allow_x_search=False,
-            allow_code=False,
-        )
+        # Polish is optional — if it fails outright, keep the unpolished answer.
+        try:
+            polish = await _run_unified(
+                final_polish_prompt(str(result.get("text") or "")),
+                model=None,
+                effort="low",
+                plane="auto",
+                fallback_policy="cross_plane",
+                agentic=False,
+                max_turns=1,
+                allow_web=False,
+                allow_x_search=False,
+                allow_code=False,
+            )
+        except Exception:
+            polish = {}
         polished_text = str(polish.get("text") or "").strip()
-        if polished_text and not leaks_deep_harness(polished_text):
+        # A polish pass that returns a non-answer is a polish failure, not a
+        # better answer — keep the unpolished text, same as the exception path.
+        if (
+            polished_text
+            and not leaks_deep_harness(polished_text)
+            and not is_nonanswer_completion(polished_text)
+        ):
             result["text"] = polished_text
         result["cost_usd"] = float(result.get("cost_usd") or 0.0) + float(
             polish.get("cost_usd") or 0.0
@@ -2798,7 +2816,9 @@ async def chat(
         model=None,
         effort=None,
         plane="auto",
-        fallback_policy="same_plane",
+        # Same contract as agent: one same-plane retry, then one bounded
+        # cross-plane recovery — a persistent non-answer must not ship as final.
+        fallback_policy="cross_plane",
         agentic=False,
         max_turns=1,
         allow_web=False,
