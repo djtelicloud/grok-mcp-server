@@ -4,6 +4,13 @@ All notable changes to the public UniGrok gateway.
 
 ## [Unreleased]
 
+### Documentation
+- Document the `@grok review` PR workflow (maintainer comment trigger, read-only
+  default-branch execution, job-level concurrency, hosted vs lab configuration) in
+  `docs/reference.md`, with a matching README feature-table row.
+- Document the `depth` compatibility parameter (`auto`/`deep`/`hive`) alongside the
+  preferred `level` ladder in `docs/reference.md`.
+
 ### Fixed
 - Non-answer detection + one same-plane recovery + bounded cross-plane fallback now
   guard every prose-producing route, including the non-agentic fast paths (`chat`,

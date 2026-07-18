@@ -134,6 +134,7 @@ you. Every answer comes back with a plane and cost receipt.
 | 🧾 | **Receipts on every answer** — plane, cost, route, and fallback, so nothing is hidden |
 | 🧠 | **Sessions and memory** — named sessions and facts you control, kept locally |
 | 🎨 | **Images, video, vision, files, web + X search** when you add an API key |
+| 🤖 | **PR reviews on comment** — a maintainer types `@grok review` on a pull request and a read-only Grok review answers |
 | 🔐 | **One credential boundary** — keys live in UniGrok, not in every project |
 
 <div align="center">
