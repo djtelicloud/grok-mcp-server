@@ -95,6 +95,153 @@ def test_history_format_and_nonanswer_contract() -> None:
     )
 
 
+def test_nonanswer_catches_generic_promise_preambles() -> None:
+    # Live fast-route regression (2026-07-17): Grok returned exactly this preamble
+    # with finish_reason final_answer and no body; "ground" is outside the curated
+    # action-verb list, so only the generic bare-preamble guard catches it.
+    live_sample = (
+        "I'll ground the checklist in the actual flow, then start the answer "
+        "at '## Checklist'"
+    )
+    prompt = "Update the contributor checklist. No preamble, start with ## Checklist."
+    assert is_nonanswer_completion(live_sample, prompt=prompt)
+    assert is_nonanswer_completion(
+        "Sure — I'll structure the response around your three questions.", prompt=prompt
+    )
+    # Legitimate short replies must survive: delivered content after a delimiter,
+    # a clarifying question, and a stated blocker are all real answers.
+    assert not is_nonanswer_completion(
+        "Sure thing, I'll be brief — the fix is to pin the revision.", prompt=prompt
+    )
+    assert not is_nonanswer_completion(
+        "I'll assume you mean the staging cluster — is that right?", prompt=prompt
+    )
+    assert not is_nonanswer_completion(
+        "I'll need the deploy logs from you before I can diagnose this.", prompt=prompt
+    )
+    assert not is_nonanswer_completion("The answer is 42.", prompt=prompt)
+
+
+@pytest.mark.asyncio
+async def test_fast_route_runs_nonanswer_recovery_and_cross_plane_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The non-agentic (fast/chat) route must reject a canned preamble-only CLI
+    completion, retry once on the same plane, and then fall back CLI->API."""
+    preamble = (
+        "I'll ground the checklist in the actual flow, then start the answer "
+        "at '## Checklist'"
+    )
+    build_calls: list[str] = []
+    catalogs = {
+        "cli": {"ready": True, "models": ["grok-test"], "default_model": "grok-test"},
+        "api": {
+            "ready": True,
+            "models": [{"id": "grok-api"}],
+            "default_model": "grok-api",
+        },
+    }
+
+    async def fake_resolve(*args, **kwargs):
+        return "cli", catalogs
+
+    async def fake_system(*args, **kwargs):
+        return "system"
+
+    async def fake_build(prompt: str, **kwargs: object) -> dict:
+        build_calls.append(prompt)
+        return {"text": preamble, "model": "grok-test", "cost_usd": 0.0}
+
+    async def fake_alternate(current: str, model, *, requires_api: bool) -> str:
+        return "api"
+
+    async def fake_api_chat(*args: object, **kwargs: object) -> dict:
+        return {"text": "## Checklist\n- [ ] ship it", "model": "grok-api", "cost_usd": 0.01}
+
+    monkeypatch.setattr(server, "_resolve_plane", fake_resolve)
+    monkeypatch.setattr(server, "_system_prompt", fake_system)
+    monkeypatch.setattr(server.BUILD_ACP, "run", fake_build)
+    monkeypatch.setattr(server, "_alternate_plane", fake_alternate)
+    monkeypatch.setattr(server.xai_api, "chat", fake_api_chat)
+    result = await server._run_unified(
+        "Update the checklist. No preamble, start with ## Checklist.",
+        model=None,
+        effort=None,
+        plane="auto",
+        fallback_policy="cross_plane",
+        agentic=False,
+        max_turns=1,
+        allow_web=False,
+        allow_x_search=False,
+        allow_code=False,
+    )
+    # Two CLI attempts (initial + same-plane recovery), then the bounded API fallback.
+    assert len(build_calls) == 2
+    assert "previous response" in build_calls[1]
+    assert result["text"].startswith("## Checklist")
+    assert result["resolved_plane"] == "api"
+    assert result["fallback_occurred"] is True
+    assert result["fallback_reason"] == "cli_incomplete_response"
+
+
+@pytest.mark.asyncio
+async def test_bounded_votes_skip_nonanswer_recovery(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    build_calls: list[str] = []
+    catalogs = {
+        "cli": {"ready": True, "models": ["grok-test"], "default_model": "grok-test"},
+        "api": {"ready": False, "models": []},
+    }
+
+    async def fake_resolve(*args, **kwargs):
+        return "cli", catalogs
+
+    async def fake_system(*args, **kwargs):
+        return "system"
+
+    async def fake_build(prompt: str, **kwargs: object) -> dict:
+        build_calls.append(prompt)
+        return {"text": "I'll tally the vote shortly.", "model": "grok-test", "cost_usd": 0.0}
+
+    monkeypatch.setattr(server, "_resolve_plane", fake_resolve)
+    monkeypatch.setattr(server, "_system_prompt", fake_system)
+    monkeypatch.setattr(server.BUILD_ACP, "run", fake_build)
+    result = await server._run_unified(
+        "vote prompt",
+        model=None,
+        effort="low",
+        plane="cli",
+        fallback_policy="same_plane",
+        agentic=False,
+        max_turns=1,
+        allow_web=False,
+        allow_x_search=False,
+        allow_code=False,
+        nonanswer_recovery=False,
+    )
+    # Opted-out internal votes accept the reply as-is: no retry, no error.
+    assert len(build_calls) == 1
+    assert result["text"] == "I'll tally the vote shortly."
+
+
+@pytest.mark.asyncio
+async def test_chat_tool_requests_cross_plane_recovery(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict = {}
+
+    async def fake_unified(prompt: str, **kwargs) -> dict:
+        captured.update(prompt=prompt, **kwargs)
+        return {"text": "done", "resolved_plane": "cli", "cost_usd": 0.0}
+
+    monkeypatch.setattr(server, "_run_unified", fake_unified)
+    result = await server.chat("What is the pinned revision convention?")
+    assert result["text"] == "done"
+    assert captured["fallback_policy"] == "cross_plane"
+    assert captured.get("nonanswer_recovery", True) is True
+
+
 @pytest.mark.asyncio
 async def test_unified_agent_recovers_one_nonanswer_on_same_plane(
     monkeypatch: pytest.MonkeyPatch,
@@ -312,3 +459,101 @@ def test_done_vote_parse_and_prompt() -> None:
     assert parse_done_vote('{"done":"maybe"}') is None
     prompt = build_done_vote_prompt("solve x", "the answer is 42")
     assert "## Request" in prompt and "## Reply" in prompt
+
+
+def _deep_polish_turn_fixture(monkeypatch: pytest.MonkeyPatch, polish_behavior):
+    """Drive _execute_team_turn in deep mode with a stubbed _run_unified.
+
+    First call produces the main (messy but substantive) deep answer; the
+    second call is the polish pass, whose behavior the test injects.
+    """
+    messy = "## Ranking note (internal)\n1. 60\n2. 59\n\nThe answer is 60."
+    calls: list[str] = []
+    catalogs = {
+        "cli": {"ready": True, "models": ["grok-test"], "default_model": "grok-test"},
+        "api": {"ready": False, "models": []},
+    }
+
+    async def fake_catalogs():
+        return catalogs
+
+    async def fake_run_unified(prompt: str, **kwargs: object) -> dict:
+        calls.append(prompt)
+        if len(calls) == 1:
+            return {
+                "text": messy,
+                "model": "grok-test",
+                "resolved_plane": "cli",
+                "cost_usd": 0.0,
+            }
+        return await polish_behavior(prompt)
+
+    monkeypatch.setattr(server, "_catalogs", fake_catalogs)
+    monkeypatch.setattr(server, "_run_unified", fake_run_unified)
+    return messy, calls
+
+
+async def _run_deep_turn() -> dict:
+    return await server._execute_team_turn(
+        prompt="What is the maximum sum?",
+        session=None,
+        workspace_context="",
+        workspace_label="",
+        caller_instructions="",
+        memory_scope=None,
+        use_memory=False,
+        model=None,
+        effort=None,
+        mode="reasoning",
+        plane="auto",
+        fallback_policy="cross_plane",
+        turns=1,
+        allow_web=False,
+        allow_x_search=False,
+        allow_code=False,
+        depth="deep",
+    )
+
+
+@pytest.mark.asyncio
+async def test_deep_polish_nonanswer_keeps_unpolished_text(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A polish pass that returns a bare-promise non-answer must not clobber
+    the already-good deep answer (hosted @grok review of PR #500, blocking)."""
+
+    async def polish_returns_nonanswer(prompt: str) -> dict:
+        return {
+            "text": "I'll tidy up the draft and share the polished version.",
+            "model": "grok-test",
+            "resolved_plane": "cli",
+            "cost_usd": 0.0,
+        }
+
+    messy, calls = _deep_polish_turn_fixture(monkeypatch, polish_returns_nonanswer)
+    result = await _run_deep_turn()
+    assert len(calls) == 2
+    assert result["text"] == messy
+    assert result["final_polish"] == {
+        "attempted": True,
+        "applied": False,
+        "plane": "cli",
+    }
+
+
+@pytest.mark.asyncio
+async def test_deep_polish_exception_keeps_unpolished_text(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def polish_raises(prompt: str) -> dict:
+        raise RuntimeError("polish plane fell over")
+
+    messy, calls = _deep_polish_turn_fixture(monkeypatch, polish_raises)
+    result = await _run_deep_turn()
+    assert len(calls) == 2
+    assert result["text"] == messy
+    assert result["final_polish"] == {
+        "attempted": True,
+        "applied": False,
+        "plane": None,
+    }
