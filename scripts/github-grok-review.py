@@ -238,7 +238,9 @@ def _upsert_comment(api: str, repository: str, number: int, token: str, body: st
             item
             for item in comments
             if MARKER in str(item.get("body", ""))
-            and item.get("user", {}).get("login") == "github-actions[bot]"
+            # Ghost/deleted accounts serialize as "user": null — guard with `or {}`
+            # so one ghost comment cannot crash the whole upsert scan.
+            and (item.get("user") or {}).get("login") == "github-actions[bot]"
         ),
         None,
     )
@@ -250,6 +252,16 @@ def _upsert_comment(api: str, repository: str, number: int, token: str, body: st
 
 def _load_event() -> dict[str, Any]:
     return json.loads(Path(_required("GITHUB_EVENT_PATH")).read_text(encoding="utf-8"))
+
+
+def _build_discussion(reviews: list[dict[str, Any]]) -> str:
+    return "\n".join(
+        # Ghost/deleted reviewers serialize as "user": null — `or {}` keeps one
+        # ghost review from crashing the whole discussion build.
+        f"- {(item.get('user') or {}).get('login', 'unknown')}: "
+        f"{item.get('state', 'COMMENTED')} — {item.get('body') or '(no body)'}"
+        for item in reviews
+    )[:MAX_DISCUSSION_CHARS]
 
 
 async def main() -> None:
@@ -286,11 +298,7 @@ async def main() -> None:
         accept="application/vnd.github.v3.diff",
     )
     reviews = _github_request(f"{pr_url}/reviews?per_page=100", token)
-    discussion = "\n".join(
-        f"- {item.get('user', {}).get('login', 'unknown')}: "
-        f"{item.get('state', 'COMMENTED')} — {item.get('body') or '(no body)'}"
-        for item in reviews
-    )[:MAX_DISCUSSION_CHARS]
+    discussion = _build_discussion(reviews)
     truncated = len(diff) > MAX_DIFF_CHARS
     diff = diff[:MAX_DIFF_CHARS]
     if truncated:

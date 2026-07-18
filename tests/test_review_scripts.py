@@ -529,6 +529,9 @@ def test_upsert_comment_patches_existing_marker_comment(
         [],
         [{"url": "u", "body": "<!-- unigrok-review --> hi", "user": {"login": "someone"}}],
         [{"url": "u", "body": "plain comment", "user": {"login": "github-actions[bot]"}}],
+        # Ghost/deleted account: GitHub serializes "user": null. Must not crash
+        # the scan, and a null-user marker comment is not the bot's.
+        [{"url": "u", "body": "<!-- unigrok-review --> ghost", "user": None}],
     ],
 )
 def test_upsert_comment_posts_when_no_bot_marker_comment(
@@ -541,6 +544,31 @@ def test_upsert_comment_posts_when_no_bot_marker_comment(
         "https://api.example/repos/owner/repo/issues/7/comments",
         {"body": "NEW-BODY"},
     )
+
+
+def test_upsert_comment_survives_ghost_comment_before_bot_marker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ghost = {"url": "g", "body": "who was I", "user": None}
+    existing = {
+        "url": "https://api.example/repos/owner/repo/issues/comments/11",
+        "body": f"{review.MARKER}\nold body",
+        "user": {"login": "github-actions[bot]"},
+    }
+    recorder = _run_upsert(monkeypatch, [ghost, existing])
+    assert [call[0] for call in recorder.calls] == ["GET", "PATCH"]
+    assert recorder.calls[1] == ("PATCH", existing["url"], {"body": "NEW-BODY"})
+
+
+def test_build_discussion_handles_ghost_reviewer() -> None:
+    discussion = review._build_discussion(
+        [
+            {"user": None, "state": "COMMENTED", "body": "drive-by note"},
+            {"user": {"login": "alice"}, "state": "APPROVED", "body": ""},
+        ]
+    )
+    assert "- unknown: COMMENTED — drive-by note" in discussion
+    assert "- alice: APPROVED — (no body)" in discussion
 
 
 # ---------------------------------------------------------------------------
