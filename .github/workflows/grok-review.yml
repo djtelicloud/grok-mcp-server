@@ -14,10 +14,6 @@ permissions:
   contents: read
   pull-requests: write
 
-concurrency:
-  group: unigrok-review-${{ github.event.pull_request.number || github.event.issue.number || inputs.pr_number }}
-  cancel-in-progress: true
-
 jobs:
   review:
     if: >-
@@ -27,6 +23,13 @@ jobs:
        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association) &&
        contains(github.event.comment.body, '@grok review'))
     name: UniGrok review
+    # Concurrency must live at the JOB level: workflow-level groups are claimed
+    # before the `if` gate runs, so any PR comment (bots included) would cancel
+    # that PR's in-flight review and then skip at the gate. Skipped jobs never
+    # enter a job-level group, so only real review runs dedupe each other.
+    concurrency:
+      group: unigrok-review-${{ github.event.pull_request.number || github.event.issue.number || inputs.pr_number }}
+      cancel-in-progress: true
     # Production (hosted): set repository variables
     #   UNIGROK_REVIEW_RUNNER_JSON = "ubuntu-latest"
     #   UNIGROK_REVIEW_MCP_URL     = https://mcp.grokmcp.org/mcp
