@@ -13,24 +13,32 @@ uv sync --frozen
 uv run pytest -q
 uv run ruff check .
 docker compose config --quiet
+docker compose build grok-mcp
 ```
 
-## Test beside an existing stable service
+## Rebuild and runtime-test the local service
 
-Stable may remain on port `4765`; run the candidate on `4775` without changing the
-public default:
+The checked-in Compose file intentionally uses one fixed container and the persistent
+`unigrok-*` auth/state volumes. It is not a side-by-side deployment definition. Stop the
+current container, then recreate the same local service on `4775` if you want to keep an
+IDE's `4765` configuration untouched while testing:
 
 ```bash
+docker compose stop grok-mcp
 UNIGROK_PORT=4775 docker compose --env-file .env up --build -d grok-mcp
 curl -fsS http://127.0.0.1:4775/healthz
 curl -fsS http://127.0.0.1:4775/readyz
 curl -fsS http://127.0.0.1:4775/runtimez
+uv run python scripts/smoke_mcp.py --url http://127.0.0.1:4775/mcp
 ```
 
 Then open a real IDE MCP client against `http://127.0.0.1:4775/mcp` (header
 `X-Client-ID` as needed). Before release, compare MCP `tools/list` with
 `grok_mcp_discover_self`, exercise both configured credential planes, and confirm
 host sources match the running container for `src/` and static UI files.
+
+Restore the normal port by recreating the same service with `UNIGROK_PORT=4765`.
+Do not point two containers at the same SQLite state volume.
 
 To verify team-state persistence across a restart, create a named `agent` session,
 restart the container, and confirm the same session still resolves through the MCP

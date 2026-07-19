@@ -18,8 +18,18 @@ Public media inputs must be HTTPS URLs. File upload accepts caller-supplied base
 bytes and a plain filename; it never accepts a local path. Remote code execution runs
 only in xAI's server-side sandbox.
 
-API calls are metered. Ordinary automatic routing prefers the Grok Build subscription,
-and the default `same_plane` policy cannot cross the credential or billing boundary.
+API calls are metered. Automatic routing prefers the Grok Build subscription, but
+supplying `XAI_API_KEY` and leaving `UNIGROK_ENABLE_METERED_API=true` authorizes bounded
+API routing fallback, specialists, and recovery. Every attempt is receipted; set the
+kill switch false to prevent metered execution. Failed/rejected attempt receipts contain
+only bounded billing metadata, and Mission V2 checkpoints them by fenced lease generation
+so retries and restarts neither erase nor double-count known spend.
+
+Before SQLite persistence, structured payloads are recursively secret-redacted and
+Mission V2 answer projections are bounded. Session turns are written only after
+CommitDone. Terminal runtime rows expire under `UNIGROK_STATE_RETENTION_HOURS`; named
+sessions and remembered facts remain until explicitly deleted. Redaction is defense in
+depth, not permission to submit secrets through prompts or workspace context.
 
 Do not expose this local service directly to a LAN or the internet. A remote
 deployment requires separately reviewed TLS, authentication, authorization, origin

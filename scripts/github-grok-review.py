@@ -23,6 +23,11 @@ MARKER = "<!-- unigrok-review -->"
 MAX_DIFF_CHARS = 90_000
 MAX_DISCUSSION_CHARS = 8_000
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+JOB_ID_RE = re.compile(r"^[0-9a-f]{32}$")
+REVIEW_POLL_WAIT_SECONDS = 20
+# Keep the complete review inside the broker token's 600-second maximum TTL,
+# with headroom for connection setup, initialization, and the initial sync window.
+REVIEW_POLL_TIMEOUT_SECONDS = 500
 
 
 def _required(name: str) -> str:
@@ -187,6 +192,81 @@ def _gateway_bearer_token() -> str:
     )
 
 
+def _tool_payload(result: Any, *, tool_name: str) -> dict[str, Any]:
+    if result.isError:
+        detail = "\n".join(getattr(item, "text", "") for item in result.content)
+        raise RuntimeError((detail or f"UniGrok {tool_name} tool failed")[:2_000])
+    structured = result.structuredContent
+    if not isinstance(structured, dict):
+        raise RuntimeError(f"UniGrok {tool_name} returned no structured payload")
+    return structured
+
+
+def _completed_review(payload: dict[str, Any]) -> dict[str, Any]:
+    review_text = str(payload.get("review") or payload.get("text") or "").strip()
+    if not review_text:
+        raise RuntimeError("UniGrok completed the review job without review text")
+    if payload.get("review") == review_text:
+        return payload
+    completed = dict(payload)
+    completed["review"] = review_text
+    return completed
+
+
+async def _await_review_result(
+    session: ClientSession,
+    initial: Any,
+    *,
+    timeout_seconds: float = REVIEW_POLL_TIMEOUT_SECONDS,
+) -> dict[str, Any]:
+    """Resolve an immediate review or poll its one durable job to a terminal result."""
+    payload = _tool_payload(initial, tool_name="review_pull_request")
+    deadline = asyncio.get_running_loop().time() + max(0.0, float(timeout_seconds))
+    job_id: str | None = None
+
+    while True:
+        status = str(payload.get("status") or "").strip().lower()
+        raw_candidate = str(payload.get("job_id") or "").strip().lower()
+        if raw_candidate:
+            if not JOB_ID_RE.fullmatch(raw_candidate):
+                raise RuntimeError("UniGrok review returned an invalid durable job id")
+            if job_id is None:
+                job_id = raw_candidate
+            elif raw_candidate != job_id:
+                raise RuntimeError("UniGrok review polling switched durable job ids")
+        if not status:
+            # Compatibility with the original hosted review tool, which
+            # returned its final schema directly without a status envelope.
+            return _completed_review(payload)
+        if status == "complete":
+            return _completed_review(payload)
+        if status in {"error", "lost", "cancelled", "canceled"}:
+            detail = str(payload.get("text") or payload.get("stop_reason") or status)
+            raise RuntimeError(f"UniGrok review job {status}: {detail[:2_000]}")
+        if status == "continue" and payload.get("poll") is not True:
+            raise RuntimeError(
+                "UniGrok review needs an explicit continuation that the review-only "
+                "broker is not authorized to start"
+            )
+        if status not in {"pending", "continue"}:
+            raise RuntimeError(f"UniGrok review returned unknown status: {status[:80]}")
+
+        if job_id is None:
+            raise RuntimeError("UniGrok review returned an invalid durable job id")
+
+        remaining = deadline - asyncio.get_running_loop().time()
+        if remaining <= 0:
+            raise TimeoutError(
+                f"UniGrok review job did not finish within {int(timeout_seconds)} seconds"
+            )
+        wait_seconds = max(1, min(REVIEW_POLL_WAIT_SECONDS, int(remaining)))
+        polled = await session.call_tool(
+            "agent_result",
+            {"job_id": job_id, "wait_seconds": wait_seconds},
+        )
+        payload = _tool_payload(polled, tool_name="agent_result")
+
+
 async def _call_unigrok(arguments: dict[str, Any]) -> dict[str, Any]:
     url = os.environ.get("UNIGROK_MCP_URL", "http://127.0.0.1:4765/mcp")
     headers = {"X-Client-ID": "github-actions", "X-Caller": "github-review-broker"}
@@ -200,14 +280,8 @@ async def _call_unigrok(arguments: dict[str, Any]) -> dict[str, Any]:
                 read, write, read_timeout_seconds=timedelta(seconds=540)
             ) as session:
                 await session.initialize()
-                result = await session.call_tool("review_pull_request", arguments)
-    if result.isError:
-        text = "\n".join(getattr(item, "text", "") for item in result.content)
-        raise RuntimeError(text or "UniGrok review tool failed")
-    structured = result.structuredContent
-    if not isinstance(structured, dict):
-        raise RuntimeError("UniGrok returned no structured review payload")
-    return structured
+                initial = await session.call_tool("review_pull_request", arguments)
+                return await _await_review_result(session, initial)
 
 
 def _format_comment(

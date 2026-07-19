@@ -40,7 +40,7 @@ jobs:
     # service:github-review-broker token at runtime — never put XAI_API_KEY
     # here and do not install static UNIGROK_API_KEYS on the Cloud Run twin.
     # Lab fallback when vars unset: self-hosted + loopback CLI (Mac required).
-    # See docs/design/hosted-review-p0.md and docs/chatgpt-github-app.md.
+    # See docs/reference.md (PR reviews) and SECURITY.md.
     runs-on: ${{ fromJSON(vars.UNIGROK_REVIEW_RUNNER_JSON || '["self-hosted","unigrok-review"]') }}
     timeout-minutes: 15
     steps:

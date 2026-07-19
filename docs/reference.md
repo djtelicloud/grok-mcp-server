@@ -11,15 +11,18 @@ Known limits of the current release are tracked in [Known limits](known-limits.m
   swarm.
 - **Long autonomy:** set `UNIGROK_AUTONOMY=true`. Unfinished agent quanta may return
   `status=continue` with `continue_token` (re-invoke `agent`); `agent_result` still
-  works while running. File/media/chat jobs always stay `pending`. Optional
+  works while running. File/media/chat jobs use the `pending` poll contract and never
+  return `continue`. Optional
   `acceptance` freezes CommitDone criteria; thin answers become `needs_continuation`,
   not success. Process default is **off**; **Docker compose live default is on**.
 - **Mission controller v2:** set `UNIGROK_MISSION_V2=true` (requires autonomy). Adds
   durable `verifying` CommitDone, fenced leases, sealed artifact hashes with redacted
   projections, shadow governor/council receipts, and A0′/A0 task-class literal
   CommitDone (`UNIGROK_TASK_CLASS` / `UNIGROK_VERIFY_LITERAL`). Candidate text never
-  counts as acceptance evidence. Process default is **off**; **Docker compose live
-  default is on**. Inspect `/runtimez` → `autonomy`.
+  counts as acceptance evidence. Verification mode is frozen with the mission:
+  ordinary answer generation uses structural checks, while requests to run/prove an
+  outcome require independent evidence. Process default is **off**; **Docker compose
+  live default is on**. Inspect `/runtimez` → `autonomy`.
 - **Context pack (named sessions):** set `UNIGROK_CONTEXT_PACK=cpu` (or `hive`, which
   currently maps to `cpu`). After each completed turn the gateway inventories history,
   runs five heuristic persona votes, lead-merges keeps/don’ts, then seals one
@@ -44,14 +47,100 @@ Known limits of the current release are tracked in [Known limits](known-limits.m
   deep-reasoning harness) · `hive` (draft → persona votes → merge). Prefer `level` —
   `max` and `ultra` engage the same harnesses; `depth` remains for existing callers.
 - **Receipts:** every result reports `resolved_plane`, `cost_usd`, `orchestration.route`,
-  `fallback_reason`, `resolved_depth`; hive adds `hive.stages` with per-stage plane+cost.
-  Relay cost/plane to the user; do not hide metered spend.
+  `fallback_reason`, `resolved_depth`; hive adds `hive.stages`, optional cleanup adds
+  `final_polish`, and rejected or failed billed responses appear in `incurred_attempts`.
+  Mission V2 adds cumulative, restart-durable `mission_billing`. Relay cost/plane to the
+  user; do not hide metered spend.
 - **Media:** ask `agent` in natural language ("generate an image of …"); it routes to the
   image/video specialist on the API plane and returns an `images` list of `{url}`. Without
   an API key the gateway returns an honest "needs `XAI_API_KEY`" message — it never
   fabricates a media link.
 - **Verify:** after checking an answer, call `record_benchmark_result` with the
   `telemetry_id` so the run counts as verified.
+
+## Handling the response
+
+Every `agent` and metered-tool result is a **status envelope** — branch on `status`
+before reading `text`. On any non-`complete` result, `text` is a progress/status
+message, not the answer.
+
+| `status` | Meaning | What the caller must do |
+|----------|---------|-------------------------|
+| `complete` | Terminal answer. With autonomy on, also `committed: true`, `gaps: []`. | Use `text`. Optionally `record_benchmark_result(telemetry_id)`. Do not re-invoke. |
+| `pending` | Work outran its initial sync window; the provider job keeps running server-side, detached. | Poll `agent_result(job_id)` with the **same** `job_id` (use the `poll` hint). Never start a duplicate tool call. |
+| `continue` | Autonomy only. Either the same quantum is still running (`poll` / `awaiting_inflight`) or Mission V2 sealed a rejected draft with named `gaps`. | If still running, poll or retry the same token later. For gaps, re-invoke `agent(continue_token=...)`; the gateway generates the repair quantum. Do not send a new task. |
+| `error` | Terminal failure; `text` carries the redacted reason. | Do not retry. If `stop_reason: "FailDone"` / `terminal_reason: "unrepairable_gaps"`, the gap is unrepairable — never reattach. |
+| `lost` | A non-Mission durable worker stopped before a terminal result was recorded (`stop_reason: "Interrupted"`). | The provider-side outcome is unknown. Inspect provider state before retrying a metered or state-changing operation. |
+
+Which statuses a surface returns:
+
+- **`agent`** with autonomy on returns `complete` / `continue` / `error`; its detached
+  in-flight envelope is `continue` with `poll=true`. With autonomy off it may return
+  `pending`. Mission V2 restart recovery returns `continue`, never `lost`.
+- **Metered/durable tools** (`web_search`, `x_search`, `remote_code_execution`,
+  `chat_with_vision`, `chat_with_files`, `generate_image`, `generate_video`,
+  `extend_video`, and the `xai_*` file ops including `xai_delete_file`) return
+  `complete` / `pending` / `error` only — they **never** return `continue`; you see
+  `lost` only by polling their `job_id` after an interruption.
+
+Terminal Mission V2 reattach is read-only: the same token returns canonical durable
+truth without running another model quantum.
+
+**Do not:**
+
+- Re-issue a metered tool on `pending` — the first job is still running detached, so a
+  second call bills the xAI API twice. Poll `agent_result(job_id)` instead.
+- Re-fire `agent` on `continue` without `continue_token` — a bare call mints a new job,
+  a fresh `acceptance_hash`, and new routing work (with possible API spend), discarding
+  the ledger.
+- Treat `committed: false` (or any `pending`/`continue`) as done — only `status:
+  complete` is finished. Read `gaps`; never surface a `proposed_text` as final.
+- Spin blindly on `continue` — read the named `gaps`, reattach serially with the same
+  token, bound caller retries, and stop on terminal `error` / `FailDone`.
+- Fire `continue_token` in parallel — reattach serially; on `awaiting_inflight` /
+  `claim_blocked`, wait briefly and retry the same token.
+- Hardcode model, plane, or effort — the tool exposes no such knobs. Shape only with
+  `depth` / `level` / `voters` / `acceptance` / `disable_tools`.
+
+**Do:**
+
+- Relay `cost_usd` and `resolved_plane` (plus `hive.stages` when present) to the user.
+- Pass a stable `session` across related calls for continuity (redacted turns persist
+  in local SQLite; it also seeds `memory_scope`).
+- Set `acceptance` on long tasks to give the verifier distinctive terms — richer gap
+  enumeration and fewer premature completions.
+- For an outcome-sensitive task, attach a real test/log/review observation through
+  `caller_evidence`; do not claim that the candidate answer itself proves the outcome.
+- Note `xai_delete_file` takes `confirm_delete=true` and carries no `continue_token`,
+  but a slow delete can still return `pending` — poll `agent_result(job_id)`, do not
+  re-issue the delete.
+
+## Verification and caller evidence
+
+Mission V2 freezes `structural` or `independent_evidence` verification when the mission
+is created. A normal explanation, plan, or generated artifact can commit from structural
+checks. A task that says to run, test, verify, or prove an external outcome requires an
+independent evidence class.
+
+The optional `caller_evidence` input is available only when autonomy and Mission V2 are
+enabled:
+
+```json
+{
+  "caller_evidence": [
+    {
+      "reference": "test-run:concurrency-42",
+      "observation": "The independent concurrency suite completed successfully."
+    }
+  ]
+}
+```
+
+`reference` is 1–2048 characters and `observation` is 1–20,000 characters. The server
+redacts, classifies, hashes, and durably fences each record before candidate generation.
+It treats the observation as quoted, untrusted data: UniGrok does not independently
+validate that the caller told the truth. Candidate digests and candidate-projection
+artifact references are rejected as self-evidence.
 
 ## MCP endpoint
 
@@ -102,17 +191,26 @@ off for the review turn. When the underlying `agent` job is still running, poll
 `agent_result` — review metadata (`review_kind`, repository, pull number, title,
 `read_only`, and `review` text) is preserved across the poll.
 
-Optional GitHub comment automation (`@grok review`) is a separate maintainer
-workflow, not required to use the MCP tool. If you maintain a private Actions
-workflow for that trigger, keep it on trusted default-branch code only and never
-execute, install, or import code from the reviewed PR.
+Optional GitHub comment automation (`@grok review`) is provided by the in-tree
+`.github/workflows/grok-review.yml`; it is not required to use the MCP tool. The
+workflow gates comments to trusted repository roles, checks out default-branch code,
+and sends a bounded diff for read-only review. Never execute, install, or import code
+from the reviewed PR. Hosted URL, runner, and short-lived auth must be configured by
+the repository owner; this local Compose service is not a public review endpoint.
 
 ## Routing and billing
 
 - Callers supply task intent rather than model, plane, effort, or fallback controls.
-- When API is ready, Grok 4.5 performs one structured routing pass capped at 256 output
-  tokens. Direct work remains subscription-first; selected specialists use the API.
+- Clear tasks route heuristically. Other tasks use three structured CLI-first intent
+  votes; their actual planes and costs are receipted. If fewer than two votes parse and
+  API is ready, a semantic API fallback runs with a 256-output-token default cap
+  (configurable 64–1024). Direct work remains subscription-first; selected specialists
+  use the API.
 - One bounded cross-plane recovery is permitted after a classified provider failure.
+- Known spend and token counts survive non-answer rejection, cross-plane fallback,
+  router/hive/polish failure, and post-provider state errors. `incurred_attempts` contains
+  bounded metadata only; Mission V2 cumulatively checkpoints it by lease generation so
+  restart polls and later quanta cannot erase or double-add a charge.
 - `UNIGROK_ENABLE_METERED_API=false` disables metered API execution globally.
 - API responses include provider billing receipts when available.
 - Destructive tools require `confirm_delete=true`.
@@ -120,11 +218,47 @@ execute, install, or import code from the reviewed PR.
 Language model IDs are discovered independently from the live CLI and API catalogs.
 The caller does not select them. Media tools retain provider-defined media defaults.
 
+## Runtime limits
+
+Environment values outside their range are clamped. `grok_mcp_discover_self` and
+`/runtimez` report effective values for the running container.
+
+| Control | Default | Allowed range |
+|---|---:|---:|
+| `UNIGROK_BUILD_TIMEOUT` | 120 s | 30–600 s |
+| `UNIGROK_API_TIMEOUT` | 120 s | 30–600 s |
+| `UNIGROK_FILE_LIST_TIMEOUT` | 120 s | 60–600 s |
+| `UNIGROK_FILE_IO_TIMEOUT` | 60 s | 30–600 s |
+| `UNIGROK_MEDIA_TIMEOUT` | 300 s | 60–600 s |
+| `UNIGROK_AGENT_SYNC_WINDOW` | 16 s | 1–60 s |
+| `UNIGROK_AGENT_MAX_TURNS` | 6 | 1–24 |
+| `UNIGROK_MISSION_LEASE_TTL` | 180 s | 30–900 s |
+| `UNIGROK_ROUTER_MAX_OUTPUT_TOKENS` | 256 | 64–1024 |
+| `UNIGROK_VOTE_MAX_OUTPUT` | 128 | 48–512 |
+| `UNIGROK_MAX_PROMPT_CHARS` | 100,000 | 1,024–500,000 |
+| `UNIGROK_MAX_WORKSPACE_CONTEXT_CHARS` | 100,000 | 1,024–500,000 |
+| `UNIGROK_FILE_CONTENT_MAX_BYTES` | 2,000,000 | 1,024–10,000,000 |
+| `UNIGROK_API_MAX_INFLIGHT` | 4 | 1–16 |
+| `UNIGROK_API_MAX_FILE_INFLIGHT` | 2 | 1–4 |
+| `UNIGROK_CATALOG_TTL` | 60 s | 5–600 s |
+| `UNIGROK_STATE_RETENTION_HOURS` | 24 h | 1–720 h |
+
+`agent_result(wait_seconds)` is a separate per-poll argument: default 16 seconds,
+clamped to 1–20. `xai_get_file_content(max_bytes)` defaults to 500,000 and clamps to
+1,024–1,000,000 bytes, then remains bounded by the environment hard cap above.
+
 ## Team continuity
 
 Named `agent` sessions persist redacted conversation turns in local SQLite. Deliberately
 remembered facts use caller-controlled scopes and can be searched or deleted explicitly.
 The `unigrok-public-state` Docker volume survives service restarts.
+
+Durable structured payloads are recursively secret-redacted. Mission answer projections
+are capped at 100 KB, while the raw candidate is returned only to the winning live call.
+Named-session turns and their context packs are CommitDone-gated and keyed by job, so a
+rejected draft or repeated terminal reattach cannot add duplicate history. Terminal
+mission/job/compatibility rows default to 24-hour retention; sessions and remembered
+facts persist until the caller deletes them.
 
 When `UNIGROK_CONTEXT_PACK` is enabled, named sessions also persist a server-pruned
 context pack (keeps/don’ts + prefrontal + optional `pfc_absent`) for the next turn.

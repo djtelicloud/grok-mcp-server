@@ -7,6 +7,12 @@ from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
+from .principal_xai import (
+    PrincipalXAIConfigurationError,
+    active_credential_source,
+    resolve_inference_credential,
+)
+
 API_PLANE = "xai_api_key"
 MANAGEMENT_KEY_CANARY = "xai-management-api-disabled-in-public-core"
 DEFAULT_API_MODEL = os.environ.get("UNIGROK_API_MODEL", "").strip() or None
@@ -47,17 +53,33 @@ FILE_CONTENT_HARD_CAP_BYTES = max(
 
 
 def api_key_configured() -> bool:
-    return bool(os.environ.get("XAI_API_KEY", "").strip())
+    try:
+        key, _source, _generation = resolve_inference_credential()
+    except PrincipalXAIConfigurationError:
+        return False
+    return bool(key)
 
 
 def _require_key() -> str:
-    key = os.environ.get("XAI_API_KEY", "").strip()
+    try:
+        key, _source, _generation = resolve_inference_credential()
+    except PrincipalXAIConfigurationError as exc:
+        raise RuntimeError("The principal xAI credential map is invalid") from exc
     if not key:
         raise RuntimeError(
             "The xAI API plane is not configured. Set XAI_API_KEY in the server environment; "
             "never place it in an IDE MCP configuration or send it through chat."
         )
     return key
+
+
+def credential_cache_key() -> str:
+    """Return a process-local, non-secret credential generation identifier."""
+    try:
+        _key, source, generation = resolve_inference_credential()
+    except PrincipalXAIConfigurationError:
+        return "configuration_error"
+    return f"{source}:{generation}"
 
 
 def _rpc_timeout(deadline_seconds: float) -> float:
@@ -217,6 +239,7 @@ def _chat_result(response: Any, *, model: str, route: str, started: float) -> di
         "response_id": getattr(response, "id", None),
         "plane": API_PLANE,
         "billing_class": "metered_api",
+        "credential_source": active_credential_source(),
         "workspace_attached": False,
         "cost_usd": float(getattr(response, "cost_usd", 0.0) or 0.0),
         "usage": _usage(response),
@@ -675,10 +698,17 @@ def _format_expires_at(value: Any) -> str | None:
 
 
 def _file_metadata(item: Any) -> dict[str, Any]:
+    raw_size = getattr(item, "size", None)
+    if raw_size is None:
+        raw_size = getattr(item, "bytes", None)
+    try:
+        size_bytes = int(raw_size) if raw_size is not None else None
+    except (TypeError, ValueError):
+        size_bytes = None
     return {
         "file_id": str(getattr(item, "id", "") or ""),
         "filename": str(getattr(item, "filename", "") or ""),
-        "size_bytes": int(getattr(item, "size", None) or getattr(item, "bytes", 0) or 0),
+        "size_bytes": size_bytes,
         "public_url": getattr(item, "public_url", None),
         "expires_at": _format_expires_at(getattr(item, "expires_at", None)),
     }
@@ -759,39 +789,44 @@ async def get_file_content(file_id: str, *, max_bytes: int) -> dict[str, Any]:
     limit = max(1, min(int(max_bytes), FILE_CONTENT_HARD_CAP_BYTES))
     # Refuse oversized objects before the SDK materializes them into memory.
     meta = await get_file(file_id)
-    size_bytes = int(meta.get("size_bytes") or 0)
+    raw_size = meta.get("size_bytes")
+    if raw_size is None:
+        raise ValueError(
+            "file size metadata is missing; refuse unbounded download "
+            "(xAI SDK content() is not a true stream)"
+        )
+    size_bytes = int(raw_size)
+    if size_bytes < 0:
+        raise ValueError("file size metadata is negative; refuse invalid download")
     if size_bytes > FILE_CONTENT_HARD_CAP_BYTES:
         raise ValueError(
             f"file is {size_bytes} bytes; refuse to download more than "
             f"{FILE_CONTENT_HARD_CAP_BYTES} bytes (set UNIGROK_FILE_CONTENT_MAX_BYTES)"
         )
-    # Current xAI SDK content() materializes the full object before returning;
-    # without trustworthy size metadata we refuse rather than risk unbounded RAM.
-    if size_bytes <= 0:
-        raise ValueError(
-            "file size metadata is missing or zero; refuse unbounded download "
-            "(xAI SDK content() is not a true stream)"
-        )
+    if size_bytes == 0:
+        return {
+            "content": "",
+            "encoding": "utf-8",
+            "bytes_returned": 0,
+            "total_bytes": 0,
+            "truncated": False,
+            "plane": API_PLANE,
+        }
 
-    def _call() -> tuple[bytes, int | None]:
+    def _call() -> bytes:
         client = _client(timeout_seconds=_rpc_timeout(deadline))
         try:
             # Prefer stream read when available; many SDK builds still buffer fully.
-            return _read_file_bytes_bounded(client.files.content(file_id), limit=limit)
+            shown, _ = _read_file_bytes_bounded(
+                client.files.content(file_id), limit=limit
+            )
+            return shown
         finally:
             _close_client(client)
 
-    shown, total_known = await _blocking_read(_call, deadline_seconds=deadline)
-    if size_bytes > 0:
-        total_bytes = size_bytes
-        truncated = size_bytes > len(shown)
-    elif total_known is not None:
-        total_bytes = total_known
-        truncated = total_known > len(shown)
-    else:
-        # Streamed read hit the limit without an EOF size; treat as truncated.
-        total_bytes = len(shown)
-        truncated = len(shown) >= limit
+    shown = await _blocking_read(_call, deadline_seconds=deadline)
+    total_bytes = size_bytes
+    truncated = size_bytes > len(shown)
     try:
         text = shown.decode("utf-8")
         encoding = "utf-8"

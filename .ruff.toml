@@ -7,4 +7,7 @@ ignore = ["S603"]
 
 [lint.per-file-ignores]
 "tests/**" = ["S101"]
-
+"evals/python_codegen_comparison/candidate_codex.py" = ["UP046"]
+"evals/python_codegen_comparison/candidate_grok.py" = ["UP046"]
+"evals/python_codegen_comparison/candidate_grok_swarm.py" = ["UP046"]
+"evals/python_codegen_comparison/evaluate.py" = ["UP047", "ASYNC109"]

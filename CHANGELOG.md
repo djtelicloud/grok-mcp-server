@@ -5,12 +5,36 @@ All notable changes to the public UniGrok gateway.
 ## [Unreleased]
 
 ### Changed
+- Runtime limits that formerly behaved as fixed constants are now clamped environment
+  controls and are reported by discovery/runtime receipts: agent sync window and turn
+  cap, mission lease TTL, semantic-router output, prompt/workspace size, concurrency,
+  file/media deadlines, file-content size, and terminal-state retention.
+- Mission V2 freezes both governor configuration and verification mode. Ordinary
+  generation can CommitDone structurally; run/test/prove outcomes require independent
+  evidence. Callers may provide typed, pre-candidate `caller_evidence`, while candidate
+  hashes and candidate-projection references remain forbidden as self-evidence.
 - De-overfitting pass (hive-merged plan in `docs/DEOVERFIT.md`): physics envelope
   stub; governor magic numbers moved into versioned `WEIGHT_BUNDLE`; mechanism
   tests (`inspect.getsource`, `_JOB_TASKS` shape, semaphore identity) replaced
   with behavioral contracts. Needle remains inactive by default.
 
 ### Fixed
+- Mission ownership and poll truth are generation-fenced end to end: claims are atomic,
+  active quanta heartbeat, envelope/artifact/event/evidence writes require the exact
+  owner, stale sweeper snapshots cannot revoke renewed leases, and job/autonomy mirrors
+  require matching status, checkpoint version, and generation. Provider failures return
+  retryable mission truth; terminal failures cannot resurrect through legacy tokens.
+- Durable state recursively redacts structured secrets, stores only a bounded Mission V2
+  projection, refreshes terminal-result retention age on completion, and prunes terminal
+  mission compatibility rows. Session history is CommitDone-gated and idempotent by job,
+  so rejected or replayed candidates do not enter memory.
+- Router/hive receipts preserve actual planes, models, and costs even when a structured
+  vote fails to parse; frozen mission governor settings now control resumed effort,
+  depth, voter count, and turn budget.
+- Billing receipts now preserve known cost and token usage across non-answer recovery,
+  cross-plane fallback, router/hive/polish failures, state/projection errors, and Mission
+  V2 restarts. Mission billing is cumulatively fenced by lease generation, and a
+  post-provider error reclassifies one telemetry row instead of counting the spend twice.
 - Mission shadow governor risk classifier: classify task/acceptance text for
   concurrency, security, irreversible, and adversarial-review signals; floor
   cognition to high/xhigh with engineer+architect+QA+security instead of the
@@ -60,8 +84,8 @@ All notable changes to the public UniGrok gateway.
 - Idle session locks are pruned past a soft cap; `chat` and `xai_delete_file`
   use the durable job contract.
 - Added `.dockerignore`; `ruff check .` is clean with test/eval per-file ignores.
-- Docs no longer reference missing smoke scripts or an in-tree GitHub review
-  workflow; added `CONTRIBUTING.md`.
+- Added `CONTRIBUTING.md`; runtime smoke and the optional in-tree GitHub review
+  workflow are documented against files that exist in this tree.
 
 ### Added
 - `grok_mcp_onboard_client` installs a public **unigrok-visuals** skill pack for
@@ -128,8 +152,11 @@ All notable changes to the public UniGrok gateway.
 - Cursor client onboarding: `grok_mcp_onboard_client` now emits a `.cursor/mcp.json` merge entry (points Cursor at the Grok gateway with `X-Client-ID: cursor`, carries no credentials), a `.cursor/rules/using-unigrok.mdc` routing rule, and a `.cursor/hooks.json` + `before-unigrok-agent.py` beforeMCPExecution hook that auto-approves ONLY the `agent` tool so `@grok` never stalls on a permission prompt. Cursor is a client, not an execution plane — ported from the old public version's static `.cursor/` setup.
 - Depth modes `deep` (cached j-space harness prompt, harness-leak guard, final polish loop) and `hive` (draft → parallel persona votes with numbered-line dif-vote anchors → always-on xhigh merge; voters split across CLI/API planes; per-stage plane+cost receipts)
 - Public level ladder `none`→`ultra` via `level` parameter and `voters` override
-- Auto++ router: three flat-rate parallel intent votes (route/depth/voter-count) replacing the metered routing pass on unclear tasks, with dynamic voter sizing
-- Agent job persistence to SQLite (results survive restarts; interrupted jobs return status `"lost"`)
+- Auto++ router: three CLI-first parallel intent votes (route/depth/voter-count)
+  replacing the semantic API pass on most unclear tasks, with actual-plane receipts and
+  dynamic voter sizing
+- Agent job persistence to SQLite (recorded results survive restarts; interrupted
+  generic jobs return status `"lost"` with an unknown provider outcome)
 - Verifying benchmark suite: `benchmark_deep.py` (executed-code checks, level sweeps, `--voters` sweep), `persona_bench.py` tournament, `parallel_probe.py`, `triage_optimize.py` scout
 - Dogfood optimizer loop (`dogfood_optimize.py`) with anti-Goodhart counter-metric gate (no new imports, bounded diff) and 8% noise floor
 - Six gateway functions hive-optimized with measured wins (+52.8%, +22.6%, +20.8%, +18.9%, +18.0% ×2)

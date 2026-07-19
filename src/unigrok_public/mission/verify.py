@@ -18,11 +18,17 @@ from .evidence import (
     EvidencePolicy,
     candidate_is_forbidden_evidence,
 )
-from .task_class import assign_task_class, literal_commit_ready, matches_literal
+from .task_class import (
+    TASK_CLASSES,
+    VERIFICATION_INDEPENDENT,
+    VERIFICATION_MODES,
+    assign_task_class,
+    assign_verification_mode,
+    literal_commit_ready,
+    matches_literal,
+)
 
 _TERM = re.compile(r"[A-Za-z0-9_]{3,}")
-
-
 @dataclass(frozen=True)
 class VerifyInput:
     candidate_text: str
@@ -37,6 +43,9 @@ class VerifyInput:
     security_veto: bool = False
     qa_veto: bool = False
     task_text: str = ""
+    frozen_task_class: str | None = None
+    frozen_verification_mode: str | None = None
+    candidate_artifact_refs: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -45,6 +54,7 @@ class VerifyResult:
     gaps: list[str]
     structural_record: dict[str, Any] | None
     task_class: str = "substantial"
+    verification_mode: str = VERIFICATION_INDEPENDENT
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -52,6 +62,7 @@ class VerifyResult:
             "gaps": list(self.gaps),
             "structural_record": self.structural_record,
             "task_class": self.task_class,
+            "verification_mode": self.verification_mode,
         }
 
 
@@ -193,7 +204,26 @@ def should_terminal_fail(
 
 def verify_commit(inp: VerifyInput) -> VerifyResult:
     gaps: list[str] = []
-    task_class = assign_task_class(inp.task_text, inp.acceptance_text)
+    if inp.frozen_task_class is None:
+        task_class = assign_task_class(inp.task_text, inp.acceptance_text)
+    elif inp.frozen_task_class in TASK_CLASSES:
+        task_class = inp.frozen_task_class
+    else:
+        gaps.append("invalid_frozen_task_class")
+        task_class = assign_task_class(inp.task_text, inp.acceptance_text)
+    if inp.frozen_verification_mode is None:
+        verification_mode = assign_verification_mode(
+            inp.task_text,
+            inp.acceptance_text,
+            assigned_class=task_class,
+            destructive=inp.destructive,
+        )
+    elif inp.frozen_verification_mode in VERIFICATION_MODES:
+        verification_mode = inp.frozen_verification_mode
+    else:
+        # An invalid frozen control must never silently weaken verification.
+        gaps.append("invalid_frozen_verification_mode")
+        verification_mode = VERIFICATION_INDEPENDENT
     if str(inp.status) != "verifying":
         gaps.append("status_not_verifying")
     if int(inp.lease_generation) != int(inp.expected_lease_generation):
@@ -211,6 +241,7 @@ def verify_commit(inp: VerifyInput) -> VerifyResult:
         task=inp.task_text,
         acceptance=inp.acceptance_text,
         candidate=inp.candidate_text,
+        assigned_class=task_class,
     )
     task_class = ready_class
     literal_path = task_class in {"literal", "echo_ok"} and expected_token is not None
@@ -231,6 +262,7 @@ def verify_commit(inp: VerifyInput) -> VerifyResult:
         "structural_gaps": list(structural_gaps),
         "checks_passed": not structural_gaps,
         "task_class": task_class,
+        "verification_mode": verification_mode,
     }
     if literal_path and matched and not structural_gaps:
         structural_payload["literal_match"] = True
@@ -259,8 +291,12 @@ def verify_commit(inp: VerifyInput) -> VerifyResult:
     if not structural_gaps:
         records = [*records, structural_record]
 
+    forbidden_refs = (inp.candidate_hash, *inp.candidate_artifact_refs)
     for record in records:
-        if candidate_is_forbidden_evidence(record, inp.candidate_hash):
+        if not isinstance(record, dict):
+            gaps.append("invalid_evidence_record")
+            continue
+        if candidate_is_forbidden_evidence(record, forbidden_refs):
             gaps.append("self_evidence_forbidden")
         klass = str(record.get("class") or "")
         if not inp.policy.allows(klass):
@@ -269,12 +305,20 @@ def verify_commit(inp: VerifyInput) -> VerifyResult:
     acceptable = [
         r
         for r in records
-        if inp.policy.allows(str(r.get("class") or ""))
-        and not candidate_is_forbidden_evidence(r, inp.candidate_hash)
+        if isinstance(r, dict)
+        and inp.policy.allows(str(r.get("class") or ""))
+        and not candidate_is_forbidden_evidence(r, forbidden_refs)
     ]
-    # Literal path: structural literal-match record satisfies evidence when ok;
-    # do not pile essay insufficient_evidence on literal_mismatch (unrepairable).
-    if len(acceptable) < inp.policy.min_records:
+    independent = [
+        r for r in acceptable if str(r.get("class") or "") != EVIDENCE_STRUCTURAL
+    ]
+    # Literal and ordinary output-generation paths may commit from deterministic
+    # structural verification. Outcome-sensitive missions require a record that
+    # existed outside the candidate answer.
+    insufficient = len(acceptable) < inp.policy.min_records
+    if verification_mode == VERIFICATION_INDEPENDENT and not independent:
+        insufficient = True
+    if insufficient:
         if not (literal_path and structural_gaps):
             gaps.append("insufficient_evidence")
 
@@ -296,4 +340,5 @@ def verify_commit(inp: VerifyInput) -> VerifyResult:
         gaps=uniq,
         structural_record=structural_record if not structural_gaps else None,
         task_class=task_class,
+        verification_mode=verification_mode,
     )

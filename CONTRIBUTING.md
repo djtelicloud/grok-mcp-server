@@ -7,26 +7,27 @@ uv sync --frozen
 uv run pytest -q
 uv run ruff check .
 docker compose config --quiet
-```
-
-Optional image build (does not start the service):
-
-```bash
 docker compose build grok-mcp
 ```
 
 ## Runtime smoke (manual)
 
-With a candidate service on port `4775` (stable may stay on `4765`):
+Compose uses one fixed container plus persistent auth/state volumes; it is not safe to
+run a second project against those same volumes. Stop and recreate the current local
+service on `4775` for a candidate smoke:
 
 ```bash
+docker compose stop grok-mcp
 UNIGROK_PORT=4775 docker compose --env-file .env up --build -d grok-mcp
 curl -fsS http://127.0.0.1:4775/healthz
 curl -fsS http://127.0.0.1:4775/readyz
+curl -fsS http://127.0.0.1:4775/runtimez
+uv run python scripts/smoke_mcp.py --url http://127.0.0.1:4775/mcp
 ```
 
-Exercise MCP from a real IDE pointed at `http://127.0.0.1:4775/mcp`, then compare
-`tools/list` with `grok_mcp_discover_self`.
+Compare MCP `tools/list` with `grok_mcp_discover_self`, then exercise both configured
+credential planes. Restore the normal port by recreating this same service on `4765`;
+do not point two containers at one state volume.
 
 ## Pull requests
 

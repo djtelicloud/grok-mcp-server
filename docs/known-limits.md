@@ -35,17 +35,22 @@ a bug with those fields — they tell most of the story.
 
 - **`xhigh` on the API plane auto-downgrades to `high`** instead of erroring.
   The downgrade is echoed in the resolved level.
-- **Interrupted jobs return status `"lost"` after a gateway restart.** Job
-  *results* persist to SQLite once complete; a job that was mid-flight during
-  a restart is reported lost rather than silently re-run. Durable facts and
-  session history are unaffected.
+- **Mission V2 and generic jobs recover differently after restart.** Mission V2
+  keeps durable mission truth and returns `continue` with the same token (or the
+  canonical terminal winner). A generic job whose terminal result was already
+  recorded remains pollable; one interrupted before recording returns `lost`.
+  `lost` means the provider outcome is unknown, so inspect provider state before
+  retrying a metered or mutating operation. Durable facts and session history are
+  unaffected.
 
 ### Auto++ router mis-routes
 
 On unclear tasks the router picks route, depth, and voter count via three
-flat-rate intent votes. If it chooses a depth or voter count that is obviously
-wrong for your task, report it and include the task text — routing quality is
-tuned from real task shapes.
+CLI-first intent votes. A provider failure may cross to the metered API, and an
+inconclusive vote set may use the bounded semantic API fallback; receipts report
+the actual plane and cost of every attempt. If it chooses a depth or voter count
+that is obviously wrong for your task, report it and include the task text —
+routing quality is tuned from real task shapes.
 
 ### How to report
 

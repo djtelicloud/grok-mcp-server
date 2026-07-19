@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 from typing import Any
 
 from mcp import ClientSession
@@ -64,17 +65,45 @@ async def _agent_call(session: ClientSession, arguments: dict[str, Any]) -> tupl
     for _ in range(20):
         result = await session.call_tool(name, arguments)
         payload = _structured(result)
+        status = payload.get("status")
+        if result.isError or status not in {"pending", "continue"}:
+            return result, payload
+        if status == "pending" or payload.get("poll"):
+            name = "agent_result"
+            arguments = {"job_id": payload["job_id"], "wait_seconds": 16}
+            continue
+        token = str(payload.get("continue_token") or "")
+        if not token:
+            return result, payload
+        name = "agent"
+        arguments = {"continue_token": token}
+    raise RuntimeError("agent job did not reach terminal truth within 20 quanta/polls")
+
+
+async def _durable_tool_call(
+    session: ClientSession, name: str, arguments: dict[str, Any]
+) -> tuple[Any, dict[str, Any]]:
+    result = await session.call_tool(name, arguments)
+    payload = _structured(result)
+    for _ in range(20):
         if result.isError or payload.get("status") != "pending":
             return result, payload
-        name = "agent_result"
-        arguments = {"job_id": payload["job_id"], "wait_seconds": 16}
-    raise RuntimeError("agent job remained pending for too long")
+        result = await session.call_tool(
+            "agent_result",
+            {"job_id": payload["job_id"], "wait_seconds": 16},
+        )
+        payload = _structured(result)
+    raise RuntimeError(f"{name} remained pending for too long")
 
 
 async def smoke(
     url: str, invoke_cli: bool, invoke_api: bool, invoke_research: bool, invoke_code: bool
 ) -> None:
-    async with streamablehttp_client(url, headers={"X-Client-ID": "release-smoke"}) as (
+    headers = {"X-Client-ID": "release-smoke"}
+    bearer = os.environ.get("UNIGROK_MCP_BEARER_TOKEN", "").strip()
+    if bearer:
+        headers["Authorization"] = f"Bearer {bearer}"
+    async with streamablehttp_client(url, headers=headers) as (
         read,
         write,
         _,
@@ -131,6 +160,10 @@ async def smoke(
                 raise RuntimeError("agent remote code is not enabled by default")
             if defaults.get("agent", {}).get("user_notice_required") is not True:
                 raise RuntimeError("agent tool disclosure requirement is missing")
+            if "caller_evidence" not in defaults.get("agent", {}).get(
+                "optional_inputs", []
+            ):
+                raise RuntimeError("Mission V2 caller_evidence input is missing")
             onboarding = discover.get("project_onboarding", {})
             if onboarding.get("canonical_paths", {}).get("antigravity_rules") != (
                 ".agents/rules/<rule-name>.md"
@@ -165,7 +198,7 @@ async def smoke(
                 result, payload = await _agent_call(
                     session,
                     {
-                        "task": "Reply exactly with: SEQUENTIAL_TEST_GROK",
+                        "task": "Reply with exactly SEQUENTIAL_TEST_GROK",
                     },
                 )
                 enabled = payload.get("agent_tools", {}).get("enabled", {})
@@ -225,11 +258,11 @@ async def smoke(
                 print(f"auto_web=complete plane=cli chars={len(text)} citations=present")
 
             if invoke_api:
-                result = await session.call_tool(
+                result, payload = await _durable_tool_call(
+                    session,
                     "remote_code_execution",
                     {"prompt": "Use Python to return exactly DUAL_PLANE_API_OK."},
                 )
-                payload = _structured(result)
                 if result.isError or "DUAL_PLANE_API_OK" not in str(payload.get("text", "")):
                     raise RuntimeError("explicit API chat smoke failed")
                 print("api=DUAL_PLANE_API_OK")

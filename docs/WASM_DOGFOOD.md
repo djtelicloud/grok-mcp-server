@@ -6,8 +6,6 @@ Hive pressure-test (partial agree): sandbox agents that **run** code, not ones
 that **think**. Docker remains the outer boundary; wasm would be per-execution
 capability isolation around a dangerous inner loop — not a rewrite of the app.
 
-Public tip push remains Codex-after-review. Cursor + sponsor ship to Docker only.
-
 ## Verdict
 
 | Decision | Meaning |
@@ -100,7 +98,7 @@ same “not in `server.py`” rule.
 - Wasm-ify the whole app, agent, or hive.
 - Treat Docker alone as in-process guest isolation.
 - Ship a gateway wasm dependency with no in-process untrusted exec path.
-- Push this design work to public git from Cursor (Docker-only until Codex).
+- Treat this document as design guidance, not evidence that a wasm runtime ships.
 
 ## Related
 

@@ -29,6 +29,7 @@ from .governor import (
 from .physics import NEEDLE_RUNTIME_DEFAULT
 from .task_class import (
     assign_task_class,
+    assign_verification_mode,
     extract_literal_acceptance,
     literal_commit_ready,
     matches_literal,
@@ -56,6 +57,7 @@ __all__ = [
     "VerifyResult",
     "artifact_projection",
     "assign_task_class",
+    "assign_verification_mode",
     "classify_task_signals",
     "default_agent_policy",
     "extract_literal_acceptance",

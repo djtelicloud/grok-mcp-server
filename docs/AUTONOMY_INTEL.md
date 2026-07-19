@@ -162,9 +162,10 @@ Safest autonomy ≠ most rules. It means:
 2. Intelligence = **right verify generator for the ask**, recursive only when the
    class needs structure, specialists only when they reduce `V`.
 3. Continue is an **iterator step with proven progress**, not a hope loop.
-4. Docker runs **two hemispheres**: awake CommitDone truth + sleep consolidation
-   (sort/rank/bench/rewind/predict) under idle budgets — preemptible, never
-   client-sealing from dreams.
+4. **Target design:** pair awake CommitDone truth with a preemptible sleep
+   consolidation plane (sort/rank/bench/rewind/predict) under idle budgets. The
+   shipping Docker runtime currently implements the awake plane only; sleep remains
+   a design.
 5. The IDE/human gets **exactly the shape they asked for**, often with warm packs
    already ranked — without skipping awake `G_c`.
 

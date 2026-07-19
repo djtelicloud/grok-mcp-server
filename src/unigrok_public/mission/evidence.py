@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -58,22 +59,46 @@ class EvidencePolicy:
 
 
 def default_agent_policy() -> EvidencePolicy:
-    """Text agent missions: structural verifier records + optional caller evidence."""
+    """Text missions accept verifier, runtime, caller, and human provenance."""
     return EvidencePolicy(
-        allowed_classes=frozenset({EVIDENCE_STRUCTURAL, EVIDENCE_CALLER, EVIDENCE_HUMAN}),
+        allowed_classes=frozenset(
+            {EVIDENCE_STRUCTURAL, EVIDENCE_RUNTIME, EVIDENCE_CALLER, EVIDENCE_HUMAN}
+        ),
         require_human_for_destructive=True,
         min_records=1,
     )
 
 
-def candidate_is_forbidden_evidence(record: dict[str, Any], candidate_hash: str) -> bool:
+def candidate_is_forbidden_evidence(
+    record: dict[str, Any], candidate_refs: str | Iterable[str]
+) -> bool:
     """True when a record tries to use the candidate artifact as its own proof."""
+    refs = (
+        (candidate_refs,)
+        if isinstance(candidate_refs, str)
+        else tuple(str(value) for value in candidate_refs)
+    )
+    needles = {value.casefold() for value in refs if value}
+    if not isinstance(record, dict) or not needles:
+        return False
     if str(record.get("class") or "") == EVIDENCE_STRUCTURAL:
         # Structural evidence may *reference* the candidate hash it checked.
         return False
-    refs = record.get("artifact_refs") or []
-    if not isinstance(refs, list):
+
+    def contains_candidate(value: Any) -> bool:
+        if isinstance(value, dict):
+            return any(
+                contains_candidate(key) or contains_candidate(item)
+                for key, item in value.items()
+            )
+        if isinstance(value, (list, tuple, set, frozenset)):
+            return any(contains_candidate(item) for item in value)
+        if isinstance(value, str):
+            folded = value.casefold()
+            return any(needle in folded for needle in needles)
         return False
-    return candidate_hash in {str(r) for r in refs} and str(
-        record.get("class")
-    ) not in {EVIDENCE_RUNTIME, EVIDENCE_CALLER, EVIDENCE_HUMAN}
+
+    # External proof must be independently addressable. A candidate digest in
+    # any field (including digest, artifact refs, or nested payload) makes it
+    # self-referential.
+    return contains_candidate(record)

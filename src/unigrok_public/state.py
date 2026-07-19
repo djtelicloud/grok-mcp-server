@@ -6,13 +6,15 @@ import os
 import re
 import sqlite3
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 SESSION_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
 SCOPE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
 TERM_PATTERN = re.compile(r"[A-Za-z0-9_]{2,}")
+TENANT_SCOPE_PATTERN = re.compile(r"^(tenant-[0-9a-f]{24}):")
+DURABLE_TEXT_MAX_BYTES = 100_000
 
 _SECRET_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (
@@ -20,6 +22,13 @@ _SECRET_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
             r"(?im)\b((?:xai|openai|anthropic|claude|gemini|google|github|gh|aws|"
             r"azure|npm|pypi)[A-Z0-9_ -]*(?:api[_ -]?key|token|secret|password))"
             r"\s*[:=]\s*([^\s,;]+)"
+        ),
+        r"\1=[REDACTED]",
+    ),
+    (
+        re.compile(
+            r"(?im)\b((?:[A-Z][A-Z0-9_ -]{0,80}?)?(?:API[_ -]?KEY|ACCESS[_ -]?KEY|"
+            r"TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL))\s*[:=]\s*([^\s,;]+)"
         ),
         r"\1=[REDACTED]",
     ),
@@ -40,6 +49,13 @@ _SECRET_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     ),
 )
 
+_SECRET_KEY_NAME = re.compile(
+    r"(?i)(?:^|[_ -])(?:api[_ -]?key|xai[_ -]?key|access[_ -]?key|auth[_ -]?token|"
+    r"access[_ -]?token|refresh[_ -]?token|id[_ -]?token|bearer[_ -]?token|"
+    r"token|secret|client[_ -]?secret|password|passwd|credential|credentials|"
+    r"private[_ -]?key|authorization|cookie|set[_ -]?cookie)$"
+)
+
 
 def utc_now() -> str:
     return datetime.now(UTC).isoformat()
@@ -50,6 +66,72 @@ def redact_secrets(value: Any) -> str:
     for pattern, replacement in _SECRET_PATTERNS:
         text = pattern.sub(replacement, text)
     return text
+
+
+def redact_json_value(value: Any, *, key: str | None = None) -> Any:
+    """Recursively redact structured payloads without destroying their shape."""
+    normalized_key = (
+        str(key or "").strip().casefold().replace("-", "_").replace(" ", "_")
+    )
+    if (
+        normalized_key == "continue_token"
+        and isinstance(value, str)
+        and re.fullmatch(r"[0-9a-fA-F]{32}", value)
+    ):
+        return value
+    if key and _SECRET_KEY_NAME.search(str(key)):
+        return None if value is None else "[REDACTED]"
+    if isinstance(value, dict):
+        return {
+            str(item_key): redact_json_value(item, key=str(item_key))
+            for item_key, item in value.items()
+        }
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return [redact_json_value(item) for item in value]
+    if isinstance(value, str):
+        return redact_secrets(value)
+    return value
+
+
+def bounded_redacted_text(value: Any, *, max_bytes: int = DURABLE_TEXT_MAX_BYTES) -> str:
+    """Redact and cap durable human-readable text on a UTF-8 boundary."""
+    text = redact_secrets(value)
+    encoded = text.encode("utf-8")
+    if len(encoded) <= max_bytes:
+        return text
+    marker = "\n…[truncated]"
+    marker_bytes = marker.encode("utf-8")
+    if max_bytes <= len(marker_bytes):
+        return marker_bytes[:max_bytes].decode("utf-8", errors="ignore")
+    cut = encoded[: max_bytes - len(marker_bytes)]
+    while cut:
+        try:
+            return cut.decode("utf-8") + marker
+        except UnicodeDecodeError:
+            cut = cut[:-1]
+    return marker.lstrip()
+
+
+def _durable_agent_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    safe = redact_json_value(payload)
+    if not isinstance(safe, dict):
+        return {}
+    mission = safe.get("mission")
+    if isinstance(mission, dict) and mission.get("protocol") == "unigrok_mission_v2":
+        for field in ("text", "proposed_text", "review"):
+            if field in safe:
+                safe[field] = bounded_redacted_text(safe[field])
+    return safe
+
+
+def _retention_cutoff() -> str:
+    raw = os.environ.get("UNIGROK_STATE_RETENTION_HOURS", "24")
+    try:
+        hours = int(raw)
+    except ValueError:
+        hours = 24
+    hours = max(1, min(hours, 24 * 30))
+    return (datetime.now(UTC) - timedelta(hours=hours)).isoformat()
 
 
 def normalize_session(value: Any) -> str:
@@ -86,6 +168,11 @@ class PublicStateStore:
         configured = (
             path
             or os.environ.get("UNIGROK_STATE_PATH")
+            or (
+                Path(os.environ["UNIGROK_STATE_DIR"]) / "public-state.db"
+                if os.environ.get("UNIGROK_STATE_DIR")
+                else None
+            )
             or (Path.home() / ".local" / "share" / "unigrok" / "public-state.db")
         )
         self.path = Path(configured).expanduser()
@@ -99,6 +186,23 @@ class PublicStateStore:
         connection.execute("PRAGMA foreign_keys=ON")
         connection.execute("PRAGMA busy_timeout=30000")
         return connection
+
+    @staticmethod
+    def _prune_retention_connection(connection: sqlite3.Connection) -> int:
+        cutoff = _retention_cutoff()
+        deleted = 0
+        for statement in (
+            "DELETE FROM agent_jobs WHERE created_at < ? "
+            "AND status IN ('complete','error')",
+            "DELETE FROM autonomy_jobs WHERE updated_at < ? "
+            "AND status IN ('committed','terminal')",
+            "DELETE FROM missions WHERE updated_at < ? "
+            "AND status IN ('complete','failed','budget_exhausted','cancelled')",
+            "DELETE FROM telemetry WHERE created_at < ?",
+        ):
+            cursor = connection.execute(statement, (cutoff,))
+            deleted += max(0, int(cursor.rowcount))
+        return deleted
 
     def _initialize_sync(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -124,6 +228,12 @@ class PublicStateStore:
                 );
                 CREATE INDEX IF NOT EXISTS messages_session_id
                     ON messages(session_name, id);
+                CREATE TABLE IF NOT EXISTS session_commits (
+                    job_id TEXT PRIMARY KEY,
+                    session_name TEXT NOT NULL
+                        REFERENCES sessions(name) ON DELETE CASCADE,
+                    created_at TEXT NOT NULL
+                );
                 CREATE TABLE IF NOT EXISTS context_packs (
                     session_name TEXT PRIMARY KEY
                         REFERENCES sessions(name) ON DELETE CASCADE,
@@ -169,7 +279,8 @@ class PublicStateStore:
                     job_id TEXT PRIMARY KEY,
                     created_at TEXT NOT NULL,
                     status TEXT NOT NULL,
-                    payload TEXT
+                    payload TEXT,
+                    owner TEXT
                 );
                 CREATE TABLE IF NOT EXISTS autonomy_jobs (
                     job_id TEXT PRIMARY KEY,
@@ -268,6 +379,17 @@ class PublicStateStore:
                 connection.execute(
                     "ALTER TABLE autonomy_jobs ADD COLUMN request_json TEXT"
                 )
+            agent_job_columns = {
+                str(row[1])
+                for row in connection.execute("PRAGMA table_info(agent_jobs)").fetchall()
+            }
+            if agent_job_columns and "owner" not in agent_job_columns:
+                connection.execute("ALTER TABLE agent_jobs ADD COLUMN owner TEXT")
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS agent_jobs_owner "
+                "ON agent_jobs(owner, job_id)"
+            )
+            self._prune_retention_connection(connection)
             connection.commit()
 
     async def initialize(self) -> None:
@@ -288,6 +410,15 @@ class PublicStateStore:
         async with self._write_lock:
             return await asyncio.to_thread(operation, *args)
 
+    def _prune_retention_sync(self) -> int:
+        with self._connect() as connection:
+            deleted = self._prune_retention_connection(connection)
+            connection.commit()
+        return deleted
+
+    async def prune_retention(self) -> int:
+        return int(await self._write(self._prune_retention_sync))
+
     def _health_sync(self) -> bool:
         with self._connect() as connection:
             row = connection.execute("SELECT 1").fetchone()
@@ -307,11 +438,16 @@ class PublicStateStore:
         model: str | None,
         plane: str | None,
         metadata: dict[str, Any] | None,
-    ) -> int:
+        commit_key: str | None,
+    ) -> tuple[int, bool]:
         now = utc_now()
-        safe_user = redact_secrets(user_text).strip()
-        safe_assistant = redact_secrets(assistant_text).strip()
-        safe_metadata = json.dumps(metadata, separators=(",", ":")) if metadata else None
+        safe_user = bounded_redacted_text(user_text).strip()
+        safe_assistant = bounded_redacted_text(assistant_text).strip()
+        safe_metadata = (
+            json.dumps(redact_json_value(metadata), separators=(",", ":"))
+            if metadata
+            else None
+        )
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             connection.execute(
@@ -325,6 +461,18 @@ class PublicStateStore:
                 """,
                 (session, now, now, model, plane),
             )
+            if commit_key:
+                claimed = connection.execute(
+                    "INSERT INTO session_commits(job_id, session_name, created_at) "
+                    "VALUES (?, ?, ?) ON CONFLICT(job_id) DO NOTHING",
+                    (commit_key, session, now),
+                )
+                if int(claimed.rowcount) != 1:
+                    row = connection.execute(
+                        "SELECT COUNT(*) FROM messages WHERE session_name=?", (session,)
+                    ).fetchone()
+                    connection.commit()
+                    return int(row[0] if row else 0), False
             connection.executemany(
                 """
                 INSERT INTO messages(session_name, role, content, created_at, metadata)
@@ -339,7 +487,7 @@ class PublicStateStore:
                 "SELECT COUNT(*) FROM messages WHERE session_name=?", (session,)
             ).fetchone()
             connection.commit()
-        return int(row[0] if row else 0)
+        return int(row[0] if row else 0), True
 
     async def append_turn(
         self,
@@ -351,17 +499,43 @@ class PublicStateStore:
         plane: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> int:
-        return int(
-            await self._write(
-                self._append_turn_sync,
-                normalize_session(session),
-                user_text,
-                assistant_text,
-                model,
-                plane,
-                metadata,
-            )
+        count, _ = await self._write(
+            self._append_turn_sync,
+            normalize_session(session),
+            user_text,
+            assistant_text,
+            model,
+            plane,
+            metadata,
+            None,
         )
+        return int(count)
+
+    async def append_turn_once(
+        self,
+        session: str,
+        user_text: str,
+        assistant_text: str,
+        *,
+        commit_key: str,
+        model: str | None = None,
+        plane: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> tuple[int, bool]:
+        key = str(commit_key or "").strip()
+        if not key:
+            raise ValueError("commit_key is required")
+        count, inserted = await self._write(
+            self._append_turn_sync,
+            normalize_session(session),
+            user_text,
+            assistant_text,
+            model,
+            plane,
+            metadata,
+            key,
+        )
+        return int(count), bool(inserted)
 
     def _load_messages_sync(self, session: str, limit: int) -> list[dict[str, Any]]:
         with self._connect() as connection:
@@ -401,7 +575,9 @@ class PublicStateStore:
         self, session: str, pack: dict[str, Any], version: int
     ) -> None:
         now = utc_now()
-        payload = json.dumps(pack, separators=(",", ":"), default=str)
+        payload = json.dumps(
+            redact_json_value(pack), separators=(",", ":"), default=str
+        )
         with self._connect() as connection:
             connection.execute(
                 """
@@ -448,22 +624,39 @@ class PublicStateStore:
             self._load_context_pack_sync, normalize_session(session)
         )
 
-    def _list_sessions_sync(self, limit: int) -> list[dict[str, Any]]:
+    def _list_sessions_sync(
+        self, limit: int, prefix: str | None
+    ) -> list[dict[str, Any]]:
         with self._connect() as connection:
-            rows = connection.execute(
-                """
-                SELECT s.name, s.created_at, s.updated_at, s.model, s.plane,
-                       COUNT(m.id) AS message_count
-                FROM sessions s LEFT JOIN messages m ON m.session_name=s.name
-                GROUP BY s.name ORDER BY s.updated_at DESC LIMIT ?
-                """,
-                (limit,),
-            ).fetchall()
+            if prefix:
+                rows = connection.execute(
+                    """
+                    SELECT s.name, s.created_at, s.updated_at, s.model, s.plane,
+                           COUNT(m.id) AS message_count
+                    FROM sessions s LEFT JOIN messages m ON m.session_name=s.name
+                    WHERE s.name LIKE ?
+                    GROUP BY s.name ORDER BY s.updated_at DESC LIMIT ?
+                    """,
+                    (f"{prefix}%", limit),
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    """
+                    SELECT s.name, s.created_at, s.updated_at, s.model, s.plane,
+                           COUNT(m.id) AS message_count
+                    FROM sessions s LEFT JOIN messages m ON m.session_name=s.name
+                    GROUP BY s.name ORDER BY s.updated_at DESC LIMIT ?
+                    """,
+                    (limit,),
+                ).fetchall()
         return [dict(row) for row in rows]
 
-    async def list_sessions(self, limit: int = 50) -> list[dict[str, Any]]:
+    async def list_sessions(
+        self, limit: int = 50, *, prefix: str | None = None
+    ) -> list[dict[str, Any]]:
         bounded = max(1, min(int(limit or 50), 100))
-        return list(await self._read(self._list_sessions_sync, bounded))
+        safe_prefix = str(prefix or "")[:40] or None
+        return list(await self._read(self._list_sessions_sync, bounded, safe_prefix))
 
     def _delete_session_sync(self, session: str) -> bool:
         with self._connect() as connection:
@@ -513,7 +706,22 @@ class PublicStateStore:
         if not query_terms:
             return []
         with self._connect() as connection:
-            if scope and scope != "global":
+            tenant_match = TENANT_SCOPE_PATTERN.match(scope or "")
+            tenant_global = (
+                f"{tenant_match.group(1)}:global" if tenant_match is not None else None
+            )
+            if scope and tenant_global and scope != tenant_global:
+                rows = connection.execute(
+                    "SELECT * FROM knowledge WHERE scope IN (?, ?) "
+                    "ORDER BY id DESC LIMIT 400",
+                    (tenant_global, scope),
+                ).fetchall()
+            elif scope and tenant_global:
+                rows = connection.execute(
+                    "SELECT * FROM knowledge WHERE scope=? ORDER BY id DESC LIMIT 400",
+                    (tenant_global,),
+                ).fetchall()
+            elif scope and scope != "global":
                 rows = connection.execute(
                     "SELECT * FROM knowledge WHERE scope IN ('global', ?) "
                     "ORDER BY id DESC LIMIT 400",
@@ -564,18 +772,32 @@ class PublicStateStore:
         ids = list(dict.fromkeys(int(value) for value in fact_ids))
         await self._write(self._touch_facts_sync, ids)
 
-    def _delete_fact_sync(self, fact_id: int) -> bool:
+    def _delete_fact_sync(self, fact_id: int, scope_prefix: str | None) -> bool:
         with self._connect() as connection:
-            cursor = connection.execute("DELETE FROM knowledge WHERE id=?", (fact_id,))
+            if scope_prefix:
+                cursor = connection.execute(
+                    "DELETE FROM knowledge WHERE id=? AND scope LIKE ?",
+                    (fact_id, f"{scope_prefix}%"),
+                )
+            else:
+                cursor = connection.execute("DELETE FROM knowledge WHERE id=?", (fact_id,))
             connection.commit()
         return bool(cursor.rowcount)
 
-    async def delete_fact(self, fact_id: int) -> bool:
-        return bool(await self._write(self._delete_fact_sync, int(fact_id)))
+    async def delete_fact(self, fact_id: int, *, scope_prefix: str | None = None) -> bool:
+        return bool(
+            await self._write(
+                self._delete_fact_sync,
+                int(fact_id),
+                str(scope_prefix or "")[:40] or None,
+            )
+        )
 
     def _save_telemetry_sync(self, row: dict[str, Any]) -> int:
         safe_metadata = json.dumps(
-            row.get("metadata") or {}, separators=(",", ":"), sort_keys=True
+            redact_json_value(row.get("metadata") or {}),
+            separators=(",", ":"),
+            sort_keys=True,
         )
         with self._connect() as connection:
             cursor = connection.execute(
@@ -598,61 +820,50 @@ class PublicStateStore:
                     int(bool(row.get("verified"))),
                     max(0, int(row.get("latency_ms") or 0)),
                     max(0.0, float(row.get("cost_usd") or 0.0)),
-                    str(row.get("fallback_reason") or "")[:120] or None,
-                    str(row.get("stop_reason") or "")[:80] or None,
+                    redact_secrets(row.get("fallback_reason") or "")[:120] or None,
+                    redact_secrets(row.get("stop_reason") or "")[:80] or None,
                     safe_metadata,
                 ),
             )
+            self._prune_retention_connection(connection)
             connection.commit()
         return int(cursor.lastrowid)
 
     async def save_telemetry(self, row: dict[str, Any]) -> int:
         return int(await self._write(self._save_telemetry_sync, dict(row)))
 
-    def _save_agent_job_sync(self, job_id: str, status: str, payload: str | None) -> None:
-        with self._connect() as connection:
-            connection.execute(
-                "INSERT INTO agent_jobs (job_id, created_at, status, payload) "
-                "VALUES (?, ?, ?, ?) ON CONFLICT(job_id) DO UPDATE SET "
-                "status=excluded.status, payload=excluded.payload",
-                (job_id, utc_now(), status, payload),
-            )
-            connection.execute(
-                "DELETE FROM agent_jobs WHERE created_at < datetime('now', '-1 day')"
-            )
-            connection.commit()
-
-    async def save_agent_job(
-        self, job_id: str, status: str, payload: dict[str, Any] | None = None
-    ) -> None:
-        encoded = (
-            json.dumps(payload, separators=(",", ":"), default=str)
-            if payload is not None
-            else None
-        )
-        await self._write(self._save_agent_job_sync, job_id, status, encoded)
-
-    def _load_agent_job_sync(self, job_id: str) -> dict[str, Any] | None:
+    def _get_caller_cost_today_sync(self, caller: str, day_start: str) -> float:
         with self._connect() as connection:
             row = connection.execute(
-                "SELECT status, payload FROM agent_jobs WHERE job_id=?", (job_id,)
+                "SELECT COALESCE(SUM(cost_usd), 0) FROM telemetry "
+                "WHERE caller=? AND created_at>=?",
+                (caller, day_start),
             ).fetchone()
-        if row is None:
-            return None
-        payload: dict[str, Any] | None = None
-        if row["payload"]:
-            try:
-                decoded = json.loads(row["payload"])
-                payload = decoded if isinstance(decoded, dict) else None
-            except json.JSONDecodeError:
-                payload = None
-        return {"status": str(row["status"]), "payload": payload}
+        return float(row[0] if row and row[0] is not None else 0.0)
 
-    async def load_agent_job(self, job_id: str) -> dict[str, Any] | None:
-        return await self._read(self._load_agent_job_sync, job_id)
+    async def get_caller_cost_today(self, caller: str) -> float:
+        """Return this UTC day's exact-principal telemetry spend."""
+        normalized = str(caller or "").strip()
+        if not normalized or len(normalized) > 160:
+            raise ValueError("caller must be 1-160 characters")
+        day_start = datetime.now(UTC).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        ).isoformat()
+        return float(
+            await self._read(
+                self._get_caller_cost_today_sync,
+                normalized,
+                day_start,
+            )
+        )
 
-    def _record_benchmark_result_sync(
-        self, telemetry_id: int, success: bool, note: str
+    def _reclassify_telemetry_error_sync(
+        self,
+        telemetry_id: int,
+        latency_ms: int,
+        fallback_reason: str,
+        error_type: str,
+        incurred_attempts: list[dict[str, Any]],
     ) -> bool:
         with self._connect() as connection:
             row = connection.execute(
@@ -666,24 +877,258 @@ class PublicStateStore:
                 metadata = {}
             if not isinstance(metadata, dict):
                 metadata = {}
-            metadata["benchmark_feedback"] = {
-                "success": bool(success),
-                "note": redact_secrets(note).strip()[:1000],
-                "recorded_at": utc_now(),
+            metadata["post_provider_error"] = {
+                "error_type": str(error_type or "Error")[:160],
+                "incurred_attempts": incurred_attempts,
             }
             connection.execute(
-                "UPDATE telemetry SET success=?, verified=1, metadata=? WHERE id=?",
+                """
+                UPDATE telemetry
+                SET route='error', success=0, verified=1, latency_ms=?,
+                    fallback_reason=?, stop_reason='error', metadata=?
+                WHERE id=?
+                """,
                 (
-                    int(bool(success)),
-                    json.dumps(metadata, separators=(",", ":"), sort_keys=True),
+                    max(0, int(latency_ms)),
+                    redact_secrets(fallback_reason or "")[:120] or None,
+                    json.dumps(
+                        redact_json_value(metadata),
+                        separators=(",", ":"),
+                        sort_keys=True,
+                    ),
                     telemetry_id,
                 ),
             )
             connection.commit()
         return True
 
+    async def reclassify_telemetry_error(
+        self,
+        telemetry_id: int,
+        *,
+        latency_ms: int,
+        fallback_reason: str,
+        error_type: str,
+        incurred_attempts: list[dict[str, Any]],
+    ) -> bool:
+        return bool(
+            await self._write(
+                self._reclassify_telemetry_error_sync,
+                int(telemetry_id),
+                int(latency_ms),
+                fallback_reason,
+                error_type,
+                incurred_attempts,
+            )
+        )
+
+    def _save_agent_job_sync(
+        self,
+        job_id: str,
+        status: str,
+        payload: str | None,
+        owner: str | None,
+    ) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                "INSERT INTO agent_jobs (job_id, created_at, status, payload, owner) "
+                "VALUES (?, ?, ?, ?, ?) ON CONFLICT(job_id) DO UPDATE SET "
+                "created_at=excluded.created_at, status=excluded.status, "
+                "payload=excluded.payload, owner=COALESCE(agent_jobs.owner, excluded.owner)",
+                (job_id, utc_now(), status, payload, owner),
+            )
+            self._prune_retention_connection(connection)
+            connection.commit()
+
+    async def save_agent_job(
+        self,
+        job_id: str,
+        status: str,
+        payload: dict[str, Any] | None = None,
+        *,
+        owner: str | None = None,
+    ) -> None:
+        encoded = (
+            json.dumps(
+                _durable_agent_payload(payload), separators=(",", ":"), default=str
+            )
+            if payload is not None
+            else None
+        )
+        await self._write(
+            self._save_agent_job_sync,
+            job_id,
+            status,
+            encoded,
+            str(owner or "")[:160] or None,
+        )
+
+    def _load_agent_job_sync(
+        self, job_id: str, owner: str | None
+    ) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            if owner:
+                row = connection.execute(
+                    "SELECT status, payload, owner FROM agent_jobs "
+                    "WHERE job_id=? AND owner=?",
+                    (job_id, owner),
+                ).fetchone()
+            else:
+                row = connection.execute(
+                    "SELECT status, payload, owner FROM agent_jobs WHERE job_id=?",
+                    (job_id,),
+                ).fetchone()
+        if row is None:
+            return None
+        payload: dict[str, Any] | None = None
+        if row["payload"]:
+            try:
+                decoded = json.loads(row["payload"])
+                payload = decoded if isinstance(decoded, dict) else None
+            except json.JSONDecodeError:
+                payload = None
+        return {
+            "status": str(row["status"]),
+            "payload": payload,
+        }
+
+    async def load_agent_job(
+        self, job_id: str, *, owner: str | None = None
+    ) -> dict[str, Any] | None:
+        return await self._read(
+            self._load_agent_job_sync,
+            job_id,
+            str(owner or "")[:160] or None,
+        )
+
+    def _mirror_mission_result_sync(
+        self,
+        mission_id: str,
+        expect_status: str,
+        expect_checkpoint_version: int,
+        expect_lease_generation: int,
+        job_id: str,
+        job_status: str,
+        autonomy_status: str,
+        encoded_payload: str,
+    ) -> bool:
+        now = utc_now()
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            mission = connection.execute(
+                "SELECT status, job_id, checkpoint_version, lease_generation "
+                "FROM missions WHERE mission_id=?",
+                (mission_id,),
+            ).fetchone()
+            if (
+                mission is None
+                or str(mission["status"] or "") != expect_status
+                or str(mission["job_id"] or "") != job_id
+                or int(mission["checkpoint_version"] or 0)
+                != int(expect_checkpoint_version)
+                or int(mission["lease_generation"] or 0)
+                != int(expect_lease_generation)
+            ):
+                connection.rollback()
+                return False
+            connection.execute(
+                "INSERT INTO agent_jobs(job_id, created_at, status, payload) "
+                "VALUES (?, ?, ?, ?) ON CONFLICT(job_id) DO UPDATE SET "
+                "created_at=excluded.created_at, status=excluded.status, "
+                "payload=excluded.payload",
+                (job_id, now, job_status, encoded_payload),
+            )
+            connection.execute(
+                "UPDATE autonomy_jobs SET status=?, updated_at=? WHERE job_id=?",
+                (autonomy_status, now, job_id),
+            )
+            self._prune_retention_connection(connection)
+            connection.commit()
+        return True
+
+    async def mirror_mission_result(
+        self,
+        mission_id: str,
+        *,
+        expect_status: str,
+        expect_checkpoint_version: int,
+        expect_lease_generation: int,
+        job_id: str,
+        job_status: str,
+        autonomy_status: str,
+        payload: dict[str, Any],
+    ) -> bool:
+        encoded = json.dumps(
+            _durable_agent_payload(payload), separators=(",", ":"), default=str
+        )
+        return bool(
+            await self._write(
+                self._mirror_mission_result_sync,
+                mission_id,
+                expect_status,
+                int(expect_checkpoint_version),
+                int(expect_lease_generation),
+                job_id,
+                job_status,
+                autonomy_status,
+                encoded,
+            )
+        )
+
+    def _record_benchmark_result_sync(
+        self,
+        telemetry_id: int,
+        success: bool,
+        note: str,
+        caller: str | None,
+    ) -> bool:
+        with self._connect() as connection:
+            if caller:
+                row = connection.execute(
+                    "SELECT metadata FROM telemetry WHERE id=? AND caller=?",
+                    (telemetry_id, caller),
+                ).fetchone()
+            else:
+                row = connection.execute(
+                    "SELECT metadata FROM telemetry WHERE id=?", (telemetry_id,)
+                ).fetchone()
+            if row is None:
+                return False
+            try:
+                metadata = json.loads(row["metadata"] or "{}")
+            except json.JSONDecodeError:
+                metadata = {}
+            if not isinstance(metadata, dict):
+                metadata = {}
+            metadata["benchmark_feedback"] = {
+                "success": bool(success),
+                "note": redact_secrets(note).strip()[:1000],
+                "recorded_at": utc_now(),
+            }
+            encoded = json.dumps(
+                redact_json_value(metadata), separators=(",", ":"), sort_keys=True
+            )
+            if caller:
+                connection.execute(
+                    "UPDATE telemetry SET success=?, verified=1, metadata=? "
+                    "WHERE id=? AND caller=?",
+                    (int(bool(success)), encoded, telemetry_id, caller),
+                )
+            else:
+                connection.execute(
+                    "UPDATE telemetry SET success=?, verified=1, metadata=? WHERE id=?",
+                    (int(bool(success)), encoded, telemetry_id),
+                )
+            connection.commit()
+        return True
+
     async def record_benchmark_result(
-        self, telemetry_id: int, success: bool, note: str = ""
+        self,
+        telemetry_id: int,
+        success: bool,
+        note: str = "",
+        *,
+        caller: str | None = None,
     ) -> bool:
         return bool(
             await self._write(
@@ -691,14 +1136,24 @@ class PublicStateStore:
                 int(telemetry_id),
                 bool(success),
                 note,
+                str(caller or "")[:160] or None,
             )
         )
 
-    def _telemetry_summary_sync(self, limit: int) -> dict[str, Any]:
+    def _telemetry_summary_sync(
+        self, limit: int, caller: str | None
+    ) -> dict[str, Any]:
         with self._connect() as connection:
-            rows = connection.execute(
-                "SELECT * FROM telemetry ORDER BY id DESC LIMIT ?", (limit,)
-            ).fetchall()
+            if caller:
+                rows = connection.execute(
+                    "SELECT * FROM telemetry WHERE caller=? "
+                    "ORDER BY id DESC LIMIT ?",
+                    (caller, limit),
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    "SELECT * FROM telemetry ORDER BY id DESC LIMIT ?", (limit,)
+                ).fetchall()
         items = [dict(row) for row in rows]
         latencies = sorted(int(item["latency_ms"] or 0) for item in items)
 
@@ -774,9 +1229,17 @@ class PublicStateStore:
             ],
         }
 
-    async def telemetry_summary(self, limit: int = 1000) -> dict[str, Any]:
+    async def telemetry_summary(
+        self, limit: int = 1000, *, caller: str | None = None
+    ) -> dict[str, Any]:
         bounded = max(1, min(int(limit or 1000), 10_000))
-        return dict(await self._read(self._telemetry_summary_sync, bounded))
+        return dict(
+            await self._read(
+                self._telemetry_summary_sync,
+                bounded,
+                str(caller or "")[:160] or None,
+            )
+        )
 
     def _create_autonomy_job_sync(
         self,
@@ -819,10 +1282,7 @@ class PublicStateStore:
                     now,
                 ),
             )
-            # Bound autonomy retention like agent_jobs (no indefinite prompt/answer store).
-            connection.execute(
-                "DELETE FROM autonomy_jobs WHERE created_at < datetime('now', '-1 day')"
-            )
+            self._prune_retention_connection(connection)
             connection.commit()
 
     async def create_autonomy_job(
@@ -834,7 +1294,9 @@ class PublicStateStore:
         continue_token: str,
         request: dict[str, Any] | None = None,
     ) -> None:
-        encoded = json.dumps(request or {}, separators=(",", ":"), default=str)
+        encoded = json.dumps(
+            redact_json_value(request or {}), separators=(",", ":"), default=str
+        )
         await self._write(
             self._create_autonomy_job_sync,
             job_id,
@@ -950,20 +1412,25 @@ class PublicStateStore:
                         payload = decoded
                 except json.JSONDecodeError:
                     payload = {}
+            safe_enrichment = redact_json_value(enrichment)
             if status in {"complete", "error", "needs_continuation"}:
-                payload.update(enrichment)
+                payload.update(safe_enrichment)
                 if enrichment.get("review_kind") and payload.get("status") == "complete":
                     payload["review"] = payload.get("text")
             else:
                 pending = payload.get("pending_enrichment")
                 if not isinstance(pending, dict):
                     pending = {}
-                pending.update(enrichment)
+                pending.update(safe_enrichment)
                 payload["pending_enrichment"] = pending
             connection.execute(
                 "UPDATE agent_jobs SET payload=? WHERE job_id=?",
                 (
-                    json.dumps(payload, separators=(",", ":"), default=str),
+                    json.dumps(
+                        redact_json_value(payload),
+                        separators=(",", ":"),
+                        default=str,
+                    ),
                     job_id,
                 ),
             )
@@ -981,7 +1448,9 @@ class PublicStateStore:
         self, job_id: str, event_type: str, payload: dict[str, Any]
     ) -> int:
         now = utc_now()
-        encoded = json.dumps(payload, separators=(",", ":"), default=str)
+        encoded = json.dumps(
+            redact_json_value(payload), separators=(",", ":"), default=str
+        )
         with self._connect() as connection:
             cursor = connection.execute(
                 """
@@ -1070,6 +1539,7 @@ class PublicStateStore:
                     now,
                 ),
             )
+            self._prune_retention_connection(connection)
             connection.commit()
 
     async def put_autonomy_artifact(
@@ -1142,6 +1612,7 @@ class PublicStateStore:
                     lease_expires_at,
                 ),
             )
+            self._prune_retention_connection(connection)
             connection.commit()
 
     async def create_mission(
@@ -1164,7 +1635,9 @@ class PublicStateStore:
             acceptance_hash,
             acceptance_text,
             continue_token,
-            json.dumps(package, separators=(",", ":"), default=str),
+            json.dumps(
+                redact_json_value(package), separators=(",", ":"), default=str
+            ),
             lease_token,
             int(lease_generation),
             lease_expires_at,
@@ -1200,6 +1673,22 @@ class PublicStateStore:
     async def load_mission_by_job(self, job_id: str) -> dict[str, Any] | None:
         return await self._read(self._load_mission_by_job_sync, job_id)
 
+    def _load_mission_by_token_sync(self, continue_token: str) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT mission_id FROM missions WHERE continue_token=?",
+                (continue_token,),
+            ).fetchone()
+        if row is None:
+            return None
+        return self._load_mission_sync(str(row["mission_id"]))
+
+    async def load_mission_by_token(self, continue_token: str) -> dict[str, Any] | None:
+        token = str(continue_token or "").strip().lower()
+        if not re.fullmatch(r"[0-9a-f]{32}", token):
+            raise ValueError("continue_token must be a 32-character hex token")
+        return await self._read(self._load_mission_by_token_sync, token)
+
     def _claim_mission_sync(
         self,
         mission_id: str,
@@ -1207,77 +1696,63 @@ class PublicStateStore:
         ttl_seconds: int,
         expect_generation: int | None,
     ) -> tuple[bool, int]:
-        from unigrok_public.mission.lease import (
-            fence_generation_next,
-            lease_active,
-            lease_expiry_iso,
-        )
+        from unigrok_public.mission.lease import lease_expiry_iso
 
         now = utc_now()
         expires_at = lease_expiry_iso(ttl_seconds=ttl_seconds)
+        expected = int(expect_generation) if expect_generation is not None else None
         with self._connect() as connection:
-            row = connection.execute(
-                "SELECT lease_token, lease_expires_at, lease_generation, status "
-                "FROM missions WHERE mission_id=?",
-                (mission_id,),
-            ).fetchone()
-            if row is None:
-                return False, 0
-            current = row["lease_token"]
-            gen = int(row["lease_generation"] or 0)
-            if (
-                current == lease_token
-                and expect_generation is not None
-                and gen == int(expect_generation)
-            ):
-                connection.execute(
-                    """
-                    UPDATE missions
-                    SET lease_expires_at=?, updated_at=?
-                    WHERE mission_id=? AND lease_token=? AND lease_generation=?
-                    """,
-                    (expires_at, now, mission_id, lease_token, gen),
-                )
-                connection.commit()
-                return True, gen
-            status = str(row["status"] or "")
-            if (
-                current
-                and current != lease_token
-                and lease_active(row["lease_expires_at"], now=now)
-            ):
-                # Includes mid-verifying: never steal an active lease (bumped
-                # lease_generation bricks VERIFYING→COMPLETE → cas_verifying_failed).
-                return False, gen
-            new_gen = fence_generation_next(gen)
-            # Expired verifying reclaim keeps status=verifying so the new owner
-            # can CAS VERIFYING→COMPLETE with the fresh generation.
-            if status == "verifying":
-                connection.execute(
-                    """
-                    UPDATE missions
-                    SET lease_token=?, lease_generation=?, lease_expires_at=?,
-                        updated_at=?
-                    WHERE mission_id=? AND status='verifying'
-                    """,
-                    (lease_token, new_gen, expires_at, now, mission_id),
-                )
-                connection.commit()
-                return True, new_gen
-            connection.execute(
+            claimed = connection.execute(
                 """
                 UPDATE missions
-                SET lease_token=?, lease_generation=?, lease_expires_at=?,
+                SET lease_token=:lease_token,
+                    lease_generation=CASE
+                        WHEN lease_token=:lease_token
+                             AND :expect_generation IS NOT NULL
+                             AND lease_generation=:expect_generation
+                        THEN lease_generation
+                        ELSE lease_generation + 1
+                    END,
+                    lease_expires_at=:expires_at,
                     status=CASE WHEN status IN (
-                        'queued','waiting_event','waiting_timer','dormant','escalated'
+                        'queued','waiting_event'
                     ) THEN 'running' ELSE status END,
-                    updated_at=?
-                WHERE mission_id=?
+                    updated_at=:now
+                WHERE mission_id=:mission_id
+                  AND status IN ('queued','waiting_event','running','verifying')
+                  AND (
+                      (
+                          lease_token=:lease_token
+                          AND :expect_generation IS NOT NULL
+                          AND lease_generation=:expect_generation
+                      )
+                      OR COALESCE(lease_token, '')=''
+                      OR lease_expires_at IS NULL
+                      OR lease_expires_at <= :now
+                  )
+                RETURNING lease_generation
                 """,
-                (lease_token, new_gen, expires_at, now, mission_id),
-            )
+                {
+                    "mission_id": mission_id,
+                    "lease_token": lease_token,
+                    "expect_generation": expected,
+                    "expires_at": expires_at,
+                    "now": now,
+                },
+            ).fetchall()
+            if claimed:
+                generation = int(claimed[0]["lease_generation"] or 0)
+                connection.commit()
+                return True, generation
+
+            # Preserve the public return shape: a rejected claim reports the
+            # current fence, while a missing mission reports generation zero.
+            row = connection.execute(
+                "SELECT lease_generation FROM missions WHERE mission_id=?",
+                (mission_id,),
+            ).fetchone()
             connection.commit()
-        return True, new_gen
+        return False, int(row["lease_generation"] or 0) if row is not None else 0
 
     async def claim_mission(
         self,
@@ -1343,6 +1818,7 @@ class PublicStateStore:
         expect_version: int,
         expect_lease_generation: int,
         new_status: str,
+        expect_lease_token: str | None,
         clear_lease: bool,
         checkpoint_update: dict[str, Any] | None,
         bump_verify_failure: bool,
@@ -1355,7 +1831,7 @@ class PublicStateStore:
         with self._connect() as connection:
             row = connection.execute(
                 "SELECT status, checkpoint_version, lease_generation, checkpoint_json, "
-                "verify_failures FROM missions WHERE mission_id=?",
+                "verify_failures, job_id FROM missions WHERE mission_id=?",
                 (mission_id,),
             ).fetchone()
             if row is None:
@@ -1371,7 +1847,7 @@ class PublicStateStore:
             except json.JSONDecodeError:
                 checkpoint = {}
             if checkpoint_update:
-                checkpoint.update(checkpoint_update)
+                checkpoint.update(redact_json_value(checkpoint_update))
             new_version = int(expect_version) + 1
             verify_failures = int(row["verify_failures"] or 0)
             if bump_verify_failure:
@@ -1389,6 +1865,7 @@ class PublicStateStore:
                         verify_failures=?, updated_at=?
                     WHERE mission_id=? AND status=? AND checkpoint_version=?
                           AND lease_generation=?
+                          AND (? IS NULL OR lease_token=?)
                     """,
                     (
                         new_status,
@@ -1401,6 +1878,8 @@ class PublicStateStore:
                         expect_status,
                         int(expect_version),
                         int(expect_lease_generation),
+                        expect_lease_token,
+                        expect_lease_token,
                     ),
                 )
             else:
@@ -1411,6 +1890,7 @@ class PublicStateStore:
                         verify_failures=?, updated_at=?
                     WHERE mission_id=? AND status=? AND checkpoint_version=?
                           AND lease_generation=?
+                          AND (? IS NULL OR lease_token=?)
                     """,
                     (
                         new_status,
@@ -1422,10 +1902,27 @@ class PublicStateStore:
                         expect_status,
                         int(expect_version),
                         int(expect_lease_generation),
+                        expect_lease_token,
+                        expect_lease_token,
+                    ),
+                )
+            changed = int(cur.rowcount) == 1
+            if changed and new_status in {
+                "complete",
+                "failed",
+                "budget_exhausted",
+                "cancelled",
+            }:
+                connection.execute(
+                    "UPDATE autonomy_jobs SET status=?, updated_at=? WHERE job_id=?",
+                    (
+                        "committed" if new_status == "complete" else "terminal",
+                        now,
+                        str(row["job_id"]),
                     ),
                 )
             connection.commit()
-            return int(cur.rowcount) == 1
+            return changed
 
     async def cas_mission_status(
         self,
@@ -1435,6 +1932,7 @@ class PublicStateStore:
         expect_version: int,
         expect_lease_generation: int,
         new_status: str,
+        expect_lease_token: str | None = None,
         clear_lease: bool = False,
         checkpoint_update: dict[str, Any] | None = None,
         bump_verify_failure: bool = False,
@@ -1447,6 +1945,7 @@ class PublicStateStore:
                 int(expect_version),
                 int(expect_lease_generation),
                 new_status,
+                expect_lease_token,
                 clear_lease,
                 checkpoint_update,
                 bump_verify_failure,
@@ -1454,17 +1953,25 @@ class PublicStateStore:
         )
 
     def _touch_mission_envelope_sync(
-        self, mission_id: str, envelope_version: int
-    ) -> None:
+        self,
+        mission_id: str,
+        envelope_version: int,
+        lease_token: str,
+        lease_generation: int,
+    ) -> bool:
         """Record deployment envelope version; never raise mission caps here."""
         now = utc_now()
         with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
             row = connection.execute(
-                "SELECT envelope_version, package_json FROM missions WHERE mission_id=?",
-                (mission_id,),
+                "SELECT envelope_version, package_json FROM missions "
+                "WHERE mission_id=? AND lease_token=? AND lease_generation=? "
+                "AND status NOT IN ('complete','failed','budget_exhausted','cancelled')",
+                (mission_id, lease_token, int(lease_generation)),
             ).fetchone()
             if row is None:
-                return
+                connection.rollback()
+                return False
             current = int(row["envelope_version"] or 1)
             new_v = max(current, int(envelope_version))
             try:
@@ -1472,36 +1979,71 @@ class PublicStateStore:
             except json.JSONDecodeError:
                 package = {}
             package["bound_envelope_version"] = new_v
-            connection.execute(
+            updated = connection.execute(
                 """
                 UPDATE missions
                 SET envelope_version=?, package_json=?, updated_at=?
-                WHERE mission_id=?
+                WHERE mission_id=? AND lease_token=? AND lease_generation=?
+                  AND status NOT IN ('complete','failed','budget_exhausted','cancelled')
                 """,
                 (
                     new_v,
-                    json.dumps(package, separators=(",", ":"), default=str),
+                    json.dumps(
+                        redact_json_value(package), separators=(",", ":"), default=str
+                    ),
                     now,
                     mission_id,
+                    lease_token,
+                    int(lease_generation),
                 ),
             )
             connection.commit()
+            return int(updated.rowcount) == 1
 
     async def touch_mission_envelope(
-        self, mission_id: str, *, envelope_version: int
-    ) -> None:
-        await self._write(
-            self._touch_mission_envelope_sync,
-            mission_id,
-            int(envelope_version),
+        self,
+        mission_id: str,
+        *,
+        envelope_version: int,
+        lease_token: str,
+        lease_generation: int,
+    ) -> bool:
+        return bool(
+            await self._write(
+                self._touch_mission_envelope_sync,
+                mission_id,
+                int(envelope_version),
+                lease_token,
+                int(lease_generation),
+            )
         )
 
     def _append_mission_event_sync(
-        self, mission_id: str, event_type: str, payload: dict[str, Any]
+        self,
+        mission_id: str,
+        event_type: str,
+        payload: dict[str, Any],
+        lease_token: str | None,
+        lease_generation: int | None,
     ) -> int:
         now = utc_now()
-        encoded = json.dumps(payload, separators=(",", ":"), default=str)
+        encoded = json.dumps(
+            redact_json_value(payload), separators=(",", ":"), default=str
+        )
         with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            if lease_token is not None or lease_generation is not None:
+                if lease_token is None or lease_generation is None:
+                    connection.rollback()
+                    return 0
+                owner = connection.execute(
+                    "SELECT 1 FROM missions WHERE mission_id=? AND lease_token=? "
+                    "AND lease_generation=?",
+                    (mission_id, lease_token, int(lease_generation)),
+                ).fetchone()
+                if owner is None:
+                    connection.rollback()
+                    return 0
             cursor = connection.execute(
                 """
                 INSERT INTO mission_ledger(mission_id, event_type, payload, created_at)
@@ -1520,7 +2062,13 @@ class PublicStateStore:
         return event_id
 
     async def append_mission_event(
-        self, mission_id: str, event_type: str, payload: dict[str, Any] | None = None
+        self,
+        mission_id: str,
+        event_type: str,
+        payload: dict[str, Any] | None = None,
+        *,
+        lease_token: str | None = None,
+        lease_generation: int | None = None,
     ) -> int:
         return int(
             await self._write(
@@ -1528,6 +2076,8 @@ class PublicStateStore:
                 mission_id,
                 event_type,
                 dict(payload or {}),
+                lease_token,
+                lease_generation,
             )
         )
 
@@ -1538,9 +2088,24 @@ class PublicStateStore:
         kind: str,
         sealed: str,
         projection: str,
-    ) -> None:
+        lease_token: str | None,
+        lease_generation: int | None,
+    ) -> bool:
         now = utc_now()
         with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            if lease_token is not None or lease_generation is not None:
+                if lease_token is None or lease_generation is None:
+                    connection.rollback()
+                    return False
+                owner = connection.execute(
+                    "SELECT 1 FROM missions WHERE mission_id=? AND lease_token=? "
+                    "AND lease_generation=?",
+                    (mission_id, lease_token, int(lease_generation)),
+                ).fetchone()
+                if owner is None:
+                    connection.rollback()
+                    return False
             connection.execute(
                 """
                 INSERT INTO mission_artifacts(
@@ -1549,9 +2114,17 @@ class PublicStateStore:
                 VALUES (?, ?, ?, ?, ?, ?)
                 ON CONFLICT(hash) DO NOTHING
                 """,
-                (digest, mission_id, kind, sealed, projection, now),
+                (
+                    digest,
+                    mission_id,
+                    kind,
+                    redact_secrets(sealed),
+                    redact_secrets(projection),
+                    now,
+                ),
             )
             connection.commit()
+        return True
 
     async def put_mission_artifact(
         self,
@@ -1561,15 +2134,33 @@ class PublicStateStore:
         kind: str,
         sealed: str,
         projection: str,
-    ) -> None:
-        await self._write(
-            self._put_mission_artifact_sync,
-            mission_id,
-            digest,
-            kind,
-            sealed,
-            projection,
+        lease_token: str | None = None,
+        lease_generation: int | None = None,
+    ) -> bool:
+        return bool(
+            await self._write(
+                self._put_mission_artifact_sync,
+                mission_id,
+                digest,
+                kind,
+                sealed,
+                projection,
+                lease_token,
+                lease_generation,
+            )
         )
+
+    def _get_mission_artifact_sync(self, digest: str) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT hash, mission_id, kind, sealed, projection, created_at "
+                "FROM mission_artifacts WHERE hash=?",
+                (digest,),
+            ).fetchone()
+        return dict(row) if row is not None else None
+
+    async def get_mission_artifact(self, digest: str) -> dict[str, Any] | None:
+        return await self._read(self._get_mission_artifact_sync, digest)
 
     def _append_mission_evidence_sync(
         self,
@@ -1579,17 +2170,24 @@ class PublicStateStore:
         payload: dict[str, Any],
         artifact_refs: list[str],
         lease_generation: int,
-    ) -> None:
+        lease_token: str | None,
+    ) -> bool:
         now = utc_now()
         with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
             row = connection.execute(
-                "SELECT lease_generation FROM missions WHERE mission_id=?",
+                "SELECT lease_generation, lease_token FROM missions WHERE mission_id=?",
                 (mission_id,),
             ).fetchone()
             if row is None:
-                return
+                connection.rollback()
+                return False
             if int(row["lease_generation"] or 0) != int(lease_generation):
-                return
+                connection.rollback()
+                return False
+            if lease_token is not None and str(row["lease_token"] or "") != lease_token:
+                connection.rollback()
+                return False
             connection.execute(
                 """
                 INSERT INTO mission_evidence(
@@ -1602,13 +2200,18 @@ class PublicStateStore:
                     mission_id,
                     klass,
                     digest,
-                    json.dumps(payload, separators=(",", ":"), default=str),
+                    json.dumps(
+                        redact_json_value(payload),
+                        separators=(",", ":"),
+                        default=str,
+                    ),
                     json.dumps(list(artifact_refs), separators=(",", ":")),
                     int(lease_generation),
                     now,
                 ),
             )
             connection.commit()
+        return True
 
     async def append_mission_evidence(
         self,
@@ -1619,15 +2222,19 @@ class PublicStateStore:
         payload: dict[str, Any],
         artifact_refs: list[str],
         lease_generation: int,
-    ) -> None:
-        await self._write(
-            self._append_mission_evidence_sync,
-            mission_id,
-            klass,
-            digest,
-            payload,
-            artifact_refs,
-            int(lease_generation),
+        lease_token: str | None = None,
+    ) -> bool:
+        return bool(
+            await self._write(
+                self._append_mission_evidence_sync,
+                mission_id,
+                klass,
+                digest,
+                payload,
+                artifact_refs,
+                int(lease_generation),
+                lease_token,
+            )
         )
 
     def _list_mission_evidence_sync(self, mission_id: str) -> list[dict[str, Any]]:
@@ -1665,6 +2272,7 @@ class PublicStateStore:
     ) -> bool:
         now = utc_now()
         with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
             row = connection.execute(
                 "SELECT lease_generation FROM missions WHERE mission_id=?",
                 (mission_id,),
@@ -1688,7 +2296,11 @@ class PublicStateStore:
                 (
                     quantum_key,
                     mission_id,
-                    json.dumps(receipt, separators=(",", ":"), default=str),
+                    json.dumps(
+                        redact_json_value(receipt),
+                        separators=(",", ":"),
+                        default=str,
+                    ),
                     int(lease_generation),
                     now,
                 ),
@@ -1720,7 +2332,8 @@ class PublicStateStore:
         with self._connect() as connection:
             rows = connection.execute(
                 """
-                SELECT mission_id, status, checkpoint_version, lease_generation
+                SELECT mission_id, status, checkpoint_version, lease_generation,
+                       lease_expires_at
                 FROM missions
                 WHERE lease_expires_at IS NOT NULL
                   AND lease_expires_at < ?
@@ -1735,3 +2348,59 @@ class PublicStateStore:
     async def list_expired_mission_leases(self, *, limit: int = 50) -> list[dict[str, Any]]:
         return list(await self._read(self._list_expired_mission_leases_sync, int(limit)))
 
+    def _requeue_expired_mission_sync(
+        self,
+        mission_id: str,
+        expect_status: str,
+        expect_version: int,
+        expect_lease_generation: int,
+        expect_lease_expires_at: str,
+    ) -> bool:
+        from unigrok_public.mission.types import MissionStatus, legal_transition
+
+        if not legal_transition(expect_status, MissionStatus.QUEUED):
+            return False
+        now = utc_now()
+        with self._connect() as connection:
+            changed = connection.execute(
+                """
+                UPDATE missions
+                SET status='queued', checkpoint_version=checkpoint_version + 1,
+                    lease_token=NULL, lease_expires_at=NULL,
+                    lease_generation=lease_generation + 1, updated_at=?
+                WHERE mission_id=? AND status=? AND checkpoint_version=?
+                  AND lease_generation=? AND lease_expires_at=?
+                  AND lease_expires_at < ?
+                """,
+                (
+                    now,
+                    mission_id,
+                    expect_status,
+                    int(expect_version),
+                    int(expect_lease_generation),
+                    expect_lease_expires_at,
+                    now,
+                ),
+            )
+            connection.commit()
+            return int(changed.rowcount) == 1
+
+    async def requeue_expired_mission(
+        self,
+        mission_id: str,
+        *,
+        expect_status: str,
+        expect_version: int,
+        expect_lease_generation: int,
+        expect_lease_expires_at: str,
+    ) -> bool:
+        return bool(
+            await self._write(
+                self._requeue_expired_mission_sync,
+                mission_id,
+                expect_status,
+                int(expect_version),
+                int(expect_lease_generation),
+                expect_lease_expires_at,
+            )
+        )

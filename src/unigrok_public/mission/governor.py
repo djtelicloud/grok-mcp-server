@@ -101,6 +101,67 @@ class GovernorConfig:
             "weight_bundle_version": self.weight_bundle_version,
         }
 
+    @classmethod
+    def from_dict(cls, raw: Any) -> GovernorConfig | None:
+        """Load an already-frozen mission config without consulting live defaults."""
+        if not isinstance(raw, dict):
+            return None
+        level = str(raw.get("reasoning_level") or "")
+        if level not in _LEVELS:
+            return None
+        allowed_roles = {
+            "architect",
+            "pm",
+            "engineer",
+            "qa",
+            "security",
+            "product",
+            "perf",
+        }
+        roles = tuple(
+            dict.fromkeys(
+                str(role)
+                for role in raw.get("voter_roles") or []
+                if str(role) in allowed_roles
+            )
+        )
+        if not roles:
+            return None
+        try:
+            candidate_count = int(raw["candidate_count"])
+            critique_rounds = int(raw["critique_rounds"])
+            context_budget = int(raw["context_budget"])
+            tool_budget = int(raw["tool_budget"])
+            quantum_size = int(raw["quantum_size"])
+        except (KeyError, TypeError, ValueError):
+            return None
+        if (
+            candidate_count < 1
+            or critique_rounds < 0
+            or context_budget < 1
+            or tool_budget < 0
+            or quantum_size < 1
+        ):
+            return None
+        verification_depth = str(raw.get("verification_depth") or "")
+        if verification_depth not in {"normal", "strict"}:
+            return None
+        return cls(
+            reasoning_level=level,
+            voter_roles=roles,
+            candidate_count=candidate_count,
+            critique_rounds=critique_rounds,
+            context_budget=context_budget,
+            tool_budget=tool_budget,
+            verification_depth=verification_depth,
+            quantum_size=quantum_size,
+            shadow=bool(raw.get("shadow", True)),
+            signals=tuple(str(value) for value in raw.get("signals") or []),
+            weight_bundle_version=str(
+                raw.get("weight_bundle_version") or WEIGHT_BUNDLE_VERSION
+            ),
+        )
+
 
 _LEVELS = (
     "none",

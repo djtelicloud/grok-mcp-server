@@ -174,7 +174,7 @@ Building dream packs before honest awake gates = autonomy theater.
 | K5 | Live A1 fail ↑ after prior version | Auto-revert prior; blacklist pack gen |
 | K6 | `idle_spend / total_spend` > policy | Freeze generative ops |
 | K7 | Same generator thrash without accept | Ban for epoch |
-| K8 | `UNIGROK_SLEEP=off` | Plane dark (default until S0) |
+| K8 | Proposed `UNIGROK_SLEEP=off` | Plane dark by design until S0 exists |
 
 Flags: `off | cpu | bench | predict` ladder; `UNIGROK_IDLE_BUDGET_*=0` → hard nap.
 
@@ -220,4 +220,4 @@ If pack_hit_rate low and spend_ratio high → plane is a **heater**; kill genera
 | Code | Sleep idle loop not started |
 | Awake context pack (related) | **Shipped:** `UNIGROK_CONTEXT_PACK=cpu` — inventory → votes → lead merge → ≤2 PFC loops → sealed prefrontal + untrusted `pfc_absent` foresight sibling |
 | WASM × dogfood (related) | **Design only:** [WASM_DOGFOOD.md](WASM_DOGFOOD.md) — NOGO gateway runtime; host dogfood `exec` is today’s surface; guest ABI when local sandboxed eval exists |
-| Default sleep | `UNIGROK_SLEEP=off` |
+| Default sleep | Proposed `UNIGROK_SLEEP=off`; no shipping runtime flag yet |

@@ -152,12 +152,16 @@ Pass a `level` when you care how hard Grok thinks:
 - `max` — a silent deep-reasoning harness under the hood
 - `ultra` — a parallel hive: draft, persona votes, then a merge
 
-Leave `level` unset and free router votes pick the rung for you. Hard tasks
-auto-engage deeper reasoning; a typo fix never pays for a swarm.
+Leave `level` unset and CLI-first router votes pick the rung for you. Hard tasks
+auto-engage deeper reasoning; a typo fix never pays for a swarm. Receipts expose
+any bounded API fallback used when those votes are inconclusive.
 
 ### Jobs that survive restarts
-Long tasks keep their results if the service restarts. Poll `agent_result`: you get the
-finished answer, or an honest "lost, safe to retry" — never a mystery hang.
+Mission V2 tasks keep their mission ledger across service restarts and resume with the
+same `continue_token`; terminal reattach returns the durable winner without rerunning
+the model. Generic durable jobs keep results recorded before restart. If a generic job
+was interrupted before a result was recorded, it returns `lost`: the provider outcome
+is unknown, so inspect state before retrying a metered or mutating operation.
 
 ### A gateway that optimizes itself, honestly
 The dogfood loop lets the hive rewrite the gateway's own functions — but a rewrite ships
@@ -181,9 +185,10 @@ flowchart TD
 - `agent` makes web, X search, and code tools available by default.
 - The live Grok subscription default leads every request and writes specialist briefs.
 - UniGrok selects models, planes, reasoning effort, and recovery automatically.
-- When API is configured, `agent` uses one metered Grok 4.5 routing pass capped at 256
-  output tokens. Direct work remains subscription-first; specialists and bounded recovery
-  use API as needed.
+- Clear tasks route heuristically; otherwise three bounded, CLI-first intent votes select
+  shape. If too few votes parse, an API semantic fallback may run (256 output tokens by
+  default, configurable from 64–1024). Direct work remains subscription-first;
+  specialists and bounded recovery use API as needed.
 - Supplying `XAI_API_KEY` is the service owner's opt-in to API use.
 - Set `UNIGROK_ENABLE_METERED_API=false` for an immediate API kill switch.
 
@@ -227,7 +232,12 @@ the instructions and templates but remains workspace-neutral.
   external MCP, memory, and subagent access disabled.
 - Project text reaches Grok only when the calling IDE deliberately sends bounded
   `workspace_context`.
-- Local sessions and remembered facts are redacted before SQLite storage.
+- Local durable payloads are recursively secret-redacted before SQLite storage. Mission
+  answer projections are additionally capped at 100 KB.
+- Named-session turns and context packs are written only after Mission V2 CommitDone;
+  rejected drafts never enter session memory, and repeated terminal reattach is idempotent.
+- Terminal runtime rows default to 24-hour retention (configurable 1–720 hours). Named
+  sessions and remembered facts persist until explicitly deleted.
 - Media accepts public HTTPS URLs; uploads accept caller-supplied bytes, never local
   filesystem paths.
 - Ask for an image or video without an API key and UniGrok says so plainly — it never
