@@ -17,5 +17,6 @@ jobs:
           enable-cache: true
       - run: uv sync --frozen
       - run: uv run ruff check .
+      - run: bash scripts/ci-insider-denylist.sh
       - run: uv run pytest -q
 

@@ -6,6 +6,7 @@ import contextlib
 import hashlib
 import ipaddress
 import json
+import mimetypes
 import os
 import re
 import secrets
@@ -24,7 +25,7 @@ from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import ToolAnnotations
 from pydantic import BaseModel, Field
 from starlette.requests import Request
-from starlette.responses import HTMLResponse, JSONResponse, PlainTextResponse
+from starlette.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
 
 from . import __version__, xai_api
 from .grok_build import GrokBuildACPManager
@@ -258,6 +259,12 @@ SHADOW_DONE_VOTE = os.environ.get("UNIGROK_SHADOW_DONE_VOTE", "off").strip().low
     "yes",
     "on",
 }
+# Surface selection (thin forge hooks). "public" is the default and changes nothing.
+# "forge" additionally registers skeleton contributor control-plane routes that answer
+# 401 until the real OAuth slice lands. The public image never ships forge UI assets;
+# a forge deployment mounts its private console at runtime via UNIGROK_UI_ROOT.
+SURFACE = os.environ.get("UNIGROK_SURFACE", "public").strip().lower() or "public"
+UI_ROOT_OVERRIDE = os.environ.get("UNIGROK_UI_ROOT", "").strip()
 _CATALOG_CACHE: tuple[float, dict[str, Any]] | None = None
 _SESSION_LOCKS: dict[str, asyncio.Lock] = {}
 _AGENT_JOBS: dict[str, tuple[float, asyncio.Task[dict[str, Any]]]] = {}
@@ -3503,16 +3510,27 @@ async def xai_delete_file(file_id: str, confirm_delete: bool = False) -> dict[st
     return await xai_api.delete_file(_validated_file_id(file_id))
 
 
-@mcp.custom_route("/ui/", methods=["GET"], include_in_schema=False)
-@mcp.custom_route("/ui", methods=["GET"], include_in_schema=False)
-async def control_center(_: Request) -> HTMLResponse:
-    # The dashboard is a single self-contained page with one inline <script>.
-    # Serve it under a per-response nonce so the CSP can forbid all other script
-    # execution (blocking injected-script exfiltration of the rendered telemetry)
-    # without moving to an external bundle. Dynamic style="width:.." bars still
-    # require 'unsafe-inline' for styles.
+def _client_is_loopback(request: Request) -> bool:
+    """True only when the direct TCP peer is loopback.
+
+    Deliberately ignores X-Forwarded-For and every other client-supplied header:
+    a spoofed header must never widen the loopback operator exemption. Callers
+    that sit behind a trusted proxy do not exist in this deployment shape (both
+    gateways bind 127.0.0.1), so the peer address is the only truth.
+    """
+    client = request.scope.get("client")
+    return bool(client) and client[0] in {"127.0.0.1", "::1"}
+
+
+def _ui_index_response(index_path: Path) -> HTMLResponse:
+    # The page is served under a per-response nonce so the CSP can forbid all
+    # other script execution (blocking injected-script exfiltration of the
+    # rendered telemetry) without moving to an external bundle. Dynamic
+    # style="width:.." bars still require 'unsafe-inline' for styles. The nonce
+    # replacement no-ops for pages with no inline script (the mounted forge
+    # console uses only same-origin external files, which 'self' covers).
     nonce = secrets.token_urlsafe(16)
-    html = (STATIC_ROOT / "dashboard.html").read_text(encoding="utf-8")
+    html = index_path.read_text(encoding="utf-8")
     html = html.replace("<script>", f'<script nonce="{nonce}">', 1)
     csp = (
         "default-src 'self'; "
@@ -3525,6 +3543,65 @@ async def control_center(_: Request) -> HTMLResponse:
         "form-action 'none'"
     )
     return HTMLResponse(html, headers={"content-security-policy": csp})
+
+
+@mcp.custom_route("/ui/", methods=["GET"], include_in_schema=False)
+@mcp.custom_route("/ui", methods=["GET"], include_in_schema=False)
+async def control_center(_: Request) -> HTMLResponse:
+    # /ui never consults Authorization or any identity state, on every surface:
+    # loopback operators always get the page, and public telemetry is identity-free.
+    if UI_ROOT_OVERRIDE:
+        index = Path(UI_ROOT_OVERRIDE) / "index.html"
+        if index.is_file():
+            return _ui_index_response(index)
+    return _ui_index_response(STATIC_ROOT / "dashboard.html")
+
+
+def _resolve_ui_asset(raw: str) -> Response:
+    """Resolve one mounted-console asset path with traversal safety (sync)."""
+    if not UI_ROOT_OVERRIDE:
+        return PlainTextResponse("Not Found", status_code=404)
+    if not raw or any(part in {"", ".", ".."} or part.startswith(".") for part in raw.split("/")):
+        return PlainTextResponse("Not Found", status_code=404)
+    root = Path(UI_ROOT_OVERRIDE).resolve()
+    try:
+        target = (root / raw).resolve()
+        target.relative_to(root)
+    except (OSError, ValueError):
+        return PlainTextResponse("Not Found", status_code=404)
+    if not target.is_file():
+        return PlainTextResponse("Not Found", status_code=404)
+    media_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+    return Response(target.read_bytes(), media_type=media_type)
+
+
+@mcp.custom_route("/ui/{asset_path:path}", methods=["GET"], include_in_schema=False)
+async def ui_asset(request: Request) -> Response:
+    """Serve same-origin assets for a runtime-mounted console.
+
+    Only active when UNIGROK_UI_ROOT is set (forge deployments mount their
+    private console there). Without the override this returns 404 for every
+    subpath, exactly like the routeless default it replaces — the baked-in
+    public dashboard is a single self-contained page.
+    """
+    return _resolve_ui_asset(request.path_params.get("asset_path", ""))
+
+
+@mcp.custom_route("/control", methods=["GET"], include_in_schema=False)
+@mcp.custom_route("/auth/github", methods=["GET"], include_in_schema=False)
+@mcp.custom_route("/api/me", methods=["GET"], include_in_schema=False)
+async def forge_control_plane_stub(request: Request) -> Response:
+    """Contributor control-plane skeleton.
+
+    On the public surface these paths stay indistinguishable from unregistered
+    routes (identity-free 4765 contract). On the forge surface they exist but
+    answer 401 until the GitHub OAuth slice lands — no cookie, no bearer, no
+    body detail. The loopback helper is intentionally not consulted here: the
+    operator exemption applies to /ui, never to identity endpoints.
+    """
+    if SURFACE != "forge":
+        return PlainTextResponse("Not Found", status_code=404)
+    return JSONResponse({"error": "authentication_required"}, status_code=401)
 
 
 @mcp.custom_route("/.well-known/webmcp", methods=["GET"], include_in_schema=False)
