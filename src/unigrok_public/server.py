@@ -42,6 +42,12 @@ from .autonomy import (
     new_continue_token,
     normalize_artifact_content,
 )
+from .context_pack import (
+    ContextPack,
+    build_context_pack,
+    context_pack_mode,
+    format_session_with_pack,
+)
 from .grok_build import GrokBuildACPManager
 from .harness import (
     HIVE_PERSONAS,
@@ -2857,7 +2863,13 @@ async def _execute_team_turn(
     num_voters: int = 5,
 ) -> dict[str, Any]:
     history = await STATE.load_messages(session) if session else []
-    provider_prompt = format_session_prompt(history, prompt)
+    prior_pack: ContextPack | None = None
+    if session and context_pack_mode() != "off":
+        prior_pack = ContextPack.from_dict(await STATE.load_context_pack(session))
+    if prior_pack is not None and (prior_pack.keeps or prior_pack.donts):
+        provider_prompt = format_session_with_pack(history, prompt, prior_pack)
+    else:
+        provider_prompt = format_session_prompt(history, prompt)
     if depth == "deep":
         # Deep mode: byte-stable j-space harness prefix (prompt-cache friendly),
         # top reasoning effort (xhigh on Build; auto-downgrades to high on API),
@@ -3032,6 +3044,7 @@ async def _execute_team_turn(
     if fact_ids:
         await STATE.touch_facts(fact_ids)
     message_count = len(history)
+    context_pack_meta: dict[str, Any] | None = None
     if session:
         message_count = await STATE.append_turn(
             session,
@@ -3045,6 +3058,28 @@ async def _execute_team_turn(
                 "degraded": bool(result.get("degraded")),
             },
         )
+        if context_pack_mode() != "off":
+            refreshed = await STATE.load_messages(session)
+            prior_version = int(prior_pack.version) if prior_pack else 0
+            pack = build_context_pack(
+                session=session,
+                history=refreshed,
+                next_task=prompt,
+                facts=facts if use_memory else None,
+                version=prior_version + 1,
+            )
+            if pack is not None:
+                await STATE.save_context_pack(
+                    session, pack.to_dict(), version=pack.version
+                )
+                context_pack_meta = {
+                    "mode": pack.mode,
+                    "version": pack.version,
+                    "keeps": len(pack.keeps),
+                    "donts": len(pack.donts),
+                    "dropped": pack.dropped,
+                    "lead_notes": pack.lead_notes,
+                }
     result.update(
         {
             "session": session,
@@ -3056,6 +3091,8 @@ async def _execute_team_turn(
             "memory_fact_ids": fact_ids,
         }
     )
+    if context_pack_meta is not None:
+        result["context_pack"] = context_pack_meta
     return result
 
 
@@ -4576,6 +4613,7 @@ async def runtimez(_: Request) -> JSONResponse:
                 .strip()
                 .lower()
                 not in {"0", "false", "off", "no"},
+                "context_pack": context_pack_mode(),
             },
         }
     )

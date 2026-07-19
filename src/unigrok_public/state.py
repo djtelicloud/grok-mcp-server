@@ -124,6 +124,13 @@ class PublicStateStore:
                 );
                 CREATE INDEX IF NOT EXISTS messages_session_id
                     ON messages(session_name, id);
+                CREATE TABLE IF NOT EXISTS context_packs (
+                    session_name TEXT PRIMARY KEY
+                        REFERENCES sessions(name) ON DELETE CASCADE,
+                    pack_json TEXT NOT NULL,
+                    version INTEGER NOT NULL DEFAULT 1,
+                    updated_at TEXT NOT NULL
+                );
                 CREATE TABLE IF NOT EXISTS knowledge (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     scope TEXT NOT NULL,
@@ -389,6 +396,57 @@ class PublicStateStore:
     async def load_messages(self, session: str, limit: int = 24) -> list[dict[str, Any]]:
         bounded = max(1, min(int(limit or 24), 100))
         return list(await self._read(self._load_messages_sync, normalize_session(session), bounded))
+
+    def _save_context_pack_sync(
+        self, session: str, pack: dict[str, Any], version: int
+    ) -> None:
+        now = utc_now()
+        payload = json.dumps(pack, separators=(",", ":"), default=str)
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO context_packs(session_name, pack_json, version, updated_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(session_name) DO UPDATE SET
+                    pack_json=excluded.pack_json,
+                    version=excluded.version,
+                    updated_at=excluded.updated_at
+                """,
+                (session, payload, int(version), now),
+            )
+            connection.commit()
+
+    async def save_context_pack(
+        self, session: str, pack: dict[str, Any], *, version: int = 1
+    ) -> None:
+        await self._write(
+            self._save_context_pack_sync,
+            normalize_session(session),
+            pack,
+            int(version),
+        )
+
+    def _load_context_pack_sync(self, session: str) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT pack_json, version FROM context_packs WHERE session_name=?",
+                (session,),
+            ).fetchone()
+        if row is None:
+            return None
+        try:
+            data = json.loads(row["pack_json"] or "{}")
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(data, dict):
+            return None
+        data["version"] = int(row["version"] or data.get("version") or 1)
+        return data
+
+    async def load_context_pack(self, session: str) -> dict[str, Any] | None:
+        return await self._read(
+            self._load_context_pack_sync, normalize_session(session)
+        )
 
     def _list_sessions_sync(self, limit: int) -> list[dict[str, Any]]:
         with self._connect() as connection:
