@@ -3,6 +3,9 @@
 This guide is for contributors and release verification. Ordinary users only need the
 README. See also [CONTRIBUTING.md](../CONTRIBUTING.md).
 
+Design notes (no runtime claims): [WASM × dogfood](WASM_DOGFOOD.md) — guest ABI and
+trigger conditions; wasm is **not** in the shipping gateway today.
+
 ## Local checks
 
 ```bash

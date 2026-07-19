@@ -219,4 +219,5 @@ If pack_hit_rate low and spend_ratio high → plane is a **heater**; kill genera
 | Hive merge | Done (narrow sleep; awake first) |
 | Code | Sleep idle loop not started |
 | Awake context pack (related) | **Shipped:** `UNIGROK_CONTEXT_PACK=cpu` — inventory → votes → lead merge → ≤2 PFC loops → sealed prefrontal + untrusted `pfc_absent` foresight sibling |
+| WASM × dogfood (related) | **Design only:** [WASM_DOGFOOD.md](WASM_DOGFOOD.md) — NOGO gateway runtime; host dogfood `exec` is today’s surface; guest ABI when local sandboxed eval exists |
 | Default sleep | `UNIGROK_SLEEP=off` |
