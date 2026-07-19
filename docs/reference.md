@@ -6,6 +6,10 @@ Known limits of the current release are tracked in [Known limits](known-limits.m
 
 ## How an IDE agent should drive `agent`
 
+Unless a paragraph is explicitly marked hosted, persistence and CLI-first routing below
+describe local Compose. The hosted pilot is API-only and its SQLite state is
+instance-local.
+
 - **Default:** call `agent` with just `task`. The router picks route, effort, and
   recovery; hard reasoning auto-engages the deep harness; a typo fix never pays for a
   swarm.
@@ -151,6 +155,21 @@ http://localhost:4765/mcp
 Transport: Streamable HTTP. The MCP handshake, `/healthz`, `/readyz`, `/runtimez`,
 `grok_mcp_status`, and `grok_mcp_discover_self` all report version `1.1.0`.
 
+The owner-operated hosted pilot uses `https://mcp.grokmcp.org/mcp`. It publishes
+OAuth protected-resource metadata and requires an active, correctly scoped Control
+token for every protected request. MCP initialization needs `unigrok:connect`; general
+tools need `unigrok:invoke`; review and status use their dedicated scopes. The
+`unigrok:chat` scope is reserved; this core does not expose a `/v1` chat route.
+An OAuth-capable client should discover and authorize from the resource URL instead of
+storing a provider key or static bearer.
+
+Hosted mode is API-only: the Grok Build CLI is disabled by policy. OAuth principals
+receive tenant-scoped sessions, facts, jobs, and telemetry. xAI file tools additionally
+require a principal-bound provider credential. The current hosted SQLite directory is
+instance-local, so the local-volume restart guarantees below do not extend across Cloud
+Run instance replacement or horizontal scaling. See
+[Authenticated remote deployment](remote-mcp-deployment.md).
+
 ## Public tools
 
 ### Main harness and discovery
@@ -162,6 +181,7 @@ Transport: Streamable HTTP. The MCP handshake, `/healthz`, `/readyz`, `/runtimez
 - `review_pull_request` — review a bounded caller-supplied diff without GitHub or Git access
 - `chat` — one stateless, tool-free answer
 - `grok_mcp_discover_self` — authoritative live self-description
+- `grok_mcp_onboard_client` — consent-first client integration plan; never writes files
 - `grok_mcp_status` — non-secret runtime and plane readiness
 - `list_models` — independent live CLI and API model catalogs
 - `benchmark_status` — route, latency, cost, caller, fallback, and breaker aggregates
@@ -199,6 +219,9 @@ from the reviewed PR. Hosted URL, runner, and short-lived auth must be configure
 the repository owner; this local Compose service is not a public review endpoint.
 
 ## Routing and billing
+
+The CLI-first policy below is the local Compose policy. Hosted mode reports `api_only`
+through discovery and never attempts the disabled CLI plane.
 
 - Callers supply task intent rather than model, plane, effort, or fallback controls.
 - Clear tasks route heuristically. Other tasks use three structured CLI-first intent
@@ -247,7 +270,7 @@ Environment values outside their range are clamped. `grok_mcp_discover_self` and
 clamped to 1–20. `xai_get_file_content(max_bytes)` defaults to 500,000 and clamps to
 1,024–1,000,000 bytes, then remains bounded by the environment hard cap above.
 
-## Team continuity
+## Local Compose team continuity
 
 Named `agent` sessions persist redacted conversation turns in local SQLite. Deliberately
 remembered facts use caller-controlled scopes and can be searched or deleted explicitly.

@@ -1,7 +1,7 @@
 """Fail-closed OAuth edge for the owner-operated remote MCP deployment.
 
 Local Docker remains loopback-first and credential-free at the gateway layer.
-When ``UNIGROK_RUNTIME=cloudrun``, every non-probe request is authenticated by
+When ``UNIGROK_RUNTIME=cloudrun``, every protected request is authenticated by
 the existing Control service through token introspection.  Provider keys stay
 server-side and are never accepted as gateway bearer credentials.
 """
@@ -184,7 +184,6 @@ def oauth_metadata() -> tuple[dict[str, Any], int, dict[str, str]]:
             "authorization_servers": servers,
             "scopes_supported": scopes,
             "bearer_methods_supported": ["header"],
-            "resource_documentation": "https://grokmcp.org/",
             "x_unigrok_authorization_status": "active",
             "x_unigrok_access_token_validation": "remote-introspection",
         },

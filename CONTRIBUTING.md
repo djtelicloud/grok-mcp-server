@@ -29,6 +29,10 @@ Compare MCP `tools/list` with `grok_mcp_discover_self`, then exercise both confi
 credential planes. Restore the normal port by recreating this same service on `4765`;
 do not point two containers at one state volume.
 
+This local smoke does not deploy the authenticated hosted service. Maintainer-operated
+remote releases follow the digest, OAuth, public-smoke, and rollback gates in
+[`docs/remote-mcp-deployment.md`](docs/remote-mcp-deployment.md).
+
 ## Pull requests
 
 - Keep changes scoped; match existing style and contracts.

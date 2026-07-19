@@ -275,6 +275,8 @@ async def test_self_description_is_generated_from_live_boundary(
         "named_sessions": True,
         "state_backend": "local_sqlite",
         "durable_knowledge": True,
+        "state_persistence": True,
+        "state_lifetime": "persistent_volume",
         "workspace_context": "explicit_bounded_redacted_courier_only",
         "automatic_workspace_access": False,
         "local_subagents": False,

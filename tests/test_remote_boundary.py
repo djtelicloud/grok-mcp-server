@@ -130,6 +130,167 @@ def test_cloudrun_oauth_configuration_is_fail_closed(
         remote_auth.validate_remote_configuration()
 
 
+def test_oauth_metadata_is_current_and_does_not_link_stale_setup(
+    remote_oauth_env: None,
+) -> None:
+    payload, status, _headers = remote_auth.oauth_metadata()
+    assert status == 200
+    assert payload["resource"] == PUBLIC_RESOURCE
+    assert payload["authorization_servers"] == [AUTHORIZATION_SERVER]
+    assert "resource_documentation" not in payload
+
+
+def test_cloudrun_discovery_and_onboarding_are_runtime_accurate(
+    remote_oauth_env: None,
+) -> None:
+    catalogs = {
+        "cli": {"ready": False, "models": [], "default_model": None},
+        "api": {
+            "ready": True,
+            "configured": True,
+            "models": [{"id": "grok-test"}],
+            "image_models": [],
+            "default_model": "grok-test",
+        },
+    }
+    description = server._live_self_description(catalogs)
+    planes = description["credential_planes"]
+    assert planes["policy"] == "api_only"
+    assert planes["preferred_plane"] == "api"
+    assert planes["effective_plane"] == "api"
+    assert planes["degraded"] is False
+    assert planes["cli"]["disabled_by_policy"] is True
+    assert "CLI-first" not in description["capability_defaults"]["agent"]["note"]
+    assert description["team_harness"]["durable_knowledge"] is False
+    assert description["team_harness"]["state_lifetime"] == "instance_local"
+    assert "ui" not in description["surfaces"]
+    tools = {item["name"]: item for item in description["tools"]}
+    for name in ("agent", "review_pull_request", "chat"):
+        assert tools[name]["plane"] == "xAI API"
+        assert tools[name]["billing_class"] == "metered"
+    assert tools["agent_result"]["plane"] == "gateway job state"
+
+    plan = server._client_onboarding_plan("cursor", "global")
+    assert plan["connection"] == {
+        "mode": "oauth_remote",
+        "mcp_url": PUBLIC_RESOURCE,
+        "authentication": "oauth_discovery",
+        "client_labels_are_authentication": False,
+    }
+    assert plan["mcp_server"]["entry"]["mcpServers"]["grok"]["url"] == PUBLIC_RESOURCE
+    assert plan["automatic_tool_approval_offered"] is False
+    assert "hooks" not in plan
+    assert "auto_approve" not in plan
+    assert not any(
+        item["path"].endswith("before-unigrok-agent.py") for item in plan["files"]
+    )
+    cursor_rule = next(
+        item["content"]
+        for item in plan["files"]
+        if item["path"].endswith("using-unigrok.mdc")
+    )
+    assert "instance-local" in cursor_rule
+    assert "durable facts" not in cursor_rule
+    assert description["team_harness"]["state_persistence"] is False
+    assert description["team_harness"]["completion_recovery"] == (
+        "one_same_plane_retry; no_cross_plane_available"
+    )
+    for client in server.CLIENT_ADAPTERS:
+        client_plan = server._client_onboarding_plan(client, "global")
+        assert client_plan["automatic_tool_approval_offered"] is False
+        assert client_plan["runtime_contract"] == {
+            "execution_policy": "api_only",
+            "inference_billing": "metered",
+            "state_lifetime": "instance_local",
+        }
+        assert "auto_approve" not in client_plan
+    instructions = server._service_instructions()
+    assert "status=pending" in instructions
+    assert "poll agent_result with the same job_id" in instructions
+    assert "never start a duplicate request" in instructions
+    assert "CLI-first" not in instructions
+
+
+@pytest.mark.asyncio
+async def test_cloudrun_webmcp_labels_public_and_authenticated_surfaces(
+    remote_oauth_env: None,
+) -> None:
+    manifest = json.loads((await server.webmcp_manifest(None)).body)
+    assert manifest["mcp"]["authentication"] == "oauth"
+    assert manifest["public_surfaces"]["oauth"].endswith(
+        "/.well-known/oauth-protected-resource/mcp"
+    )
+    assert manifest["authenticated_surfaces"] == {
+        "runtime": "/runtimez",
+        "benchmarks": "/benchmarkz",
+    }
+    assert manifest["surfaces"]["health"] == "/healthz"
+    assert manifest["surfaces"]["runtime"] == "/runtimez"
+    assert manifest["authorization_server"] == AUTHORIZATION_SERVER
+    assert manifest["control_ui"] == AUTHORIZATION_SERVER
+    assert manifest["state_lifetime"] == "instance_local"
+    assert "ui" not in manifest["public_surfaces"]
+    assert "ui" not in manifest["authenticated_surfaces"]
+
+
+@pytest.mark.asyncio
+async def test_cloudrun_runtimez_reports_instance_local_state(
+    remote_oauth_env: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def telemetry_summary(
+        _self: object, *, limit: int, caller: str | None
+    ) -> dict[str, Any]:
+        assert limit == 1000
+        assert caller is None
+        return {
+            "sample_size": 0,
+            "verified_samples": 0,
+            "verified_success_rate": None,
+            "latency_ms": {},
+            "cost_usd": 0.0,
+            "callers": {},
+            "models": {},
+            "routes": {},
+            "planes": {},
+            "fallbacks": {},
+        }
+
+    monkeypatch.setattr(type(server.STATE), "telemetry_summary", telemetry_summary)
+    payload = json.loads((await server.runtimez(None)).body)
+    assert payload["state_persistence"] is False
+    assert payload["state_lifetime"] == "instance_local"
+    assert payload["completion_recovery"] == (
+        "one_same_plane_retry; no_cross_plane_available"
+    )
+    assert payload["routing_advisor"]["policy"].startswith("live_discovered_lead")
+
+
+def test_cloudrun_onboarding_fails_closed_without_public_resource(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("UNIGROK_RUNTIME", "cloudrun")
+    monkeypatch.delenv("UNIGROK_PUBLIC_MCP_URL", raising=False)
+    with pytest.raises(RuntimeError, match="UNIGROK_PUBLIC_MCP_URL"):
+        server._client_onboarding_plan("cursor", "global")
+
+
+def test_router_policy_does_not_pin_a_model_version() -> None:
+    assert "Grok 4.5" not in server.ROUTER_SYSTEM_PROMPT
+
+
+def test_cloudrun_media_unavailable_result_respects_remote_boundary(
+    remote_oauth_env: None,
+) -> None:
+    result = server._media_unavailable_result("image")
+    assert result["plane"] == "api"
+    assert result["resolved_plane"] == "api"
+    assert result["degraded"] is True
+    assert "Contact the service operator" in result["text"]
+    assert "XAI_API_KEY" not in result["text"]
+    assert ".env" not in result["text"]
+
+
 @pytest.mark.parametrize(
     ("tool_name", "expected"),
     (

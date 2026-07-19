@@ -1,4 +1,9 @@
-# Launch checklist — public graft go/no-go
+# Historical source-publication checklist — public graft go/no-go
+
+This file records the 1.1 public-history graft. Do not rerun its unrelated-history
+procedure without a new repository baseline and explicit publication decision. It is
+not the Cloud Run release checklist; hosted deployments use
+[`docs/remote-mcp-deployment.md`](docs/remote-mcp-deployment.md).
 
 Status legend: [ ] open · [x] done · [~] partially proven
 

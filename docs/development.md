@@ -3,6 +3,10 @@
 This guide is for contributors and release verification. Ordinary users only need the
 README. See also [CONTRIBUTING.md](../CONTRIBUTING.md).
 
+The authenticated Cloud Run service has a separate digest-pinned release and rollback
+gate. Do not infer a public deployment from a local Compose rebuild; operators must use
+the [remote deployment runbook](remote-mcp-deployment.md).
+
 Design notes (no runtime claims): [WASM × dogfood](WASM_DOGFOOD.md) — guest ABI and
 trigger conditions; wasm is **not** in the shipping gateway today.
 

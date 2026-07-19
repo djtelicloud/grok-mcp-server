@@ -100,8 +100,23 @@ All notable changes to the public UniGrok gateway.
   stricter Content-Security-Policy; a new `SecurityHeadersMiddleware` adds
   baseline hardening (X-Frame-Options, nosniff, COOP/CORP, permissions-policy,
   default-deny CSP) to every HTTP response that has no route-specific CSP.
+- Cloud Run mode now fails closed behind Control OAuth introspection with exact
+  tool scopes, pre-buffer authentication and bounded request bodies, origin checks,
+  issuer-qualified tenant state, optional exact-principal budgets and credentials,
+  and principal-only access to hosted xAI file accounts.
+- Runtime discovery, MCP initialization instructions, WebMCP, and generated onboarding
+  plans now report the hosted API-only/instance-local contract, preserve the remote OAuth
+  URL, and tell callers to poll `pending` jobs instead of duplicating billed work.
+- OAuth protected-resource metadata no longer links to a separate site whose setup text
+  is not versioned with this runtime.
+- The hosted review workflow no longer sends an ignored plane argument and documents its
+  actual bounded 600-second service-token lifetime.
 
 ### Documentation
+- Restore and update the authenticated remote-deployment runbook with the current OAuth,
+  secret-version, tenant, instance-local-state, atomic-cutover, smoke, and rollback
+  contracts; link the hosted pilot from README, reference, security, development, known
+  limits, launch, and contributor guidance.
 - Document the `review_pull_request` MCP tool and pollable review metadata in
   `docs/reference.md`.
 - Document the `depth` compatibility parameter (`auto`/`deep`/`hive`) alongside the

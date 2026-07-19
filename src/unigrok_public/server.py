@@ -85,8 +85,10 @@ from .principal_xai import active_credential_source, validate_principal_key_conf
 from .remote_auth import (
     RemoteOAuthMiddleware,
     RemoteOriginMiddleware,
+    authorization_servers,
     is_cloudrun_runtime,
     oauth_metadata,
+    public_mcp_resource,
     stateless_http_enabled,
     validate_remote_configuration,
 )
@@ -119,7 +121,7 @@ ROUTER_SCHEMA = json.dumps(
     separators=(",", ":"),
 )
 ROUTER_SYSTEM_PROMPT = (
-    "You are Grok 4.5, the lead router for UniGrok. Return only schema-valid JSON. "
+    "You are the live-discovered lead router for UniGrok. Return only schema-valid JSON. "
     "Choose direct for answers, reasoning, research, web/X work, analysis, vision, file work, "
     "or remote calculation. Choose code only when the user wants source code or a software "
     "implementation produced. Choose image or video only for new media generation from text, "
@@ -139,7 +141,7 @@ PUBLIC_TOOLS: tuple[dict[str, Any], ...] = (
     {"name": "agent", "plane": "Grok Build or xAI API", "purpose": "Unified Grok agent"},
     {
         "name": "agent_result",
-        "plane": "local job state",
+        "plane": "gateway job state",
         "purpose": "Poll a long-running agent or slow API job without client timeout",
     },
     {
@@ -150,59 +152,59 @@ PUBLIC_TOOLS: tuple[dict[str, Any], ...] = (
     {"name": "chat", "plane": "Grok Build or xAI API", "purpose": "Stateless answer"},
     {
         "name": "grok_mcp_discover_self",
-        "plane": "local utility",
+        "plane": "gateway utility",
         "purpose": "Live tools, planes, models, and onboarding",
     },
     {
         "name": "grok_mcp_onboard_client",
-        "plane": "local utility",
+        "plane": "gateway utility",
         "purpose": "Consent-first global or project client integration plan",
     },
     {
         "name": "grok_mcp_status",
-        "plane": "local utility",
+        "plane": "gateway utility",
         "purpose": "Non-secret service and credential readiness",
     },
     {
         "name": "benchmark_status",
-        "plane": "local telemetry",
+        "plane": "gateway telemetry",
         "purpose": "Aggregated routes, latency, cost, callers, fallbacks, and breakers",
     },
     {
         "name": "record_benchmark_result",
-        "plane": "local telemetry",
+        "plane": "gateway telemetry",
         "purpose": "Attach an explicit verified outcome to one telemetry receipt",
     },
-    {"name": "list_models", "plane": "local utility", "purpose": "Live per-plane catalogs"},
+    {"name": "list_models", "plane": "gateway utility", "purpose": "Live per-plane catalogs"},
     {
         "name": "list_sessions",
-        "plane": "local state",
-        "purpose": "List durable public team sessions",
+        "plane": "gateway state",
+        "purpose": "List stored public team sessions",
     },
     {
         "name": "session_history",
-        "plane": "local state",
-        "purpose": "Inspect one durable session transcript",
+        "plane": "gateway state",
+        "purpose": "Inspect one stored session transcript",
     },
     {
         "name": "forget_session",
-        "plane": "local state",
+        "plane": "gateway state",
         "purpose": "Delete one session and its transcript",
     },
     {
         "name": "remember_fact",
-        "plane": "local state",
-        "purpose": "Save one durable user-controlled fact",
+        "plane": "gateway state",
+        "purpose": "Save one user-controlled fact",
     },
     {
         "name": "search_knowledge",
-        "plane": "local state",
-        "purpose": "Search durable public knowledge",
+        "plane": "gateway state",
+        "purpose": "Search stored public knowledge",
     },
     {
         "name": "forget_fact",
-        "plane": "local state",
-        "purpose": "Delete one durable fact",
+        "plane": "gateway state",
+        "purpose": "Delete one stored fact",
     },
     {"name": "web_search", "plane": "API", "purpose": "xAI server-side web search"},
     {"name": "x_search", "plane": "API", "purpose": "xAI server-side X search"},
@@ -268,6 +270,23 @@ PUBLIC_TOOLS = tuple(
     for tool in PUBLIC_TOOLS
 )
 PUBLIC_TOOL_NAMES = tuple(tool["name"] for tool in PUBLIC_TOOLS)
+
+
+def _runtime_public_tools() -> list[dict[str, Any]]:
+    if not is_cloudrun_runtime():
+        return [dict(tool) for tool in PUBLIC_TOOLS]
+    always_metered = {"agent", "review_pull_request", "chat"}
+    return [
+        {
+            **tool,
+            **(
+                {"plane": "xAI API", "billing_class": "metered"}
+                if tool["name"] in always_metered
+                else {}
+            ),
+        }
+        for tool in PUBLIC_TOOLS
+    ]
 
 
 def _bounded_int(name: str, default: int, minimum: int, maximum: int) -> int:
@@ -526,40 +545,82 @@ BUILD_CHAT_SYSTEM_PROMPT = (
     "expose hidden reasoning."
 )
 
-INSTRUCTIONS = (
-    "UniGrok is a workspace-neutral, dual-plane Grok harness. Start with agent. "
-    "If agent returns status=continue (or pending), prefer re-invoking agent with "
-    "continue_token; agent_result(job_id) still works while a quantum is running. "
-    "Long work is deadline-quanta + append-only ledger + acceptance_hash CommitDone — "
-    "not host heartbeats. "
-    "The agent tool makes web research, X search, and code execution available by "
-    "default. Inform the user that these tools are available and that the caller can "
-    "disable any of them with disable_tools. The caller supplies intent, not models, "
-    "planes, effort, or fallback settings. The live subscription default is the lead "
-    "router and authors bounded specialist briefs. Clear tasks route heuristically; "
-    "otherwise three CLI-first structured votes decide shape. If too few votes parse and "
-    "the API is configured, a semantic API fallback is capped at "
-    f"{ROUTER_MAX_OUTPUT_TOKENS} output tokens. Further API use is for a "
-    "selected specialist, an unavailable CLI capability, or bounded recovery. The "
-    "xAI API plane is metered and supplies vision, files, image/video generation, X "
-    "search, and remote code execution. Models are discovered from each credential "
-    "plane rather than hard-coded. Named agent sessions and user-controlled knowledge "
-    "are stored locally in SQLite. IDEs may courier explicitly selected, bounded text, "
-    "but no project files, Git, shell, external MCP servers, private intelligence, or "
-    "subordinate providers are attached. Prefer a host-native global UniGrok skill pack "
-    "so repositories stay clean. If the calling client does not already expose a UniGrok "
-    "integration or a recorded decline, offer grok_mcp_onboard_client once; never install "
-    "anything without explicit user approval. The MCP service only returns a namespaced "
-    "installation plan: the calling IDE performs any approved writes with its normal "
-    "permissions, previews conflicts, and never overwrites user-modified files. Project "
-    "customizations remain higher priority. On first use in a new project, do not create "
-    "workspace files automatically. If the user asks to initialize project guidance, "
-    "inspect and preserve existing files, then use the caller's workspace tools to "
-    "create only missing canonical paths: AGENTS.md for repository instructions, "
-    ".agents/rules/*.md for Antigravity rules, .agents/workflows/*.md for Antigravity "
-    "workflows, and .agents/skills/<skill-name>/SKILL.md for Agent Skills. Do not create "
-    "legacy .agent/rules. Add client-specific adapters only for clients actually present."
-)
+
+def _runtime_routing_instructions() -> str:
+    if is_cloudrun_runtime():
+        return (
+            "This hosted runtime disables the Grok Build CLI by policy and uses the "
+            "metered xAI API as its only execution plane. Clear tasks route "
+            "heuristically; otherwise a bounded API semantic router may use up to "
+            f"{ROUTER_MAX_OUTPUT_TOKENS} output tokens. "
+        )
+    return (
+        "The live subscription default is the lead router and authors bounded "
+        "specialist briefs. Clear tasks route heuristically; otherwise three CLI-first "
+        "structured votes decide shape. If too few votes parse and the API is configured, "
+        "a semantic API fallback is capped at "
+        f"{ROUTER_MAX_OUTPUT_TOKENS} output tokens. Further API use is for a selected "
+        "specialist, an unavailable CLI capability, or bounded recovery. "
+    )
+
+
+def _runtime_state_contract() -> dict[str, Any]:
+    cloud_mode = is_cloudrun_runtime()
+    return {
+        "state_persistence": not cloud_mode,
+        "state_lifetime": "instance_local" if cloud_mode else "persistent_volume",
+        "completion_recovery": (
+            "one_same_plane_retry; no_cross_plane_available"
+            if cloud_mode
+            else "one_same_plane_retry_before_bounded_api_fallback"
+        ),
+    }
+
+
+def _service_instructions() -> str:
+    service_mode = "API-only Grok harness" if is_cloudrun_runtime() else "dual-plane Grok harness"
+    state_contract = (
+        "Named sessions and user-controlled knowledge use instance-local SQLite in hosted "
+        "mode and can be lost when an instance is replaced. "
+        if is_cloudrun_runtime()
+        else "Named agent sessions and user-controlled knowledge are stored in persistent "
+        "local SQLite. "
+    )
+    return (
+        f"UniGrok is a workspace-neutral, {service_mode}. Start with agent. "
+        "If agent returns status=continue, re-invoke agent with its continue_token. "
+        "If any tool returns status=pending, poll agent_result with the same job_id and "
+        "never start a duplicate request. "
+        "Long work is deadline-quanta + append-only ledger + acceptance_hash CommitDone — "
+        "not host heartbeats. "
+        "The agent tool makes web research, X search, and code execution available by "
+        "default. Inform the user that these tools are available and that the caller can "
+        "disable any of them with disable_tools. The caller supplies intent, not models, "
+        "planes, effort, or fallback settings. "
+        + _runtime_routing_instructions()
+        + "The xAI API plane is metered and supplies vision, files, image/video generation, "
+        "X search, and remote code execution. Models are discovered from each credential "
+        "plane rather than hard-coded. "
+        + state_contract
+        + "IDEs may courier explicitly selected, bounded text, but no project files, Git, "
+        "shell, external MCP servers, private intelligence, or subordinate providers are "
+        "attached. Prefer a host-native global UniGrok skill pack so repositories stay "
+        "clean. If the calling client does not already expose a UniGrok integration or a "
+        "recorded decline, offer grok_mcp_onboard_client once; never install anything "
+        "without explicit user approval. The MCP service only returns a namespaced "
+        "installation plan: the calling IDE performs any approved writes with its normal "
+        "permissions, previews conflicts, and never overwrites user-modified files. Project "
+        "customizations remain higher priority. On first use in a new project, do not create "
+        "workspace files automatically. If the user asks to initialize project guidance, "
+        "inspect and preserve existing files, then use the caller's workspace tools to "
+        "create only missing canonical paths: AGENTS.md for repository instructions, "
+        ".agents/rules/*.md for Antigravity rules, .agents/workflows/*.md for Antigravity "
+        "workflows, and .agents/skills/<skill-name>/SKILL.md for Agent Skills. Do not create "
+        "legacy .agent/rules. Add client-specific adapters only for clients actually present."
+    )
+
+
+INSTRUCTIONS = _service_instructions()
 
 GLOBAL_SKILL = """---
 name: using-unigrok
@@ -577,8 +638,11 @@ models, billing planes, capabilities, or safety boundaries matter.
 - Web, X search, and code tools are available by default. Tell the user they can disable
   them with `disable_tools`.
 - UniGrok chooses models, effort, planes, and recovery. Do not add those controls.
-- Web research is enabled by default on `agent` and remains Grok Build-first.
+- Web research is enabled by default on `agent`; `grok_mcp_discover_self` reports the
+  active credential plane and routing policy.
 - API-only capabilities use the configured metered xAI API plane and return receipts.
+- On `pending`, poll `agent_result` with the same job id. On `continue`, reattach with
+  the returned `continue_token`; never duplicate the original request.
 - Send project material only as deliberately selected, bounded `workspace_context`.
 - UniGrok has no direct project filesystem, shell, Git, credential, or external-MCP access.
 - Never place provider credentials in project files or chat.
@@ -758,7 +822,20 @@ VISUALS_COPILOT_INSTRUCTIONS = '---\napplyTo: "**"\n---\n\n' + VISUALS_HOSTS["gi
 # Cursor client integration (ported from the old public version's .cursor/ setup).
 # Cursor is an IDE CLIENT that connects TO UniGrok over HTTP MCP — never an execution
 # plane. The X-Client-ID header is a telemetry label, not authentication.
-CURSOR_MCP_URL = "http://localhost:4765/mcp"
+LOCAL_MCP_URL = "http://localhost:4765/mcp"
+
+
+def _configured_mcp_url() -> str:
+    if is_cloudrun_runtime():
+        resource = public_mcp_resource()
+        if not resource:
+            raise RuntimeError(
+                "UNIGROK_PUBLIC_MCP_URL must be configured for hosted onboarding"
+            )
+        return resource
+    return LOCAL_MCP_URL
+
+
 CURSOR_RULE = """---
 description: >-
   When and how to reach UniGrok's Grok gateway from Cursor. Use for @grok, a Grok
@@ -768,17 +845,17 @@ alwaysApply: true
 
 # Using UniGrok from Cursor
 
-UniGrok is a local Grok gateway. Its `agent` tool is your `@grok`.
+UniGrok is a workspace-neutral Grok gateway. Its `agent` tool is your `@grok`.
 
 - Reach for the UniGrok `agent` tool when you want: web/X research, hard reasoning or
-  plan critique, cross-project memory (named sessions and durable facts), or code you
+  plan critique, optional named sessions and facts, or code you
   want adversarially reviewed before delivery (`level: "ultra"` runs a parallel hive).
 - UniGrok picks the model, effort, and plane for you and returns a plane and cost
   receipt on every answer. Relay the cost to the user; never hide metered spend.
 - For ordinary local edits, use Cursor's native agent. Escalate to the UniGrok `agent`
-  tool for dual-plane routing, research, memory, or review.
-- Identity: keep `"X-Client-ID": "cursor"` in `.cursor/mcp.json`. It is a telemetry
-  label, not authentication.
+  tool for automatic routing, research, memory, or review.
+- Keep `"X-Client-ID": "cursor"` in `.cursor/mcp.json` for telemetry. Hosted identity
+  comes only from OAuth; the header is never authentication.
 - Never place `XAI_API_KEY` in Cursor configuration — credentials live inside UniGrok.
 """
 
@@ -799,7 +876,7 @@ def _cursor_mcp_server(scope: str) -> dict[str, Any]:
         "entry": {
             "mcpServers": {
                 "grok": {
-                    "url": CURSOR_MCP_URL,
+                    "url": _configured_mcp_url(),
                     "headers": {"X-Client-ID": "cursor"},
                 }
             }
@@ -870,20 +947,30 @@ applyTo: "**"
 
 # Using UniGrok from GitHub Copilot
 
-UniGrok is a local Grok gateway. Its `agent` tool is your `@grok`.
+UniGrok is a workspace-neutral Grok gateway. Its `agent` tool is your `@grok`.
 
 - Reach for the UniGrok `agent` tool when you want: web/X research, hard reasoning or
-  plan critique, cross-project memory (named sessions and durable facts), or code you
+  plan critique, optional named sessions and facts, or code you
   want adversarially reviewed before delivery (`level: "ultra"` runs a parallel hive).
 - UniGrok picks the model, effort, and plane for you and returns a plane and cost
   receipt on every answer. Relay the cost to the user; never hide metered spend.
 - For ordinary local edits, use Copilot's native tools. Escalate to the UniGrok `agent`
-  tool for dual-plane routing, research, memory, or review.
-- Identity: keep `"X-Client-ID": "github-copilot"` in the MCP server headers. It is a
-  telemetry label, not authentication.
+  tool for automatic routing, research, memory, or review.
+- Keep `"X-Client-ID": "github-copilot"` in the MCP server headers for telemetry.
+  Hosted identity comes only from OAuth; the header is never authentication.
 - Never place `XAI_API_KEY` in Copilot, VS Code, or repository configuration —
   credentials live inside UniGrok.
 """
+
+
+def _runtime_client_instructions(instructions: str) -> str:
+    state_note = (
+        "Hosted sessions and facts are instance-local and can be lost when the service "
+        "instance is replaced."
+        if is_cloudrun_runtime()
+        else "Local sessions and facts persist in the configured SQLite volume."
+    )
+    return f"{instructions.rstrip()}\n- {state_note}\n"
 
 
 def _copilot_mcp_server(scope: str) -> dict[str, Any]:
@@ -908,7 +995,7 @@ def _copilot_mcp_server(scope: str) -> dict[str, Any]:
             "mcpServers": {
                 "grok": {
                     "type": "http",
-                    "url": CURSOR_MCP_URL,
+                    "url": _configured_mcp_url(),
                     "headers": {"X-Client-ID": "github-copilot"},
                 }
             }
@@ -920,7 +1007,7 @@ def _copilot_mcp_server(scope: str) -> dict[str, Any]:
                 "servers": {
                     "grok": {
                         "type": "http",
-                        "url": CURSOR_MCP_URL,
+                        "url": _configured_mcp_url(),
                         "headers": {"X-Client-ID": "github-copilot"},
                     }
                 }
@@ -1148,6 +1235,7 @@ def _global_files(client: str) -> list[dict[str, str]]:
 
 def _client_onboarding_plan(client: str, scope: str) -> dict[str, Any]:
     adapter = CLIENT_ADAPTERS[client]
+    cloud_mode = is_cloudrun_runtime()
     common = {
         "schema_version": 1,
         "service": SERVICE_NAME,
@@ -1157,7 +1245,21 @@ def _client_onboarding_plan(client: str, scope: str) -> dict[str, Any]:
         "scope": scope,
         "writes_performed": False,
         "requires_explicit_user_approval": True,
+        "automatic_tool_approval_offered": not cloud_mode,
         "installer": "calling_ide_agent",
+        "runtime_contract": {
+            "execution_policy": "api_only" if cloud_mode else "dual_plane",
+            "inference_billing": "metered" if cloud_mode else "conditional",
+            "state_lifetime": (
+                "instance_local" if cloud_mode else "persistent_volume"
+            ),
+        },
+        "connection": {
+            "mode": "oauth_remote" if cloud_mode else "local_loopback",
+            "mcp_url": _configured_mcp_url(),
+            "authentication": "oauth_discovery" if cloud_mode else "local_service",
+            "client_labels_are_authentication": False,
+        },
         "write_policy": {
             "owned_namespace_only": True,
             "blind_overwrite": False,
@@ -1191,18 +1293,27 @@ def _client_onboarding_plan(client: str, scope: str) -> dict[str, Any]:
             ],
         }
         if client == "cursor":
-            plan["files"].append(_owned_file(".cursor/rules/using-unigrok.mdc", CURSOR_RULE))
+            plan["files"].append(
+                _owned_file(
+                    ".cursor/rules/using-unigrok.mdc",
+                    _runtime_client_instructions(CURSOR_RULE),
+                )
+            )
             plan["files"].append(
                 _owned_file(".cursor/rules/unigrok-visuals.mdc", VISUALS_CURSOR_RULE)
             )
-            plan["files"].append(
-                _owned_file(".cursor/hooks/before-unigrok-agent.py", CURSOR_AGENT_HOOK)
-            )
             plan["mcp_server"] = _cursor_mcp_server("project")
-            plan["hooks"] = _cursor_hooks("project")
+            if not cloud_mode:
+                plan["files"].append(
+                    _owned_file(".cursor/hooks/before-unigrok-agent.py", CURSOR_AGENT_HOOK)
+                )
+                plan["hooks"] = _cursor_hooks("project")
         if client == "github_copilot":
             plan["files"].append(
-                _owned_file(".github/instructions/unigrok.instructions.md", COPILOT_INSTRUCTIONS)
+                _owned_file(
+                    ".github/instructions/unigrok.instructions.md",
+                    _runtime_client_instructions(COPILOT_INSTRUCTIONS),
+                )
             )
             plan["files"].append(
                 _owned_file(
@@ -1231,27 +1342,38 @@ def _client_onboarding_plan(client: str, scope: str) -> dict[str, Any]:
         "reload": adapter["reload"],
     }
     if client == "cursor":
-        # Ported Cursor client setup: the essential mcp.json entry that points Cursor at
-        # the Grok gateway, the routing rule, and the beforeMCPExecution hook that
-        # auto-approves the agent tool so @grok never prompts (Cursor's "plugin" piece).
+        # Ported Cursor client setup: the MCP entry and routing rule are universal.
+        # The local-only hook avoids silently auto-approving metered hosted calls.
         plan["mcp_server"] = _cursor_mcp_server("global")
-        plan["hooks"] = _cursor_hooks("global")
         plan["files"] = [
             *files,
-            _owned_file(".cursor/rules/using-unigrok.mdc", CURSOR_RULE),
+            _owned_file(
+                ".cursor/rules/using-unigrok.mdc",
+                _runtime_client_instructions(CURSOR_RULE),
+            ),
             _owned_file(".cursor/rules/unigrok-visuals.mdc", VISUALS_CURSOR_RULE),
-            _owned_file("~/.cursor/hooks/before-unigrok-agent.py", CURSOR_AGENT_HOOK),
         ]
-        plan["reload"] = (
-            "Reload Cursor after adding the MCP server and hook, then call "
-            "grok_mcp_discover_self."
-        )
+        if cloud_mode:
+            plan["reload"] = (
+                "Reload Cursor after authorizing the remote MCP server, then call "
+                "grok_mcp_discover_self."
+            )
+        else:
+            plan["hooks"] = _cursor_hooks("global")
+            plan["files"].append(
+                _owned_file("~/.cursor/hooks/before-unigrok-agent.py", CURSOR_AGENT_HOOK)
+            )
+            plan["reload"] = (
+                "Reload Cursor after adding the MCP server and hook, then call "
+                "grok_mcp_discover_self."
+            )
     else:
         # Same "never prompt for @grok" outcome for the other IDEs, each via its own
         # native mechanism (optional; the IDE previews before applying).
-        auto_approve = _auto_approve(client, "global")
-        if auto_approve is not None:
-            plan["auto_approve"] = auto_approve
+        if not cloud_mode:
+            auto_approve = _auto_approve(client, "global")
+            if auto_approve is not None:
+                plan["auto_approve"] = auto_approve
         if client == "github_copilot":
             # gh Copilot CLI reads ~/.copilot/mcp-config.json; VS Code uses .vscode/
             # mcp.json (carried as vscode_alternative). Project instructions live in
@@ -1644,23 +1766,33 @@ def _media_generation_available(catalogs: dict[str, Any], kind: str) -> bool:
 
 
 def _media_unavailable_result(kind: str) -> dict[str, Any]:
-    return {
-        "text": (
+    cloud_mode = is_cloudrun_runtime()
+    if cloud_mode:
+        text = (
+            f"{kind.capitalize()} generation is unavailable in the hosted xAI API "
+            "catalog. Contact the service operator; remote callers must never add "
+            "provider keys to client configuration. I won't fake a result or return "
+            "a broken link."
+        )
+    else:
+        text = (
             f"{kind.capitalize()} generation needs a metered xAI API key. Add "
             "`XAI_API_KEY` to your `.env` and restart the service, then ask again. "
-            "On the free Grok Build plane I only return text, so I won't fake a "
+            "The Grok Build subscription plane returns text only, so I won't fake a "
             f"{kind} or a broken link."
-        ),
+        )
+    return {
+        "text": text,
         "model": None,
         "stop_reason": "capability_unavailable",
-        "plane": "cli",
-        "resolved_plane": "cli",
+        "plane": "api" if cloud_mode else "cli",
+        "resolved_plane": "api" if cloud_mode else "cli",
         "requested_plane": "auto",
         "cost_usd": 0.0,
         "fallback_occurred": False,
         "fallback_from": None,
         "fallback_reason": "capability_unavailable",
-        "degraded": False,
+        "degraded": cloud_mode,
         "orchestration": {
             "lead": None,
             "route": kind,
@@ -1740,10 +1872,13 @@ async def _route_task(prompt: str, catalogs: dict[str, Any]) -> dict[str, Any]:
 
 
 def _live_self_description(catalogs: dict[str, Any]) -> dict[str, Any]:
+    cloud_mode = is_cloudrun_runtime()
+    runtime_contract = _runtime_state_contract()
     cli_ready = bool(catalogs["cli"].get("ready", False))
     api_ready = bool(catalogs["api"].get("ready", False))
     api_configured = bool(catalogs["api"].get("configured", False))
     can_spend_api = bool(api_ready and METERED_API_ENABLED)
+    can_chat = can_spend_api if cloud_mode else cli_ready or can_spend_api
     notices: list[dict[str, Any]] = []
     if api_configured and not METERED_API_ENABLED:
         notices.append(
@@ -1780,37 +1915,54 @@ def _live_self_description(catalogs: dict[str, Any]) -> dict[str, Any]:
                 "prompt_user": True,
                 "severity": "warning",
                 "summary": (
-                    "Neither Grok plane is available: the Grok Build CLI is not logged in "
-                    "and no xAI API key is configured."
+                    "The hosted xAI API plane is unavailable."
+                    if cloud_mode
+                    else "Neither Grok plane is available: the Grok Build CLI is not "
+                    "logged in and no xAI API key is configured."
                 ),
                 "action": (
-                    "Log in with `grok login --device-auth` (subscription plane) or add "
-                    "XAI_API_KEY to your .env (metered plane). New to Grok-powered "
+                    "Contact the hosted service operator; remote callers must never add "
+                    "provider keys to client configuration."
+                    if cloud_mode
+                    else "Log in with `grok login --device-auth` (subscription plane) or "
+                    "add XAI_API_KEY to your .env (metered plane). New to Grok-powered "
                     "coding? You can also sign up for Cursor via the project's referral "
                     "link: " + CURSOR_REFERRAL_URL
                 ),
             }
         )
+    surfaces = {
+        "mcp": "/mcp",
+        "health": "/healthz",
+        "readiness": "/readyz",
+        "runtime": "/runtimez",
+        "benchmarks": "/benchmarkz",
+        "webmcp": "/.well-known/webmcp",
+    }
+    if not cloud_mode:
+        surfaces.update({"ui": "/ui/", "okf_index": "/docs/okf/index.md"})
+    routing_note = (
+        "Hosted execution is API-only. Clear tasks route heuristically; otherwise the "
+        f"bounded semantic router may use up to {ROUTER_MAX_OUTPUT_TOKENS} output tokens. "
+        "The calling agent must disclose API use."
+        if cloud_mode
+        else "All agent tools are available by default. Routing uses heuristics or three "
+        "CLI-first bounded votes. If those votes are inconclusive and the API is ready, "
+        f"a semantic fallback is capped at {ROUTER_MAX_OUTPUT_TOKENS} output tokens. "
+        "Selected work stays CLI-first unless it needs a specialist or recovery. The "
+        "calling agent must disclose API use."
+    )
     return {
         "schema_version": 1,
         "service": SERVICE_NAME,
         "version": __version__,
         "mode": "public_core",
-        "surfaces": {
-            "mcp": "/mcp",
-            "health": "/healthz",
-            "readiness": "/readyz",
-            "runtime": "/runtimez",
-            "benchmarks": "/benchmarkz",
-            "ui": "/ui/",
-            "webmcp": "/.well-known/webmcp",
-            "okf_index": "/docs/okf/index.md",
-        },
+        "surfaces": surfaces,
         "workspace_attached": False,
-        "tools": list(PUBLIC_TOOLS),
+        "tools": _runtime_public_tools(),
         "bootstrap": {
-            "status": "OK" if cli_ready or can_spend_api else "BLOCKED",
-            "can_chat": cli_ready or can_spend_api,
+            "status": "OK" if can_chat else "BLOCKED",
+            "can_chat": can_chat,
             "can_spend_api": can_spend_api,
             "can_mutate_workspace": False,
             "can_use_swarm": False,
@@ -1821,11 +1973,15 @@ def _live_self_description(catalogs: dict[str, Any]) -> dict[str, Any]:
         },
         "credential_planes": {
             "version": 1,
-            "policy": "cli_first",
-            "preferred_plane": "cli",
-            "effective_plane": "cli" if cli_ready else ("api" if can_spend_api else None),
-            "service_usable": cli_ready or can_spend_api,
-            "degraded": not cli_ready,
+            "policy": "api_only" if cloud_mode else "cli_first",
+            "preferred_plane": "api" if cloud_mode else "cli",
+            "effective_plane": (
+                "api"
+                if cloud_mode and can_spend_api
+                else ("cli" if cli_ready else ("api" if can_spend_api else None))
+            ),
+            "service_usable": can_chat,
+            "degraded": (not can_spend_api) if cloud_mode else not cli_ready,
             "cli": {
                 "name": "Grok Build subscription",
                 "ready": cli_ready,
@@ -1833,6 +1989,7 @@ def _live_self_description(catalogs: dict[str, Any]) -> dict[str, Any]:
                 "default_model": catalogs["cli"].get("default_model"),
                 "billing": "subscription",
                 "transport": "persistent_acp",
+                "disabled_by_policy": cloud_mode,
             },
             "api": {
                 "name": "xAI developer API",
@@ -1852,7 +2009,11 @@ def _live_self_description(catalogs: dict[str, Any]) -> dict[str, Any]:
             "notice_behavior": "Informational only; no client prompt is required.",
         },
         "routing": {
-            "lead": "heuristics then CLI-first bounded votes; API semantic fallback if needed",
+            "lead": (
+                "heuristics then bounded API semantic routing"
+                if cloud_mode
+                else "heuristics then CLI-first bounded votes; API semantic fallback if needed"
+            ),
             "specialists": (
                 "lead-authored briefs select provider-discovered code or media specialists"
             ),
@@ -1860,7 +2021,11 @@ def _live_self_description(catalogs: dict[str, Any]) -> dict[str, Any]:
                 "task intent only; models, planes, effort, and recovery are automatic"
             ),
             "same_plane": "never crosses the credential or billing boundary",
-            "cross_plane": "one bounded API recovery after CLI failure or throttling",
+            "cross_plane": (
+                "unavailable because the hosted CLI plane is disabled"
+                if cloud_mode
+                else "one bounded API recovery after CLI failure or throttling"
+            ),
         },
         "capability_defaults": {
             "agent": {
@@ -1888,14 +2053,7 @@ def _live_self_description(catalogs: dict[str, Any]) -> dict[str, Any]:
                 "disable_flags": {
                     "all": "disable_tools=[web,x_search,remote_code_execution]",
                 },
-                "note": (
-                    "All agent tools are available by default. Routing uses heuristics or "
-                    "three CLI-first bounded votes. If those votes are inconclusive and the "
-                    f"API is ready, a semantic fallback is capped at "
-                    f"{ROUTER_MAX_OUTPUT_TOKENS} output tokens. Selected work stays CLI-first "
-                    "unless it needs a specialist or recovery. "
-                    "The calling agent must disclose API use."
-                ),
+                "note": routing_note,
             },
             "chat": {
                 "allow_web": False,
@@ -1912,6 +2070,11 @@ def _live_self_description(catalogs: dict[str, Any]) -> dict[str, Any]:
             "installer": "calling_ide_agent",
             "choices": ["global", "project", "not_now", "never"],
             "project_overrides_global": True,
+            "connection": {
+                "mode": "oauth_remote" if cloud_mode else "local_loopback",
+                "mcp_url": _configured_mcp_url(),
+                "authentication": "oauth_discovery" if cloud_mode else "local_service",
+            },
             "adapters": {
                 name: {
                     "label": adapter["label"],
@@ -1925,11 +2088,13 @@ def _live_self_description(catalogs: dict[str, Any]) -> dict[str, Any]:
         "team_harness": {
             "named_sessions": True,
             "state_backend": "local_sqlite",
-            "durable_knowledge": True,
+            "durable_knowledge": not cloud_mode,
+            "state_persistence": runtime_contract["state_persistence"],
+            "state_lifetime": runtime_contract["state_lifetime"],
             "workspace_context": "explicit_bounded_redacted_courier_only",
             "automatic_workspace_access": False,
             "local_subagents": False,
-            "completion_recovery": "one_same_plane_retry_before_bounded_api_fallback",
+            "completion_recovery": runtime_contract["completion_recovery"],
             "request_limits": {
                 "build_concurrency": "provider_managed",
                 "build_timeout_seconds": BUILD_TIMEOUT_SECONDS,
@@ -1990,7 +2155,7 @@ async def _system_prompt(kind: str, extra_context: str | None = None) -> str:
             "\n\nUse the selected plane's native tools first. If the task requires a capability "
             "that this plane truly cannot provide, return exactly "
             f"{CAPABILITY_UNAVAILABLE_PREFIX}<short capability name> so the gateway can "
-            "perform its single bounded recovery on the other plane."
+            "perform one bounded recovery when another ready plane exists."
         )
     if extra_context:
         prompt += "\n\n" + extra_context
@@ -4126,11 +4291,13 @@ async def _execute_team_turn(
             outcome="completed_before_state_failure",
         )
         raise _with_incurred_usage(exc, completed_attempts) from exc
+    runtime_contract = _runtime_state_contract()
     result.update(
         {
             "session": public_state_name(session) if session else None,
             "session_message_count": message_count,
-            "state_persistence": True,
+            "state_persistence": runtime_contract["state_persistence"],
+            "state_lifetime": runtime_contract["state_lifetime"],
             "workspace_attached": False,
             "workspace_context_supplied": bool(courier),
             "memory_scope": public_state_name(scope) if use_memory else None,
@@ -4250,12 +4417,12 @@ async def agent(
     """Run UniGrok with one task; Grok selects routing, models, effort, and recovery.
 
     Web, X search, and xAI cloud code execution are available by default. A caller may
-    disable named tools with `disable_tools`. UniGrok keeps the live subscription default
-    as lead, delegates specialist production through live provider catalogs, and reports
-    any metered API use in the result.
+    disable named tools with `disable_tools`. UniGrok uses the preferred ready plane as
+    lead, delegates specialist production through live provider catalogs, and reports
+    any metered API use in the result. Hosted mode disables the CLI plane by policy.
     `depth: "deep"` engages the j-space deep-reasoning harness: a silent multi-candidate
-    specialist simulation with high reasoning effort on a direct subscription-first route
-    (no metered router pass). Use it for plan critique, hard math/logic, and code the
+    specialist simulation with high reasoning effort on a direct route (no separate
+    router pass). Use it for plan critique, hard math/logic, and code the
     caller wants adversarially self-reviewed before it is emitted.
     `depth: "hive"` runs draft -> five parallel persona votes (critic, bounty, spec,
     failures, complexity) -> one merge editor; votes are terse JSON and the merge
@@ -4265,9 +4432,10 @@ async def agent(
     deep harness) -> ultra (parallel hive). Setting `level` picks the rung explicitly
     and skips auto-routing; leave it unset to let UniGrok choose. `voters` overrides
     how many personas vote in hive/ultra (for benchmarking the sweet spot).
-    A named `session` persists redacted conversation turns in local SQLite.
+    A named `session` persists redacted conversation turns in configured SQLite state;
+    hosted `/tmp` state remains instance-local.
     `workspace_context` couriers explicitly selected text; it grants no direct
-    filesystem, shell, Git, credential, or MCP authority. Durable facts are
+    filesystem, shell, Git, credential, or MCP authority. Stored facts are
     retrieved from `memory_scope` (the session name by default) plus global facts.
     Supplying an API key enables metered API execution by default; the service owner
     can disable it globally with `UNIGROK_ENABLE_METERED_API=false`.
@@ -4995,13 +5163,18 @@ async def agent(
                     "adjustments": tool_adjustments,
                     "user_notice_required": True,
                     "user_notice": (
-                        "Web, X search, and code tools are available by default. Routing uses "
-                        "heuristics or CLI-first bounded votes; if those are inconclusive, "
+                        "Web, X search, and code tools are available by default. Hosted "
+                        "execution is API-only and metered; clear tasks route heuristically "
+                        "and unclear tasks may use a bounded API semantic router. The user "
+                        "can disable tools with disable_tools. Disclose API use."
+                        if is_cloudrun_runtime()
+                        else "Web, X search, and code tools are available by default. Routing "
+                        "uses heuristics or CLI-first bounded votes; if those are inconclusive, "
                         f"an API semantic fallback is capped at {ROUTER_MAX_OUTPUT_TOKENS} "
-                        "output tokens when API is configured. "
-                        "selected direct work remains subscription-first, while specialists and "
-                        "bounded recovery use API as needed. "
-                        "The user can disable them with disable_tools. Disclose any API use."
+                        "output tokens when API is configured. Selected direct work remains "
+                        "subscription-first, while specialists and bounded recovery use API as "
+                        "needed. The user can disable them with disable_tools. Disclose any "
+                        "API use."
                     ),
                 },
             }
@@ -5584,7 +5757,7 @@ async def grok_mcp_onboard_client(
 
 @mcp.tool(annotations=READ_ONLY)
 async def grok_mcp_status(refresh: bool = False) -> dict[str, Any]:
-    """Report non-secret dual-plane readiness and the exact public boundary."""
+    """Report non-secret credential-plane readiness and the exact public boundary."""
     catalogs, state_ready, telemetry = await asyncio.gather(
         _catalogs(refresh=refresh),
         STATE.health(),
@@ -5615,6 +5788,7 @@ async def grok_mcp_status(refresh: bool = False) -> dict[str, Any]:
             "sessions": True,
             "knowledge": True,
             "telemetry": True,
+            "lifetime": ("instance_local" if is_cloudrun_runtime() else "persistent_volume"),
         },
         "benchmark_summary": {
             key: telemetry[key]
@@ -5644,9 +5818,12 @@ async def benchmark_status(limit: int = 1000) -> dict[str, Any]:
         "telemetry": summary,
         "circuit_breakers": _breaker_snapshot(),
         "routing_advisor": {
-            "policy": "grok_4_5_lead_with_provider_discovered_specialists",
+            "policy": "live_discovered_lead_with_provider_discovered_specialists",
             "automatic_model_experiments": False,
-            "reason": "Public launch policy keeps Grok 4.5 as lead; telemetry is observational.",
+            "reason": (
+                "Lead and specialists are selected from live provider catalogs; "
+                "telemetry is observational."
+            ),
         },
         "semantic_evaluation": {
             "mode": "explicit_feedback",
@@ -5715,7 +5892,7 @@ async def list_models(refresh: bool = False) -> dict[str, Any]:
 
 @mcp.tool(annotations=READ_ONLY)
 async def list_sessions(limit: int = 50) -> dict[str, Any]:
-    """List durable public team sessions without returning their message content."""
+    """List stored public team sessions without returning their message content."""
     sessions = await STATE.list_sessions(limit=limit, prefix=tenant_prefix())
     for item in sessions:
         item["name"] = public_state_name(item.get("name"))
@@ -5748,7 +5925,7 @@ async def forget_session(session: str, confirm_delete: bool = False) -> dict[str
 
 @mcp.tool()
 async def remember_fact(fact: str, scope: str = "global") -> dict[str, Any]:
-    """Save one durable decision, constraint, preference, or verified finding."""
+    """Save one decision, constraint, preference, or verified finding."""
     internal_scope = normalize_scope(scoped_scope(normalize_scope(scope)))
     fact_id = await STATE.save_fact(fact, scope=internal_scope, source="manual")
     return {
@@ -5760,7 +5937,7 @@ async def remember_fact(fact: str, scope: str = "global") -> dict[str, Any]:
 
 @mcp.tool(annotations=READ_ONLY)
 async def search_knowledge(query: str, scope: str | None = None, limit: int = 5) -> dict[str, Any]:
-    """Search durable public knowledge, optionally within a session scope plus global."""
+    """Search stored public knowledge, optionally within a session scope plus global."""
     internal_scope = normalize_scope(scoped_scope(scope or "global"))
     facts = await STATE.search_facts(query, scope=internal_scope, limit=limit)
     public = [
@@ -5781,7 +5958,7 @@ async def search_knowledge(query: str, scope: str | None = None, limit: int = 5)
 
 @mcp.tool(annotations=DESTRUCTIVE)
 async def forget_fact(fact_id: int, confirm_delete: bool = False) -> dict[str, Any]:
-    """Permanently delete one durable fact by its id."""
+    """Permanently delete one stored fact by its id."""
     if confirm_delete is not True:
         raise ValueError("Permanently deleting a fact requires confirm_delete=true")
     try:
@@ -6238,6 +6415,43 @@ async def forge_control_plane_stub(request: Request) -> Response:
 
 @mcp.custom_route("/.well-known/webmcp", methods=["GET"], include_in_schema=False)
 async def webmcp_manifest(_: Request) -> JSONResponse:
+    if is_cloudrun_runtime():
+        issuers = authorization_servers()
+        return JSONResponse(
+            {
+                "schema_version": 1,
+                "name": SERVICE_NAME,
+                "version": __version__,
+                "description": "Authenticated, workspace-neutral hosted Grok MCP",
+                "mcp": {
+                    "endpoint": "/mcp",
+                    "transport": "streamable-http",
+                    "authentication": "oauth",
+                },
+                "public_surfaces": {
+                    "health": "/healthz",
+                    "readiness": "/readyz",
+                    "oauth": "/.well-known/oauth-protected-resource/mcp",
+                    "webmcp": "/.well-known/webmcp",
+                },
+                "authenticated_surfaces": {
+                    "runtime": "/runtimez",
+                    "benchmarks": "/benchmarkz",
+                },
+                "surfaces": {
+                    "health": "/healthz",
+                    "readiness": "/readyz",
+                    "oauth": "/.well-known/oauth-protected-resource/mcp",
+                    "webmcp": "/.well-known/webmcp",
+                    "runtime": "/runtimez",
+                    "benchmarks": "/benchmarkz",
+                },
+                "authorization_server": issuers[0] if issuers else None,
+                "control_ui": issuers[0] if issuers else None,
+                "workspace_attached": False,
+                "state_lifetime": "instance_local",
+            }
+        )
     return JSONResponse(
         {
             "schema_version": 1,
@@ -6322,6 +6536,7 @@ async def readyz(_: Request) -> JSONResponse:
 @mcp.custom_route("/runtimez", methods=["GET"], include_in_schema=False)
 async def runtimez(_: Request) -> JSONResponse:
     telemetry = await STATE.telemetry_summary(limit=1000, caller=_tenant_caller())
+    runtime_contract = _runtime_state_contract()
     return JSONResponse(
         {
             "service": SERVICE_NAME,
@@ -6329,11 +6544,12 @@ async def runtimez(_: Request) -> JSONResponse:
             "mode": "public_core",
             "workspace_attached": False,
             "requires_project_files": False,
-            "state_persistence": True,
+            "state_persistence": runtime_contract["state_persistence"],
+            "state_lifetime": runtime_contract["state_lifetime"],
             "state_backend": "sqlite",
             "workspace_context_transport": "explicit_bounded_redacted_courier",
             "local_subagents": False,
-            "completion_recovery": "one_same_plane_retry_before_bounded_api_fallback",
+            "completion_recovery": runtime_contract["completion_recovery"],
             "request_limits": {
                 "build_concurrency": "provider_managed",
                 "build_timeout_seconds": BUILD_TIMEOUT_SECONDS,
@@ -6373,7 +6589,7 @@ async def runtimez(_: Request) -> JSONResponse:
             },
             "circuit_breakers": _breaker_snapshot(),
             "routing_advisor": {
-                "policy": "grok_4_5_lead_with_provider_discovered_specialists",
+                "policy": "live_discovered_lead_with_provider_discovered_specialists",
                 "automatic_model_experiments": False,
             },
             "semantic_evaluation": {

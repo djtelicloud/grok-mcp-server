@@ -599,6 +599,16 @@ def test_gateway_bearer_mints_broker_token_from_secret(
     assert claims["exp"] - claims["iat"] == 600
 
 
+def test_workflow_has_no_ignored_plane_knob_and_documents_token_ttl() -> None:
+    script = (SCRIPTS_DIR / "github-grok-review.py").read_text(encoding="utf-8")
+    workflow = (SCRIPTS_DIR.parent / ".github/workflows/grok-review.yml").read_text(
+        encoding="utf-8"
+    )
+    assert "UNIGROK_REVIEW_PLANE" not in script
+    assert "UNIGROK_REVIEW_PLANE" not in workflow
+    assert "bounded 600s" in workflow
+
+
 @pytest.mark.parametrize(
     ("configured", "expected_aud"),
     [

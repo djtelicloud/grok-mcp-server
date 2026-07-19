@@ -5,6 +5,25 @@ report that we can actually reproduce. One section per release, newest first.
 
 ## 1.1.0
 
+### Hosted collaboration is authenticated, but state is instance-local
+
+The owner-operated remote endpoint is an OAuth-gated collaboration pilot, not an
+anonymous multi-tenant SaaS. OAuth identity isolates sessions, facts, jobs, telemetry,
+and configured budgets, while hosted xAI file tools require a principal-bound provider
+credential.
+
+Cloud Run currently stores SQLite under `/tmp`. A revision or instance replacement can
+therefore lose hosted sessions, facts, and durable-job state, and two scaled instances
+do not share that state. Release cutovers are atomic rather than fractional for this
+reason. Treat an unknown poll after replacement like `lost`: inspect provider state
+before retrying any metered or mutating operation. Local Compose uses a persistent
+volume and has the stronger restart behavior documented below.
+
+Configured caller budgets are pre-call daily stop thresholds, not atomic reservations.
+A call admitted just below its threshold, or several concurrent calls, can finish above
+the configured amount. Use conservative thresholds and provider-side account controls
+when a strict financial ceiling is required.
+
 ### Depth modes are new — here is what a "miss" looks like
 
 `max` (deep harness) and `ultra` (hive voting) shipped in 1.1.0 and have had
@@ -25,7 +44,7 @@ is exactly the feedback we need. A depth-mode miss usually looks like one of:
 
 ### Plane fallback is visible — check the receipts
 
-The subscription CLI plane is the default; the metered xAI API plane is for
+In local Compose, the subscription CLI plane is the default; the metered xAI API plane is for
 selected specialists and bounded recovery. Every result carries
 `resolved_plane`, `fallback_occurred` / `fallback_reason`, and `usage`. If
 those receipts show a fallback to the API plane that you did not expect, file
@@ -35,7 +54,8 @@ a bug with those fields — they tell most of the story.
 
 - **`xhigh` on the API plane auto-downgrades to `high`** instead of erroring.
   The downgrade is echoed in the resolved level.
-- **Mission V2 and generic jobs recover differently after restart.** Mission V2
+- **On persistent local Compose, Mission V2 and generic jobs recover differently after
+  restart.** Mission V2
   keeps durable mission truth and returns `continue` with the same token (or the
   canonical terminal winner). A generic job whose terminal result was already
   recorded remains pollable; one interrupted before recording returns `lost`.
@@ -45,7 +65,7 @@ a bug with those fields — they tell most of the story.
 
 ### Auto++ router mis-routes
 
-On unclear tasks the router picks route, depth, and voter count via three
+In local Compose, unclear tasks route via three
 CLI-first intent votes. A provider failure may cross to the metered API, and an
 inconclusive vote set may use the bounded semantic API fallback; receipts report
 the actual plane and cost of every attempt. If it chooses a depth or voter count

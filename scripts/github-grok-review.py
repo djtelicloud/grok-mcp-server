@@ -398,7 +398,6 @@ async def main() -> None:
                 f"- bounded evidence sha256: {provenance['evidence_sha256']}"
             ),
             "review_comments": discussion,
-            "plane": os.environ.get("UNIGROK_REVIEW_PLANE", "cli"),
         }
     )
     current = _github_request(pr_url, token)
