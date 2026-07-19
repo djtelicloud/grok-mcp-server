@@ -28,6 +28,20 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
 
 from . import __version__, xai_api
+from .autonomy import (
+    JOB_COMPLETE,
+    JOB_ERROR,
+    JOB_NEEDS_CONTINUATION,
+    TERMINAL_JOB_STATUSES,
+    acceptance_hash,
+    artifact_hash,
+    check_propose_done,
+    continue_envelope,
+    ledger_summary,
+    new_claim_lease,
+    new_continue_token,
+    normalize_artifact_content,
+)
 from .grok_build import GrokBuildACPManager
 from .harness import (
     HIVE_PERSONAS,
@@ -101,7 +115,7 @@ PUBLIC_TOOLS: tuple[dict[str, Any], ...] = (
     {
         "name": "agent_result",
         "plane": "local job state",
-        "purpose": "Poll a long-running agent call without client timeout",
+        "purpose": "Poll a long-running agent or slow API job without client timeout",
     },
     {
         "name": "review_pull_request",
@@ -244,6 +258,21 @@ CATALOG_TTL_SECONDS = _bounded_int("UNIGROK_CATALOG_TTL", 60, 5, 600)
 MAX_WORKSPACE_CONTEXT_CHARS = _bounded_int(
     "UNIGROK_MAX_WORKSPACE_CONTEXT_CHARS", 100_000, 1_024, 500_000
 )
+# Autonomy continue_token / ProposeDone layer — OFF by default until hosts opt in.
+AUTONOMY_ENABLED = os.environ.get("UNIGROK_AUTONOMY", "false").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+# Mission controller v2 (durable verifying + fenced leases). Requires autonomy.
+MISSION_V2_ENABLED = os.environ.get("UNIGROK_MISSION_V2", "false").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+MISSION_ENVELOPE_VERSION = _bounded_int("UNIGROK_MISSION_ENVELOPE_VERSION", 1, 1, 1_000_000)
 METERED_API_ENABLED = os.environ.get("UNIGROK_ENABLE_METERED_API", "true").strip().lower() in {
     "1",
     "true",
@@ -267,9 +296,79 @@ SURFACE = os.environ.get("UNIGROK_SURFACE", "public").strip().lower() or "public
 UI_ROOT_OVERRIDE = os.environ.get("UNIGROK_UI_ROOT", "").strip()
 _CATALOG_CACHE: tuple[float, dict[str, Any]] | None = None
 _SESSION_LOCKS: dict[str, asyncio.Lock] = {}
-_AGENT_JOBS: dict[str, tuple[float, asyncio.Task[dict[str, Any]]]] = {}
+# In-memory durable jobs for agent turns and slow xAI file/media calls. Completed
+# payloads are also persisted via STATE.save_agent_job so polls survive restarts.
+# Value: (created_monotonic, task, kind)
+_DURABLE_JOBS: dict[str, tuple[float, asyncio.Task[dict[str, Any]], str]] = {}
+# App-scoped task set so job work outlives the MCP request task. Sync-window
+# expiry and request cancellation must NOT cancel these (A1 / P0).
+_JOB_TASKS: set[asyncio.Task[Any]] = set()
+# Optional fields merged into a job payload when the background task finishes
+# (e.g. review_pull_request metadata that must survive agent_result polls).
+_JOB_ENRICHMENT: dict[str, dict[str, Any]] = {}
 AGENT_SYNC_WINDOW_SECONDS = 16
 AGENT_JOB_TTL_SECONDS = 900
+# Keep the alias so older call sites / mental model stay readable.
+_AGENT_JOBS = _DURABLE_JOBS
+
+
+def _track_job_task(task: asyncio.Task[Any]) -> None:
+    """Retain a strong reference until the job finishes; discard on done.
+
+    Also retrieves the task exception so cancelled/failed jobs never surface as
+    \"Task exception was never retrieved\" after the waiter has already left.
+    """
+
+    def _on_done(done: asyncio.Task[Any]) -> None:
+        _JOB_TASKS.discard(done)
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            done.exception()
+
+    _JOB_TASKS.add(task)
+    task.add_done_callback(_on_done)
+
+
+async def cancel_job(job_id: str) -> bool:
+    """Explicit cancel only — never used for sync-window expiry."""
+    normalized = str(job_id or "").strip().lower()
+    record = _DURABLE_JOBS.get(normalized)
+    if record is None:
+        return False
+    _, task, _ = record
+    if task.done():
+        return False
+    task.cancel()
+    with contextlib.suppress(asyncio.CancelledError, Exception):
+        await asyncio.wait({task}, timeout=2.0)
+    return True
+
+
+async def shutdown_jobs(*, wait_seconds: float = 5.0) -> None:
+    """Cancel in-flight job tasks on process teardown (bounded wait)."""
+    # Mark non-terminal durable rows interrupted before cancelling tasks.
+    for job_id, (_created, task, kind) in tuple(_DURABLE_JOBS.items()):
+        if task.done():
+            continue
+        payload = {
+            "status": "lost",
+            "job_id": job_id,
+            "job_kind": kind,
+            "text": (
+                "This job was interrupted by a service shutdown before it finished. "
+                "It is safe to retry the original request."
+            ),
+            "stop_reason": "Interrupted",
+            "workspace_attached": False,
+        }
+        with contextlib.suppress(Exception):
+            await STATE.save_agent_job(job_id, JOB_ERROR, payload)
+    tasks = [task for task in tuple(_JOB_TASKS) if not task.done()]
+    for task in tasks:
+        task.cancel()
+    if tasks:
+        await asyncio.wait(set(tasks), timeout=max(0.1, float(wait_seconds)))
+
+
 HIVE_VOTE_MAX_OUTPUT_TOKENS = _bounded_int("UNIGROK_VOTE_MAX_OUTPUT", 128, 48, 512)
 BREAKER_FAILURE_THRESHOLD = _bounded_int("UNIGROK_BREAKER_FAILURES", 3, 2, 20)
 BREAKER_COOLDOWN_SECONDS = _bounded_int("UNIGROK_BREAKER_COOLDOWN", 30, 5, 600)
@@ -369,8 +468,10 @@ BUILD_CHAT_SYSTEM_PROMPT = (
 
 INSTRUCTIONS = (
     "UniGrok is a workspace-neutral, dual-plane Grok harness. Start with agent. "
-    "If agent returns status=pending, call agent_result with its job_id until complete; "
-    "this keeps long Grok turns compatible with short IDE tool deadlines. "
+    "If agent returns status=continue (or pending), prefer re-invoking agent with "
+    "continue_token; agent_result(job_id) still works while a quantum is running. "
+    "Long work is deadline-quanta + append-only ledger + acceptance_hash CommitDone — "
+    "not host heartbeats. "
     "The agent tool makes web research, X search, and code execution available by "
     "default. Inform the user that these tools are available and that the caller can "
     "disable any of them with disable_tools. The caller supplies intent, not models, "
@@ -1673,6 +1774,21 @@ def _live_self_description(catalogs: dict[str, Any]) -> dict[str, Any]:
         "capability_defaults": {
             "agent": {
                 "input": "task (canonical) or prompt (compatibility alias)",
+                "optional_inputs": [
+                    "continue_token",
+                    "acceptance",
+                    "level",
+                    "depth",
+                    "voters",
+                    "session",
+                    "workspace_context",
+                    "disable_tools",
+                ],
+                "continue_token": (
+                    "When a prior agent result has status=continue, re-invoke agent with "
+                    "continue_token=<token> to advance the durable quantum (requires "
+                    "UNIGROK_AUTONOMY=true). Polling agent_result(job_id) remains valid."
+                ),
                 "allow_web": True,
                 "allow_x_search": True,
                 "allow_remote_code_execution": True,
@@ -2068,6 +2184,8 @@ async def _run_unified(
 
 
 def _session_lock(session: str) -> asyncio.Lock:
+    # Never prune: removing an unlocked lock while another task is about to
+    # acquire it creates two locks for one session (reproduced under contention).
     lock = _SESSION_LOCKS.get(session)
     if lock is None:
         lock = asyncio.Lock()
@@ -2075,34 +2193,66 @@ def _session_lock(session: str) -> asyncio.Lock:
     return lock
 
 
+def _apply_job_enrichment(job_id: str, result: dict[str, Any]) -> dict[str, Any]:
+    enrichment = _JOB_ENRICHMENT.pop(job_id, None)
+    if not enrichment:
+        return result
+    merged = dict(result)
+    merged.update(enrichment)
+    if enrichment.get("review_kind") and merged.get("status") == "complete":
+        merged["review"] = merged.get("text")
+    return merged
+
+
+async def _finalize_job_payload(job_id: str, result: dict[str, Any]) -> dict[str, Any]:
+    """Merge in-memory and SQLite pending enrichment onto a terminal job payload."""
+    stored = await STATE.load_agent_job(job_id)
+    payload = stored.get("payload") if stored else None
+    if isinstance(payload, dict):
+        pending_meta = payload.get("pending_enrichment")
+        if isinstance(pending_meta, dict):
+            merged = dict(result)
+            merged.update(pending_meta)
+            if pending_meta.get("review_kind") and merged.get("status") == "complete":
+                merged["review"] = merged.get("text")
+            result = merged
+    return _apply_job_enrichment(job_id, result)
+
+
 async def _await_job_window(
-    task: asyncio.Task[dict[str, Any]], ctx: Context | None, wait_seconds: int
+    task: asyncio.Task[dict[str, Any]],
+    ctx: Context | None,
+    wait_seconds: float | int,
 ) -> dict[str, Any] | None:
-    """Wait briefly while keeping the provider task alive across client deadlines."""
-    elapsed = 0
-    deadline = time.monotonic() + max(1, wait_seconds)
+    """Wait briefly while keeping the provider task alive across client deadlines.
+
+    Uses ``asyncio.wait`` (not ``wait_for``) so timeout never cancels *task*.
+    """
+    elapsed = 0.0
+    deadline = time.monotonic() + max(0.01, float(wait_seconds))
     while True:
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             return None
-        interval = min(8, remaining)
+        interval = min(8.0, remaining)
         done, _ = await asyncio.wait({task}, timeout=interval)
         if done:
             return task.result()
-        elapsed += round(interval)
+        elapsed += interval
         if ctx is not None:
             with contextlib.suppress(Exception):
                 await ctx.report_progress(
                     float(elapsed),
                     None,
-                    f"UniGrok is still working ({elapsed}s elapsed)",
+                    f"UniGrok is still working ({int(elapsed)}s elapsed)",
                 )
 
 
-def _pending_agent_job(job_id: str) -> dict[str, Any]:
+def _pending_job(job_id: str, *, kind: str = "agent") -> dict[str, Any]:
     return {
         "status": "pending",
         "job_id": job_id,
+        "job_kind": kind,
         "text": (
             "UniGrok is still working. Call agent_result with this job_id to retrieve "
             "the completed answer; repeat while status is pending."
@@ -2110,14 +2260,250 @@ def _pending_agent_job(job_id: str) -> dict[str, Any]:
         "stop_reason": "InProgress",
         "poll": {"tool": "agent_result", "job_id": job_id, "wait_seconds": 16},
         "workspace_attached": False,
+        "pending": True,
     }
 
 
-def _cleanup_agent_jobs() -> None:
+async def _autonomy_continue_fields(job_id: str) -> dict[str, Any]:
+    auto = await STATE.load_autonomy_job(job_id)
+    if auto is None:
+        return {}
+    return {
+        "continue_token": auto["continue_token"],
+        "ledger_cursor": int(auto.get("ledger_cursor") or 0),
+        "acceptance_hash": auto["acceptance_hash"],
+        "autonomy": {
+            "protocol": "unigrok_continue_v1",
+            "reattach": "agent",
+            "committed": auto.get("status") == "committed",
+            "status": auto.get("status"),
+        },
+    }
+
+
+async def _seal_autonomy_done(
+    job_id: str, *, acceptance_text: str, result: dict[str, Any]
+) -> dict[str, Any]:
+    """ProposeDone → checker → CommitDone, or seal status=continue with gaps."""
+    if not AUTONOMY_ENABLED:
+        out = dict(result)
+        out.setdefault("job_id", job_id)
+        return out
+    if MISSION_V2_ENABLED:
+        from .mission.epoch import seal_mission_epoch
+        from .mission.sweeper import sweep_expired_leases
+
+        with contextlib.suppress(Exception):
+            await sweep_expired_leases(STATE, limit=25)
+        mission = await STATE.load_mission_by_job(job_id)
+        if mission is not None:
+            return await seal_mission_epoch(
+                STATE,
+                mission_id=str(mission["mission_id"]),
+                job_id=job_id,
+                acceptance_text=acceptance_text,
+                result=result,
+                lease_generation=int(mission.get("lease_generation") or 0),
+                continue_token=str(mission.get("continue_token") or ""),
+                envelope_version=MISSION_ENVELOPE_VERSION,
+                shadow_cognition=True,
+            )
+    auto = await STATE.load_autonomy_job(job_id)
+    if auto is None:
+        out = dict(result)
+        out.setdefault("job_id", job_id)
+        return out
+    answer = normalize_artifact_content(str(result.get("text") or ""))
+    digest = artifact_hash(answer, kind="answer")
+    # Legacy autonomy path still accepts answer-as-evidence; mission v2 does not.
+    evidence = [answer] if answer else []
+    with contextlib.suppress(Exception):
+        if answer:
+            await STATE.put_autonomy_artifact(
+                job_id, digest, kind="answer", content=answer
+            )
+            await STATE.append_autonomy_event(
+                job_id,
+                "ArtifactPut",
+                {"hash": digest, "kind": "answer", "bytes": len(answer)},
+            )
+        await STATE.append_autonomy_event(
+            job_id, "ProposeDone", {"evidence_refs": [digest] if answer else []}
+        )
+    check = check_propose_done(
+        acceptance_text=str(auto.get("acceptance_text") or acceptance_text),
+        answer_text=answer,
+        evidence_contents=evidence,
+    )
+    with contextlib.suppress(Exception):
+        await STATE.append_autonomy_event(job_id, "ProposeChecked", check)
+    refreshed = await STATE.load_autonomy_job(job_id)
+    cursor = int((refreshed or auto).get("ledger_cursor") or 0)
+    if check["ok"]:
+        with contextlib.suppress(Exception):
+            await STATE.append_autonomy_event(
+                job_id, "CommitDone", {"acceptance_hash": auto["acceptance_hash"]}
+            )
+            await STATE.set_autonomy_status(job_id, "committed")
+        refreshed = await STATE.load_autonomy_job(job_id)
+        cursor = int((refreshed or auto).get("ledger_cursor") or 0)
+        out = dict(result)
+        out["status"] = "complete"
+        out["job_id"] = job_id
+        out["acceptance_hash"] = auto["acceptance_hash"]
+        out["continue_token"] = auto["continue_token"]
+        out["ledger_cursor"] = cursor
+        out["artifact_refs"] = [digest] if answer else []
+        out["autonomy"] = {
+            "protocol": "unigrok_continue_v1",
+            "committed": True,
+            "gaps": [],
+            "check": check,
+        }
+        return out
+    with contextlib.suppress(Exception):
+        await STATE.set_autonomy_status(job_id, "needs_continuation")
+    sealed = continue_envelope(
+        job_id=job_id,
+        continue_token=str(auto["continue_token"]),
+        ledger_cursor=cursor,
+        acceptance_hash_value=str(auto["acceptance_hash"]),
+        gaps=list(check.get("gaps") or []),
+        artifact_refs=[digest] if answer else [],
+        text=(
+            "Acceptance checker rejected ProposeDone. Re-invoke agent with "
+            f"continue_token to close gaps: {', '.join(check.get('gaps') or [])}."
+        ),
+        poll=False,
+    )
+    for key in (
+        "model",
+        "plane",
+        "resolved_plane",
+        "cost_usd",
+        "orchestration",
+        "telemetry_id",
+        "harness",
+        "requested_mode",
+        "level",
+        "resolved_depth",
+        "agent_tools",
+        "session",
+    ):
+        if key in result:
+            sealed[key] = result[key]
+    sealed["proposed_text"] = answer
+    sealed["autonomy"]["check"] = check
+    return sealed
+
+
+def _durable_store_status(payload: dict[str, Any]) -> str:
+    status = str(payload.get("status") or "")
+    if status == "error":
+        return JOB_ERROR
+    if status == "continue":
+        return JOB_NEEDS_CONTINUATION
+    return JOB_COMPLETE
+
+
+def _pending_agent_job(job_id: str) -> dict[str, Any]:
+    return _pending_job(job_id, kind="agent")
+
+
+def _cleanup_durable_jobs() -> None:
     now = time.monotonic()
-    for job_id, (created, task) in tuple(_AGENT_JOBS.items()):
+    for job_id, (created, task, _kind) in tuple(_DURABLE_JOBS.items()):
         if task.done() and now - created > AGENT_JOB_TTL_SECONDS:
-            _AGENT_JOBS.pop(job_id, None)
+            _DURABLE_JOBS.pop(job_id, None)
+
+
+def _cleanup_agent_jobs() -> None:
+    _cleanup_durable_jobs()
+
+
+async def _run_durable_job(
+    produce: Callable[[], Awaitable[dict[str, Any]]],
+    *,
+    ctx: Context | None,
+    kind: str,
+    sync_window: float = AGENT_SYNC_WINDOW_SECONDS,
+) -> dict[str, Any]:
+    """Run slow work as a pollable job (same contract as agent → agent_result).
+
+    Returns the result if it finishes within *sync_window*; otherwise returns a
+    pending envelope so short IDE MCP deadlines never block on provider latency.
+
+    Provider work is detached onto ``_JOB_TASKS``. Sync-window expiry and MCP
+    request cancellation must never cancel that task (use ``cancel_job`` /
+    ``shutdown_jobs`` only).
+    """
+    _cleanup_durable_jobs()
+    job_id = uuid.uuid4().hex
+
+    async def _complete() -> dict[str, Any]:
+        try:
+            result = await produce()
+        except asyncio.CancelledError:
+            payload = {
+                "status": "error",
+                "job_id": job_id,
+                "job_kind": kind,
+                "text": "Job cancelled",
+                "stop_reason": "cancelled",
+                "workspace_attached": False,
+            }
+            payload = _apply_job_enrichment(job_id, payload)
+            with contextlib.suppress(Exception):
+                await STATE.save_agent_job(job_id, JOB_ERROR, payload)
+            raise
+        except Exception as exc:  # noqa: BLE001 — surfaced to the poller as a job payload
+            payload = {
+                "status": "error",
+                "job_id": job_id,
+                "job_kind": kind,
+                "text": redact_secrets(str(exc)),
+                "stop_reason": "error",
+                "workspace_attached": False,
+            }
+            payload = _apply_job_enrichment(job_id, payload)
+            with contextlib.suppress(Exception):
+                await STATE.save_agent_job(job_id, JOB_ERROR, payload)
+            return payload
+        if isinstance(result, dict):
+            result.setdefault("status", "complete")
+            result.setdefault("job_id", job_id)
+            result.setdefault("job_kind", kind)
+            result = _apply_job_enrichment(job_id, result)
+        # Persist result before treating the job as terminal for pollers.
+        with contextlib.suppress(Exception):
+            await STATE.save_agent_job(
+                job_id,
+                _durable_store_status(result) if isinstance(result, dict) else JOB_COMPLETE,
+                result,
+            )
+        return result
+
+    # Register running before starting work so immediate polls never 404.
+    with contextlib.suppress(Exception):
+        await STATE.save_agent_job(job_id, "running")
+    operation = asyncio.create_task(_complete(), name=f"unigrok-{kind}-{job_id[:8]}")
+    _track_job_task(operation)
+    _DURABLE_JOBS[job_id] = (time.monotonic(), operation, kind)
+    try:
+        # asyncio.wait does NOT cancel `operation` on timeout (unlike wait_for).
+        result = await _await_job_window(operation, ctx, sync_window)
+    except asyncio.CancelledError:
+        # MCP request cancelled — leave the detached job running for agent_result.
+        raise
+    except Exception:
+        if operation.done():
+            _DURABLE_JOBS.pop(job_id, None)
+        raise
+    if result is not None:
+        _DURABLE_JOBS.pop(job_id, None)
+        return result
+    # Pending envelope only — never task.cancel() on sync-window expiry.
+    return _pending_job(job_id, kind=kind)
 
 
 def _optional_text(value: str | None, field: str, limit: int) -> str:
@@ -2689,6 +3075,8 @@ async def agent(
         "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"
     ] | None = None,
     voters: int | None = None,
+    continue_token: str | None = None,
+    acceptance: str | None = None,
     ctx: Context | None = None,
 ) -> dict[str, Any]:
     """Run UniGrok with one task; Grok selects routing, models, effort, and recovery.
@@ -2716,12 +3104,158 @@ async def agent(
     Supplying an API key enables metered API execution by default; the service owner
     can disable it globally with `UNIGROK_ENABLE_METERED_API=false`.
     `prompt` is a compatibility alias for `task`; callers should supply only one.
+    Long autonomy: when status is `continue`, re-invoke this same tool with the
+    `continue_token` argument set to the token from the prior result (preferred over
+    polling alone). Optional `acceptance` freezes CommitDone criteria (defaults to
+    the task text) as `acceptance_hash`.
     """
     if task is not None and prompt is not None and task != prompt:
         raise ValueError("task and prompt cannot contain different values")
-    prompt = _validated_prompt(task if task is not None else prompt, "task")
+    token = str(continue_token or "").strip().lower() or None
+    resume: dict[str, Any] | None = None
+    claim_lease: str | None = None
+    request_snapshot: dict[str, Any] | None = None
+    resume_context = ""
+
+    if token:
+        if not AUTONOMY_ENABLED:
+            raise ValueError(
+                "continue_token requires UNIGROK_AUTONOMY=true on the server"
+            )
+        resume = await STATE.load_autonomy_by_token(token)
+        if resume is None:
+            raise ValueError("continue_token was not found or has expired")
+        job_id = str(resume["job_id"])
+        # Prefer awaiting an in-flight quantum over stealing its claim lease.
+        inflight = _DURABLE_JOBS.get(job_id)
+        if inflight is not None and not inflight[1].done():
+            try:
+                caught = await _await_job_window(
+                    inflight[1], ctx, AGENT_SYNC_WINDOW_SECONDS
+                )
+            except Exception:
+                caught = None
+            if caught is not None:
+                _DURABLE_JOBS.pop(job_id, None)
+                return caught
+            fields = await _autonomy_continue_fields(job_id)
+            attached = continue_envelope(
+                job_id=job_id,
+                continue_token=str(resume["continue_token"]),
+                ledger_cursor=int(
+                    fields.get("ledger_cursor") or resume.get("ledger_cursor") or 0
+                ),
+                acceptance_hash_value=str(
+                    fields.get("acceptance_hash") or resume["acceptance_hash"]
+                ),
+                text=(
+                    "Prior quantum still running; poll agent_result or retry "
+                    "continue_token shortly."
+                ),
+                poll=True,
+            )
+            attached["autonomy"] = {
+                **attached.get("autonomy", {}),
+                "awaiting_inflight": True,
+            }
+            attached.update(
+                {
+                    "requested_mode": depth,
+                    "level": level,
+                    "harness": "unigrok_public_v1",
+                }
+            )
+            return attached
+        claim_lease = new_claim_lease()
+        claimed = await STATE.claim_autonomy(job_id, claim_lease, ttl_seconds=180)
+        if not claimed:
+            fields = await _autonomy_continue_fields(job_id)
+            blocked = continue_envelope(
+                job_id=job_id,
+                continue_token=str(resume["continue_token"]),
+                ledger_cursor=int(
+                    fields.get("ledger_cursor") or resume.get("ledger_cursor") or 0
+                ),
+                acceptance_hash_value=str(resume["acceptance_hash"]),
+                text="Another caller holds the claim lease; retry continue_token shortly.",
+                poll=job_id in _DURABLE_JOBS,
+            )
+            blocked["autonomy"] = {
+                **blocked.get("autonomy", {}),
+                "claim_blocked": True,
+            }
+            return blocked
+        try:
+            if resume.get("status") == "committed":
+                stored = await STATE.load_agent_job(job_id)
+                if stored and stored.get("payload"):
+                    return stored["payload"]
+            raw_request = resume.get("request_json")
+            if isinstance(raw_request, str) and raw_request:
+                try:
+                    decoded = json.loads(raw_request)
+                    request_snapshot = decoded if isinstance(decoded, dict) else {}
+                except json.JSONDecodeError:
+                    request_snapshot = {}
+            else:
+                request_snapshot = {}
+            acceptance_text = str(
+                resume.get("acceptance_text")
+                or request_snapshot.get("acceptance")
+                or ""
+            )
+            prompt = _validated_prompt(
+                str(request_snapshot.get("task") or acceptance_text),
+                "task",
+            )
+            session = request_snapshot.get("session") or session
+            workspace_context = request_snapshot.get("workspace_context") or ""
+            workspace_label = request_snapshot.get("workspace_label") or workspace_label
+            system_prompt = request_snapshot.get("system_prompt") or system_prompt
+            memory_scope = request_snapshot.get("memory_scope") or memory_scope
+            if "use_memory" in request_snapshot:
+                use_memory = bool(request_snapshot.get("use_memory"))
+            disable_tools = list(request_snapshot.get("disable_tools") or []) or None
+            if request_snapshot.get("depth") in {"auto", "deep", "hive"}:
+                depth = request_snapshot["depth"]  # type: ignore[assignment]
+            if request_snapshot.get("level") is not None:
+                level = request_snapshot.get("level")  # type: ignore[assignment]
+            if request_snapshot.get("voters") is not None:
+                voters = request_snapshot.get("voters")  # type: ignore[assignment]
+            events = await STATE.list_autonomy_events(job_id, limit=40)
+            gap_bits: list[str] = []
+            for event in reversed(events):
+                if event.get("event_type") == "ProposeChecked":
+                    payload = event.get("payload") or {}
+                    if isinstance(payload, dict):
+                        gap_bits = [str(g) for g in payload.get("gaps") or []]
+                    break
+            ledger_block = ledger_summary(events)
+            gap_block = (
+                "# Acceptance gaps to close\n" + "\n".join(f"- {g}" for g in gap_bits)
+                if gap_bits
+                else (
+                    "# Continue quantum\nClose remaining work against the frozen "
+                    "acceptance_hash."
+                )
+            )
+            resume_context = f"{ledger_block}\n\n{gap_block}"
+        finally:
+            if claim_lease is not None:
+                with contextlib.suppress(Exception):
+                    await STATE.release_autonomy_claim(job_id, claim_lease)
+                claim_lease = None
+    else:
+        prompt = _validated_prompt(task if task is not None else prompt, "task")
+        job_id = uuid.uuid4().hex
+        acceptance_text = _optional_text(acceptance, "acceptance", 20_000) or prompt
+
     session_name = normalize_session(session) if session else None
     safe_workspace = str(workspace_context or "")
+    if resume_context:
+        safe_workspace = (
+            f"{safe_workspace}\n\n{resume_context}" if safe_workspace else resume_context
+        )
     if len(safe_workspace) > MAX_WORKSPACE_CONTEXT_CHARS:
         raise ValueError(
             f"workspace_context exceeds the {MAX_WORKSPACE_CONTEXT_CHARS} character limit"
@@ -2782,6 +3316,92 @@ async def agent(
     }
     caller = _caller_label(ctx)
     operation_started = time.monotonic()
+    _cleanup_durable_jobs()
+    token_value = ""
+    accept_digest = acceptance_hash(acceptance_text)
+    if AUTONOMY_ENABLED:
+        if token is None:
+            token_value = new_continue_token()
+            request_snapshot = {
+                "task": prompt,
+                "acceptance": acceptance_text,
+                "session": session_name,
+                "workspace_context": str(workspace_context or ""),
+                "workspace_label": safe_label,
+                "system_prompt": caller_instructions,
+                "memory_scope": scope,
+                "use_memory": bool(use_memory),
+                "disable_tools": sorted(disabled),
+                "depth": depth,
+                "level": level,
+                "voters": voters,
+            }
+            with contextlib.suppress(Exception):
+                await STATE.create_autonomy_job(
+                    job_id,
+                    acceptance_hash=accept_digest,
+                    acceptance_text=acceptance_text,
+                    continue_token=token_value,
+                    request=request_snapshot,
+                )
+            if MISSION_V2_ENABLED:
+                from .mission.evidence import default_agent_policy
+                from .mission.lease import lease_expiry_iso, new_lease_token
+
+                mission_id = f"msn_{job_id}"
+                lease_tok = new_lease_token()
+                package = {
+                    "task": prompt,
+                    "acceptance": acceptance_text,
+                    "idempotency_key": accept_digest,
+                    "evidence_policy": default_agent_policy().to_dict(),
+                    "level_ceiling": "ultra",
+                    "destructive": False,
+                    "request": request_snapshot,
+                }
+                with contextlib.suppress(Exception):
+                    await STATE.create_mission(
+                        mission_id,
+                        job_id=job_id,
+                        acceptance_hash=accept_digest,
+                        acceptance_text=acceptance_text,
+                        continue_token=token_value,
+                        package=package,
+                        lease_token=lease_tok,
+                        lease_generation=1,
+                        lease_expires_at=lease_expiry_iso(ttl_seconds=180),
+                    )
+        else:
+            accept_digest = (
+                str(resume["acceptance_hash"]) if resume else accept_digest
+            )
+            token_value = (
+                str(resume["continue_token"]) if resume else new_continue_token()
+            )
+            with contextlib.suppress(Exception):
+                await STATE.set_autonomy_status(job_id, "running")
+                await STATE.append_autonomy_event(
+                    job_id,
+                    "BudgetSlice",
+                    {"reason": "continue_token_reattach"},
+                )
+            if MISSION_V2_ENABLED:
+                from .mission.lease import new_lease_token
+
+                mission = await STATE.load_mission_by_job(job_id)
+                if mission is not None:
+                    with contextlib.suppress(Exception):
+                        await STATE.claim_mission(
+                            str(mission["mission_id"]),
+                            lease_token=new_lease_token(),
+                            ttl_seconds=180,
+                        )
+        with contextlib.suppress(Exception):
+            await STATE.append_autonomy_event(
+                job_id, "BudgetSlice", {"sync_window_s": AGENT_SYNC_WINDOW_SECONDS}
+            )
+    with contextlib.suppress(Exception):
+        await STATE.save_agent_job(job_id, "running")
 
     async def _complete_turn() -> dict[str, Any]:
         try:
@@ -2809,10 +3429,40 @@ async def agent(
                     "metadata": {"error_type": type(exc).__name__},
                     }
                 )
-            raise
+            # Persist a terminal error so agent_result never misreports a restart.
+            safe_error = redact_secrets(str(exc))
+            payload = {
+                "status": "error",
+                "job_id": job_id,
+                "job_kind": "agent",
+                "text": safe_error,
+                "stop_reason": "error",
+                "workspace_attached": False,
+                "error_type": type(exc).__name__,
+                "requested_mode": depth,
+                "level": level,
+                "resolved_depth": resolved_depth,
+                "harness": "unigrok_public_v1",
+            }
+            if AUTONOMY_ENABLED and token_value:
+                payload["continue_token"] = token_value
+                payload["acceptance_hash"] = accept_digest
+            with contextlib.suppress(Exception):
+                if AUTONOMY_ENABLED:
+                    await STATE.append_autonomy_event(
+                        job_id,
+                        "Blocker",
+                        {"error": safe_error, "type": type(exc).__name__},
+                    )
+                    await STATE.set_autonomy_status(job_id, "needs_continuation")
+            payload = await _finalize_job_payload(job_id, payload)
+            with contextlib.suppress(Exception):
+                await STATE.save_agent_job(job_id, JOB_ERROR, payload)
+            return payload
         result.update(
             {
                 "status": "complete",
+                "job_id": job_id,
                 "requested_mode": depth,
                 "level": level,
                 "resolved_depth": resolved_depth,
@@ -2862,6 +3512,7 @@ async def agent(
                         "specialist_model"
                     ),
                     "shadow_done_vote": shadow_done,
+                    "acceptance_hash": accept_digest,
                 },
                 }
             )
@@ -2873,26 +3524,51 @@ async def agent(
                 f"telemetry_id ({telemetry_id}) and success=true/false so the run "
                 "counts as verified in benchmark receipts."
             )
-        # Persist the finished job so agent_result survives service restarts.
+        result = await _finalize_job_payload(job_id, result)
+        result.setdefault("job_id", job_id)
+        if AUTONOMY_ENABLED:
+            result = await _seal_autonomy_done(
+                job_id, acceptance_text=acceptance_text, result=result
+            )
+        # Persist so agent_result survives restarts; status matches payload shape.
         with contextlib.suppress(Exception):
-            await STATE.save_agent_job(job_id, "complete", result)
+            await STATE.save_agent_job(job_id, _durable_store_status(result), result)
         return result
 
-    _cleanup_agent_jobs()
-    job_id = uuid.uuid4().hex
-    with contextlib.suppress(Exception):
-        await STATE.save_agent_job(job_id, "running")
     operation = asyncio.create_task(_complete_turn(), name=f"unigrok-agent-{job_id[:8]}")
-    _AGENT_JOBS[job_id] = (time.monotonic(), operation)
+    _track_job_task(operation)
+    _DURABLE_JOBS[job_id] = (time.monotonic(), operation, "agent")
     try:
         result = await _await_job_window(operation, ctx, AGENT_SYNC_WINDOW_SECONDS)
+    except asyncio.CancelledError:
+        # Detached agent quantum keeps running; host polls / continue_token.
+        raise
     except Exception:
-        _AGENT_JOBS.pop(job_id, None)
+        # Task crashed without a persisted payload — fail closed if SQLite has one.
+        if operation.done():
+            _DURABLE_JOBS.pop(job_id, None)
+        stored = await STATE.load_agent_job(job_id)
+        if (
+            stored
+            and stored.get("status") in TERMINAL_JOB_STATUSES
+            and stored.get("payload")
+        ):
+            return stored["payload"]
         raise
     if result is not None:
-        _AGENT_JOBS.pop(job_id, None)
+        _DURABLE_JOBS.pop(job_id, None)
         return result
-    pending = _pending_agent_job(job_id)
+    if AUTONOMY_ENABLED and token_value:
+        auto_row = await STATE.load_autonomy_job(job_id)
+        pending = continue_envelope(
+            job_id=job_id,
+            continue_token=token_value,
+            ledger_cursor=int((auto_row or {}).get("ledger_cursor") or 0),
+            acceptance_hash_value=accept_digest,
+            poll=True,
+        )
+    else:
+        pending = _pending_job(job_id, kind="agent")
     pending.update(
         {
             "requested_mode": depth,
@@ -2915,20 +3591,23 @@ async def agent_result(
     wait_seconds: int = 16,
     ctx: Context | None = None,
 ) -> dict[str, Any]:
-    """Retrieve a long-running agent result; repeat while status is pending."""
-    _cleanup_agent_jobs()
+    """Poll a durable job from agent or a slow file/media tool until complete."""
+    _cleanup_durable_jobs()
     normalized = str(job_id or "").strip().lower()
     if not re.fullmatch(r"[0-9a-f]{32}", normalized):
-        raise ValueError("job_id must be the 32-character id returned by agent")
-    record = _AGENT_JOBS.get(normalized)
+        raise ValueError("job_id must be the 32-character id returned by agent or a slow API tool")
+    record = _DURABLE_JOBS.get(normalized)
     if record is None:
         # Not in memory: consult the durable store so completed work survives
         # restarts and interrupted work fails honestly instead of vanishing.
         stored = await STATE.load_agent_job(normalized)
         if stored is None:
-            raise ValueError("agent job was not found or has expired")
-        if stored["status"] == "complete" and stored["payload"] is not None:
-            return stored["payload"]
+            raise ValueError("job was not found or has expired")
+        if (
+            stored["status"] in TERMINAL_JOB_STATUSES
+            and stored["payload"] is not None
+        ):
+            return _apply_job_enrichment(normalized, stored["payload"])
         return {
             "status": "lost",
             "job_id": normalized,
@@ -2939,15 +3618,41 @@ async def agent_result(
             "stop_reason": "Interrupted",
             "workspace_attached": False,
         }
-    _, operation = record
+    _, operation, kind = record
     try:
         result = await _await_job_window(operation, ctx, max(1, min(int(wait_seconds), 20)))
     except Exception:
-        _AGENT_JOBS.pop(normalized, None)
+        _DURABLE_JOBS.pop(normalized, None)
+        stored = await STATE.load_agent_job(normalized)
+        if (
+            stored
+            and stored.get("status") in TERMINAL_JOB_STATUSES
+            and stored.get("payload")
+        ):
+            return _apply_job_enrichment(normalized, stored["payload"])
         raise
     if result is None:
-        return _pending_agent_job(normalized)
-    _AGENT_JOBS.pop(normalized, None)
+        # Generic API/chat/media jobs stay pending. Only autonomy-enabled agent
+        # jobs may advertise continue_token.
+        pending = _pending_job(normalized, kind=kind)
+        if AUTONOMY_ENABLED and kind == "agent":
+            fields = await _autonomy_continue_fields(normalized)
+            token = fields.get("continue_token")
+            if token:
+                pending = continue_envelope(
+                    job_id=normalized,
+                    continue_token=str(token),
+                    ledger_cursor=int(fields.get("ledger_cursor") or 0),
+                    acceptance_hash_value=str(fields.get("acceptance_hash") or ""),
+                    poll=True,
+                )
+        enrichment = _JOB_ENRICHMENT.get(normalized)
+        if enrichment:
+            pending.update(enrichment)
+        return pending
+    _DURABLE_JOBS.pop(normalized, None)
+    if isinstance(result, dict):
+        return _apply_job_enrichment(normalized, result)
     return result
 
 
@@ -2976,6 +3681,13 @@ async def review_pull_request(
         f"## CI summary\n{safe_ci or 'Not supplied'}\n\n"
         f"## Existing review discussion\n{safe_comments or 'Not supplied'}"
     )
+    review_meta = {
+        "review_kind": "pull_request",
+        "repository": safe_repository,
+        "pull_number": number,
+        "title": safe_title,
+        "read_only": True,
+    }
     result = await agent(
         task=(
             "Review this pull request for correctness, security, regressions, tests, "
@@ -2984,21 +3696,25 @@ async def review_pull_request(
             "blocking findings, non-blocking findings, validation gaps, and smartest next action. "
             "Do not claim to have run tests or accessed files that were not supplied."
         ),
+        acceptance=(
+            "Concise Markdown PR review with verdict, blocking findings, non-blocking "
+            "findings, validation gaps, and smartest next action."
+        ),
         session=f"github-review:{safe_repository}:{number}"[:128],
         workspace_context=evidence,
         workspace_label=f"GitHub PR {safe_repository}#{number}"[:160],
         disable_tools=["web", "x_search", "remote_code_execution"],
         ctx=ctx,
     )
-    result.update(
-        {
-            "review_kind": "pull_request",
-            "repository": safe_repository,
-            "pull_number": number,
-            "title": safe_title,
-            "read_only": True,
-        }
-    )
+    if result.get("status") in {"pending", "continue"} and result.get("job_id"):
+        pending_job_id = str(result["job_id"])
+        _JOB_ENRICHMENT[pending_job_id] = dict(review_meta)
+        # Never downgrade a terminal SQLite row back to running.
+        with contextlib.suppress(Exception):
+            await STATE.merge_agent_job_enrichment(pending_job_id, review_meta)
+        result.update(review_meta)
+        return result
+    result.update(review_meta)
     if result.get("status") == "complete":
         result["review"] = result.get("text")
     return result
@@ -3007,22 +3723,28 @@ async def review_pull_request(
 @mcp.tool()
 async def chat(
     prompt: str,
+    ctx: Context | None = None,
 ) -> dict[str, Any]:
     """Return one stateless, tool-free answer with automatic Grok routing."""
-    return await _run_unified(
-        _validated_prompt(prompt, "prompt"),
-        model=None,
-        effort=None,
-        plane="auto",
-        # Same contract as agent: one same-plane retry, then one bounded
-        # cross-plane recovery — a persistent non-answer must not ship as final.
-        fallback_policy="cross_plane",
-        agentic=False,
-        max_turns=1,
-        allow_web=False,
-        allow_x_search=False,
-        allow_code=False,
-    )
+    safe_prompt = _validated_prompt(prompt, "prompt")
+
+    async def _produce() -> dict[str, Any]:
+        return await _run_unified(
+            safe_prompt,
+            model=None,
+            effort=None,
+            plane="auto",
+            # Same contract as agent: one same-plane retry, then one bounded
+            # cross-plane recovery — a persistent non-answer must not ship as final.
+            fallback_policy="cross_plane",
+            agentic=False,
+            max_turns=1,
+            allow_web=False,
+            allow_x_search=False,
+            allow_code=False,
+        )
+
+    return await _run_durable_job(_produce, ctx=ctx, kind="chat")
 
 
 @mcp.tool(annotations=READ_ONLY)
@@ -3293,17 +4015,30 @@ async def web_search(
     prompt: str,
     allowed_domains: list[str] | None = None,
     excluded_domains: list[str] | None = None,
+    ctx: Context | None = None,
 ) -> dict[str, Any]:
-    """Search the live web with xAI's server-side API tool. This is metered."""
+    """Search the live web with xAI's server-side API tool. This is metered.
+
+    Slow provider work returns status=pending with a job_id; poll agent_result.
+    """
     _require_metered_api_enabled()
-    return await xai_api.search(
-        _validated_prompt(prompt, "prompt"),
-        kind="web",
-        model=_lead_model(await _catalogs(), "api"),
-        system_prompt=await _system_prompt("web_search"),
-        allowed_domains=_validated_domains(allowed_domains, "allowed_domains"),
-        excluded_domains=_validated_domains(excluded_domains, "excluded_domains"),
-    )
+    safe_prompt = _validated_prompt(prompt, "prompt")
+    model = _lead_model(await _catalogs(), "api")
+    system_prompt = await _system_prompt("web_search")
+    allowed = _validated_domains(allowed_domains, "allowed_domains")
+    excluded = _validated_domains(excluded_domains, "excluded_domains")
+
+    async def _produce() -> dict[str, Any]:
+        return await xai_api.search(
+            safe_prompt,
+            kind="web",
+            model=model,
+            system_prompt=system_prompt,
+            allowed_domains=allowed,
+            excluded_domains=excluded,
+        )
+
+    return await _run_durable_job(_produce, ctx=ctx, kind="web_search")
 
 
 @mcp.tool(annotations=READ_ONLY)
@@ -3312,8 +4047,12 @@ async def x_search(
     allowed_x_handles: list[str] | None = None,
     from_date: str | None = None,
     to_date: str | None = None,
+    ctx: Context | None = None,
 ) -> dict[str, Any]:
-    """Search live X posts with xAI's server-side API tool. This is metered."""
+    """Search live X posts with xAI's server-side API tool. This is metered.
+
+    Slow provider work returns status=pending with a job_id; poll agent_result.
+    """
     _require_metered_api_enabled()
     for value, field in ((from_date, "from_date"), (to_date, "to_date")):
         if value:
@@ -3323,29 +4062,48 @@ async def x_search(
                 datetime.fromisoformat(value)
             except ValueError as exc:
                 raise ValueError(f"{field} must be an ISO date or datetime") from exc
-    return await xai_api.search(
-        _validated_prompt(prompt, "prompt"),
-        kind="x",
-        model=_lead_model(await _catalogs(), "api"),
-        system_prompt=await _system_prompt("x_search"),
-        allowed_x_handles=_validated_handles(allowed_x_handles),
-        from_date=from_date,
-        to_date=to_date,
-    )
+    safe_prompt = _validated_prompt(prompt, "prompt")
+    model = _lead_model(await _catalogs(), "api")
+    system_prompt = await _system_prompt("x_search")
+    handles = _validated_handles(allowed_x_handles)
+
+    async def _produce() -> dict[str, Any]:
+        return await xai_api.search(
+            safe_prompt,
+            kind="x",
+            model=model,
+            system_prompt=system_prompt,
+            allowed_x_handles=handles,
+            from_date=from_date,
+            to_date=to_date,
+        )
+
+    return await _run_durable_job(_produce, ctx=ctx, kind="x_search")
 
 
 @mcp.tool(annotations=READ_ONLY)
 async def remote_code_execution(
     prompt: str,
+    ctx: Context | None = None,
 ) -> dict[str, Any]:
-    """Let Grok run Python in xAI's remote sandbox; no code runs on this machine."""
+    """Let Grok run Python in xAI's remote sandbox; no code runs on this machine.
+
+    Slow provider work returns status=pending with a job_id; poll agent_result.
+    """
     _require_metered_api_enabled()
-    return await xai_api.code_execution(
-        _validated_prompt(prompt, "prompt"),
-        model=_lead_model(await _catalogs(), "api"),
-        max_turns=6,
-        system_prompt=await _system_prompt("remote_code_execution"),
-    )
+    safe_prompt = _validated_prompt(prompt, "prompt")
+    model = _lead_model(await _catalogs(), "api")
+    system_prompt = await _system_prompt("remote_code_execution")
+
+    async def _produce() -> dict[str, Any]:
+        return await xai_api.code_execution(
+            safe_prompt,
+            model=model,
+            max_turns=6,
+            system_prompt=system_prompt,
+        )
+
+    return await _run_durable_job(_produce, ctx=ctx, kind="remote_code_execution")
 
 
 @mcp.tool(annotations=READ_ONLY)
@@ -3353,37 +4111,59 @@ async def chat_with_vision(
     prompt: str,
     image_urls: list[str],
     detail: Literal["auto", "low", "high"] = "auto",
+    ctx: Context | None = None,
 ) -> dict[str, Any]:
-    """Analyze public HTTPS images with an API model. Local paths are never accepted."""
+    """Analyze public HTTPS images with an API model. Local paths are never accepted.
+
+    Slow provider work returns status=pending with a job_id; poll agent_result.
+    """
     _require_metered_api_enabled()
     urls = _validated_media_urls(image_urls, "image_urls", 10)
     if not urls:
         raise ValueError("image_urls must contain at least one public HTTPS URL")
-    return await xai_api.vision(
-        _validated_prompt(prompt, "prompt"),
-        urls,
-        model=_lead_model(await _catalogs(), "api"),
-        detail=detail,
-        system_prompt=await _system_prompt("vision"),
-    )
+    safe_prompt = _validated_prompt(prompt, "prompt")
+    model = _lead_model(await _catalogs(), "api")
+    system_prompt = await _system_prompt("vision")
+
+    async def _produce() -> dict[str, Any]:
+        return await xai_api.vision(
+            safe_prompt,
+            urls,
+            model=model,
+            detail=detail,
+            system_prompt=system_prompt,
+        )
+
+    return await _run_durable_job(_produce, ctx=ctx, kind="chat_with_vision")
 
 
 @mcp.tool(annotations=READ_ONLY)
 async def chat_with_files(
     prompt: str,
     file_ids: list[str],
+    ctx: Context | None = None,
 ) -> dict[str, Any]:
-    """Ask Grok about files previously uploaded to xAI. This is metered."""
+    """Ask Grok about files previously uploaded to xAI. This is metered.
+
+    Slow provider work returns status=pending with a job_id; poll agent_result.
+    """
     _require_metered_api_enabled()
     ids = [_validated_file_id(file_id) for file_id in file_ids]
     if not ids or len(ids) > 10:
         raise ValueError("file_ids must contain between 1 and 10 ids")
-    return await xai_api.chat_files(
-        _validated_prompt(prompt, "prompt"),
-        ids,
-        model=_lead_model(await _catalogs(), "api"),
-        system_prompt=await _system_prompt("files"),
-    )
+    safe_prompt = _validated_prompt(prompt, "prompt")
+    model = _lead_model(await _catalogs(), "api")
+    system_prompt = await _system_prompt("files")
+
+    async def _produce() -> dict[str, Any]:
+        return await xai_api.chat_files(
+            safe_prompt,
+            ids,
+            model=model,
+            system_prompt=system_prompt,
+        )
+
+    return await _run_durable_job(_produce, ctx=ctx, kind="chat_with_files")
 
 
 @mcp.tool()
@@ -3393,6 +4173,7 @@ async def generate_image(
     n: int = 1,
     aspect_ratio: str | None = None,
     resolution: Literal["1k", "2k"] | None = None,
+    ctx: Context | None = None,
 ) -> dict[str, Any]:
     """Generate or edit images through the metered xAI API; returns hosted URLs."""
     _require_metered_api_enabled()
@@ -3405,14 +4186,22 @@ async def generate_image(
     ]
     if not image_models:
         raise RuntimeError("The provider returned no image-generation model")
-    return await xai_api.generate_image(
-        _validated_prompt(prompt, "prompt"),
-        model=image_models[0],
-        image_urls=_validated_media_urls(image_urls, "image_urls", 10),
-        n=count,
-        aspect_ratio=str(aspect_ratio).strip() if aspect_ratio else None,
-        resolution=resolution,
-    )
+    safe_prompt = _validated_prompt(prompt, "prompt")
+    urls = _validated_media_urls(image_urls, "image_urls", 10)
+    ratio = str(aspect_ratio).strip() if aspect_ratio else None
+    model = image_models[0]
+
+    async def _produce() -> dict[str, Any]:
+        return await xai_api.generate_image(
+            safe_prompt,
+            model=model,
+            image_urls=urls,
+            n=count,
+            aspect_ratio=ratio,
+            resolution=resolution,
+        )
+
+    return await _run_durable_job(_produce, ctx=ctx, kind="generate_image")
 
 
 @mcp.tool()
@@ -3424,6 +4213,7 @@ async def generate_video(
     duration: int | None = None,
     aspect_ratio: str | None = None,
     resolution: Literal["480p", "720p"] | None = None,
+    ctx: Context | None = None,
 ) -> dict[str, Any]:
     """Generate or edit video through the metered xAI API."""
     _require_metered_api_enabled()
@@ -3431,18 +4221,26 @@ async def generate_video(
         raise ValueError("provide image_url or video_url, not both")
     if duration is not None and not 1 <= int(duration) <= 15:
         raise ValueError("duration must be between 1 and 15 seconds")
-    return await xai_api.generate_video(
-        _validated_prompt(prompt, "prompt"),
-        model="grok-imagine-video",
-        image_url=_validated_media_url(image_url, "image_url") if image_url else None,
-        video_url=_validated_media_url(video_url, "video_url") if video_url else None,
-        reference_image_urls=_validated_media_urls(
-            reference_image_urls, "reference_image_urls", 10
-        ),
-        duration=int(duration) if duration is not None else None,
-        aspect_ratio=str(aspect_ratio).strip() if aspect_ratio else None,
-        resolution=resolution,
-    )
+    safe_prompt = _validated_prompt(prompt, "prompt")
+    safe_image = _validated_media_url(image_url, "image_url") if image_url else None
+    safe_video = _validated_media_url(video_url, "video_url") if video_url else None
+    refs = _validated_media_urls(reference_image_urls, "reference_image_urls", 10)
+    ratio = str(aspect_ratio).strip() if aspect_ratio else None
+    dur = int(duration) if duration is not None else None
+
+    async def _produce() -> dict[str, Any]:
+        return await xai_api.generate_video(
+            safe_prompt,
+            model="grok-imagine-video",
+            image_url=safe_image,
+            video_url=safe_video,
+            reference_image_urls=refs,
+            duration=dur,
+            aspect_ratio=ratio,
+            resolution=resolution,
+        )
+
+    return await _run_durable_job(_produce, ctx=ctx, kind="generate_video")
 
 
 @mcp.tool()
@@ -3450,17 +4248,25 @@ async def extend_video(
     prompt: str,
     video_url: str,
     duration: int | None = None,
+    ctx: Context | None = None,
 ) -> dict[str, Any]:
     """Extend a public HTTPS video through the metered xAI API."""
     _require_metered_api_enabled()
     if duration is not None and not 2 <= int(duration) <= 10:
         raise ValueError("duration must be between 2 and 10 seconds")
-    return await xai_api.extend_video(
-        _validated_prompt(prompt, "prompt"),
-        model="grok-imagine-video",
-        video_url=_validated_media_url(video_url, "video_url"),
-        duration=int(duration) if duration is not None else None,
-    )
+    safe_prompt = _validated_prompt(prompt, "prompt")
+    safe_video = _validated_media_url(video_url, "video_url")
+    dur = int(duration) if duration is not None else None
+
+    async def _produce() -> dict[str, Any]:
+        return await xai_api.extend_video(
+            safe_prompt,
+            model="grok-imagine-video",
+            video_url=safe_video,
+            duration=dur,
+        )
+
+    return await _run_durable_job(_produce, ctx=ctx, kind="extend_video")
 
 
 @mcp.tool()
@@ -3468,6 +4274,7 @@ async def xai_upload_file(
     filename: str,
     content_base64: str,
     expires_after_seconds: int = 86_400,
+    ctx: Context | None = None,
 ) -> dict[str, Any]:
     """Upload caller-provided bytes to xAI without granting local filesystem access."""
     safe_name = str(filename or "").strip()
@@ -3480,34 +4287,71 @@ async def xai_upload_file(
     if not content or len(content) > MAX_UPLOAD_BYTES:
         raise ValueError(f"decoded file must be between 1 and {MAX_UPLOAD_BYTES} bytes")
     expires = max(3_600, min(int(expires_after_seconds), 2_592_000))
-    return await xai_api.upload_file(content, filename=safe_name, expires_after_seconds=expires)
+
+    async def _produce() -> dict[str, Any]:
+        return await xai_api.upload_file(
+            content, filename=safe_name, expires_after_seconds=expires
+        )
+
+    return await _run_durable_job(_produce, ctx=ctx, kind="xai_upload_file")
 
 
 @mcp.tool(annotations=READ_ONLY)
-async def xai_list_files(limit: int = 100) -> dict[str, Any]:
-    """List files uploaded to the configured xAI API account."""
-    return await xai_api.list_files(max(1, min(int(limit), 100)))
+async def xai_list_files(limit: int = 100, ctx: Context | None = None) -> dict[str, Any]:
+    """List files uploaded to the configured xAI API account.
+
+    Slow provider lists return status=pending with a job_id; poll agent_result.
+    """
+    bounded = max(1, min(int(limit), 100))
+
+    async def _produce() -> dict[str, Any]:
+        return await xai_api.list_files(bounded)
+
+    return await _run_durable_job(_produce, ctx=ctx, kind="xai_list_files")
 
 
 @mcp.tool(annotations=READ_ONLY)
-async def xai_get_file(file_id: str) -> dict[str, Any]:
+async def xai_get_file(file_id: str, ctx: Context | None = None) -> dict[str, Any]:
     """Get metadata for one xAI-hosted file."""
-    return await xai_api.get_file(_validated_file_id(file_id))
+    safe_id = _validated_file_id(file_id)
+
+    async def _produce() -> dict[str, Any]:
+        return await xai_api.get_file(safe_id)
+
+    return await _run_durable_job(_produce, ctx=ctx, kind="xai_get_file")
 
 
 @mcp.tool(annotations=READ_ONLY)
-async def xai_get_file_content(file_id: str, max_bytes: int = 500_000) -> dict[str, Any]:
+async def xai_get_file_content(
+    file_id: str,
+    max_bytes: int = 500_000,
+    ctx: Context | None = None,
+) -> dict[str, Any]:
     """Return bounded text or base64 content for an xAI-hosted file."""
+    safe_id = _validated_file_id(file_id)
     limit = max(1_024, min(int(max_bytes), 1_000_000))
-    return await xai_api.get_file_content(_validated_file_id(file_id), max_bytes=limit)
+
+    async def _produce() -> dict[str, Any]:
+        return await xai_api.get_file_content(safe_id, max_bytes=limit)
+
+    return await _run_durable_job(_produce, ctx=ctx, kind="xai_get_file_content")
 
 
 @mcp.tool(annotations=DESTRUCTIVE)
-async def xai_delete_file(file_id: str, confirm_delete: bool = False) -> dict[str, Any]:
+async def xai_delete_file(
+    file_id: str,
+    confirm_delete: bool = False,
+    ctx: Context | None = None,
+) -> dict[str, Any]:
     """Permanently delete one file from the configured xAI API account."""
     if confirm_delete is not True:
         raise ValueError("Permanently deleting an xAI file requires confirm_delete=true")
-    return await xai_api.delete_file(_validated_file_id(file_id))
+    safe_id = _validated_file_id(file_id)
+
+    async def _produce() -> dict[str, Any]:
+        return await xai_api.delete_file(safe_id)
+
+    return await _run_durable_job(_produce, ctx=ctx, kind="xai_delete_file")
 
 
 def _client_is_loopback(request: Request) -> bool:
@@ -3718,6 +4562,21 @@ async def runtimez(_: Request) -> JSONResponse:
             "tool_count": len(PUBLIC_TOOLS),
             "mcp_endpoint": "/mcp",
             "needle_active": False,
+            "autonomy": {
+                "enabled": AUTONOMY_ENABLED,
+                "mission_v2": MISSION_V2_ENABLED and AUTONOMY_ENABLED,
+                "envelope_version": int(
+                    os.environ.get("UNIGROK_MISSION_ENVELOPE_VERSION", "1") or "1"
+                ),
+                "task_class": os.environ.get("UNIGROK_TASK_CLASS", "true")
+                .strip()
+                .lower()
+                not in {"0", "false", "off", "no"},
+                "verify_literal": os.environ.get("UNIGROK_VERIFY_LITERAL", "true")
+                .strip()
+                .lower()
+                not in {"0", "false", "off", "no"},
+            },
         }
     )
 
@@ -3793,11 +4652,30 @@ class SecurityHeadersMiddleware:
 
 
 def main() -> None:
+    from contextlib import asynccontextmanager
+
     import uvicorn
 
     app = mcp.streamable_http_app()
     app.add_middleware(CallerIdentityMiddleware)
     app.add_middleware(SecurityHeadersMiddleware)
+    previous_lifespan = getattr(app.router, "lifespan_context", None)
+
+    @asynccontextmanager
+    async def _with_job_shutdown(application: Any) -> Any:
+        if previous_lifespan is not None:
+            async with previous_lifespan(application):
+                try:
+                    yield
+                finally:
+                    await shutdown_jobs(wait_seconds=5.0)
+        else:
+            try:
+                yield
+            finally:
+                await shutdown_jobs(wait_seconds=5.0)
+
+    app.router.lifespan_context = _with_job_shutdown
     uvicorn.run(app, host=mcp.settings.host, port=mcp.settings.port)
 
 

@@ -8,7 +8,20 @@ Known limits of the current release are tracked in [Known limits](known-limits.m
 
 - **Default:** call `agent` with just `task`. The router picks route, effort, and
   recovery; hard reasoning auto-engages the deep harness; a typo fix never pays for a
-  swarm. Poll `agent_result` while `status == "pending"`.
+  swarm.
+- **Long autonomy:** set `UNIGROK_AUTONOMY=true`. Unfinished agent quanta may return
+  `status=continue` with `continue_token` (re-invoke `agent`); `agent_result` still
+  works while running. File/media/chat jobs always stay `pending`. Optional
+  `acceptance` freezes CommitDone criteria; thin answers become `needs_continuation`,
+  not success. Process default is **off**; **Docker compose live default is on**.
+- **Mission controller v2:** set `UNIGROK_MISSION_V2=true` (requires autonomy). Adds
+  durable `verifying` CommitDone, fenced leases, sealed artifact hashes with redacted
+  projections, shadow governor/council receipts, and A0′/A0 task-class literal
+  CommitDone (`UNIGROK_TASK_CLASS` / `UNIGROK_VERIFY_LITERAL`). Candidate text never
+  counts as acceptance evidence. Process default is **off**; **Docker compose live
+  default is on**. Inspect `/runtimez` → `autonomy`.
+- **De-overfitting doctrine:** freeze only near-physics envelopes; treat cognition
+  weights, timeouts, and pools as versioned posteriors. See [DEOVERFIT.md](DEOVERFIT.md).
 - **`level`** (optional, explicit rung): `none` · `minimal` · `low` · `medium` ·
   `high` · `xhigh` (one call at that native Grok effort) → `max` (silent deep harness)
   → `ultra` (parallel hive: draft → persona votes → merge). Setting `level` skips
@@ -42,8 +55,9 @@ Transport: Streamable HTTP. The MCP handshake, `/healthz`, `/readyz`, `/runtimez
 ### Main harness and discovery
 
 - `agent` — one-task automatic Grok harness with web research enabled by default,
-  optional sessions, scoped knowledge, and an explicit workspace-context courier
-- `agent_result` — poll a long-running `agent` call without exceeding short IDE deadlines
+  optional sessions, scoped knowledge, workspace-context courier, `continue_token`
+  reattach, and acceptance-hash CommitDone
+- `agent_result` — poll an in-flight quantum without exceeding short IDE deadlines
 - `review_pull_request` — review a bounded caller-supplied diff without GitHub or Git access
 - `chat` — one stateless, tool-free answer
 - `grok_mcp_discover_self` — authoritative live self-description
@@ -68,25 +82,18 @@ Transport: Streamable HTTP. The MCP handshake, `/healthz`, `/readyz`, `/runtimez
 The complete 29-tool surface remains visible when the API is not configured. API tools
 then return a clear setup error instead of disappearing from client discovery.
 
-## PR reviews on comment (`@grok review`)
+## PR reviews (`review_pull_request`)
 
-A repository maintainer (author association `OWNER`, `MEMBER`, or `COLLABORATOR`)
-comments `@grok review` on a pull request — or dispatches the **UniGrok PR Review**
-workflow with a PR number — and `.github/workflows/grok-review.yml` runs a read-only
-Grok review and posts the result back to the PR.
+IDE callers use the `review_pull_request` MCP tool: it reviews a bounded
+caller-supplied diff without GitHub, Git, or workspace access. Tools are forced
+off for the review turn. When the underlying `agent` job is still running, poll
+`agent_result` — review metadata (`review_kind`, repository, pull number, title,
+`read_only`, and `review` text) is preserved across the poll.
 
-- The job checks out only trusted default-branch code; code from the reviewed PR is
-  never executed, installed, or imported.
-- One live review per PR: job-level concurrency cancels a superseded in-flight run
-  when a newer `@grok review` lands, while unrelated PR comments never touch it.
-- Hosted mode is selected with repository variables (`UNIGROK_REVIEW_RUNNER_JSON`,
-  `UNIGROK_REVIEW_MCP_URL`, `UNIGROK_REVIEW_PLANE`) and mints a short-lived service
-  token at runtime from the `UNIGROK_MCP_TOKEN_SECRET` repository secret — no static
-  API keys live in the workflow. With the variables unset, the workflow falls back to
-  a self-hosted runner talking to the loopback gateway.
-
-The `review_pull_request` MCP tool is the same capability for IDE callers: it reviews
-a bounded caller-supplied diff without GitHub or Git access.
+Optional GitHub comment automation (`@grok review`) is a separate maintainer
+workflow, not required to use the MCP tool. If you maintain a private Actions
+workflow for that trigger, keep it on trusted default-branch code only and never
+execute, install, or import code from the reviewed PR.
 
 ## Routing and billing
 

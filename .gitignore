@@ -1,16 +1,13 @@
-# Python
+.env
+.DS_Store
+**/.DS_Store
+.pytest_cache/
+.ruff_cache/
 __pycache__/
 *.pyc
 .venv/
-.pytest_cache/
-.ruff_cache/
-
-# Dogfood optimizer scratch (candidate rewrites for manual review only)
-dogfood_candidate_*.py
-
-# Local benchmark result artifacts (regenerate via scripts/)
-bench-results/
-*_results.json
-
-# Local env
-.env
+*.egg-info/
+.coverage
+htmlcov/
+dist/
+build/

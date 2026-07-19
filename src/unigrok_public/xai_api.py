@@ -4,7 +4,7 @@ import asyncio
 import os
 import time
 from collections.abc import Callable, Sequence
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 API_PLANE = "xai_api_key"
@@ -13,6 +13,36 @@ DEFAULT_API_MODEL = os.environ.get("UNIGROK_API_MODEL", "").strip() or None
 API_TIMEOUT_SECONDS = max(
     30,
     min(int(os.environ.get("UNIGROK_API_TIMEOUT", "120") or 120), 600),
+)
+# Split concurrency pools so slow files.list (up to ~120s) cannot HOL-block
+# metered generation (B1). Generation keeps the historic inflight cap; file
+# reads get a smaller dedicated pool.
+API_MAX_INFLIGHT = max(1, min(int(os.environ.get("UNIGROK_API_MAX_INFLIGHT", "4") or 4), 16))
+API_MAX_FILE_INFLIGHT = max(
+    1, min(int(os.environ.get("UNIGROK_API_MAX_FILE_INFLIGHT", "2") or 2), 4)
+)
+_API_GENERATION_WORKERS = asyncio.Semaphore(API_MAX_INFLIGHT)
+_API_FILE_WORKERS = asyncio.Semaphore(API_MAX_FILE_INFLIGHT)
+# Back-compat alias — historically one shared pool; now generation-only.
+_API_WORKERS = _API_GENERATION_WORKERS
+# files.list is observed ~40s cold; keep headroom under MCP poll loops.
+FILE_LIST_TIMEOUT_SECONDS = max(
+    60,
+    min(int(os.environ.get("UNIGROK_FILE_LIST_TIMEOUT", "120") or 120), 600),
+)
+FILE_IO_TIMEOUT_SECONDS = max(
+    30,
+    min(int(os.environ.get("UNIGROK_FILE_IO_TIMEOUT", "60") or 60), 600),
+)
+MEDIA_TIMEOUT_SECONDS = max(
+    60,
+    min(int(os.environ.get("UNIGROK_MEDIA_TIMEOUT", "300") or 300), 600),
+)
+# Refuse to materialize files larger than this even when the caller asks for a
+# smaller max_bytes window (SDK content() may not stream).
+FILE_CONTENT_HARD_CAP_BYTES = max(
+    1_024,
+    min(int(os.environ.get("UNIGROK_FILE_CONTENT_MAX_BYTES", "2000000") or 2_000_000), 10_000_000),
 )
 
 
@@ -30,10 +60,30 @@ def _require_key() -> str:
     return key
 
 
-def _client() -> Any:
+def _rpc_timeout(deadline_seconds: float) -> float:
+    """Native gRPC deadline slightly under the await deadline.
+
+    asyncio.wait_for alone abandons the awaiter while the worker thread keeps
+    running against the SDK's 27-minute default. The Client timeout cancels the
+    RPC so the thread can exit; keep it 2s under the await budget so gRPC loses
+    the race cleanly.
+    """
+    return max(1.0, float(deadline_seconds) - 2.0)
+
+
+def _client(*, timeout_seconds: float | None = None) -> Any:
     from xai_sdk import Client
 
-    return Client(api_key=_require_key(), management_api_key=MANAGEMENT_KEY_CANARY)
+    timeout = (
+        float(timeout_seconds)
+        if timeout_seconds is not None
+        else float(API_TIMEOUT_SECONDS)
+    )
+    return Client(
+        api_key=_require_key(),
+        management_api_key=MANAGEMENT_KEY_CANARY,
+        timeout=max(1.0, timeout),
+    )
 
 
 def _close_client(client: Any) -> None:
@@ -43,12 +93,99 @@ def _close_client(client: Any) -> None:
 
 
 async def _blocking(call: Callable[[], Any], deadline_seconds: float | None = None) -> Any:
-    try:
-        return await asyncio.wait_for(
-            asyncio.to_thread(call), timeout=deadline_seconds or API_TIMEOUT_SECONDS
-        )
-    except TimeoutError as exc:
-        raise RuntimeError("The xAI API request timed out") from exc
+    """Metered generation / mutations — uses the generation concurrency pool."""
+    deadline = float(deadline_seconds or API_TIMEOUT_SECONDS)
+    async with _API_GENERATION_WORKERS:
+        try:
+            return await asyncio.wait_for(asyncio.to_thread(call), timeout=deadline)
+        except TimeoutError as exc:
+            raise RuntimeError(
+                f"The xAI API request timed out after {deadline:g}s"
+            ) from exc
+
+
+# Retry policy for IDEMPOTENT READS ONLY (list/get/probe/resolve). Reads carry no
+# side effects and cannot double-spend, so a bounded retry lets transient network
+# faults self-heal. Mutations (upload/delete) and metered generation
+# (chat/image/video/search/code/vision) NEVER retry here — that would risk
+# duplicate side effects or double billing.
+# NOTE: retries only help CONNECTION faults. Timeouts mean the endpoint is slower
+# than the deadline; retrying only multiplies wait and thread occupancy.
+_READ_RETRY_BACKOFFS = (0.5, 1.5)  # seconds slept before retries (connection faults only)
+
+
+def _is_timeout(exc: BaseException) -> bool:
+    if isinstance(exc, TimeoutError):
+        return True
+    if type(exc).__name__ in {"DeadlineExceeded", "DeadlineExceededError"}:
+        return True
+    code = getattr(exc, "code", None)
+    if callable(code):
+        try:
+            return str(code()).rsplit(".", 1)[-1] == "DEADLINE_EXCEEDED"
+        except Exception:
+            return False
+    return False
+
+
+def _is_retryable(exc: BaseException) -> bool:
+    # Never retry timeouts — they are deadline/policy failures, not blips.
+    if _is_timeout(exc):
+        return False
+    # OSError covers ConnectionError/BrokenPipe/Reset, ssl.SSLError, and
+    # ECONNRESET/ECONNREFUSED/ETIMEDOUT/EPIPE (but not TimeoutError — excluded above).
+    if isinstance(exc, OSError):
+        return True
+    # httpx-style transport transients (matched by name to avoid a hard import).
+    if type(exc).__name__ in {
+        "ConnectError",
+        "ConnectTimeout",
+        "ReadTimeout",
+        "WriteTimeout",
+        "PoolTimeout",
+        "RemoteProtocolError",
+        "TransportError",
+    }:
+        return True
+    # gRPC: only UNAVAILABLE / RESOURCE_EXHAUSTED (DEADLINE_EXCEEDED handled above).
+    code = getattr(exc, "code", None)
+    if callable(code):
+        try:
+            if str(code()).rsplit(".", 1)[-1] in {"UNAVAILABLE", "RESOURCE_EXHAUSTED"}:
+                return True
+        except Exception:
+            return False
+    # HTTP status errors: retry only 429/502/503/504, never other 4xx.
+    status = getattr(getattr(exc, "response", None), "status_code", None)
+    return status in {429, 502, 503, 504}
+
+
+async def _blocking_read(call: Callable[[], Any], deadline_seconds: float | None = None) -> Any:
+    """Idempotent file/catalog reads — dedicated pool, never blocks generation."""
+    deadline = float(deadline_seconds or API_TIMEOUT_SECONDS)
+    last: BaseException | None = None
+    attempts = 0
+    for attempt in range(len(_READ_RETRY_BACKOFFS) + 1):
+        attempts = attempt + 1
+        # Acquire per attempt; release before backoff sleep (B2).
+        async with _API_FILE_WORKERS:
+            try:
+                return await asyncio.wait_for(asyncio.to_thread(call), timeout=deadline)
+            except Exception as exc:  # noqa: BLE001 — re-raised below unless retryable
+                if _is_timeout(exc):
+                    raise RuntimeError(
+                        f"The xAI API read timed out after {deadline:g}s "
+                        "(native SDK deadline should have cancelled the RPC)"
+                    ) from exc
+                if not _is_retryable(exc):
+                    raise
+                last = exc
+        if attempt < len(_READ_RETRY_BACKOFFS):
+            await asyncio.sleep(_READ_RETRY_BACKOFFS[attempt])
+    detail = str(last).strip() or type(last).__name__
+    raise RuntimeError(
+        f"The xAI API read failed after {attempts} attempts ({detail})"
+    ) from last
 
 
 def _model_name(model: Any) -> str:
@@ -113,8 +250,10 @@ async def probe_models() -> dict[str, Any]:
             entries.append(entry)
         return sorted(entries, key=lambda item: item["id"])
 
+    deadline = 15.0
+
     def _call() -> dict[str, list[dict[str, Any]]]:
-        client = _client()
+        client = _client(timeout_seconds=_rpc_timeout(deadline))
         try:
             return {
                 "language_models": _entries(client.models.list_language_models()),
@@ -124,7 +263,7 @@ async def probe_models() -> dict[str, Any]:
             _close_client(client)
 
     try:
-        catalogs = await _blocking(_call, deadline_seconds=15)
+        catalogs = await _blocking_read(_call, deadline_seconds=deadline)
     except Exception:
         return {
             "ready": False,
@@ -179,6 +318,7 @@ async def chat(
 ) -> dict[str, Any]:
     selected = await resolve_model(model)
     started = time.monotonic()
+    deadline = float(API_TIMEOUT_SECONDS)
 
     def _call() -> Any:
         from xai_sdk.chat import system, user
@@ -202,7 +342,7 @@ async def chat(
             params["max_tokens"] = max_tokens
         if response_format is not None:
             params["response_format"] = response_format
-        client = _client()
+        client = _client(timeout_seconds=_rpc_timeout(deadline))
         try:
             conversation = client.chat.create(**params)
             conversation.append(system(system_prompt))
@@ -211,7 +351,7 @@ async def chat(
         finally:
             _close_client(client)
 
-    response = await _blocking(_call)
+    response = await _blocking(_call, deadline_seconds=deadline)
     route = "agent" if any((allow_web, allow_x_search, allow_code)) else "chat"
     return _chat_result(response, model=selected, route=route, started=started)
 
@@ -226,11 +366,12 @@ async def vision(
 ) -> dict[str, Any]:
     selected = await resolve_model(model)
     started = time.monotonic()
+    deadline = float(API_TIMEOUT_SECONDS)
 
     def _call() -> Any:
         from xai_sdk.chat import image, system, user
 
-        client = _client()
+        client = _client(timeout_seconds=_rpc_timeout(deadline))
         try:
             conversation = client.chat.create(model=selected)
             conversation.append(system(system_prompt))
@@ -240,7 +381,12 @@ async def vision(
         finally:
             _close_client(client)
 
-    return _chat_result(await _blocking(_call), model=selected, route="vision", started=started)
+    return _chat_result(
+        await _blocking(_call, deadline_seconds=deadline),
+        model=selected,
+        route="vision",
+        started=started,
+    )
 
 
 async def chat_files(
@@ -252,12 +398,13 @@ async def chat_files(
 ) -> dict[str, Any]:
     selected = await resolve_model(model)
     started = time.monotonic()
+    deadline = float(API_TIMEOUT_SECONDS)
 
     def _call() -> Any:
         from xai_sdk.chat import file as xai_file
         from xai_sdk.chat import system, user
 
-        client = _client()
+        client = _client(timeout_seconds=_rpc_timeout(deadline))
         try:
             conversation = client.chat.create(model=selected)
             conversation.append(system(system_prompt))
@@ -266,7 +413,12 @@ async def chat_files(
         finally:
             _close_client(client)
 
-    return _chat_result(await _blocking(_call), model=selected, route="files", started=started)
+    return _chat_result(
+        await _blocking(_call, deadline_seconds=deadline),
+        model=selected,
+        route="files",
+        started=started,
+    )
 
 
 async def search(
@@ -283,6 +435,7 @@ async def search(
 ) -> dict[str, Any]:
     selected = await resolve_model(model)
     started = time.monotonic()
+    deadline = float(API_TIMEOUT_SECONDS)
 
     def _call() -> Any:
         from xai_sdk.chat import system, user
@@ -301,7 +454,7 @@ async def search(
             )
         else:
             raise ValueError("unsupported search kind")
-        client = _client()
+        client = _client(timeout_seconds=_rpc_timeout(deadline))
         try:
             conversation = client.chat.create(model=selected, tools=[tool])
             conversation.append(system(system_prompt))
@@ -311,7 +464,10 @@ async def search(
             _close_client(client)
 
     return _chat_result(
-        await _blocking(_call), model=selected, route=f"{kind}_search", started=started
+        await _blocking(_call, deadline_seconds=deadline),
+        model=selected,
+        route=f"{kind}_search",
+        started=started,
     )
 
 
@@ -324,12 +480,13 @@ async def code_execution(
 ) -> dict[str, Any]:
     selected = await resolve_model(model)
     started = time.monotonic()
+    deadline = float(API_TIMEOUT_SECONDS)
 
     def _call() -> Any:
         from xai_sdk.chat import system, user
         from xai_sdk.tools import code_execution as code_tool
 
-        client = _client()
+        client = _client(timeout_seconds=_rpc_timeout(deadline))
         try:
             conversation = client.chat.create(
                 model=selected,
@@ -344,7 +501,10 @@ async def code_execution(
             _close_client(client)
 
     return _chat_result(
-        await _blocking(_call), model=selected, route="code_execution", started=started
+        await _blocking(_call, deadline_seconds=deadline),
+        model=selected,
+        route="code_execution",
+        started=started,
     )
 
 
@@ -367,6 +527,7 @@ async def generate_image(
     resolution: str | None,
 ) -> dict[str, Any]:
     started = time.monotonic()
+    deadline = float(API_TIMEOUT_SECONDS)
 
     def _call() -> Any:
         params: dict[str, Any] = {
@@ -381,13 +542,16 @@ async def generate_image(
             params["aspect_ratio"] = aspect_ratio
         if resolution:
             params["resolution"] = resolution
-        client = _client()
+        client = _client(timeout_seconds=_rpc_timeout(deadline))
         try:
             return client.image.sample_batch(**params)
         finally:
             _close_client(client)
 
-    images = [_media_result(item) for item in await _blocking(_call)]
+    images = [
+        _media_result(item)
+        for item in await _blocking(_call, deadline_seconds=deadline)
+    ]
     return {
         "images": images,
         "model": model,
@@ -410,6 +574,7 @@ async def generate_video(
     resolution: str | None,
 ) -> dict[str, Any]:
     started = time.monotonic()
+    deadline = float(MEDIA_TIMEOUT_SECONDS)
 
     def _call() -> Any:
         params: dict[str, Any] = {"prompt": prompt, "model": model}
@@ -424,13 +589,13 @@ async def generate_video(
                 params[key] = value
         if reference_image_urls:
             params["reference_image_urls"] = list(reference_image_urls)
-        client = _client()
+        client = _client(timeout_seconds=_rpc_timeout(deadline))
         try:
             return client.video.generate(**params)
         finally:
             _close_client(client)
 
-    result = _media_result(await _blocking(_call, deadline_seconds=300))
+    result = _media_result(await _blocking(_call, deadline_seconds=deadline))
     return {
         "video": result,
         "model": model,
@@ -449,6 +614,7 @@ async def extend_video(
     duration: int | None,
 ) -> dict[str, Any]:
     started = time.monotonic()
+    deadline = float(MEDIA_TIMEOUT_SECONDS)
 
     def _call() -> Any:
         params: dict[str, Any] = {
@@ -458,13 +624,13 @@ async def extend_video(
         }
         if duration is not None:
             params["duration"] = duration
-        client = _client()
+        client = _client(timeout_seconds=_rpc_timeout(deadline))
         try:
             return client.video.extend(**params)
         finally:
             _close_client(client)
 
-    result = _media_result(await _blocking(_call, deadline_seconds=300))
+    result = _media_result(await _blocking(_call, deadline_seconds=deadline))
     return {
         "video": result,
         "model": model,
@@ -475,21 +641,56 @@ async def extend_video(
     }
 
 
+def _format_expires_at(value: Any) -> str | None:
+    if value is None or value == "":
+        return None
+    to_datetime = getattr(value, "ToDatetime", None)
+    if callable(to_datetime):
+        try:
+            dt = to_datetime()
+            if getattr(dt, "year", 0) > 1970:
+                return dt.astimezone(UTC).isoformat()
+        except Exception:  # noqa: S110 — best-effort protobuf timestamp decode
+            return None
+    seconds = getattr(value, "seconds", None)
+    if seconds is not None:
+        try:
+            sec = int(seconds)
+            if sec > 0:
+                return datetime.fromtimestamp(sec, tz=UTC).isoformat()
+        except Exception:  # noqa: S110 — best-effort seconds field decode
+            return None
+    text = str(value).strip()
+    if not text:
+        return None
+    # Protobuf Timestamp str() looks like "seconds: 1784450992\nnanos: …"
+    if text.startswith("seconds:"):
+        try:
+            sec = int(text.split("seconds:", 1)[1].splitlines()[0].strip())
+            if sec > 0:
+                return datetime.fromtimestamp(sec, tz=UTC).isoformat()
+        except Exception:
+            return None
+    return text
+
+
 def _file_metadata(item: Any) -> dict[str, Any]:
     return {
         "file_id": str(getattr(item, "id", "") or ""),
         "filename": str(getattr(item, "filename", "") or ""),
         "size_bytes": int(getattr(item, "size", None) or getattr(item, "bytes", 0) or 0),
         "public_url": getattr(item, "public_url", None),
-        "expires_at": str(getattr(item, "expires_at", "") or "") or None,
+        "expires_at": _format_expires_at(getattr(item, "expires_at", None)),
     }
 
 
 async def upload_file(
     content: bytes, *, filename: str, expires_after_seconds: int
 ) -> dict[str, Any]:
+    deadline = float(FILE_IO_TIMEOUT_SECONDS)
+
     def _call() -> Any:
-        client = _client()
+        client = _client(timeout_seconds=_rpc_timeout(deadline))
         try:
             return client.files.upload(
                 content,
@@ -499,47 +700,98 @@ async def upload_file(
         finally:
             _close_client(client)
 
-    result = _file_metadata(await _blocking(_call, deadline_seconds=60))
+    result = _file_metadata(await _blocking(_call, deadline_seconds=deadline))
     result.update({"plane": API_PLANE, "billing_class": "metered_api"})
     return result
 
 
 async def list_files(limit: int) -> dict[str, Any]:
+    deadline = float(FILE_LIST_TIMEOUT_SECONDS)
+
     def _call() -> Any:
-        client = _client()
+        client = _client(timeout_seconds=_rpc_timeout(deadline))
         try:
             return client.files.list(limit=limit)
         finally:
             _close_client(client)
 
-    response = await _blocking(_call, deadline_seconds=30)
+    # Slow cold-start list (~40s); durable MCP jobs poll so IDE deadlines stay short.
+    response = await _blocking_read(_call, deadline_seconds=deadline)
     data = getattr(response, "data", response) or []
     return {"files": [_file_metadata(item) for item in data], "plane": API_PLANE}
 
 
 async def get_file(file_id: str) -> dict[str, Any]:
+    deadline = float(FILE_IO_TIMEOUT_SECONDS)
+
     def _call() -> Any:
-        client = _client()
+        client = _client(timeout_seconds=_rpc_timeout(deadline))
         try:
             return client.files.get(file_id)
         finally:
             _close_client(client)
 
-    result = _file_metadata(await _blocking(_call, deadline_seconds=30))
+    result = _file_metadata(await _blocking_read(_call, deadline_seconds=deadline))
     result["plane"] = API_PLANE
     return result
 
 
+def _read_file_bytes_bounded(raw: Any, *, limit: int) -> tuple[bytes, int | None]:
+    """Return (shown_bytes, total_bytes_if_known).
+
+    Prefer a streaming read when the SDK object exposes ``read`` so we never
+    buffer more than ``limit + 1`` bytes. Otherwise fall back to ``bytes()`` and
+    rely on the metadata hard-cap checked by ``get_file_content``.
+    """
+    reader = getattr(raw, "read", None)
+    if callable(reader):
+        chunk = reader(limit + 1)
+        data = bytes(chunk)
+        if len(data) > limit:
+            return data[:limit], None
+        return data, len(data)
+    data = bytes(raw)
+    return data[:limit], len(data)
+
+
 async def get_file_content(file_id: str, *, max_bytes: int) -> dict[str, Any]:
-    def _call() -> bytes:
-        client = _client()
+    deadline = float(FILE_IO_TIMEOUT_SECONDS)
+    limit = max(1, min(int(max_bytes), FILE_CONTENT_HARD_CAP_BYTES))
+    # Refuse oversized objects before the SDK materializes them into memory.
+    meta = await get_file(file_id)
+    size_bytes = int(meta.get("size_bytes") or 0)
+    if size_bytes > FILE_CONTENT_HARD_CAP_BYTES:
+        raise ValueError(
+            f"file is {size_bytes} bytes; refuse to download more than "
+            f"{FILE_CONTENT_HARD_CAP_BYTES} bytes (set UNIGROK_FILE_CONTENT_MAX_BYTES)"
+        )
+    # Current xAI SDK content() materializes the full object before returning;
+    # without trustworthy size metadata we refuse rather than risk unbounded RAM.
+    if size_bytes <= 0:
+        raise ValueError(
+            "file size metadata is missing or zero; refuse unbounded download "
+            "(xAI SDK content() is not a true stream)"
+        )
+
+    def _call() -> tuple[bytes, int | None]:
+        client = _client(timeout_seconds=_rpc_timeout(deadline))
         try:
-            return bytes(client.files.content(file_id))
+            # Prefer stream read when available; many SDK builds still buffer fully.
+            return _read_file_bytes_bounded(client.files.content(file_id), limit=limit)
         finally:
             _close_client(client)
 
-    content = await _blocking(_call, deadline_seconds=30)
-    shown = content[:max_bytes]
+    shown, total_known = await _blocking_read(_call, deadline_seconds=deadline)
+    if size_bytes > 0:
+        total_bytes = size_bytes
+        truncated = size_bytes > len(shown)
+    elif total_known is not None:
+        total_bytes = total_known
+        truncated = total_known > len(shown)
+    else:
+        # Streamed read hit the limit without an EOF size; treat as truncated.
+        total_bytes = len(shown)
+        truncated = len(shown) >= limit
     try:
         text = shown.decode("utf-8")
         encoding = "utf-8"
@@ -552,19 +804,21 @@ async def get_file_content(file_id: str, *, max_bytes: int) -> dict[str, Any]:
         "content": text,
         "encoding": encoding,
         "bytes_returned": len(shown),
-        "total_bytes": len(content),
-        "truncated": len(shown) < len(content),
+        "total_bytes": total_bytes,
+        "truncated": truncated,
         "plane": API_PLANE,
     }
 
 
 async def delete_file(file_id: str) -> dict[str, Any]:
+    deadline = float(FILE_IO_TIMEOUT_SECONDS)
+
     def _call() -> None:
-        client = _client()
+        client = _client(timeout_seconds=_rpc_timeout(deadline))
         try:
             client.files.delete(file_id)
         finally:
             _close_client(client)
 
-    await _blocking(_call, deadline_seconds=30)
+    await _blocking(_call, deadline_seconds=deadline)
     return {"deleted": True, "file_id": file_id, "plane": API_PLANE}

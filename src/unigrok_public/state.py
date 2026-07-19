@@ -164,8 +164,104 @@ class PublicStateStore:
                     status TEXT NOT NULL,
                     payload TEXT
                 );
+                CREATE TABLE IF NOT EXISTS autonomy_jobs (
+                    job_id TEXT PRIMARY KEY,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    acceptance_hash TEXT NOT NULL,
+                    acceptance_text TEXT NOT NULL,
+                    continue_token TEXT NOT NULL UNIQUE,
+                    claim_lease TEXT,
+                    claim_expires_at TEXT,
+                    ledger_cursor INTEGER NOT NULL DEFAULT 0,
+                    request_json TEXT
+                );
+                CREATE INDEX IF NOT EXISTS autonomy_jobs_token
+                    ON autonomy_jobs(continue_token);
+                CREATE TABLE IF NOT EXISTS autonomy_ledger (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    job_id TEXT NOT NULL REFERENCES autonomy_jobs(job_id) ON DELETE CASCADE,
+                    event_type TEXT NOT NULL,
+                    payload TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS autonomy_ledger_job
+                    ON autonomy_ledger(job_id, id);
+                CREATE TABLE IF NOT EXISTS autonomy_artifacts (
+                    hash TEXT PRIMARY KEY,
+                    job_id TEXT NOT NULL REFERENCES autonomy_jobs(job_id) ON DELETE CASCADE,
+                    kind TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS missions (
+                    mission_id TEXT PRIMARY KEY,
+                    job_id TEXT NOT NULL UNIQUE,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    acceptance_hash TEXT NOT NULL,
+                    acceptance_text TEXT NOT NULL,
+                    continue_token TEXT NOT NULL UNIQUE,
+                    package_json TEXT NOT NULL,
+                    checkpoint_json TEXT NOT NULL,
+                    checkpoint_version INTEGER NOT NULL DEFAULT 0,
+                    lease_token TEXT,
+                    lease_generation INTEGER NOT NULL DEFAULT 0,
+                    lease_expires_at TEXT,
+                    envelope_version INTEGER NOT NULL DEFAULT 1,
+                    verify_failures INTEGER NOT NULL DEFAULT 0,
+                    ledger_cursor INTEGER NOT NULL DEFAULT 0
+                );
+                CREATE INDEX IF NOT EXISTS missions_status
+                    ON missions(status, updated_at);
+                CREATE TABLE IF NOT EXISTS mission_ledger (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    mission_id TEXT NOT NULL REFERENCES missions(mission_id) ON DELETE CASCADE,
+                    event_type TEXT NOT NULL,
+                    payload TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS mission_ledger_mission
+                    ON mission_ledger(mission_id, id);
+                CREATE TABLE IF NOT EXISTS mission_artifacts (
+                    hash TEXT PRIMARY KEY,
+                    mission_id TEXT NOT NULL REFERENCES missions(mission_id) ON DELETE CASCADE,
+                    kind TEXT NOT NULL,
+                    sealed TEXT NOT NULL,
+                    projection TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS mission_evidence (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    mission_id TEXT NOT NULL REFERENCES missions(mission_id) ON DELETE CASCADE,
+                    class TEXT NOT NULL,
+                    digest TEXT NOT NULL,
+                    payload TEXT NOT NULL,
+                    artifact_refs TEXT NOT NULL,
+                    lease_generation INTEGER NOT NULL,
+                    created_at TEXT NOT NULL,
+                    UNIQUE(mission_id, digest)
+                );
+                CREATE TABLE IF NOT EXISTS mission_side_effects (
+                    quantum_key TEXT PRIMARY KEY,
+                    mission_id TEXT NOT NULL REFERENCES missions(mission_id) ON DELETE CASCADE,
+                    receipt_json TEXT NOT NULL,
+                    lease_generation INTEGER NOT NULL,
+                    created_at TEXT NOT NULL
+                );
                 """
             )
+            columns = {
+                str(row[1])
+                for row in connection.execute("PRAGMA table_info(autonomy_jobs)").fetchall()
+            }
+            if columns and "request_json" not in columns:
+                connection.execute(
+                    "ALTER TABLE autonomy_jobs ADD COLUMN request_json TEXT"
+                )
+            connection.commit()
 
     async def initialize(self) -> None:
         if self._initialized:
@@ -623,3 +719,944 @@ class PublicStateStore:
     async def telemetry_summary(self, limit: int = 1000) -> dict[str, Any]:
         bounded = max(1, min(int(limit or 1000), 10_000))
         return dict(await self._read(self._telemetry_summary_sync, bounded))
+
+    def _create_autonomy_job_sync(
+        self,
+        job_id: str,
+        acceptance_hash: str,
+        acceptance_text: str,
+        continue_token: str,
+        request_json: str,
+    ) -> None:
+        now = utc_now()
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO autonomy_jobs(
+                    job_id, created_at, updated_at, status, acceptance_hash,
+                    acceptance_text, continue_token, ledger_cursor, request_json
+                ) VALUES (?, ?, ?, 'running', ?, ?, ?, 0, ?)
+                """,
+                (
+                    job_id,
+                    now,
+                    now,
+                    acceptance_hash,
+                    redact_secrets(acceptance_text).strip()[:20_000],
+                    continue_token,
+                    request_json,
+                ),
+            )
+            connection.execute(
+                """
+                INSERT INTO autonomy_ledger(job_id, event_type, payload, created_at)
+                VALUES (?, 'JobCreated', ?, ?)
+                """,
+                (
+                    job_id,
+                    json.dumps(
+                        {"acceptance_hash": acceptance_hash},
+                        separators=(",", ":"),
+                    ),
+                    now,
+                ),
+            )
+            # Bound autonomy retention like agent_jobs (no indefinite prompt/answer store).
+            connection.execute(
+                "DELETE FROM autonomy_jobs WHERE created_at < datetime('now', '-1 day')"
+            )
+            connection.commit()
+
+    async def create_autonomy_job(
+        self,
+        job_id: str,
+        *,
+        acceptance_hash: str,
+        acceptance_text: str,
+        continue_token: str,
+        request: dict[str, Any] | None = None,
+    ) -> None:
+        encoded = json.dumps(request or {}, separators=(",", ":"), default=str)
+        await self._write(
+            self._create_autonomy_job_sync,
+            job_id,
+            acceptance_hash,
+            acceptance_text,
+            continue_token,
+            encoded,
+        )
+
+    def _load_autonomy_job_sync(self, job_id: str) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM autonomy_jobs WHERE job_id=?", (job_id,)
+            ).fetchone()
+        return dict(row) if row is not None else None
+
+    async def load_autonomy_job(self, job_id: str) -> dict[str, Any] | None:
+        return await self._read(self._load_autonomy_job_sync, job_id)
+
+    def _load_autonomy_by_token_sync(self, continue_token: str) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM autonomy_jobs WHERE continue_token=?",
+                (continue_token,),
+            ).fetchone()
+        return dict(row) if row is not None else None
+
+    async def load_autonomy_by_token(self, continue_token: str) -> dict[str, Any] | None:
+        token = str(continue_token or "").strip().lower()
+        if not re.fullmatch(r"[0-9a-f]{32}", token):
+            raise ValueError("continue_token must be a 32-character hex token")
+        return await self._read(self._load_autonomy_by_token_sync, token)
+
+    def _set_autonomy_status_sync(self, job_id: str, status: str) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                "UPDATE autonomy_jobs SET status=?, updated_at=? WHERE job_id=?",
+                (status, utc_now(), job_id),
+            )
+            connection.commit()
+
+    async def set_autonomy_status(self, job_id: str, status: str) -> None:
+        await self._write(self._set_autonomy_status_sync, job_id, status)
+
+    def _claim_autonomy_sync(
+        self, job_id: str, claim_lease: str, ttl_seconds: int
+    ) -> bool:
+        now = utc_now()
+        expires = datetime.now(UTC).timestamp() + max(5, int(ttl_seconds))
+        expires_at = datetime.fromtimestamp(expires, tz=UTC).isoformat()
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT claim_lease, claim_expires_at FROM autonomy_jobs WHERE job_id=?",
+                (job_id,),
+            ).fetchone()
+            if row is None:
+                return False
+            current = row["claim_lease"]
+            current_exp = row["claim_expires_at"]
+            if current and current_exp and current_exp > now and current != claim_lease:
+                return False
+            connection.execute(
+                """
+                UPDATE autonomy_jobs
+                SET claim_lease=?, claim_expires_at=?, updated_at=?
+                WHERE job_id=?
+                """,
+                (claim_lease, expires_at, now, job_id),
+            )
+            connection.commit()
+        return True
+
+    async def claim_autonomy(
+        self, job_id: str, claim_lease: str, *, ttl_seconds: int = 120
+    ) -> bool:
+        return bool(
+            await self._write(
+                self._claim_autonomy_sync, job_id, claim_lease, int(ttl_seconds)
+            )
+        )
+
+    def _release_autonomy_claim_sync(self, job_id: str, claim_lease: str) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE autonomy_jobs
+                SET claim_lease=NULL, claim_expires_at=NULL, updated_at=?
+                WHERE job_id=? AND claim_lease=?
+                """,
+                (utc_now(), job_id, claim_lease),
+            )
+            connection.commit()
+
+    async def release_autonomy_claim(self, job_id: str, claim_lease: str) -> None:
+        await self._write(self._release_autonomy_claim_sync, job_id, claim_lease)
+
+    def _merge_agent_job_enrichment_sync(
+        self, job_id: str, enrichment: dict[str, Any]
+    ) -> str | None:
+        """Attach enrichment without downgrading a terminal durable status."""
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT status, payload FROM agent_jobs WHERE job_id=?", (job_id,)
+            ).fetchone()
+            if row is None:
+                return None
+            status = str(row["status"])
+            payload: dict[str, Any] = {}
+            if row["payload"]:
+                try:
+                    decoded = json.loads(row["payload"])
+                    if isinstance(decoded, dict):
+                        payload = decoded
+                except json.JSONDecodeError:
+                    payload = {}
+            if status in {"complete", "error", "needs_continuation"}:
+                payload.update(enrichment)
+                if enrichment.get("review_kind") and payload.get("status") == "complete":
+                    payload["review"] = payload.get("text")
+            else:
+                pending = payload.get("pending_enrichment")
+                if not isinstance(pending, dict):
+                    pending = {}
+                pending.update(enrichment)
+                payload["pending_enrichment"] = pending
+            connection.execute(
+                "UPDATE agent_jobs SET payload=? WHERE job_id=?",
+                (
+                    json.dumps(payload, separators=(",", ":"), default=str),
+                    job_id,
+                ),
+            )
+            connection.commit()
+        return status
+
+    async def merge_agent_job_enrichment(
+        self, job_id: str, enrichment: dict[str, Any]
+    ) -> str | None:
+        return await self._write(
+            self._merge_agent_job_enrichment_sync, job_id, dict(enrichment)
+        )
+
+    def _append_autonomy_event_sync(
+        self, job_id: str, event_type: str, payload: dict[str, Any]
+    ) -> int:
+        now = utc_now()
+        encoded = json.dumps(payload, separators=(",", ":"), default=str)
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                INSERT INTO autonomy_ledger(job_id, event_type, payload, created_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (job_id, event_type, encoded, now),
+            )
+            event_id = int(cursor.lastrowid)
+            connection.execute(
+                """
+                UPDATE autonomy_jobs
+                SET ledger_cursor=?, updated_at=?
+                WHERE job_id=?
+                """,
+                (event_id, now, job_id),
+            )
+            connection.commit()
+        return event_id
+
+    async def append_autonomy_event(
+        self, job_id: str, event_type: str, payload: dict[str, Any] | None = None
+    ) -> int:
+        return int(
+            await self._write(
+                self._append_autonomy_event_sync,
+                job_id,
+                event_type,
+                dict(payload or {}),
+            )
+        )
+
+    def _list_autonomy_events_sync(
+        self, job_id: str, after_id: int, limit: int
+    ) -> list[dict[str, Any]]:
+        bounded = max(1, min(int(limit), 200))
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT id, event_type, payload, created_at
+                FROM autonomy_ledger
+                WHERE job_id=? AND id>?
+                ORDER BY id ASC
+                LIMIT ?
+                """,
+                (job_id, int(after_id), bounded),
+            ).fetchall()
+        events: list[dict[str, Any]] = []
+        for row in rows:
+            item = dict(row)
+            try:
+                item["payload"] = json.loads(item["payload"])
+            except json.JSONDecodeError:
+                item["payload"] = {"raw": item["payload"]}
+            events.append(item)
+        return events
+
+    async def list_autonomy_events(
+        self, job_id: str, *, after_id: int = 0, limit: int = 50
+    ) -> list[dict[str, Any]]:
+        return list(
+            await self._read(
+                self._list_autonomy_events_sync,
+                job_id,
+                int(after_id),
+                int(limit),
+            )
+        )
+
+    def _put_autonomy_artifact_sync(
+        self, job_id: str, digest: str, kind: str, content: str
+    ) -> None:
+        now = utc_now()
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO autonomy_artifacts(hash, job_id, kind, content, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(hash) DO NOTHING
+                """,
+                (
+                    digest,
+                    job_id,
+                    kind,
+                    redact_secrets(content).strip()[:100_000],
+                    now,
+                ),
+            )
+            connection.commit()
+
+    async def put_autonomy_artifact(
+        self, job_id: str, digest: str, *, kind: str, content: str
+    ) -> None:
+        await self._write(
+            self._put_autonomy_artifact_sync,
+            job_id,
+            digest,
+            kind,
+            content,
+        )
+
+    def _get_autonomy_artifact_sync(self, digest: str) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT hash, job_id, kind, content, created_at "
+                "FROM autonomy_artifacts WHERE hash=?",
+                (digest,),
+            ).fetchone()
+        return dict(row) if row is not None else None
+
+    async def get_autonomy_artifact(self, digest: str) -> dict[str, Any] | None:
+        return await self._read(self._get_autonomy_artifact_sync, digest)
+
+    # --- Mission controller (UNIGROK_MISSION_V2) ---------------------------------
+
+    def _create_mission_sync(
+        self,
+        mission_id: str,
+        job_id: str,
+        acceptance_hash: str,
+        acceptance_text: str,
+        continue_token: str,
+        package_json: str,
+        lease_token: str,
+        lease_generation: int,
+        lease_expires_at: str,
+    ) -> None:
+        now = utc_now()
+        checkpoint = {
+            "epoch": 0,
+            "plan": [],
+            "step_cursor": 0,
+            "previous_checkpoint_hash": None,
+        }
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO missions(
+                    mission_id, job_id, created_at, updated_at, status,
+                    acceptance_hash, acceptance_text, continue_token,
+                    package_json, checkpoint_json, checkpoint_version,
+                    lease_token, lease_generation, lease_expires_at,
+                    envelope_version, verify_failures, ledger_cursor
+                ) VALUES (?, ?, ?, ?, 'running', ?, ?, ?, ?, ?, 0, ?, ?, ?, 1, 0, 0)
+                """,
+                (
+                    mission_id,
+                    job_id,
+                    now,
+                    now,
+                    acceptance_hash,
+                    redact_secrets(acceptance_text),
+                    continue_token,
+                    package_json,
+                    json.dumps(checkpoint, separators=(",", ":"), default=str),
+                    lease_token,
+                    int(lease_generation),
+                    lease_expires_at,
+                ),
+            )
+            connection.commit()
+
+    async def create_mission(
+        self,
+        mission_id: str,
+        *,
+        job_id: str,
+        acceptance_hash: str,
+        acceptance_text: str,
+        continue_token: str,
+        package: dict[str, Any],
+        lease_token: str,
+        lease_generation: int,
+        lease_expires_at: str,
+    ) -> None:
+        await self._write(
+            self._create_mission_sync,
+            mission_id,
+            job_id,
+            acceptance_hash,
+            acceptance_text,
+            continue_token,
+            json.dumps(package, separators=(",", ":"), default=str),
+            lease_token,
+            int(lease_generation),
+            lease_expires_at,
+        )
+
+    def _load_mission_sync(self, mission_id: str) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM missions WHERE mission_id=?", (mission_id,)
+            ).fetchone()
+        if row is None:
+            return None
+        item = dict(row)
+        for key, field in (("package", "package_json"), ("checkpoint", "checkpoint_json")):
+            try:
+                item[key] = json.loads(item.get(field) or "{}")
+            except json.JSONDecodeError:
+                item[key] = {}
+        return item
+
+    async def load_mission(self, mission_id: str) -> dict[str, Any] | None:
+        return await self._read(self._load_mission_sync, mission_id)
+
+    def _load_mission_by_job_sync(self, job_id: str) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT mission_id FROM missions WHERE job_id=?", (job_id,)
+            ).fetchone()
+        if row is None:
+            return None
+        return self._load_mission_sync(str(row["mission_id"]))
+
+    async def load_mission_by_job(self, job_id: str) -> dict[str, Any] | None:
+        return await self._read(self._load_mission_by_job_sync, job_id)
+
+    def _claim_mission_sync(
+        self,
+        mission_id: str,
+        lease_token: str,
+        ttl_seconds: int,
+        expect_generation: int | None,
+    ) -> tuple[bool, int]:
+        from unigrok_public.mission.lease import (
+            fence_generation_next,
+            lease_active,
+            lease_expiry_iso,
+        )
+
+        now = utc_now()
+        expires_at = lease_expiry_iso(ttl_seconds=ttl_seconds)
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT lease_token, lease_expires_at, lease_generation, status "
+                "FROM missions WHERE mission_id=?",
+                (mission_id,),
+            ).fetchone()
+            if row is None:
+                return False, 0
+            current = row["lease_token"]
+            gen = int(row["lease_generation"] or 0)
+            if (
+                current == lease_token
+                and expect_generation is not None
+                and gen == int(expect_generation)
+            ):
+                connection.execute(
+                    """
+                    UPDATE missions
+                    SET lease_expires_at=?, updated_at=?
+                    WHERE mission_id=? AND lease_token=? AND lease_generation=?
+                    """,
+                    (expires_at, now, mission_id, lease_token, gen),
+                )
+                connection.commit()
+                return True, gen
+            if (
+                current
+                and current != lease_token
+                and lease_active(row["lease_expires_at"], now=now)
+            ):
+                return False, gen
+            new_gen = fence_generation_next(gen)
+            connection.execute(
+                """
+                UPDATE missions
+                SET lease_token=?, lease_generation=?, lease_expires_at=?,
+                    status=CASE WHEN status IN (
+                        'queued','waiting_event','waiting_timer','dormant','escalated'
+                    ) THEN 'running' ELSE status END,
+                    updated_at=?
+                WHERE mission_id=?
+                """,
+                (lease_token, new_gen, expires_at, now, mission_id),
+            )
+            connection.commit()
+        return True, new_gen
+
+    async def claim_mission(
+        self,
+        mission_id: str,
+        *,
+        lease_token: str,
+        ttl_seconds: int = 180,
+        expect_generation: int | None = None,
+    ) -> tuple[bool, int]:
+        return await self._write(
+            self._claim_mission_sync,
+            mission_id,
+            lease_token,
+            int(ttl_seconds),
+            expect_generation,
+        )
+
+    def _heartbeat_mission_sync(
+        self,
+        mission_id: str,
+        lease_token: str,
+        lease_generation: int,
+        ttl_seconds: int,
+    ) -> bool:
+        from unigrok_public.mission.lease import lease_expiry_iso
+
+        now = utc_now()
+        expires_at = lease_expiry_iso(ttl_seconds=ttl_seconds)
+        with self._connect() as connection:
+            cur = connection.execute(
+                """
+                UPDATE missions
+                SET lease_expires_at=?, updated_at=?
+                WHERE mission_id=? AND lease_token=? AND lease_generation=?
+                """,
+                (expires_at, now, mission_id, lease_token, int(lease_generation)),
+            )
+            connection.commit()
+            return cur.rowcount == 1
+
+    async def heartbeat_mission(
+        self,
+        mission_id: str,
+        *,
+        lease_token: str,
+        lease_generation: int,
+        ttl_seconds: int = 180,
+    ) -> bool:
+        return bool(
+            await self._write(
+                self._heartbeat_mission_sync,
+                mission_id,
+                lease_token,
+                int(lease_generation),
+                int(ttl_seconds),
+            )
+        )
+
+    def _cas_mission_status_sync(
+        self,
+        mission_id: str,
+        expect_status: str,
+        expect_version: int,
+        expect_lease_generation: int,
+        new_status: str,
+        clear_lease: bool,
+        checkpoint_update: dict[str, Any] | None,
+        bump_verify_failure: bool,
+    ) -> bool:
+        from unigrok_public.mission.types import legal_transition
+
+        if not legal_transition(expect_status, new_status):
+            return False
+        now = utc_now()
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT status, checkpoint_version, lease_generation, checkpoint_json, "
+                "verify_failures FROM missions WHERE mission_id=?",
+                (mission_id,),
+            ).fetchone()
+            if row is None:
+                return False
+            if str(row["status"]) != str(expect_status):
+                return False
+            if int(row["checkpoint_version"] or 0) != int(expect_version):
+                return False
+            if int(row["lease_generation"] or 0) != int(expect_lease_generation):
+                return False
+            try:
+                checkpoint = json.loads(row["checkpoint_json"] or "{}")
+            except json.JSONDecodeError:
+                checkpoint = {}
+            if checkpoint_update:
+                checkpoint.update(checkpoint_update)
+            new_version = int(expect_version) + 1
+            verify_failures = int(row["verify_failures"] or 0)
+            if bump_verify_failure:
+                verify_failures += 1
+            if clear_lease:
+                # Bump lease_generation when releasing so a stale worker cannot
+                # CommitDone after sweeper requeue + new claim.
+                fenced_gen = int(expect_lease_generation) + 1
+                cur = connection.execute(
+                    """
+                    UPDATE missions
+                    SET status=?, checkpoint_json=?, checkpoint_version=?,
+                        lease_token=NULL, lease_expires_at=NULL,
+                        lease_generation=?,
+                        verify_failures=?, updated_at=?
+                    WHERE mission_id=? AND status=? AND checkpoint_version=?
+                          AND lease_generation=?
+                    """,
+                    (
+                        new_status,
+                        json.dumps(checkpoint, separators=(",", ":"), default=str),
+                        new_version,
+                        fenced_gen,
+                        verify_failures,
+                        now,
+                        mission_id,
+                        expect_status,
+                        int(expect_version),
+                        int(expect_lease_generation),
+                    ),
+                )
+            else:
+                cur = connection.execute(
+                    """
+                    UPDATE missions
+                    SET status=?, checkpoint_json=?, checkpoint_version=?,
+                        verify_failures=?, updated_at=?
+                    WHERE mission_id=? AND status=? AND checkpoint_version=?
+                          AND lease_generation=?
+                    """,
+                    (
+                        new_status,
+                        json.dumps(checkpoint, separators=(",", ":"), default=str),
+                        new_version,
+                        verify_failures,
+                        now,
+                        mission_id,
+                        expect_status,
+                        int(expect_version),
+                        int(expect_lease_generation),
+                    ),
+                )
+            connection.commit()
+            return int(cur.rowcount) == 1
+
+    async def cas_mission_status(
+        self,
+        mission_id: str,
+        *,
+        expect_status: str,
+        expect_version: int,
+        expect_lease_generation: int,
+        new_status: str,
+        clear_lease: bool = False,
+        checkpoint_update: dict[str, Any] | None = None,
+        bump_verify_failure: bool = False,
+    ) -> bool:
+        return bool(
+            await self._write(
+                self._cas_mission_status_sync,
+                mission_id,
+                expect_status,
+                int(expect_version),
+                int(expect_lease_generation),
+                new_status,
+                clear_lease,
+                checkpoint_update,
+                bump_verify_failure,
+            )
+        )
+
+    def _touch_mission_envelope_sync(
+        self, mission_id: str, envelope_version: int
+    ) -> None:
+        """Record deployment envelope version; never raise mission caps here."""
+        now = utc_now()
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT envelope_version, package_json FROM missions WHERE mission_id=?",
+                (mission_id,),
+            ).fetchone()
+            if row is None:
+                return
+            current = int(row["envelope_version"] or 1)
+            new_v = max(current, int(envelope_version))
+            try:
+                package = json.loads(row["package_json"] or "{}")
+            except json.JSONDecodeError:
+                package = {}
+            package["bound_envelope_version"] = new_v
+            connection.execute(
+                """
+                UPDATE missions
+                SET envelope_version=?, package_json=?, updated_at=?
+                WHERE mission_id=?
+                """,
+                (
+                    new_v,
+                    json.dumps(package, separators=(",", ":"), default=str),
+                    now,
+                    mission_id,
+                ),
+            )
+            connection.commit()
+
+    async def touch_mission_envelope(
+        self, mission_id: str, *, envelope_version: int
+    ) -> None:
+        await self._write(
+            self._touch_mission_envelope_sync,
+            mission_id,
+            int(envelope_version),
+        )
+
+    def _append_mission_event_sync(
+        self, mission_id: str, event_type: str, payload: dict[str, Any]
+    ) -> int:
+        now = utc_now()
+        encoded = json.dumps(payload, separators=(",", ":"), default=str)
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                INSERT INTO mission_ledger(mission_id, event_type, payload, created_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (mission_id, event_type, encoded, now),
+            )
+            event_id = int(cursor.lastrowid)
+            connection.execute(
+                """
+                UPDATE missions SET ledger_cursor=?, updated_at=? WHERE mission_id=?
+                """,
+                (event_id, now, mission_id),
+            )
+            connection.commit()
+        return event_id
+
+    async def append_mission_event(
+        self, mission_id: str, event_type: str, payload: dict[str, Any] | None = None
+    ) -> int:
+        return int(
+            await self._write(
+                self._append_mission_event_sync,
+                mission_id,
+                event_type,
+                dict(payload or {}),
+            )
+        )
+
+    def _put_mission_artifact_sync(
+        self,
+        mission_id: str,
+        digest: str,
+        kind: str,
+        sealed: str,
+        projection: str,
+    ) -> None:
+        now = utc_now()
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO mission_artifacts(
+                    hash, mission_id, kind, sealed, projection, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(hash) DO NOTHING
+                """,
+                (digest, mission_id, kind, sealed, projection, now),
+            )
+            connection.commit()
+
+    async def put_mission_artifact(
+        self,
+        mission_id: str,
+        digest: str,
+        *,
+        kind: str,
+        sealed: str,
+        projection: str,
+    ) -> None:
+        await self._write(
+            self._put_mission_artifact_sync,
+            mission_id,
+            digest,
+            kind,
+            sealed,
+            projection,
+        )
+
+    def _append_mission_evidence_sync(
+        self,
+        mission_id: str,
+        klass: str,
+        digest: str,
+        payload: dict[str, Any],
+        artifact_refs: list[str],
+        lease_generation: int,
+    ) -> None:
+        now = utc_now()
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT lease_generation FROM missions WHERE mission_id=?",
+                (mission_id,),
+            ).fetchone()
+            if row is None:
+                return
+            if int(row["lease_generation"] or 0) != int(lease_generation):
+                return
+            connection.execute(
+                """
+                INSERT INTO mission_evidence(
+                    mission_id, class, digest, payload, artifact_refs,
+                    lease_generation, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(mission_id, digest) DO NOTHING
+                """,
+                (
+                    mission_id,
+                    klass,
+                    digest,
+                    json.dumps(payload, separators=(",", ":"), default=str),
+                    json.dumps(list(artifact_refs), separators=(",", ":")),
+                    int(lease_generation),
+                    now,
+                ),
+            )
+            connection.commit()
+
+    async def append_mission_evidence(
+        self,
+        mission_id: str,
+        *,
+        klass: str,
+        digest: str,
+        payload: dict[str, Any],
+        artifact_refs: list[str],
+        lease_generation: int,
+    ) -> None:
+        await self._write(
+            self._append_mission_evidence_sync,
+            mission_id,
+            klass,
+            digest,
+            payload,
+            artifact_refs,
+            int(lease_generation),
+        )
+
+    def _list_mission_evidence_sync(self, mission_id: str) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT class, digest, payload, artifact_refs, lease_generation, created_at
+                FROM mission_evidence WHERE mission_id=? ORDER BY id ASC
+                """,
+                (mission_id,),
+            ).fetchall()
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            item = dict(row)
+            try:
+                item["payload"] = json.loads(item["payload"])
+            except json.JSONDecodeError:
+                item["payload"] = {}
+            try:
+                item["artifact_refs"] = json.loads(item["artifact_refs"])
+            except json.JSONDecodeError:
+                item["artifact_refs"] = []
+            out.append(item)
+        return out
+
+    async def list_mission_evidence(self, mission_id: str) -> list[dict[str, Any]]:
+        return list(await self._read(self._list_mission_evidence_sync, mission_id))
+
+    def _put_side_effect_sync(
+        self,
+        quantum_key: str,
+        mission_id: str,
+        receipt: dict[str, Any],
+        lease_generation: int,
+    ) -> bool:
+        now = utc_now()
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT lease_generation FROM missions WHERE mission_id=?",
+                (mission_id,),
+            ).fetchone()
+            if row is None:
+                return False
+            if int(row["lease_generation"] or 0) != int(lease_generation):
+                return False
+            existing = connection.execute(
+                "SELECT quantum_key FROM mission_side_effects WHERE quantum_key=?",
+                (quantum_key,),
+            ).fetchone()
+            if existing is not None:
+                return True  # idempotent hit
+            connection.execute(
+                """
+                INSERT INTO mission_side_effects(
+                    quantum_key, mission_id, receipt_json, lease_generation, created_at
+                ) VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    quantum_key,
+                    mission_id,
+                    json.dumps(receipt, separators=(",", ":"), default=str),
+                    int(lease_generation),
+                    now,
+                ),
+            )
+            connection.commit()
+        return True
+
+    async def put_mission_side_effect(
+        self,
+        quantum_key: str,
+        *,
+        mission_id: str,
+        receipt: dict[str, Any],
+        lease_generation: int,
+    ) -> bool:
+        return bool(
+            await self._write(
+                self._put_side_effect_sync,
+                quantum_key,
+                mission_id,
+                receipt,
+                int(lease_generation),
+            )
+        )
+
+    def _list_expired_mission_leases_sync(self, limit: int) -> list[dict[str, Any]]:
+        now = utc_now()
+        bounded = max(1, min(int(limit), 200))
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT mission_id, status, checkpoint_version, lease_generation
+                FROM missions
+                WHERE lease_expires_at IS NOT NULL
+                  AND lease_expires_at < ?
+                  AND status NOT IN ('complete','failed','cancelled','budget_exhausted')
+                ORDER BY updated_at ASC
+                LIMIT ?
+                """,
+                (now, bounded),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    async def list_expired_mission_leases(self, *, limit: int = 50) -> list[dict[str, Any]]:
+        return list(await self._read(self._list_expired_mission_leases_sync, int(limit)))
+

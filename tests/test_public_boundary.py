@@ -378,11 +378,14 @@ async def test_long_agent_turn_returns_resumable_job(
     monkeypatch.setattr(server, "_execute_team_turn", fake_turn)
     monkeypatch.setattr(server, "_await_job_window", fake_wait)
     pending = await server.agent(task="long task")
+    # Autonomy is off by default: unfinished agent jobs stay pending (not continue).
     assert pending["status"] == "pending"
     assert pending["poll"]["tool"] == "agent_result"
+    assert "continue_token" not in pending
     complete = await server.agent_result(pending["job_id"])
     assert complete["status"] == "complete"
     assert complete["text"] == "LONG_RESULT"
+    assert complete.get("job_id") == pending["job_id"]
     assert not server._AGENT_JOBS
 
 
@@ -551,6 +554,75 @@ async def test_pull_request_review_is_bounded_read_only_courier(
 
 
 @pytest.mark.asyncio
+async def test_failed_agent_job_persists_terminal_error_for_poll(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(server, "AGENT_SYNC_WINDOW_SECONDS", 0)
+    release = asyncio.Event()
+
+    async def boom(**_kwargs: object) -> dict:
+        await release.wait()
+        raise RuntimeError("simulated agent failure")
+
+    monkeypatch.setattr(server, "_execute_team_turn", boom)
+    pending = await server.agent(task="fail please")
+    assert pending["status"] == "pending"
+    job_id = pending["job_id"]
+    release.set()
+    # Wait until the background task has written the terminal payload, then
+    # drop the in-memory task so the poll must read SQLite (restart-shaped path).
+    for _ in range(50):
+        stored = await server.STATE.load_agent_job(job_id)
+        if stored and stored.get("status") in {"complete", "error"}:
+            break
+        await asyncio.sleep(0.02)
+    server._DURABLE_JOBS.clear()
+    result = await server.agent_result(job_id)
+    assert result["status"] == "error"
+    assert "simulated agent failure" in result["text"]
+    assert result.get("stop_reason") == "error"
+    assert result.get("job_id") == job_id
+
+
+@pytest.mark.asyncio
+async def test_pending_pull_request_review_keeps_metadata_on_poll(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(server, "AGENT_SYNC_WINDOW_SECONDS", 0)
+    release = asyncio.Event()
+
+    async def slow_turn(**_kwargs: object) -> dict:
+        await release.wait()
+        return {
+            "text": "No blocking findings.",
+            "plane": "test",
+            "stop_reason": "EndTurn",
+            "workspace_attached": False,
+            "cost_usd": 0.0,
+            "orchestration": {},
+        }
+
+    monkeypatch.setattr(server, "_execute_team_turn", slow_turn)
+    pending = await server.review_pull_request(
+        "owner/repo",
+        7,
+        "Pending review",
+        "+ line",
+    )
+    assert pending["status"] in {"pending", "continue"}
+    assert pending["review_kind"] == "pull_request"
+    assert pending["repository"] == "owner/repo"
+    release.set()
+    complete = await server.agent_result(pending["job_id"])
+    assert complete["status"] == "complete"
+    assert complete["review_kind"] == "pull_request"
+    assert complete["repository"] == "owner/repo"
+    assert complete["pull_number"] == 7
+    assert complete["read_only"] is True
+    assert complete["review"] == "No blocking findings."
+
+
+@pytest.mark.asyncio
 async def test_public_dashboard_manifest_and_okf_routes_exist() -> None:
     dashboard = await server.control_center(None)
     manifest = await server.webmcp_manifest(None)
@@ -671,7 +743,11 @@ async def test_upload_accepts_bytes_not_local_paths(monkeypatch: pytest.MonkeyPa
     result = await server.xai_upload_file(
         "note.txt", base64.b64encode(b"hello").decode(), expires_after_seconds=300
     )
-    assert result == {"file_id": "file_test"}
+    # Tool results are wrapped in a durable-job envelope (job_id/job_kind/status);
+    # assert the underlying payload rather than exact-dict equality.
+    assert result["file_id"] == "file_test"
+    assert result["status"] == "complete"
+    assert result["job_kind"] == "xai_upload_file"
     assert captured["content"] == b"hello"
     assert captured["expires_after_seconds"] == 3_600
     with pytest.raises(ValueError, match="path components"):

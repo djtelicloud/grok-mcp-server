@@ -1,7 +1,7 @@
 # Developing UniGrok Public
 
 This guide is for contributors and release verification. Ordinary users only need the
-README.
+README. See also [CONTRIBUTING.md](../CONTRIBUTING.md).
 
 ## Local checks
 
@@ -18,27 +18,20 @@ Stable may remain on port `4765`; run the candidate on `4775` without changing t
 public default:
 
 ```bash
-UNIGROK_PORT=4775 docker compose --env-file ../.env up --build -d grok-mcp
-uv run python scripts/smoke_mcp.py \
-  --url http://127.0.0.1:4775/mcp \
-  --invoke-cli \
-  --invoke-api
+UNIGROK_PORT=4775 docker compose --env-file .env up --build -d grok-mcp
+curl -fsS http://127.0.0.1:4775/healthz
+curl -fsS http://127.0.0.1:4775/readyz
+curl -fsS http://127.0.0.1:4775/runtimez
 ```
 
-Verify team-state persistence across a restart:
+Then open a real IDE MCP client against `http://127.0.0.1:4775/mcp` (header
+`X-Client-ID` as needed). Before release, compare MCP `tools/list` with
+`grok_mcp_discover_self`, exercise both configured credential planes, and confirm
+host sources match the running container for `src/` and static UI files.
 
-```bash
-uv run python scripts/smoke_team_harness.py --url http://127.0.0.1:4775/mcp
-docker compose restart grok-mcp
-uv run python scripts/smoke_team_harness.py \
-  --url http://127.0.0.1:4775/mcp \
-  --verify-existing \
-  --cleanup
-```
-
-Before release, also compare MCP `tools/list` with `grok_mcp_discover_self`, verify
-`/healthz`, `/readyz`, and `/runtimez`, exercise both configured credential planes, and
-test from a real IDE opened on an unrelated project.
+To verify team-state persistence across a restart, create a named `agent` session,
+restart the container, and confirm the same session still resolves through the MCP
+tools (facts / session history).
 
 ## Cutting a release
 

@@ -4,6 +4,65 @@ All notable changes to the public UniGrok gateway.
 
 ## [Unreleased]
 
+### Changed
+- De-overfitting pass (hive-merged plan in `docs/DEOVERFIT.md`): physics envelope
+  stub; governor magic numbers moved into versioned `WEIGHT_BUNDLE`; mechanism
+  tests (`inspect.getsource`, `_JOB_TASKS` shape, semaphore identity) replaced
+  with behavioral contracts. Needle remains inactive by default.
+
+### Fixed
+- Mission shadow governor risk classifier: classify task/acceptance text for
+  concurrency, security, irreversible, and adversarial-review signals; floor
+  cognition to high/xhigh with engineer+architect+QA+security instead of the
+  previous hardcoded low/engineer-only path. Continue envelopes now expose an
+  explicit `reattach.continue_token` argument hint for hosts whose tool cache
+  omitted the parameter.
+- Split xAI API concurrency pools (B1): file/catalog reads use
+  `UNIGROK_API_MAX_FILE_INFLIGHT` (default 2); metered generation/mutations keep
+  `UNIGROK_API_MAX_INFLIGHT` (default 4). Slow `list_files` no longer HOL-blocks
+  chat/search/media.
+- Durable jobs outlive the MCP request (A1/P0): provider work is tracked in an
+  app-scoped `_JOB_TASKS` set, awaited with non-cancelling `asyncio.wait`, and
+  only cancelled via explicit `cancel_job` or bounded `shutdown_jobs` on
+  lifespan teardown. Sync-window expiry returns pending without tearing down
+  in-flight provider calls.
+
+### Added
+- Optional mission controller v2 (`UNIGROK_MISSION_V2`, default **off**, requires
+  autonomy): durable `verifying` CommitDone, fenced leases with generation bump
+  on release, sealed artifact hashes with redacted projections, typed evidence
+  (candidate text is never evidence), shadow governor/council receipts, and
+  sweeper requeue that skips mid-verify rows.
+- Optional long-running autonomy spine (`UNIGROK_AUTONOMY`, default **off**):
+  deadline quanta with `continue_token`, request-snapshot resume, append-only
+  ledger, and ProposeDone → structural checker → CommitDone. Distinct durable
+  statuses: `running` / `complete` / `error` / `needs_continuation`.
+
+### Fixed
+- Autonomy state-machine correctness: API jobs stay `pending` (not `continue`);
+  review enrichment never downgrades terminal SQLite rows; claim leases are
+  released; continue restores the immutable request snapshot; exception text is
+  redacted; artifact hashes match stored normalization; session-lock pruning
+  removed (dual-lock race); file download refuses missing size metadata.
+
+### Fixed
+- Failed durable `agent` jobs now persist a terminal `status=error` payload so
+  `agent_result` no longer misreports a service restart while SQLite still said
+  `running`.
+- `review_pull_request` metadata survives `agent_result` polls (in-memory and
+  SQLite pending enrichment).
+- Compose passes through API timeout/concurrency and file-content hard-cap env
+  vars documented in `example.env`.
+- `get_file_content` refuses oversized files via metadata before download and
+  prefers a bounded stream read when the SDK object supports it.
+- Grok Build init/auth failures close and uncache the worker instead of leaving
+  a live-but-unusable process.
+- Idle session locks are pruned past a soft cap; `chat` and `xai_delete_file`
+  use the durable job contract.
+- Added `.dockerignore`; `ruff check .` is clean with test/eval per-file ignores.
+- Docs no longer reference missing smoke scripts or an in-tree GitHub review
+  workflow; added `CONTRIBUTING.md`.
+
 ### Added
 - `grok_mcp_onboard_client` installs a public **unigrok-visuals** skill pack for
   every client alongside `using-unigrok`: one capability-ladder core (markdown →
@@ -19,18 +78,15 @@ All notable changes to the public UniGrok gateway.
   default-deny CSP) to every HTTP response that has no route-specific CSP.
 
 ### Documentation
-- Document the `@grok review` PR workflow (maintainer comment trigger, read-only
-  default-branch execution, job-level concurrency, hosted vs lab configuration) in
-  `docs/reference.md`, with a matching README feature-table row.
+- Document the `review_pull_request` MCP tool and pollable review metadata in
+  `docs/reference.md`.
 - Document the `depth` compatibility parameter (`auto`/`deep`/`hive`) alongside the
   preferred `level` ladder in `docs/reference.md`.
-- Contributor and reporting setup: issue templates (bug reports capture the
-  level/depth knobs and receipt fields, feature, docs; security routed to
-  `SECURITY.md`) and a `CONTRIBUTING.md` covering local checks plus the CI and
-  `@grok review` expectations.
+- Contributor setup: `CONTRIBUTING.md` covers local checks (`pytest`, `ruff`,
+  Compose config) and security reporting via `SECURITY.md`.
 - `docs/known-limits.md`: what has limited soak in 1.1.0, which behaviors are
   expected rather than bugs, and how to report a depth-mode miss — linked from
-  the README, `docs/reference.md`, and the bug-report form.
+  the README and `docs/reference.md`.
 
 ### Fixed
 - Non-answer detection + one same-plane recovery + bounded cross-plane fallback now
