@@ -20,6 +20,12 @@ through editor settings.
 http://localhost:4765/mcp
 ```
 
+Approved collaborators can also use the owner-operated hosted pilot at
+`https://mcp.grokmcp.org/mcp`. It uses browser OAuth and never asks an IDE for an
+xAI key. Local Compose remains the private, persistent default; see
+[Authenticated remote deployment](docs/remote-mcp-deployment.md) for the
+different hosted security and state contract.
+
 <div align="center">
 
 <img src="assets/control-center-live.png" alt="UniGrok Control Center — live route mix, model mix, callers, cost, and fallback receipts" width="100%" />
@@ -105,6 +111,19 @@ Configure an MCP server named grok for this machine.
 
 The config filename varies by IDE, but every client connects to the same local URL.
 
+### Hosted pilot (approved collaborators)
+
+For an OAuth-capable MCP client, use this resource instead:
+
+```text
+https://mcp.grokmcp.org/mcp
+```
+
+Do not add an API key or hand-written bearer. The client follows the protected-resource
+metadata, opens Control OAuth, and receives only the scopes the operator approves.
+Authorization policy can still deny access. The hosted plane is API-only, tenant-scoped,
+and currently uses instance-local state; it is a collaboration pilot, not anonymous SaaS.
+
 ## Try it in 60 seconds
 
 Start a fresh conversation in any project and try:
@@ -130,7 +149,7 @@ you. Every answer comes back with a plane and cost receipt.
 |---|---|
 | ⚡ | **One tool, `agent`** — say what you want; routing, effort, and recovery are automatic |
 | 🎚️ | **Levels that scale** — from a quick answer up to a parallel review swarm, picked for you |
-| 💸 | **Free by default** — your Grok subscription is flat-rate; an API key is optional |
+| 💸 | **Free by default locally** — Compose prefers your flat-rate Grok subscription; the hosted pilot is metered API-only |
 | 🧾 | **Receipts on every answer** — plane, cost, route, and fallback, so nothing is hidden |
 | 🧠 | **Sessions and memory** — named sessions and facts you control, kept locally |
 | 🎨 | **Images, video, vision, files, web + X search** when you add an API key |
@@ -152,12 +171,17 @@ Pass a `level` when you care how hard Grok thinks:
 - `max` — a silent deep-reasoning harness under the hood
 - `ultra` — a parallel hive: draft, persona votes, then a merge
 
-Leave `level` unset and free router votes pick the rung for you. Hard tasks
-auto-engage deeper reasoning; a typo fix never pays for a swarm.
+Leave `level` unset and UniGrok picks the rung for you. In local Compose, unclear tasks
+use CLI-first router votes. Hard tasks auto-engage deeper reasoning; a typo fix never
+pays for a swarm. Receipts expose
+any bounded API fallback used when those votes are inconclusive.
 
 ### Jobs that survive restarts
-Long tasks keep their results if the service restarts. Poll `agent_result`: you get the
-finished answer, or an honest "lost, safe to retry" — never a mystery hang.
+On persistent local Compose, Mission V2 tasks keep their mission ledger across service restarts and resume with the
+same `continue_token`; terminal reattach returns the durable winner without rerunning
+the model. Generic durable jobs keep results recorded before restart. If a generic job
+was interrupted before a result was recorded, it returns `lost`: the provider outcome
+is unknown, so inspect state before retrying a metered or mutating operation.
 
 ### A gateway that optimizes itself, honestly
 The dogfood loop lets the hive rewrite the gateway's own functions — but a rewrite ships
@@ -167,10 +191,13 @@ and a bounded diff. Six functions shipped this way (up to +52.8% measured). Sub-
 
 ## Two Grok planes, one simple entry point
 
+This routing section describes local Compose. The authenticated hosted pilot disables
+the CLI plane and uses the metered API only.
+
 ```mermaid
 flowchart TD
-    T["{ task: Your request }"] --> L["Grok 4.5 lead"]
-    L -->|"answer / research / reasoning"| D["Direct Grok 4.5 work"]
+    T["{ task: Your request }"] --> L["Live-discovered Grok lead"]
+    L -->|"answer / research / reasoning"| D["Direct Grok work"]
     L -->|"lead-authored code brief"| C["Discovered Grok Build specialist"]
     L -->|"lead-authored media brief"| M["Provider image / video specialist"]
     D --> R["Result + model / plane / cost receipt"]
@@ -181,9 +208,10 @@ flowchart TD
 - `agent` makes web, X search, and code tools available by default.
 - The live Grok subscription default leads every request and writes specialist briefs.
 - UniGrok selects models, planes, reasoning effort, and recovery automatically.
-- When API is configured, `agent` uses one metered Grok 4.5 routing pass capped at 256
-  output tokens. Direct work remains subscription-first; specialists and bounded recovery
-  use API as needed.
+- Clear tasks route heuristically; otherwise three bounded, CLI-first intent votes select
+  shape. If too few votes parse, an API semantic fallback may run (256 output tokens by
+  default, configurable from 64–1024). Direct work remains subscription-first;
+  specialists and bounded recovery use API as needed.
 - Supplying `XAI_API_KEY` is the service owner's opt-in to API use.
 - Set `UNIGROK_ENABLE_METERED_API=false` for an immediate API kill switch.
 
@@ -227,7 +255,13 @@ the instructions and templates but remains workspace-neutral.
   external MCP, memory, and subagent access disabled.
 - Project text reaches Grok only when the calling IDE deliberately sends bounded
   `workspace_context`.
-- Local sessions and remembered facts are redacted before SQLite storage.
+- Local durable payloads are recursively secret-redacted before SQLite storage. Mission
+  answer projections are additionally capped at 100 KB.
+- Named-session turns and context packs are written only after Mission V2 CommitDone;
+  rejected drafts never enter session memory, and repeated terminal reattach is idempotent.
+- In persistent local Compose, terminal runtime rows default to 24-hour retention
+  (configurable 1–720 hours), while named sessions and remembered facts persist until
+  explicitly deleted. Hosted state is instance-local as documented below.
 - Media accepts public HTTPS URLs; uploads accept caller-supplied bytes, never local
   filesystem paths.
 - Ask for an image or video without an API key and UniGrok says so plainly — it never
@@ -240,6 +274,7 @@ See [SECURITY.md](SECURITY.md) for the complete public runtime boundary.
 | I want to… | Read |
 |---|---|
 | See every tool and routing rule | [Technical reference](docs/reference.md) |
+| Understand or operate the authenticated hosted service | [Remote deployment](docs/remote-mcp-deployment.md) |
 | Drive `agent` from an IDE agent | [Technical reference](docs/reference.md#how-an-ide-agent-should-drive-agent) |
 | Develop or acceptance-test UniGrok | [Development guide](docs/development.md) |
 | See what has limited soak and how to report a miss | [Known limits](docs/known-limits.md) |

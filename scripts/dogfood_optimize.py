@@ -9,6 +9,9 @@ The gateway proposes; this script (the "caller" with the filesystem) disposes:
 This is the forge loop without workspace attachment: Grok never touches files;
 we run the oracle here and courier the verdict into benchmark receipts.
 
+Untrusted local exec lives here (host ``exec``), not in the gateway agent.
+Future wasm-in-Docker guest ABI / trigger conditions: docs/WASM_DOGFOOD.md.
+
 Usage:
     python scripts/dogfood_optimize.py                 # default target
     python scripts/dogfood_optimize.py --target number_draft_lines

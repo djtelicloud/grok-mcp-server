@@ -9,7 +9,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 from typing import Any
 
 import pytest
@@ -599,6 +599,16 @@ def test_gateway_bearer_mints_broker_token_from_secret(
     assert claims["exp"] - claims["iat"] == 600
 
 
+def test_workflow_has_no_ignored_plane_knob_and_documents_token_ttl() -> None:
+    script = (SCRIPTS_DIR / "github-grok-review.py").read_text(encoding="utf-8")
+    workflow = (SCRIPTS_DIR.parent / ".github/workflows/grok-review.yml").read_text(
+        encoding="utf-8"
+    )
+    assert "UNIGROK_REVIEW_PLANE" not in script
+    assert "UNIGROK_REVIEW_PLANE" not in workflow
+    assert "bounded 600s" in workflow
+
+
 @pytest.mark.parametrize(
     ("configured", "expected_aud"),
     [
@@ -615,6 +625,117 @@ def test_gateway_bearer_normalizes_resource_to_mcp_audience(
     claims = _independent_verify(review._gateway_bearer_token(), SECRET)
     assert claims is not None
     assert claims["aud"] == expected_aud
+
+
+# ---------------------------------------------------------------------------
+# github-grok-review: durable review polling
+# ---------------------------------------------------------------------------
+
+
+def _tool_result(
+    payload: dict[str, Any] | None,
+    *,
+    error: bool = False,
+    detail: str = "",
+) -> SimpleNamespace:
+    content = [SimpleNamespace(text=detail)] if detail else []
+    return SimpleNamespace(
+        isError=error,
+        structuredContent=payload,
+        content=content,
+    )
+
+
+class _ReviewPollSession:
+    def __init__(self, results: list[SimpleNamespace]) -> None:
+        self.results = list(results)
+        self.calls: list[tuple[str, dict[str, Any]]] = []
+
+    async def call_tool(self, name: str, arguments: dict[str, Any]) -> SimpleNamespace:
+        self.calls.append((name, arguments))
+        assert self.results, "unexpected extra agent_result poll"
+        return self.results.pop(0)
+
+
+@pytest.mark.asyncio
+async def test_review_result_accepts_original_immediate_schema() -> None:
+    session = _ReviewPollSession([])
+    initial = _tool_result({"review": "Immediate review", "model": "grok"})
+    result = await review._await_review_result(session, initial)
+    assert result["review"] == "Immediate review"
+    assert session.calls == []
+
+
+@pytest.mark.asyncio
+async def test_review_result_polls_one_job_until_complete() -> None:
+    job_id = "a" * 32
+    session = _ReviewPollSession(
+        [
+            _tool_result({"status": "pending", "job_id": job_id}),
+            _tool_result(
+                {
+                    "status": "complete",
+                    "job_id": job_id,
+                    "text": "Durable review",
+                    "model": "grok-4.5",
+                }
+            ),
+        ]
+    )
+    initial = _tool_result({"status": "pending", "job_id": job_id})
+    result = await review._await_review_result(session, initial, timeout_seconds=100)
+    assert result["review"] == "Durable review"
+    assert session.calls == [
+        ("agent_result", {"job_id": job_id, "wait_seconds": 20}),
+        ("agent_result", {"job_id": job_id, "wait_seconds": 20}),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_review_result_rejects_job_id_switch() -> None:
+    first_job = "a" * 32
+    second_job = "b" * 32
+    session = _ReviewPollSession(
+        [_tool_result({"status": "pending", "job_id": second_job})]
+    )
+    initial = _tool_result({"status": "pending", "job_id": first_job})
+    with pytest.raises(RuntimeError, match="switched durable job ids"):
+        await review._await_review_result(session, initial, timeout_seconds=100)
+
+
+@pytest.mark.asyncio
+async def test_review_result_surfaces_terminal_error() -> None:
+    job_id = "a" * 32
+    session = _ReviewPollSession(
+        [_tool_result({"status": "error", "job_id": job_id, "text": "provider failed"})]
+    )
+    initial = _tool_result({"status": "pending", "job_id": job_id})
+    with pytest.raises(RuntimeError, match="review job error: provider failed"):
+        await review._await_review_result(session, initial, timeout_seconds=100)
+
+
+@pytest.mark.asyncio
+async def test_review_result_timeout_does_not_start_duplicate_work() -> None:
+    job_id = "a" * 32
+    session = _ReviewPollSession([])
+    initial = _tool_result({"status": "pending", "job_id": job_id})
+    with pytest.raises(TimeoutError, match="did not finish within 0 seconds"):
+        await review._await_review_result(session, initial, timeout_seconds=0)
+    assert session.calls == []
+
+
+@pytest.mark.asyncio
+async def test_review_result_rejects_unapproved_continuation() -> None:
+    initial = _tool_result(
+        {
+            "status": "continue",
+            "job_id": "a" * 32,
+            "continue_token": "opaque",
+            "poll": False,
+        }
+    )
+    with pytest.raises(RuntimeError, match="review-only broker is not authorized"):
+        await review._await_review_result(_ReviewPollSession([]), initial)
 
 
 # ---------------------------------------------------------------------------

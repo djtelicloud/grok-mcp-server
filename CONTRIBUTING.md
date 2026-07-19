@@ -1,41 +1,46 @@
-# Contributing to UniGrok
+# Contributing to UniGrok Public
 
-Thanks for helping. Two ways to contribute: report what you hit, or send a change.
+## Local checks
 
-## Reporting
+```bash
+uv sync --frozen
+uv run pytest -q
+uv run ruff check .
+docker compose config --quiet
+docker compose build grok-mcp
+```
 
-Open an issue with the matching template (bug, feature, docs). For bugs in the
-depth/level paths — `max`, `ultra`, hive voting, plane fallback — paste the receipt
-fields from the tool result (`resolved_plane`, `fallback_occurred`, `resolved_depth`,
-`usage`, `hive.stages`). Receipts are designed to make these reports reproducible;
-redact anything sensitive before posting.
+## Runtime smoke (manual)
 
-Security issues go through [SECURITY.md](SECURITY.md), not public issues.
+Compose uses one fixed container plus persistent auth/state volumes; it is not safe to
+run a second project against those same volumes. Stop and recreate the current local
+service on `4775` for a candidate smoke:
 
-## Sending changes
+```bash
+docker compose stop grok-mcp
+UNIGROK_PORT=4775 docker compose --env-file .env up --build -d grok-mcp
+curl -fsS http://127.0.0.1:4775/healthz
+curl -fsS http://127.0.0.1:4775/readyz
+curl -fsS http://127.0.0.1:4775/runtimez
+uv run python scripts/smoke_mcp.py --url http://127.0.0.1:4775/mcp
+```
 
-1. Fork and branch from `main`.
-2. Run the local checks (see [docs/development.md](docs/development.md)):
+Compare MCP `tools/list` with `grok_mcp_discover_self`, then exercise both configured
+credential planes. Restore the normal port by recreating this same service on `4765`;
+do not point two containers at one state volume.
 
-   ```bash
-   uv sync --frozen
-   uv run pytest -q
-   uv run ruff check .
-   docker compose config --quiet
-   ```
+This local smoke does not deploy the authenticated hosted service. Maintainer-operated
+remote releases follow the digest, OAuth, public-smoke, and rollback gates in
+[`docs/remote-mcp-deployment.md`](docs/remote-mcp-deployment.md).
 
-3. If the change is behavior-visible, add a line to the `[Unreleased]` section of
-   [CHANGELOG.md](CHANGELOG.md) (Added/Changed/Fixed/Security/Documentation as fits).
-4. Open a PR with a short description of the problem and the change. Keep PRs
-   single-purpose — small ones land fast.
+## Pull requests
 
-Every PR gets CI plus an automated `@grok` review pass; you can re-trigger a review by
-commenting on the PR (see [docs/reference.md](docs/reference.md) for the workflow).
-Address or answer review comments before merge — disagreement with the bot is fine when
-you say why.
+- Keep changes scoped; match existing style and contracts.
+- Do not commit `.env`, OAuth tokens, or API keys.
+- Prefer durable job semantics for slow or failure-prone MCP tools: terminal
+  success **and** terminal error payloads must persist for `agent_result`.
 
-## Scope
+## Security
 
-This repo is the public, credential-free gateway: server, dashboard, docs, packaging.
-Feature ideas that need private infrastructure will be redirected to an issue discussion
-first.
+Report vulnerabilities via `SECURITY.md`. Do not file public issues for secrets
+or unauthenticated remote exposure.

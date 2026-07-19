@@ -185,6 +185,86 @@ async def test_fast_route_runs_nonanswer_recovery_and_cross_plane_fallback(
 
 
 @pytest.mark.asyncio
+async def test_cross_plane_fallback_preserves_rejected_metered_usage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    catalogs = {
+        "cli": {"ready": True, "models": ["grok-cli"], "default_model": "grok-cli"},
+        "api": {
+            "ready": True,
+            "models": [{"id": "grok-api"}],
+            "default_model": "grok-api",
+        },
+    }
+    api_calls = 0
+
+    async def fake_resolve(*args, **kwargs):
+        return "api", catalogs
+
+    async def fake_system(*args, **kwargs):
+        return "system"
+
+    async def fake_api_chat(*args: object, **kwargs: object) -> dict:
+        nonlocal api_calls
+        api_calls += 1
+        return {
+            "text": "I'll provide the result after I finish checking it.",
+            "model": "grok-api",
+            "cost_usd": 0.02,
+            "usage": {
+                "prompt_tokens": 3 if api_calls == 1 else 5,
+                "completion_tokens": 4 if api_calls == 1 else 6,
+                "total_tokens": 7 if api_calls == 1 else 11,
+            },
+        }
+
+    async def fake_build(*args: object, **kwargs: object) -> dict:
+        return {
+            "text": "The completed answer is 42.",
+            "model": "grok-cli",
+            "cost_usd": 0.0,
+            "usage": {"inputTokens": 2, "outputTokens": 1, "totalTokens": 3},
+        }
+
+    async def fake_alternate(current: str, model, *, requires_api: bool) -> str:
+        return "cli"
+
+    monkeypatch.setattr(server, "METERED_API_ENABLED", True)
+    monkeypatch.setattr(server, "_resolve_plane", fake_resolve)
+    monkeypatch.setattr(server, "_system_prompt", fake_system)
+    monkeypatch.setattr(server.xai_api, "chat", fake_api_chat)
+    monkeypatch.setattr(server.BUILD_ACP, "run", fake_build)
+    monkeypatch.setattr(server, "_alternate_plane", fake_alternate)
+
+    result = await server._run_unified(
+        "Give me the completed answer.",
+        model=None,
+        effort=None,
+        plane="auto",
+        fallback_policy="cross_plane",
+        agentic=False,
+        max_turns=1,
+        allow_web=False,
+        allow_x_search=False,
+        allow_code=False,
+    )
+
+    assert api_calls == 2
+    assert result["text"] == "The completed answer is 42."
+    assert result["resolved_plane"] == "cli"
+    assert result["fallback_reason"] == "api_incomplete_response"
+    assert result["cost_usd"] == pytest.approx(0.04)
+    assert result["input_tokens"] == 10
+    assert result["output_tokens"] == 11
+    assert result["total_tokens"] == 21
+    assert [item["stage"] for item in result["incurred_attempts"]] == [
+        "completion_initial",
+        "completion_retry",
+    ]
+    assert [item["cost_usd"] for item in result["incurred_attempts"]] == [0.02, 0.02]
+
+
+@pytest.mark.asyncio
 async def test_bounded_votes_skip_nonanswer_recovery(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -538,6 +618,7 @@ async def test_deep_polish_nonanswer_keeps_unpolished_text(
         "attempted": True,
         "applied": False,
         "plane": "cli",
+        "cost_usd": 0.0,
     }
 
 
@@ -556,4 +637,88 @@ async def test_deep_polish_exception_keeps_unpolished_text(
         "attempted": True,
         "applied": False,
         "plane": None,
+        "cost_usd": 0.0,
     }
+
+
+@pytest.mark.asyncio
+async def test_deep_polish_failure_preserves_reported_usage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def polish_raises_after_usage(prompt: str) -> dict:
+        del prompt
+        reported = {
+            "model": "grok-api",
+            "resolved_plane": "api",
+            "cost_usd": 0.015,
+            "usage": {
+                "prompt_tokens": 8,
+                "completion_tokens": 2,
+                "total_tokens": 10,
+            },
+        }
+        error = RuntimeError("polish response was unusable")
+        raise server._with_incurred_usage(
+            error,
+            [
+                server._usage_attempt(
+                    reported,
+                    stage="completion_initial",
+                    outcome="rejected_nonanswer",
+                )
+            ],
+        ) from error
+
+    messy, calls = _deep_polish_turn_fixture(monkeypatch, polish_raises_after_usage)
+    result = await _run_deep_turn()
+
+    assert len(calls) == 2
+    assert result["text"] == messy
+    assert result["cost_usd"] == pytest.approx(0.015)
+    assert result["total_tokens"] == 10
+    assert result["incurred_attempts"][0]["stage"] == "completion_initial"
+    assert result["final_polish"]["plane"] == "api"
+    assert result["final_polish"]["incurred_cost_usd"] == pytest.approx(0.015)
+
+
+@pytest.mark.asyncio
+async def test_successful_deep_polish_keeps_stage_and_retry_receipts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def polish_succeeds_after_retry(prompt: str) -> dict:
+        del prompt
+        return {
+            "text": "The answer is 60.",
+            "model": "grok-api",
+            "resolved_plane": "api",
+            "cost_usd": 0.025,
+            "usage": {
+                "prompt_tokens": 10,
+                "completion_tokens": 5,
+                "total_tokens": 15,
+            },
+            "incurred_attempts": [
+                {
+                    "stage": "completion_initial",
+                    "outcome": "rejected_nonanswer",
+                    "plane": "api",
+                    "model": "grok-api",
+                    "cost_usd": 0.01,
+                    "total_tokens": 6,
+                }
+            ],
+        }
+
+    _messy, calls = _deep_polish_turn_fixture(monkeypatch, polish_succeeds_after_retry)
+    result = await _run_deep_turn()
+
+    assert len(calls) == 2
+    assert result["text"] == "The answer is 60."
+    assert result["cost_usd"] == pytest.approx(0.025)
+    assert result["total_tokens"] == 15
+    assert result["incurred_attempts"][0]["cost_usd"] == pytest.approx(0.01)
+    assert result["final_polish"]["cost_usd"] == pytest.approx(0.025)
+    assert result["final_polish"]["total_tokens"] == 15
+    assert result["final_polish"]["incurred_attempts"][0]["stage"] == (
+        "completion_initial"
+    )

@@ -126,6 +126,13 @@ def test_public_mcp_tool_contract_is_exact_and_self_checked() -> None:
     assert ".agents/skills/<skill-name>/SKILL.md" in server.INSTRUCTIONS
     agent_tool = next(tool for tool in tools if tool.name == "agent")
     assert "disable_tools" in agent_tool.inputSchema["properties"]
+    caller_evidence = agent_tool.inputSchema["properties"]["caller_evidence"]
+    evidence_schema = agent_tool.inputSchema["$defs"]["CallerEvidenceInput"]
+    assert caller_evidence["anyOf"][0]["items"]["$ref"].endswith(
+        "/CallerEvidenceInput"
+    )
+    assert set(evidence_schema["required"]) == {"reference", "observation"}
+    assert "class" not in evidence_schema["properties"]
     for hidden_control in ("model", "reasoning_effort", "mode", "plane", "fallback_policy"):
         assert hidden_control not in agent_tool.inputSchema["properties"]
     assert "prompt" in agent_tool.inputSchema["properties"]
@@ -241,6 +248,9 @@ async def test_self_description_is_generated_from_live_boundary(
     assert description["capability_defaults"]["agent"]["allow_x_search"] is True
     assert description["capability_defaults"]["agent"]["allow_remote_code_execution"] is True
     assert description["capability_defaults"]["agent"]["user_notice_required"] is True
+    assert "caller_evidence" in description["capability_defaults"]["agent"][
+        "optional_inputs"
+    ]
     assert "plane" not in description["capability_defaults"]["agent"]
     assert "prompt" in description["capability_defaults"]["agent"]["input"]
     assert description["capability_defaults"]["chat"]["allow_web"] is False
@@ -265,16 +275,34 @@ async def test_self_description_is_generated_from_live_boundary(
         "named_sessions": True,
         "state_backend": "local_sqlite",
         "durable_knowledge": True,
+        "state_persistence": True,
+        "state_lifetime": "persistent_volume",
         "workspace_context": "explicit_bounded_redacted_courier_only",
         "automatic_workspace_access": False,
-            "local_subagents": False,
-            "completion_recovery": "one_same_plane_retry_before_bounded_api_fallback",
-            "request_limits": {
-                "build_concurrency": "provider_managed",
-                "build_timeout_seconds": 120,
-                "api_timeout_seconds": 120,
-            },
-        }
+        "local_subagents": False,
+        "completion_recovery": "one_same_plane_retry_before_bounded_api_fallback",
+        "request_limits": {
+            "build_concurrency": "provider_managed",
+            "build_timeout_seconds": 120,
+            "api_timeout_seconds": 120,
+            "file_list_timeout_seconds": 120,
+            "file_io_timeout_seconds": 60,
+            "media_timeout_seconds": 300,
+            "agent_sync_window_seconds": 16,
+            "agent_result_wait_default_seconds": 16,
+            "agent_result_wait_max_seconds": 20,
+            "agent_max_turns_cap": 6,
+            "mission_lease_ttl_seconds": 180,
+            "router_max_output_tokens": 256,
+            "vote_max_output_tokens": 128,
+            "prompt_chars": 100_000,
+            "workspace_context_chars": 100_000,
+            "file_content_bytes": 2_000_000,
+            "api_max_inflight": 4,
+            "api_max_file_inflight": 2,
+            "state_terminal_retention_hours": 24,
+        },
+    }
     assert description["needle"]["active"] is False
 
 
@@ -378,11 +406,14 @@ async def test_long_agent_turn_returns_resumable_job(
     monkeypatch.setattr(server, "_execute_team_turn", fake_turn)
     monkeypatch.setattr(server, "_await_job_window", fake_wait)
     pending = await server.agent(task="long task")
+    # Autonomy is off by default: unfinished agent jobs stay pending (not continue).
     assert pending["status"] == "pending"
     assert pending["poll"]["tool"] == "agent_result"
+    assert "continue_token" not in pending
     complete = await server.agent_result(pending["job_id"])
     assert complete["status"] == "complete"
     assert complete["text"] == "LONG_RESULT"
+    assert complete.get("job_id") == pending["job_id"]
     assert not server._AGENT_JOBS
 
 
@@ -551,6 +582,139 @@ async def test_pull_request_review_is_bounded_read_only_courier(
 
 
 @pytest.mark.asyncio
+async def test_failed_agent_job_persists_terminal_error_for_poll(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(server, "AGENT_SYNC_WINDOW_SECONDS", 0)
+    release = asyncio.Event()
+
+    async def boom(**_kwargs: object) -> dict:
+        await release.wait()
+        raise RuntimeError("simulated agent failure")
+
+    monkeypatch.setattr(server, "_execute_team_turn", boom)
+    pending = await server.agent(task="fail please")
+    assert pending["status"] == "pending"
+    job_id = pending["job_id"]
+    release.set()
+    # Wait until the background task has written the terminal payload, then
+    # drop the in-memory task so the poll must read SQLite (restart-shaped path).
+    for _ in range(50):
+        stored = await server.STATE.load_agent_job(job_id)
+        if stored and stored.get("status") in {"complete", "error"}:
+            break
+        await asyncio.sleep(0.02)
+    server._DURABLE_JOBS.clear()
+    result = await server.agent_result(job_id)
+    assert result["status"] == "error"
+    assert "simulated agent failure" in result["text"]
+    assert result.get("stop_reason") == "error"
+    assert result.get("job_id") == job_id
+
+
+@pytest.mark.asyncio
+async def test_post_provider_projection_failure_preserves_reported_usage(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    state = server.PublicStateStore(tmp_path / "projection-failure.db")
+    await state.initialize()
+    monkeypatch.setattr(server, "STATE", state)
+    monkeypatch.setattr(server, "AUTONOMY_ENABLED", False)
+    monkeypatch.setattr(server, "MISSION_V2_ENABLED", False)
+    monkeypatch.setattr(server, "SHADOW_DONE_VOTE", False)
+    monkeypatch.setattr(server, "_DURABLE_JOBS", {})
+
+    async def completed_turn(**_kwargs: object) -> dict:
+        return {
+            "text": "Completed provider answer.",
+            "model": "grok-api",
+            "resolved_plane": "api",
+            "cost_usd": 0.07,
+            "usage": {
+                "prompt_tokens": 9,
+                "completion_tokens": 3,
+                "total_tokens": 12,
+            },
+            "orchestration": {"route": "direct"},
+        }
+
+    finalize_calls = 0
+
+    async def fail_first_finalize(job_id: str, payload: dict) -> dict:
+        nonlocal finalize_calls
+        del job_id
+        finalize_calls += 1
+        if finalize_calls == 1:
+            raise RuntimeError("projection write failed")
+        return payload
+
+    monkeypatch.setattr(server, "_execute_team_turn", completed_turn)
+    monkeypatch.setattr(server, "_finalize_job_payload", fail_first_finalize)
+
+    result = await server.agent(task="Complete this task")
+
+    assert result["status"] == "error"
+    assert result["error_type"] == "RuntimeError"
+    assert result["cost_usd"] == pytest.approx(0.07)
+    assert result["total_tokens"] == 12
+    assert result["incurred_attempts"][0]["stage"] == "agent_result"
+    stored = await state.load_agent_job(result["job_id"])
+    assert stored is not None
+    assert stored["payload"]["cost_usd"] == pytest.approx(0.07)
+    telemetry = await state.telemetry_summary()
+    assert telemetry["sample_size"] == 1
+    assert telemetry["cost_usd"] == pytest.approx(0.07)
+    assert telemetry["routes"] == [
+        {
+            "name": "error",
+            "calls": 1,
+            "verified": 1,
+            "successes": 0,
+            "cost_usd": 0.07,
+            "success_rate": 0.0,
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_pending_pull_request_review_keeps_metadata_on_poll(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(server, "AGENT_SYNC_WINDOW_SECONDS", 0)
+    release = asyncio.Event()
+
+    async def slow_turn(**_kwargs: object) -> dict:
+        await release.wait()
+        return {
+            "text": "No blocking findings.",
+            "plane": "test",
+            "stop_reason": "EndTurn",
+            "workspace_attached": False,
+            "cost_usd": 0.0,
+            "orchestration": {},
+        }
+
+    monkeypatch.setattr(server, "_execute_team_turn", slow_turn)
+    pending = await server.review_pull_request(
+        "owner/repo",
+        7,
+        "Pending review",
+        "+ line",
+    )
+    assert pending["status"] in {"pending", "continue"}
+    assert pending["review_kind"] == "pull_request"
+    assert pending["repository"] == "owner/repo"
+    release.set()
+    complete = await server.agent_result(pending["job_id"])
+    assert complete["status"] == "complete"
+    assert complete["review_kind"] == "pull_request"
+    assert complete["repository"] == "owner/repo"
+    assert complete["pull_number"] == 7
+    assert complete["read_only"] is True
+    assert complete["review"] == "No blocking findings."
+
+
+@pytest.mark.asyncio
 async def test_public_dashboard_manifest_and_okf_routes_exist() -> None:
     dashboard = await server.control_center(None)
     manifest = await server.webmcp_manifest(None)
@@ -671,7 +835,11 @@ async def test_upload_accepts_bytes_not_local_paths(monkeypatch: pytest.MonkeyPa
     result = await server.xai_upload_file(
         "note.txt", base64.b64encode(b"hello").decode(), expires_after_seconds=300
     )
-    assert result == {"file_id": "file_test"}
+    # Tool results are wrapped in a durable-job envelope (job_id/job_kind/status);
+    # assert the underlying payload rather than exact-dict equality.
+    assert result["file_id"] == "file_test"
+    assert result["status"] == "complete"
+    assert result["job_kind"] == "xai_upload_file"
     assert captured["content"] == b"hello"
     assert captured["expires_after_seconds"] == 3_600
     with pytest.raises(ValueError, match="path components"):
@@ -739,3 +907,38 @@ def test_per_client_auto_approve_uses_native_mechanism() -> None:
     for c in ("claude_code", "codex", "antigravity", "github_copilot"):
         blob = json.dumps(server._client_onboarding_plan(c, "global"))
         assert "XAI_API_KEY" not in blob and "CURSOR_API_KEY" not in blob
+
+
+@pytest.mark.asyncio
+async def test_failed_catalog_probe_uses_short_negative_cache(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock = [100.0]
+    api_calls = 0
+
+    async def fake_cli() -> dict:
+        return {"ready": False, "models": []}
+
+    async def fake_api() -> dict:
+        nonlocal api_calls
+        api_calls += 1
+        return {
+            "ready": api_calls > 1,
+            "configured": True,
+            "models": [{"id": "grok-live"}] if api_calls > 1 else [],
+        }
+
+    monkeypatch.setattr(server.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(server, "_probe_cli", fake_cli)
+    monkeypatch.setattr(xai_api, "probe_models", fake_api)
+    monkeypatch.setattr(xai_api, "credential_cache_key", lambda: "test-key")
+    server._CATALOG_CACHE.clear()
+
+    assert (await server._catalogs())["api"]["ready"] is False
+    clock[0] += 4
+    assert (await server._catalogs())["api"]["ready"] is False
+    assert api_calls == 1
+    clock[0] += 2
+    assert (await server._catalogs())["api"]["ready"] is True
+    assert api_calls == 2
+    server._CATALOG_CACHE.clear()

@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 license = { file = "LICENSE" }
 dependencies = [
+  "httpx==0.28.1",
   "mcp==1.28.1",
   "xai-sdk==1.17.0",
 ]
@@ -35,3 +36,7 @@ target-version = "py312"
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "ASYNC", "S"]
 ignore = ["S603"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"]
+"evals/**" = ["S101", "UP046", "UP047", "ASYNC109"]

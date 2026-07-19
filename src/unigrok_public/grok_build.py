@@ -133,6 +133,7 @@ class GrokBuildWorker:
         self.started_at: float | None = None
         self.completed_turns = 0
         self.in_flight = 0
+        self._ready = False
 
     def _runtime_env(self) -> tuple[Path, dict[str, str]]:
         if not self.auth_path.is_file():
@@ -223,45 +224,57 @@ class GrokBuildWorker:
 
     async def start(self) -> None:
         async with self._start_lock:
-            if self.process is not None and self.process.returncode is None:
+            if (
+                self._ready
+                and self.process is not None
+                and self.process.returncode is None
+            ):
                 return
-            work, env = self._runtime_env()
-            self.process = await asyncio.create_subprocess_exec(
-                *self._command(),
-                cwd=str(work),
-                env=env,
-                stdin=asyncio.subprocess.PIPE,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                limit=MAX_JSON_LINE_BYTES,
-            )
-            self.started_at = time.monotonic()
-            self._reader_task = asyncio.create_task(self._read_stdout())
-            self._stderr_task = asyncio.create_task(self._read_stderr())
-            initialized = await self._request(
-                "initialize",
-                {
-                    "protocolVersion": 1,
-                    "clientCapabilities": {
-                        "fs": {"readTextFile": False, "writeTextFile": False},
-                        "terminal": False,
+            try:
+                work, env = self._runtime_env()
+                self.process = await asyncio.create_subprocess_exec(
+                    *self._command(),
+                    cwd=str(work),
+                    env=env,
+                    stdin=asyncio.subprocess.PIPE,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    limit=MAX_JSON_LINE_BYTES,
+                )
+                self.started_at = time.monotonic()
+                self._reader_task = asyncio.create_task(self._read_stdout())
+                self._stderr_task = asyncio.create_task(self._read_stderr())
+                initialized = await self._request(
+                    "initialize",
+                    {
+                        "protocolVersion": 1,
+                        "clientCapabilities": {
+                            "fs": {"readTextFile": False, "writeTextFile": False},
+                            "terminal": False,
+                        },
                     },
-                },
-                deadline_seconds=15,
-            )
-            auth_methods = {
-                str(item.get("id"))
-                for item in initialized.get("authMethods", [])
-                if isinstance(item, dict)
-            }
-            if "cached_token" not in auth_methods:
+                    deadline_seconds=15,
+                )
+                auth_methods = {
+                    str(item.get("id"))
+                    for item in initialized.get("authMethods", [])
+                    if isinstance(item, dict)
+                }
+                if "cached_token" not in auth_methods:
+                    raise RuntimeError(
+                        "Grok Build cached OAuth authentication is unavailable"
+                    )
+                await self._request(
+                    "authenticate",
+                    {"methodId": "cached_token", "_meta": {"headless": True}},
+                    deadline_seconds=15,
+                )
+                self._ready = True
+            except Exception:
+                # Never leave a live-but-unusable process in the worker cache.
+                self._ready = False
                 await self.close()
-                raise RuntimeError("Grok Build cached OAuth authentication is unavailable")
-            await self._request(
-                "authenticate",
-                {"methodId": "cached_token", "_meta": {"headless": True}},
-                deadline_seconds=15,
-            )
+                raise
 
     async def _send(self, message: dict[str, Any]) -> None:
         process = self.process
@@ -452,6 +465,7 @@ class GrokBuildWorker:
         }
 
     async def close(self) -> None:
+        self._ready = False
         process = self.process
         self.process = None
         for task in (self._reader_task, self._stderr_task):
@@ -471,7 +485,9 @@ class GrokBuildWorker:
 
     def metrics(self) -> dict[str, Any]:
         return {
-            "ready": self.process is not None and self.process.returncode is None,
+            "ready": self._ready
+            and self.process is not None
+            and self.process.returncode is None,
             "in_flight": self.in_flight,
             "completed_turns": self.completed_turns,
             "uptime_seconds": (
@@ -519,7 +535,11 @@ class GrokBuildACPManager:
         try:
             return await worker.run(prompt)
         except Exception as exc:
-            if worker.process is None or worker.process.returncode is not None:
+            if (
+                not worker._ready
+                or worker.process is None
+                or worker.process.returncode is not None
+            ):
                 async with self._lock:
                     if self._workers.get(key) is worker:
                         self._workers.pop(key, None)

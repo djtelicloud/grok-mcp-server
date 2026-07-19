@@ -1,4 +1,9 @@
-# Launch checklist — public graft go/no-go
+# Historical source-publication checklist — public graft go/no-go
+
+This file records the 1.1 public-history graft. Do not rerun its unrelated-history
+procedure without a new repository baseline and explicit publication decision. It is
+not the Cloud Run release checklist; hosted deployments use
+[`docs/remote-mcp-deployment.md`](docs/remote-mcp-deployment.md).
 
 Status legend: [ ] open · [x] done · [~] partially proven
 
@@ -44,13 +49,9 @@ Status legend: [ ] open · [x] done · [~] partially proven
 
 ## Post-launch backlog (approved ideas, deliberately deferred)
 
-- Cursor plane (third plane, xAI family). Order: Grok Build CLI (1) → xAI API (2)
-  → Cursor (3). Cursor CLI (`curl https://cursor.com/install -fsS | bash`) +
-  `CURSOR_API_KEY`. Now viable in the PUBLIC gateway (not just intelligence),
-  because SpaceX/xAI acquired Cursor — it is xAI-family, not a subordinate
-  competitor like the Anthropic/Gemini/OpenAI providers we removed. Gate:
-  deal close is pending regulatory approval (Q3 2026), so keep public copy
-  neutral until it closes. Free-tier Cursor API keys allow headless CLI use.
+- Any third execution plane is deferred. It would require an independently reviewed
+  credential boundary, billing policy, provider contract, and soak data; the shipping
+  gateway supports only Grok Build CLI and the xAI developer API.
 - Courier bridge: caller-run tests/bench couriered back for *proven* user-code
   optimization (forge loop for arbitrary files).
 - Function-path router; self-healing error messages; readability hive-vote

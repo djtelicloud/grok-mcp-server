@@ -1,7 +1,14 @@
 # Developing UniGrok Public
 
 This guide is for contributors and release verification. Ordinary users only need the
-README.
+README. See also [CONTRIBUTING.md](../CONTRIBUTING.md).
+
+The authenticated Cloud Run service has a separate digest-pinned release and rollback
+gate. Do not infer a public deployment from a local Compose rebuild; operators must use
+the [remote deployment runbook](remote-mcp-deployment.md).
+
+Design notes (no runtime claims): [WASM × dogfood](WASM_DOGFOOD.md) — guest ABI and
+trigger conditions; wasm is **not** in the shipping gateway today.
 
 ## Local checks
 
@@ -10,35 +17,36 @@ uv sync --frozen
 uv run pytest -q
 uv run ruff check .
 docker compose config --quiet
+docker compose build grok-mcp
 ```
 
-## Test beside an existing stable service
+## Rebuild and runtime-test the local service
 
-Stable may remain on port `4765`; run the candidate on `4775` without changing the
-public default:
+The checked-in Compose file intentionally uses one fixed container and the persistent
+`unigrok-*` auth/state volumes. It is not a side-by-side deployment definition. Stop the
+current container, then recreate the same local service on `4775` if you want to keep an
+IDE's `4765` configuration untouched while testing:
 
 ```bash
-UNIGROK_PORT=4775 docker compose --env-file ../.env up --build -d grok-mcp
-uv run python scripts/smoke_mcp.py \
-  --url http://127.0.0.1:4775/mcp \
-  --invoke-cli \
-  --invoke-api
+docker compose stop grok-mcp
+UNIGROK_PORT=4775 docker compose --env-file .env up --build -d grok-mcp
+curl -fsS http://127.0.0.1:4775/healthz
+curl -fsS http://127.0.0.1:4775/readyz
+curl -fsS http://127.0.0.1:4775/runtimez
+uv run python scripts/smoke_mcp.py --url http://127.0.0.1:4775/mcp
 ```
 
-Verify team-state persistence across a restart:
+Then open a real IDE MCP client against `http://127.0.0.1:4775/mcp` (header
+`X-Client-ID` as needed). Before release, compare MCP `tools/list` with
+`grok_mcp_discover_self`, exercise both configured credential planes, and confirm
+host sources match the running container for `src/` and static UI files.
 
-```bash
-uv run python scripts/smoke_team_harness.py --url http://127.0.0.1:4775/mcp
-docker compose restart grok-mcp
-uv run python scripts/smoke_team_harness.py \
-  --url http://127.0.0.1:4775/mcp \
-  --verify-existing \
-  --cleanup
-```
+Restore the normal port by recreating the same service with `UNIGROK_PORT=4765`.
+Do not point two containers at the same SQLite state volume.
 
-Before release, also compare MCP `tools/list` with `grok_mcp_discover_self`, verify
-`/healthz`, `/readyz`, and `/runtimez`, exercise both configured credential planes, and
-test from a real IDE opened on an unrelated project.
+To verify team-state persistence across a restart, create a named `agent` session,
+restart the container, and confirm the same session still resolves through the MCP
+tools (facts / session history).
 
 ## Cutting a release
 

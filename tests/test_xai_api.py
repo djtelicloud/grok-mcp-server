@@ -1,3 +1,4 @@
+import asyncio
 from types import SimpleNamespace
 
 import pytest
@@ -100,7 +101,7 @@ class FakeClient:
 def fake_client(monkeypatch: pytest.MonkeyPatch) -> FakeClient:
     client = FakeClient()
     monkeypatch.setenv("XAI_API_KEY", "test-only")
-    monkeypatch.setattr(xai_api, "_client", lambda: client)
+    monkeypatch.setattr(xai_api, "_client", lambda **_: client)
     return client
 
 
@@ -188,3 +189,38 @@ async def test_xai_file_lifecycle_wrappers(fake_client: FakeClient) -> None:
     assert content["truncated"] is False
     assert (await xai_api.delete_file("file_test"))["deleted"] is True
     assert fake_client.files.deleted == "file_test"
+
+
+@pytest.mark.asyncio
+async def test_file_saturation_does_not_block_generation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """B1 contract: N in-flight file reads must not HOL-block generation."""
+    file_pool = asyncio.Semaphore(2)
+    gen_pool = asyncio.Semaphore(4)
+    monkeypatch.setattr(xai_api, "_API_FILE_WORKERS", file_pool)
+    monkeypatch.setattr(xai_api, "_API_GENERATION_WORKERS", gen_pool)
+    monkeypatch.setattr(xai_api, "_API_WORKERS", gen_pool)
+
+    file_hold = asyncio.Event()
+    gen_done = asyncio.Event()
+
+    async def hold_file_slot() -> str:
+        async with file_pool:
+            await file_hold.wait()
+            return "held"
+
+    holders = [asyncio.create_task(hold_file_slot()) for _ in range(2)]
+    await asyncio.sleep(0)
+
+    async def run_gen() -> str:
+        async with gen_pool:
+            gen_done.set()
+            return "gen"
+
+    gen_task = asyncio.create_task(run_gen())
+    await asyncio.wait_for(gen_done.wait(), timeout=1.0)
+    assert await gen_task == "gen"
+
+    file_hold.set()
+    await asyncio.gather(*holders)
