@@ -1549,8 +1549,13 @@ async def _catalogs(*, refresh: bool = False) -> dict[str, Any]:
     now = time.monotonic()
     cache_key = xai_api.credential_cache_key()
     cached = _CATALOG_CACHE.get(cache_key)
-    if not refresh and cached and now - cached[0] < CATALOG_TTL_SECONDS:
-        return cached[1]
+    if not refresh and cached:
+        cached_ready = bool(
+            cached[1]["cli"].get("ready") or cached[1]["api"].get("ready")
+        )
+        cache_ttl = CATALOG_TTL_SECONDS if cached_ready else min(5, CATALOG_TTL_SECONDS)
+        if now - cached[0] < cache_ttl:
+            return cached[1]
     cli, api = await asyncio.gather(_probe_cli(), xai_api.probe_models())
     result = {"cli": cli, "api": api, "generated_at_monotonic": now}
     _CATALOG_CACHE[cache_key] = (now, result)

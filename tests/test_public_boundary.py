@@ -905,3 +905,38 @@ def test_per_client_auto_approve_uses_native_mechanism() -> None:
     for c in ("claude_code", "codex", "antigravity", "github_copilot"):
         blob = json.dumps(server._client_onboarding_plan(c, "global"))
         assert "XAI_API_KEY" not in blob and "CURSOR_API_KEY" not in blob
+
+
+@pytest.mark.asyncio
+async def test_failed_catalog_probe_uses_short_negative_cache(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock = [100.0]
+    api_calls = 0
+
+    async def fake_cli() -> dict:
+        return {"ready": False, "models": []}
+
+    async def fake_api() -> dict:
+        nonlocal api_calls
+        api_calls += 1
+        return {
+            "ready": api_calls > 1,
+            "configured": True,
+            "models": [{"id": "grok-live"}] if api_calls > 1 else [],
+        }
+
+    monkeypatch.setattr(server.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(server, "_probe_cli", fake_cli)
+    monkeypatch.setattr(xai_api, "probe_models", fake_api)
+    monkeypatch.setattr(xai_api, "credential_cache_key", lambda: "test-key")
+    server._CATALOG_CACHE.clear()
+
+    assert (await server._catalogs())["api"]["ready"] is False
+    clock[0] += 4
+    assert (await server._catalogs())["api"]["ready"] is False
+    assert api_calls == 1
+    clock[0] += 2
+    assert (await server._catalogs())["api"]["ready"] is True
+    assert api_calls == 2
+    server._CATALOG_CACHE.clear()

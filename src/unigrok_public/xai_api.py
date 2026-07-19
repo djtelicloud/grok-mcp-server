@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import time
 from collections.abc import Callable, Sequence
@@ -12,6 +13,8 @@ from .principal_xai import (
     active_credential_source,
     resolve_inference_credential,
 )
+
+logger = logging.getLogger(__name__)
 
 API_PLANE = "xai_api_key"
 MANAGEMENT_KEY_CANARY = "xai-management-api-disabled-in-public-core"
@@ -287,7 +290,8 @@ async def probe_models() -> dict[str, Any]:
 
     try:
         catalogs = await _blocking_read(_call, deadline_seconds=deadline)
-    except Exception:
+    except Exception as exc:
+        logger.warning("xAI model discovery failed (%s)", type(exc).__name__)
         return {
             "ready": False,
             "configured": True,
