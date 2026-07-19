@@ -218,5 +218,5 @@ If pack_hit_rate low and spend_ratio high → plane is a **heater**; kill genera
 | Miss named | Done |
 | Hive merge | Done (narrow sleep; awake first) |
 | Code | Sleep idle loop not started |
-| Awake context pack (related) | **Shipped:** `UNIGROK_CONTEXT_PACK=cpu` — per-turn inventory → persona votes → lead merge → SQLite pack for next named session |
+| Awake context pack (related) | **Shipped:** `UNIGROK_CONTEXT_PACK=cpu` — inventory → persona votes → lead merge → ≤2 PFC hive loops → one prefrontal summary sentence at bottom of context list |
 | Default sleep | `UNIGROK_SLEEP=off` |
