@@ -1240,13 +1240,30 @@ class PublicStateStore:
                 )
                 connection.commit()
                 return True, gen
+            status = str(row["status"] or "")
             if (
                 current
                 and current != lease_token
                 and lease_active(row["lease_expires_at"], now=now)
             ):
+                # Includes mid-verifying: never steal an active lease (bumped
+                # lease_generation bricks VERIFYING→COMPLETE → cas_verifying_failed).
                 return False, gen
             new_gen = fence_generation_next(gen)
+            # Expired verifying reclaim keeps status=verifying so the new owner
+            # can CAS VERIFYING→COMPLETE with the fresh generation.
+            if status == "verifying":
+                connection.execute(
+                    """
+                    UPDATE missions
+                    SET lease_token=?, lease_generation=?, lease_expires_at=?,
+                        updated_at=?
+                    WHERE mission_id=? AND status='verifying'
+                    """,
+                    (lease_token, new_gen, expires_at, now, mission_id),
+                )
+                connection.commit()
+                return True, new_gen
             connection.execute(
                 """
                 UPDATE missions

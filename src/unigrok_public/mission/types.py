@@ -43,7 +43,11 @@ _ALLOWED: frozenset[tuple[MissionStatus, MissionStatus]] = frozenset(
         (MissionStatus.VERIFYING, MissionStatus.RUNNING),
         (MissionStatus.VERIFYING, MissionStatus.FAILED),
         (MissionStatus.VERIFYING, MissionStatus.ESCALATED),
+        # Host continue: verifier rejected CommitDone → wait for reattach.
+        (MissionStatus.VERIFYING, MissionStatus.WAITING_EVENT),
         (MissionStatus.WAITING_EVENT, MissionStatus.QUEUED),
+        # claim_mission maps waiting_event → running; also allow direct resume.
+        (MissionStatus.WAITING_EVENT, MissionStatus.RUNNING),
         (MissionStatus.WAITING_TIMER, MissionStatus.QUEUED),
         (MissionStatus.DORMANT, MissionStatus.QUEUED),
         (MissionStatus.ESCALATED, MissionStatus.QUEUED),

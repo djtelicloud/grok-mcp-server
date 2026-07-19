@@ -34,6 +34,10 @@ def test_complete_only_from_verifying() -> None:
     assert legal_transition(MissionStatus.VERIFYING, MissionStatus.COMPLETE)
     assert not legal_transition(MissionStatus.RUNNING, MissionStatus.COMPLETE)
     assert not legal_transition(MissionStatus.COMPLETE, MissionStatus.RUNNING)
+    # Host continue demote + resume (CAS hard-loop fix).
+    assert legal_transition(MissionStatus.VERIFYING, MissionStatus.WAITING_EVENT)
+    assert legal_transition(MissionStatus.WAITING_EVENT, MissionStatus.RUNNING)
+    assert not legal_transition(MissionStatus.VERIFYING, MissionStatus.VERIFYING)
 
 
 def test_verify_rejects_self_evidence_and_wrong_status() -> None:
@@ -185,6 +189,145 @@ async def test_mission_cas_and_lease_fence(tmp_path) -> None:  # noqa: ANN001
         new_status="running",
     )
     assert demote is False
+
+
+@pytest.mark.asyncio
+async def test_claim_refuses_steal_mid_verifying(tmp_path) -> None:  # noqa: ANN001
+    """P0: reattach must not bump lease_generation while verifying + active lease."""
+    store = PublicStateStore(tmp_path / "m_steal.db")
+    await store.initialize()
+    from unigrok_public.mission.lease import lease_expiry_iso
+
+    await store.create_mission(
+        "msn_steal",
+        job_id="job_steal",
+        acceptance_hash="steal",
+        acceptance_text="Return a checklist of deploy steps including healthz",
+        continue_token="c" * 32,
+        package={"evidence_policy": default_agent_policy().to_dict()},
+        lease_token="tok_owner",  # noqa: S106
+        lease_generation=1,
+        lease_expires_at=lease_expiry_iso(ttl_seconds=120),
+    )
+    assert await store.cas_mission_status(
+        "msn_steal",
+        expect_status="running",
+        expect_version=0,
+        expect_lease_generation=1,
+        new_status="verifying",
+    )
+    stole, gen = await store.claim_mission(
+        "msn_steal",
+        lease_token="tok_reattach",  # noqa: S106
+        ttl_seconds=120,
+    )
+    assert stole is False
+    assert gen == 1
+    row = await store.load_mission("msn_steal")
+    assert row is not None
+    assert row["status"] == "verifying"
+    assert int(row["lease_generation"]) == 1
+    assert row["lease_token"] == "tok_owner"  # noqa: S105
+    # Owner can still CommitDone.
+    assert await store.cas_mission_status(
+        "msn_steal",
+        expect_status="verifying",
+        expect_version=1,
+        expect_lease_generation=1,
+        new_status="complete",
+        clear_lease=True,
+    )
+
+
+@pytest.mark.asyncio
+async def test_seal_self_heals_sticky_verifying(tmp_path) -> None:  # noqa: ANN001
+    """Sticky verifying + correct candidate must CommitDone (no verifying→verifying)."""
+    from unigrok_public.mission.epoch import seal_mission_epoch
+    from unigrok_public.mission.lease import lease_expiry_iso
+
+    store = PublicStateStore(tmp_path / "m_sticky.db")
+    await store.initialize()
+    acceptance = (
+        "- Build the container image\n"
+        "- Run database migrations\n"
+        "- Smoke test /healthz\n"
+        "- Flip traffic to the new revision\n"
+    )
+    await store.create_mission(
+        "msn_sticky",
+        job_id="job_sticky",
+        acceptance_hash="sticky",
+        acceptance_text="Return a checklist of deploy steps including healthz",
+        continue_token="d" * 32,
+        package={
+            "task": "Return a checklist of deploy steps including healthz",
+            "acceptance": "Return a checklist of deploy steps including healthz",
+            "evidence_policy": default_agent_policy().to_dict(),
+        },
+        lease_token="tok_sticky",  # noqa: S106
+        lease_generation=2,
+        lease_expires_at=lease_expiry_iso(ttl_seconds=120),
+    )
+    assert await store.cas_mission_status(
+        "msn_sticky",
+        expect_status="running",
+        expect_version=0,
+        expect_lease_generation=2,
+        new_status="verifying",
+    )
+    out = await seal_mission_epoch(
+        store,
+        mission_id="msn_sticky",
+        job_id="job_sticky",
+        acceptance_text="Return a checklist of deploy steps including healthz",
+        result={"text": acceptance, "model": "test"},
+        lease_generation=2,
+        continue_token="d" * 32,
+        envelope_version=1,
+        shadow_cognition=False,
+    )
+    assert out.get("mission", {}).get("committed") is True
+    assert out.get("status") == "complete"
+    row = await store.load_mission("msn_sticky")
+    assert row is not None
+    assert row["status"] == "complete"
+
+
+@pytest.mark.asyncio
+async def test_verifying_can_demote_to_waiting_event(tmp_path) -> None:  # noqa: ANN001
+    store = PublicStateStore(tmp_path / "m_wait.db")
+    await store.initialize()
+    from unigrok_public.mission.lease import lease_expiry_iso
+
+    await store.create_mission(
+        "msn_wait",
+        job_id="job_wait",
+        acceptance_hash="wait",
+        acceptance_text="task",
+        continue_token="e" * 32,
+        package={},
+        lease_token="tok_wait",  # noqa: S106
+        lease_generation=1,
+        lease_expires_at=lease_expiry_iso(ttl_seconds=60),
+    )
+    assert await store.cas_mission_status(
+        "msn_wait",
+        expect_status="running",
+        expect_version=0,
+        expect_lease_generation=1,
+        new_status="verifying",
+    )
+    assert await store.cas_mission_status(
+        "msn_wait",
+        expect_status="verifying",
+        expect_version=1,
+        expect_lease_generation=1,
+        new_status="waiting_event",
+        clear_lease=True,
+    )
+    row = await store.load_mission("msn_wait")
+    assert row is not None
+    assert row["status"] == "waiting_event"
 
 
 @pytest.mark.asyncio
