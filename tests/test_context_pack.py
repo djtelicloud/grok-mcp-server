@@ -10,6 +10,7 @@ from unigrok_public.context_pack import (
     build_context_pack,
     context_pack_mode,
     format_session_with_pack,
+    imagine_pfc_absent,
     inventory,
     lead_merge,
     prefrontal_condense,
@@ -162,6 +163,12 @@ def test_prefrontal_placement_and_loop2_gate() -> None:
     # PFC must sit after pack body and before the current request (bottom cue).
     assert rendered.index("Prefrontal") < rendered.index("Current user request")
     assert rendered.index("Don'ts") < rendered.index("Prefrontal")
+    # pfc_absent (when present) is sibling after sealed PFC.
+    if out.pfc_absent:
+        absent_hdr = "# pfc_absent"
+        assert absent_hdr in rendered
+        assert rendered.index("Prefrontal") < rendered.index(absent_hdr)
+        assert rendered.index(absent_hdr) < rendered.index("Current user request")
 
 
 def test_prefrontal_runs_loop2_when_first_pass_incomplete() -> None:
@@ -256,3 +263,66 @@ async def test_context_pack_roundtrip_sqlite(
     assert loaded is not None
     assert loaded.get("prefrontal")
     assert loaded.get("pfc_loops", 0) >= 1
+    assert "pfc_absent" in loaded
+
+
+def test_imagine_pfc_absent_finds_grounded_gap() -> None:
+    pack = lead_merge(
+        inventory(
+            [
+                {
+                    "role": "user",
+                    "content": (
+                        "Never invent private intelligence. "
+                        "Also must run Docker verify after ship."
+                    ),
+                },
+                {
+                    "role": "assistant",
+                    "content": "Noted. Will pack context and verify /readyz.",
+                },
+            ],
+            next_task="Ship then verify Docker health endpoints",
+        ),
+        next_task="Ship then verify Docker health endpoints",
+    )
+    # Thin sealed PFC covers only the don't — leave Docker-verify as absent.
+    pack.prefrontal = "Avoid: Never invent private intelligence."
+    pack.pfc_loops = 1
+    pack.pfc_points = 1
+    pack.pfc_confidence = 1.0
+    out = imagine_pfc_absent(
+        pack, next_task="Ship then verify Docker health endpoints"
+    )
+    assert out.pfc_absent
+    assert "likely missing" in out.pfc_absent.lower()
+    assert out.pfc_absent_confidence >= 0.5
+    # Must not invent free text outside grounded keeps/donts/task.
+    assert "untrusted" not in out.pfc_absent.lower()
+    rendered = format_session_with_pack(
+        [{"role": "user", "content": "hi"}], "Continue", out
+    )
+    absent_hdr = "# pfc_absent"
+    assert rendered.index("Prefrontal") < rendered.index(absent_hdr)
+    assert rendered.index(absent_hdr) < rendered.index("Current user request")
+    assert "zero authority" in rendered
+
+
+def test_imagine_pfc_absent_null_when_fully_covered() -> None:
+    pack = lead_merge(
+        inventory(
+            [
+                {
+                    "role": "user",
+                    "content": "Do not force-push main.",
+                }
+            ],
+            next_task="Do not force-push main",
+        ),
+        next_task="Do not force-push main",
+    )
+    pack = prefrontal_condense(pack, next_task="Do not force-push main")
+    # Force PFC to cover the only don't terms.
+    pack.prefrontal = "Avoid: Do not force-push main."
+    out = imagine_pfc_absent(pack, next_task="Do not force-push main")
+    assert out.pfc_absent == ""

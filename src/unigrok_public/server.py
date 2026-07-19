@@ -2867,7 +2867,10 @@ async def _execute_team_turn(
     if session and context_pack_mode() != "off":
         prior_pack = ContextPack.from_dict(await STATE.load_context_pack(session))
     if prior_pack is not None and (
-        prior_pack.keeps or prior_pack.donts or prior_pack.prefrontal
+        prior_pack.keeps
+        or prior_pack.donts
+        or prior_pack.prefrontal
+        or prior_pack.pfc_absent
     ):
         provider_prompt = format_session_with_pack(history, prompt, prior_pack)
     else:
@@ -3085,6 +3088,8 @@ async def _execute_team_turn(
                     "pfc_loops": pack.pfc_loops,
                     "pfc_points": pack.pfc_points,
                     "pfc_confidence": pack.pfc_confidence,
+                    "pfc_absent": pack.pfc_absent,
+                    "pfc_absent_confidence": pack.pfc_absent_confidence,
                 }
     result.update(
         {

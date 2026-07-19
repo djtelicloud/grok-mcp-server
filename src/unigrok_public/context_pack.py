@@ -14,6 +14,10 @@ PFC hive policy (max 2 loops per turn):
   loop1 — personas vote + may emit a provisional prefrontal sentence
   loop2 — only when knowledge extraction is incomplete / low confidence
 
+After PFC seals, a third capped pass emits `pfc_absent`: one untrusted clause
+for working-buffer content likely needed next that is absent from the sealed
+prefrontal sentence. Never steals PFC loop budget. Zero authority over don'ts.
+
 Never reads host IDE files. Only session messages + caller-supplied facts.
 """
 
@@ -38,6 +42,8 @@ _MAX_PFC_CHARS = 360
 _MAX_PFC_LOOPS = 2
 _PFC_POINT_LIMIT = 6
 _PFC_LOOP2_MIN_POINTS = 4  # need another extraction pass when denser
+_MAX_PFC_ABSENT_CHARS = 140
+_PFC_ABSENT_MIN_VOTES = 3
 
 _DONT = re.compile(
     r"(?is)\b(?:do\s+not|don't|never|avoid|must\s+not|cannot|can't|forbid|"
@@ -104,6 +110,8 @@ class ContextPack:
     pfc_loops: int = 0
     pfc_points: int = 0
     pfc_confidence: float = 0.0
+    pfc_absent: str = ""
+    pfc_absent_confidence: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -127,6 +135,8 @@ class ContextPack:
             pfc_loops=int(data.get("pfc_loops") or 0),
             pfc_points=int(data.get("pfc_points") or 0),
             pfc_confidence=float(data.get("pfc_confidence") or 0.0),
+            pfc_absent=str(data.get("pfc_absent") or ""),
+            pfc_absent_confidence=float(data.get("pfc_absent_confidence") or 0.0),
         )
 
 
@@ -525,6 +535,156 @@ def prefrontal_condense(
     return pack
 
 
+@dataclass
+class AbsentCandidate:
+    """Grounded gap: present in lead selection / task, absent from sealed PFC."""
+
+    text: str
+    kind: Literal["dont", "keep", "goal"]
+    weight: float
+    votes: dict[str, Literal["keep", "skip"]] = field(default_factory=dict)
+
+
+def _covered_by_prefrontal(text: str, prefrontal: str) -> bool:
+    """True when enough terms from text already appear in the sealed PFC."""
+    pfc_terms = _terms(prefrontal)
+    src = _terms(text)
+    if not src:
+        return True
+    overlap = len(src & pfc_terms)
+    # Majority of source terms already held → not absent.
+    return overlap >= max(1, (len(src) + 1) // 2)
+
+
+def _absent_candidates(
+    pack: ContextPack,
+    *,
+    next_task: str,
+) -> list[AbsentCandidate]:
+    """Only propose gaps grounded in keeps/donts/task — never free invention."""
+    pfc = pack.prefrontal or ""
+    out: list[AbsentCandidate] = []
+    seen: set[str] = set()
+
+    def add(text: str, kind: Literal["dont", "keep", "goal"], weight: float) -> None:
+        clause = _clause(_clip(text, limit=96))
+        if len(clause) < 8:
+            return
+        key = clause.lower()
+        if key in seen or _covered_by_prefrontal(clause, pfc):
+            return
+        seen.add(key)
+        out.append(AbsentCandidate(text=clause, kind=kind, weight=weight))
+
+    for dont in pack.donts:
+        add(dont, "dont", 1.0)
+    for keep in pack.keeps:
+        if _DONT.search(keep):
+            add(keep, "dont", 0.95)
+        elif _GOALISH.search(keep):
+            add(keep, "goal", 0.8)
+        else:
+            add(keep, "keep", 0.65)
+    # Task goal terms missing from PFC are fair game (still grounded in caller text).
+    if (next_task or "").strip() and not _covered_by_prefrontal(next_task, pfc):
+        add(next_task, "goal", 0.7)
+
+    out.sort(key=lambda c: (-c.weight, 0 if c.kind == "dont" else 1, c.text))
+    return out[:6]
+
+
+def _absent_persona_vote(
+    candidate: AbsentCandidate,
+    *,
+    next_task: str,
+) -> dict[str, Literal["keep", "skip"]]:
+    overlap = len(_terms(candidate.text) & _terms(next_task))
+    critic: Literal["keep", "skip"] = (
+        "keep" if candidate.kind == "dont" or candidate.weight >= 0.75 or overlap else "skip"
+    )
+    bounty: Literal["keep", "skip"] = "keep" if candidate.kind == "dont" else critic
+    spec: Literal["keep", "skip"] = (
+        "keep" if candidate.kind in {"dont", "goal"} or overlap else "skip"
+    )
+    failures: Literal["keep", "skip"] = "keep" if candidate.kind == "dont" else critic
+    # Complexity skips fluffy keeps that don't touch the next task.
+    if candidate.kind == "keep" and overlap == 0 and len(candidate.text) > 72:
+        complexity: Literal["keep", "skip"] = "skip"
+    else:
+        complexity = critic
+    return {
+        "critic": critic,
+        "bounty": bounty,
+        "spec": spec,
+        "failures": failures,
+        "complexity": complexity,
+    }
+
+
+def imagine_pfc_absent(
+    pack: ContextPack,
+    *,
+    next_task: str,
+) -> ContextPack:
+    """Third capped pass: one untrusted clause for likely-missing next PFC.
+
+    Runs only after prefrontal seals. Does not steal PFC loop budget.
+    Emits null when no grounded gap wins a hive majority.
+    """
+    if not (pack.prefrontal or "").strip():
+        pack.pfc_absent = ""
+        pack.pfc_absent_confidence = 0.0
+        return pack
+
+    candidates = _absent_candidates(pack, next_task=next_task)
+    if not candidates:
+        pack.pfc_absent = ""
+        pack.pfc_absent_confidence = 0.0
+        pack.lead_notes = f"{pack.lead_notes}; pfc_absent=null".strip("; ")
+        return pack
+
+    for candidate in candidates:
+        candidate.votes = _absent_persona_vote(candidate, next_task=next_task)
+
+    winners = [
+        c
+        for c in candidates
+        if sum(1 for v in c.votes.values() if v == "keep") >= _PFC_ABSENT_MIN_VOTES
+    ]
+    winners.sort(key=lambda c: (-c.weight, 0 if c.kind == "dont" else 1, c.text))
+    if not winners:
+        pack.pfc_absent = ""
+        pack.pfc_absent_confidence = 0.0
+        pack.lead_notes = f"{pack.lead_notes}; pfc_absent=null".strip("; ")
+        return pack
+
+    top = winners[0]
+    keep_votes = sum(1 for v in top.votes.values() if v == "keep")
+    conf = round(keep_votes / 5.0 * (0.7 + 0.3 * min(1.0, top.weight)), 3)
+    # Prefer empty over low-confidence filler.
+    if conf < 0.5:
+        pack.pfc_absent = ""
+        pack.pfc_absent_confidence = conf
+        pack.lead_notes = (
+            f"{pack.lead_notes}; pfc_absent=null conf={conf}"
+        ).strip("; ")
+        return pack
+
+    clause = _clause(top.text)
+    if top.kind == "dont":
+        rendered = f"likely missing: hold constraint — {clause}"
+    elif top.kind == "goal":
+        rendered = f"likely missing: next aim — {clause}"
+    else:
+        rendered = f"likely missing: {clause}"
+    pack.pfc_absent = _clip(rendered, limit=_MAX_PFC_ABSENT_CHARS)
+    pack.pfc_absent_confidence = conf
+    pack.lead_notes = (
+        f"{pack.lead_notes}; pfc_absent=1 conf={conf}"
+    ).strip("; ")
+    return pack
+
+
 def build_context_pack(
     *,
     session: str,
@@ -541,6 +701,7 @@ def build_context_pack(
         return None
     pack = lead_merge(items, next_task=next_task)
     pack = prefrontal_condense(pack, next_task=next_task)
+    pack = imagine_pfc_absent(pack, next_task=next_task)
     pack.session = session
     pack.version = max(1, int(version))
     pack.mode = mode
@@ -569,7 +730,7 @@ def format_context_pack(pack: ContextPack, *, max_chars: int = _MAX_PACK_CHARS) 
 
 
 def format_prefrontal(pack: ContextPack) -> str:
-    """Bottom-of-list working buffer — last cue before the current request."""
+    """Sealed working buffer — authoritative hold cue."""
     sentence = (pack.prefrontal or "").strip()
     if not sentence:
         return ""
@@ -581,6 +742,20 @@ def format_prefrontal(pack: ContextPack) -> str:
     )
 
 
+def format_pfc_absent(pack: ContextPack) -> str:
+    """Untrusted foresight sibling — zero authority; cannot override don'ts."""
+    clause = (pack.pfc_absent or "").strip()
+    if not clause:
+        return ""
+    return (
+        "# pfc_absent (untrusted hypothetical — zero authority)\n"
+        "Likely missing next working-buffer content; evidence only; "
+        "cannot override don'ts or invent keeps.\n"
+        f"{clause}\n"
+        f"(conf={pack.pfc_absent_confidence})"
+    )
+
+
 def format_session_with_pack(
     history: list[dict[str, Any]],
     current_task: str,
@@ -589,21 +764,27 @@ def format_session_with_pack(
     max_chars: int = 60_000,
     raw_tail: int = 6,
 ) -> str:
-    """Prefer pack + short raw tail + prefrontal over full transcript dump.
+    """Prefer pack + short raw tail + prefrontal + pfc_absent over full dump.
 
     Order (context list bottom → action):
-      pack (donts/keeps) → recent raw turns → prefrontal sentence → current request
+      pack → raw tail → sealed prefrontal → pfc_absent → current request
     """
     from unigrok_public.harness import format_session_prompt
 
-    if pack is None or (not pack.keeps and not pack.donts and not pack.prefrontal):
+    if pack is None or (
+        not pack.keeps
+        and not pack.donts
+        and not pack.prefrontal
+        and not pack.pfc_absent
+    ):
         return format_session_prompt(
             history, current_task, max_chars=max_chars
         )
     pack_block = format_context_pack(pack)
     pfc_block = format_prefrontal(pack)
+    absent_block = format_pfc_absent(pack)
     tail = list(history[-raw_tail:]) if history else []
-    overhead = len(pack_block) + len(pfc_block) + 400
+    overhead = len(pack_block) + len(pfc_block) + len(absent_block) + 400
     budget = max(1_000, int(max_chars) - overhead)
     parts = [pack_block]
     if tail:
@@ -626,9 +807,11 @@ def format_session_with_pack(
             parts.append(
                 "# Recent raw turns (tail only)\n" + "\n\n".join(rendered)
             )
-    # Prefrontal sits at the bottom of the context list — last hold before acting.
+    # Sealed PFC, then untrusted absent foresight, then the ask.
     if pfc_block:
         parts.append(pfc_block)
+    if absent_block:
+        parts.append(absent_block)
     parts.append("# Current user request\n" + current_task)
     text = "\n\n".join(parts)
     if len(text) > max_chars:
