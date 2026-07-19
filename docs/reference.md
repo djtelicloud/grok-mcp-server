@@ -20,8 +20,20 @@ Known limits of the current release are tracked in [Known limits](known-limits.m
   CommitDone (`UNIGROK_TASK_CLASS` / `UNIGROK_VERIFY_LITERAL`). Candidate text never
   counts as acceptance evidence. Process default is **off**; **Docker compose live
   default is on**. Inspect `/runtimez` → `autonomy`.
+- **Context pack (named sessions):** set `UNIGROK_CONTEXT_PACK=cpu` (or `hive`, which
+  currently maps to `cpu`). After each completed turn the gateway inventories history,
+  runs five heuristic persona votes, lead-merges keeps/don’ts, then seals one
+  **prefrontal** working-buffer sentence (≤2 hive loops) and an optional untrusted
+  **`pfc_absent`** foresight sibling. Next turn injects pack → raw tail → prefrontal →
+  `pfc_absent` → current request instead of the full transcript dump. Receipts land on
+  `context_pack` (`prefrontal`, `pfc_loops`, `pfc_absent`, …). Process default is
+  **off**; **Docker compose live default is `cpu`**. Inspect `/runtimez` → `autonomy.context_pack`.
 - **De-overfitting doctrine:** freeze only near-physics envelopes; treat cognition
   weights, timeouts, and pools as versioned posteriors. See [DEOVERFIT.md](DEOVERFIT.md).
+- **WASM × dogfood (design only):** sandbox agents that **run** code, not ones that
+  **think**. No wasm runtime in the shipping gateway; today’s untrusted local exec is
+  the host dogfood script. Guest ABI and trigger conditions:
+  [WASM_DOGFOOD.md](WASM_DOGFOOD.md).
 - **`level`** (optional, explicit rung): `none` · `minimal` · `low` · `medium` ·
   `high` · `xhigh` (one call at that native Grok effort) → `max` (silent deep harness)
   → `ultra` (parallel hive: draft → persona votes → merge). Setting `level` skips
@@ -114,6 +126,10 @@ Named `agent` sessions persist redacted conversation turns in local SQLite. Deli
 remembered facts use caller-controlled scopes and can be searched or deleted explicitly.
 The `unigrok-public-state` Docker volume survives service restarts.
 
+When `UNIGROK_CONTEXT_PACK` is enabled, named sessions also persist a server-pruned
+context pack (keeps/don’ts + prefrontal + optional `pfc_absent`) for the next turn.
+Pack text is untrusted evidence framing; don’ts remain authoritative over foresight.
+
 An IDE may send selected text through `workspace_context` with an optional
 `workspace_label`. This is a bounded, redacted courier—not workspace attachment. It
 grants no file, shell, Git, credential, or external MCP authority.
@@ -166,4 +182,6 @@ credentials. Its session database contains only caller-supplied MCP content afte
 redaction.
 
 Needle remains visibly inactive. Design and evaluation artifacts do not constitute a
-live shadow/reflex runtime.
+live shadow/reflex runtime. WASM guest isolation for dogfood/local code-exec is
+likewise design-only until a sandboxed promotion oracle or local RCE path exists
+([WASM_DOGFOOD.md](WASM_DOGFOOD.md)).
