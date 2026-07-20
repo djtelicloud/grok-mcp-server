@@ -514,9 +514,12 @@ async def test_all_tools_available_does_not_bypass_authenticated_cli(
 
 
 @pytest.mark.asyncio
-async def test_cli_unavailable_capability_gets_one_bounded_api_recovery(
+async def test_cli_unavailable_capability_recovers_without_tripping_breaker(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    breakers: dict[str, dict] = {}
+    build_calls = 0
+
     async def fake_resolve(
         requested: str, model: str | None, *, requires_api: bool
     ) -> tuple[str, dict]:
@@ -528,6 +531,8 @@ async def test_cli_unavailable_capability_gets_one_bounded_api_recovery(
         return "safe"
 
     async def fake_build(prompt: str, **kwargs: object) -> dict:
+        nonlocal build_calls
+        build_calls += 1
         return {"text": server.CAPABILITY_UNAVAILABLE_PREFIX + "remote sandbox"}
 
     async def fake_alternate(current: str, model: str | None, *, requires_api: bool) -> str:
@@ -543,23 +548,34 @@ async def test_cli_unavailable_capability_gets_one_bounded_api_recovery(
     monkeypatch.setattr(server.BUILD_ACP, "run", fake_build)
     monkeypatch.setattr(server, "_alternate_plane", fake_alternate)
     monkeypatch.setattr(server.xai_api, "chat", fake_api_chat)
-    result = await server._run_unified(
-        "Use a remote sandbox",
-        model=None,
-        effort=None,
-        plane="auto",
-        fallback_policy="cross_plane",
-        agentic=True,
-        max_turns=6,
-        allow_web=True,
-        allow_x_search=True,
-        allow_code=True,
-    )
+    monkeypatch.setattr(server, "_CIRCUIT_BREAKERS", breakers)
+    monkeypatch.setattr(server, "BREAKER_FAILURE_THRESHOLD", 2)
+    results = [
+        await server._run_unified(
+            "Use a remote sandbox",
+            model=None,
+            effort=None,
+            plane="auto",
+            fallback_policy="cross_plane",
+            agentic=True,
+            max_turns=6,
+            allow_web=True,
+            allow_x_search=True,
+            allow_code=True,
+        )
+        for _ in range(3)
+    ]
+    result = results[-1]
     assert result["text"] == "API_RECOVERY_OK"
     assert result["resolved_plane"] == "api"
     assert result["fallback_occurred"] is True
     assert result["fallback_from"] == "cli"
     assert result["fallback_reason"] == "cli_capability_unavailable"
+    assert build_calls == 3
+    cli_key = server._breaker_key("cli", "grok-cli-live")
+    assert breakers[cli_key]["failures"] == 0
+    assert breakers[cli_key]["trips"] == 0
+    assert breakers[cli_key]["open_until"] == 0.0
 
 
 def test_metered_api_requires_only_owner_enablement(
@@ -598,18 +614,293 @@ def test_fallback_reason_is_precise_and_plane_specific(
 
 
 def test_circuit_breaker_opens_and_recovers(monkeypatch: pytest.MonkeyPatch) -> None:
-    server._CIRCUIT_BREAKERS.clear()
+    breakers: dict[str, dict] = {}
+    monkeypatch.setattr(server, "_CIRCUIT_BREAKERS", breakers)
     monkeypatch.setattr(server, "BREAKER_FAILURE_THRESHOLD", 2)
     monkeypatch.setattr(server, "BREAKER_COOLDOWN_SECONDS", 5)
-    server._breaker_failure("cli", "grok-live")
-    server._breaker_failure("cli", "grok-live")
+    server._breaker_failure(server._breaker_before_call("cli", "grok-live"))
+    server._breaker_failure(server._breaker_before_call("cli", "grok-live"))
+    key = server._breaker_key("cli", "grok-live")
     snapshot = server._breaker_snapshot()["cli:grok-live"]
     assert snapshot["open"] is True
     assert snapshot["trips"] == 1
     with pytest.raises(RuntimeError, match="circuit breaker open"):
         server._breaker_before_call("cli", "grok-live")
-    server._breaker_success("cli", "grok-live")
+
+    breakers[key]["open_until"] = server.time.monotonic() - 1
+    expired = server._breaker_snapshot()["cli:grok-live"]
+    assert expired["open"] is True
+    assert expired["retry_after_seconds"] == 0
+    probe = server._breaker_before_call("cli", "grok-live")
+    assert probe.probe is True
+    server._breaker_success(probe)
     assert server._breaker_snapshot()["cli:grok-live"]["open"] is False
+    assert breakers[key]["generation"] == 2
+
+
+def test_stale_breaker_completions_cannot_clear_newer_epoch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    breakers: dict[str, dict] = {}
+    monkeypatch.setattr(server, "_CIRCUIT_BREAKERS", breakers)
+    monkeypatch.setattr(server, "BREAKER_FAILURE_THRESHOLD", 2)
+    stale_success = server._breaker_before_call("cli", "grok-live")
+    stale_failure = server._breaker_before_call("cli", "grok-live")
+    server._breaker_failure(server._breaker_before_call("cli", "grok-live"))
+    server._breaker_failure(server._breaker_before_call("cli", "grok-live"))
+    key = server._breaker_key("cli", "grok-live")
+    opened_generation = breakers[key]["generation"]
+    opened_until = breakers[key]["open_until"]
+
+    server._breaker_success(stale_success)
+    assert breakers[key]["generation"] == opened_generation
+    assert breakers[key]["open_until"] == opened_until
+
+    breakers[key]["open_until"] = server.time.monotonic() - 1
+    probe = server._breaker_before_call("cli", "grok-live")
+    server._breaker_success(stale_success)
+    server._breaker_failure(stale_failure)
+    assert breakers[key]["half_open"] is True
+    assert breakers[key]["generation"] == opened_generation
+    with pytest.raises(RuntimeError, match="circuit breaker open"):
+        server._breaker_before_call("cli", "grok-live")
+
+    server._breaker_success(probe)
+    closed_generation = breakers[key]["generation"]
+    server._breaker_failure(stale_failure)
+    assert breakers[key]["generation"] == closed_generation
+    assert breakers[key]["open_until"] == 0.0
+    assert breakers[key]["failures"] == 0
+
+
+def test_stale_probe_token_cannot_release_replacement(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    breakers: dict[str, dict] = {}
+    monkeypatch.setattr(server, "_CIRCUIT_BREAKERS", breakers)
+    monkeypatch.setattr(server, "BREAKER_FAILURE_THRESHOLD", 2)
+    monkeypatch.setattr(server, "BUILD_TIMEOUT_SECONDS", 20)
+    server._breaker_failure(server._breaker_before_call("cli", "grok-live"))
+    server._breaker_failure(server._breaker_before_call("cli", "grok-live"))
+    key = server._breaker_key("cli", "grok-live")
+    breakers[key]["open_until"] = server.time.monotonic() - 1
+    abandoned = server._breaker_before_call("cli", "grok-live")
+    server._breaker_abandon_probe(abandoned)
+    replacement_generation = breakers[key]["generation"]
+    breakers[key]["open_until"] = server.time.monotonic() - 1
+    replacement = server._breaker_before_call("cli", "grok-live")
+
+    server._breaker_abandon_probe(abandoned)
+    server._breaker_success(abandoned)
+    server._breaker_failure(abandoned)
+    assert breakers[key]["generation"] == replacement_generation
+    assert breakers[key]["half_open"] is True
+    with pytest.raises(RuntimeError, match="circuit breaker open"):
+        server._breaker_before_call("cli", "grok-live")
+
+    server._breaker_success(replacement)
+    assert breakers[key]["half_open"] is False
+    assert breakers[key]["open_until"] == 0.0
+
+
+def test_failed_half_open_probe_reopens_breaker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    breakers: dict[str, dict] = {}
+    monkeypatch.setattr(server, "_CIRCUIT_BREAKERS", breakers)
+    monkeypatch.setattr(server, "BREAKER_FAILURE_THRESHOLD", 2)
+    server._breaker_failure(server._breaker_before_call("cli", "grok-live"))
+    server._breaker_failure(server._breaker_before_call("cli", "grok-live"))
+    key = server._breaker_key("cli", "grok-live")
+    breakers[key]["open_until"] = server.time.monotonic() - 1
+    probe = server._breaker_before_call("cli", "grok-live")
+    server._breaker_failure(probe)
+
+    assert breakers[key]["half_open"] is False
+    assert breakers[key]["open_until"] > server.time.monotonic()
+    assert breakers[key]["generation"] == 2
+    assert breakers[key]["trips"] == 2
+
+
+@pytest.mark.asyncio
+async def test_circuit_breaker_allows_only_one_half_open_probe(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    breakers: dict[str, dict] = {}
+    monkeypatch.setattr(server, "_CIRCUIT_BREAKERS", breakers)
+    monkeypatch.setattr(server, "BREAKER_FAILURE_THRESHOLD", 2)
+    server._breaker_failure(server._breaker_before_call("api", "grok-live"))
+    server._breaker_failure(server._breaker_before_call("api", "grok-live"))
+    key = server._breaker_key("api", "grok-live")
+    breakers[key]["open_until"] = server.time.monotonic() - 1
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    calls = 0
+
+    async def allow_budget(state: object) -> None:
+        return None
+
+    async def operation() -> dict:
+        nonlocal calls
+        calls += 1
+        entered.set()
+        await release.wait()
+        return {"text": "probe ok"}
+
+    monkeypatch.setattr(server, "enforce_caller_budget", allow_budget)
+    winner = asyncio.create_task(
+        server._guarded_provider_call("api", "grok-live", operation)
+    )
+    await asyncio.wait_for(entered.wait(), timeout=1)
+
+    with pytest.raises(RuntimeError, match="circuit breaker open"):
+        await server._guarded_provider_call("api", "grok-live", operation)
+    assert calls == 1
+    assert breakers[key]["half_open"] is True
+
+    release.set()
+    assert await winner == {"text": "probe ok"}
+    assert breakers[key] == {
+        "failures": 0,
+        "trips": 1,
+        "open_until": 0.0,
+        "half_open": False,
+        "generation": 2,
+    }
+
+    assert await server._guarded_provider_call(
+        "api", "grok-live", operation
+    ) == {"text": "probe ok"}
+    assert calls == 2
+
+
+@pytest.mark.asyncio
+async def test_cancelled_guarded_half_open_probe_fences_safe_replacement(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    breakers: dict[str, dict] = {}
+    monkeypatch.setattr(server, "_CIRCUIT_BREAKERS", breakers)
+    monkeypatch.setattr(server, "BREAKER_FAILURE_THRESHOLD", 2)
+    monkeypatch.setattr(server, "BREAKER_COOLDOWN_SECONDS", 5)
+    monkeypatch.setattr(server.xai_api, "API_TIMEOUT_SECONDS", 10)
+    monkeypatch.setattr(server.xai_api, "MEDIA_TIMEOUT_SECONDS", 20)
+    server._breaker_failure(server._breaker_before_call("api", "grok-live"))
+    server._breaker_failure(server._breaker_before_call("api", "grok-live"))
+    key = server._breaker_key("api", "grok-live")
+    breakers[key]["open_until"] = server.time.monotonic() - 1
+    entered = asyncio.Event()
+    replacement_calls = 0
+
+    async def allow_budget(state: object) -> None:
+        return None
+
+    async def blocked_operation() -> dict:
+        entered.set()
+        await asyncio.Event().wait()
+        return {"text": "unreachable"}
+
+    monkeypatch.setattr(server, "enforce_caller_budget", allow_budget)
+    probe = asyncio.create_task(
+        server._guarded_provider_call("api", "grok-live", blocked_operation)
+    )
+    await asyncio.wait_for(entered.wait(), timeout=1)
+    probe.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await probe
+
+    assert breakers[key]["failures"] == 2
+    assert breakers[key]["trips"] == 1
+    assert breakers[key]["half_open"] is False
+    assert breakers[key]["generation"] == 2
+    assert breakers[key]["open_until"] >= server.time.monotonic() + 19
+
+    async def replacement() -> dict:
+        nonlocal replacement_calls
+        replacement_calls += 1
+        return {"text": "replacement ok"}
+
+    with pytest.raises(RuntimeError, match="circuit breaker open"):
+        await server._guarded_provider_call("api", "grok-live", replacement)
+    assert replacement_calls == 0
+
+    breakers[key]["open_until"] = server.time.monotonic() - 1
+    assert await server._guarded_provider_call(
+        "api", "grok-live", replacement
+    ) == {"text": "replacement ok"}
+    assert breakers[key]["half_open"] is False
+    assert breakers[key]["open_until"] == 0.0
+
+
+@pytest.mark.asyncio
+async def test_cancelled_unified_half_open_probe_fences_safe_replacement(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    breakers: dict[str, dict] = {}
+    monkeypatch.setattr(server, "_CIRCUIT_BREAKERS", breakers)
+    monkeypatch.setattr(server, "BREAKER_FAILURE_THRESHOLD", 2)
+    monkeypatch.setattr(server, "BREAKER_COOLDOWN_SECONDS", 5)
+    monkeypatch.setattr(server, "BUILD_TIMEOUT_SECONDS", 20)
+    key = server._breaker_key("cli", "grok-cli-live")
+    server._breaker_failure(server._breaker_before_call("cli", "grok-cli-live"))
+    server._breaker_failure(server._breaker_before_call("cli", "grok-cli-live"))
+    breakers[key]["open_until"] = server.time.monotonic() - 1
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    calls = 0
+
+    async def fake_resolve(
+        requested: str, model: str | None, *, requires_api: bool
+    ) -> tuple[str, dict]:
+        return "cli", _catalogs(api_ready=False, api_models=[])
+
+    async def fake_system_prompt(kind: str, extra_context: str | None = None) -> str:
+        return "safe"
+
+    async def fake_build(prompt: str, **kwargs: object) -> dict:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            entered.set()
+            await release.wait()
+        return {"text": "CLI_OK", "plane": "cli", "cost_usd": 0.0}
+
+    monkeypatch.setattr(server, "_resolve_plane", fake_resolve)
+    monkeypatch.setattr(server, "_system_prompt", fake_system_prompt)
+    monkeypatch.setattr(server.BUILD_ACP, "run", fake_build)
+    arguments = {
+        "model": None,
+        "effort": None,
+        "plane": "auto",
+        "fallback_policy": "same_plane",
+        "agentic": False,
+        "max_turns": 1,
+        "allow_web": False,
+        "allow_x_search": False,
+        "allow_code": False,
+        "nonanswer_recovery": False,
+    }
+
+    probe = asyncio.create_task(server._run_unified("probe", **arguments))
+    await asyncio.wait_for(entered.wait(), timeout=1)
+    probe.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await probe
+
+    assert breakers[key]["failures"] == 2
+    assert breakers[key]["trips"] == 1
+    assert breakers[key]["half_open"] is False
+    assert breakers[key]["generation"] == 2
+    assert breakers[key]["open_until"] >= server.time.monotonic() + 19
+
+    with pytest.raises(RuntimeError, match="circuit breaker open"):
+        await server._run_unified("too soon", **arguments)
+    assert calls == 1
+
+    breakers[key]["open_until"] = server.time.monotonic() - 1
+    assert (await server._run_unified("replacement", **arguments))["text"] == "CLI_OK"
+    assert calls == 2
+    assert breakers[key]["half_open"] is False
+    assert breakers[key]["open_until"] == 0.0
 
 
 @pytest.mark.asyncio
@@ -787,6 +1078,7 @@ async def test_unified_api_call_obeys_owner_policy_before_provider(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls = 0
+    breakers: dict[str, dict] = {}
 
     async def fake_resolve(*args, **kwargs):
         return "api", _catalogs()
@@ -802,6 +1094,7 @@ async def test_unified_api_call_obeys_owner_policy_before_provider(
     monkeypatch.setattr(server, "_resolve_plane", fake_resolve)
     monkeypatch.setattr(server, "_system_prompt", fake_system)
     monkeypatch.setattr(xai_api, "chat", fake_api_chat)
+    monkeypatch.setattr(server, "_CIRCUIT_BREAKERS", breakers)
     arguments = {
         "model": None,
         "effort": None,
@@ -817,11 +1110,53 @@ async def test_unified_api_call_obeys_owner_policy_before_provider(
     with pytest.raises(RuntimeError, match="disabled by server policy"):
         await server._run_unified("test", **arguments)
     assert calls == 0
+    assert breakers == {}
 
     monkeypatch.setattr(server, "METERED_API_ENABLED", True)
     result = await server._run_unified("test", **arguments)
     assert result["text"] == "API_OK"
     assert calls == 1
+
+
+@pytest.mark.asyncio
+async def test_unified_api_budget_denial_precedes_provider_breaker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    breakers: dict[str, dict] = {}
+
+    async def fake_resolve(*args: object, **kwargs: object) -> tuple[str, dict]:
+        return "api", _catalogs()
+
+    async def fake_system(*args: object, **kwargs: object) -> str:
+        return "system"
+
+    async def deny_budget(state: object) -> None:
+        raise RuntimeError("caller budget exhausted")
+
+    async def forbidden_provider(*args: object, **kwargs: object) -> dict:
+        raise AssertionError("provider must not run after a caller-budget denial")
+
+    monkeypatch.setattr(server, "_resolve_plane", fake_resolve)
+    monkeypatch.setattr(server, "_system_prompt", fake_system)
+    monkeypatch.setattr(server, "enforce_caller_budget", deny_budget)
+    monkeypatch.setattr(server.xai_api, "chat", forbidden_provider)
+    monkeypatch.setattr(server, "METERED_API_ENABLED", True)
+    monkeypatch.setattr(server, "_CIRCUIT_BREAKERS", breakers)
+
+    with pytest.raises(RuntimeError, match="caller budget exhausted"):
+        await server._run_unified(
+            "test",
+            model=None,
+            effort=None,
+            plane="api",
+            fallback_policy="same_plane",
+            agentic=False,
+            max_turns=1,
+            allow_web=False,
+            allow_x_search=False,
+            allow_code=False,
+        )
+    assert breakers == {}
 
 
 @pytest.mark.asyncio

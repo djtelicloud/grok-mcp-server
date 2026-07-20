@@ -17,6 +17,7 @@ import time
 import uuid
 from collections.abc import Awaitable, Callable, Iterator, Sequence
 from contextvars import ContextVar
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import urlsplit
@@ -456,37 +457,125 @@ def _breaker_key(plane: str, model: str | None) -> str:
     return f"{plane}:{credential}:{model or 'default'}"
 
 
-def _breaker_before_call(plane: str, model: str | None) -> None:
+@dataclass(frozen=True, slots=True)
+class _BreakerAdmission:
+    key: str
+    plane: str
+    generation: int
+    probe: bool
+
+
+def _breaker_state(key: str) -> dict[str, Any]:
+    state = _CIRCUIT_BREAKERS.setdefault(
+        key,
+        {
+            "failures": 0,
+            "trips": 0,
+            "open_until": 0.0,
+            "half_open": False,
+            "generation": 0,
+        },
+    )
+    state.setdefault("generation", 0)
+    return state
+
+
+def _breaker_before_call(plane: str, model: str | None) -> _BreakerAdmission:
+    """Atomically admit a closed call or claim the single half-open probe."""
     key = _breaker_key(plane, model)
-    state = _CIRCUIT_BREAKERS.get(key)
-    if not state:
-        return
+    state = _breaker_state(key)
+    if bool(state.get("half_open")):
+        raise RuntimeError("circuit breaker open")
     open_until = float(state.get("open_until") or 0.0)
     if open_until > time.monotonic():
         raise RuntimeError("circuit breaker open")
+    generation = int(state.get("generation") or 0)
     if open_until:
-        state["open_until"] = 0.0
         state["half_open"] = True
+        return _BreakerAdmission(key, plane, generation, True)
+    return _BreakerAdmission(key, plane, generation, False)
 
 
-def _breaker_success(plane: str, model: str | None) -> None:
-    state = _CIRCUIT_BREAKERS.setdefault(
-        _breaker_key(plane, model),
-        {"failures": 0, "trips": 0, "open_until": 0.0, "half_open": False},
+def _breaker_abandon_delay_seconds(plane: str) -> float:
+    """Fence replacement probes through the longest configured provider deadline."""
+    provider_deadline = (
+        max(float(xai_api.API_TIMEOUT_SECONDS), float(xai_api.MEDIA_TIMEOUT_SECONDS))
+        if plane == "api"
+        else float(BUILD_TIMEOUT_SECONDS)
     )
-    state.update({"failures": 0, "open_until": 0.0, "half_open": False})
+    return max(float(BREAKER_COOLDOWN_SECONDS), provider_deadline)
 
 
-def _breaker_failure(plane: str, model: str | None) -> None:
-    state = _CIRCUIT_BREAKERS.setdefault(
-        _breaker_key(plane, model),
-        {"failures": 0, "trips": 0, "open_until": 0.0, "half_open": False},
+def _breaker_abandon_probe(admission: _BreakerAdmission) -> None:
+    """Fence a cancelled probe without treating cancellation as provider failure."""
+    if not admission.probe:
+        return
+    state = _CIRCUIT_BREAKERS.get(admission.key)
+    if (
+        state is None
+        or int(state.get("generation") or 0) != admission.generation
+        or not bool(state.get("half_open"))
+    ):
+        return
+    state["half_open"] = False
+    state["open_until"] = time.monotonic() + _breaker_abandon_delay_seconds(
+        admission.plane
     )
+    state["generation"] = admission.generation + 1
+
+
+def _breaker_success(admission: _BreakerAdmission) -> None:
+    state = _CIRCUIT_BREAKERS.get(admission.key)
+    if (
+        state is None
+        or int(state.get("generation") or 0) != admission.generation
+    ):
+        return
+    open_until = float(state.get("open_until") or 0.0)
+    half_open = bool(state.get("half_open"))
+    if admission.probe:
+        if not half_open or not open_until:
+            return
+        state.update(
+            {
+                "failures": 0,
+                "open_until": 0.0,
+                "half_open": False,
+                "generation": admission.generation + 1,
+            }
+        )
+        return
+    if half_open or open_until:
+        return
+    state["failures"] = 0
+
+
+def _breaker_failure(admission: _BreakerAdmission) -> None:
+    state = _CIRCUIT_BREAKERS.get(admission.key)
+    if (
+        state is None
+        or int(state.get("generation") or 0) != admission.generation
+    ):
+        return
+    open_until = float(state.get("open_until") or 0.0)
+    half_open = bool(state.get("half_open"))
+    if admission.probe:
+        if not half_open or not open_until:
+            return
+        state["failures"] = int(state.get("failures") or 0) + 1
+        state["trips"] = int(state.get("trips") or 0) + 1
+        state["open_until"] = time.monotonic() + BREAKER_COOLDOWN_SECONDS
+        state["half_open"] = False
+        state["generation"] = admission.generation + 1
+        return
+    if half_open or open_until:
+        return
     state["failures"] = int(state.get("failures") or 0) + 1
     if state["failures"] >= BREAKER_FAILURE_THRESHOLD:
         state["trips"] = int(state.get("trips") or 0) + 1
         state["open_until"] = time.monotonic() + BREAKER_COOLDOWN_SECONDS
         state["half_open"] = False
+        state["generation"] = admission.generation + 1
 
 
 def _breaker_snapshot() -> dict[str, Any]:
@@ -500,12 +589,13 @@ def _breaker_snapshot() -> dict[str, Any]:
         if plane == "api" and credential != api_credential:
             continue
         public_key = f"{plane}:{model}"
+        open_until = float(state.get("open_until") or 0.0)
         snapshot[public_key] = {
             "failures": int(state.get("failures") or 0),
             "trips": int(state.get("trips") or 0),
-            "open": float(state.get("open_until") or 0.0) > now,
+            "open": bool(open_until),
             "retry_after_seconds": max(
-                0, round(float(state.get("open_until") or 0.0) - now)
+                0, round(open_until - now)
             ),
             "half_open": bool(state.get("half_open")),
         }
@@ -520,13 +610,16 @@ async def _guarded_provider_call(
     """Run one provider operation through the shared circuit breaker."""
     if plane == "api":
         await enforce_caller_budget(STATE)
-    _breaker_before_call(plane, model)
+    admission = _breaker_before_call(plane, model)
     try:
         result = await operation()
-    except Exception:
-        _breaker_failure(plane, model)
+    except asyncio.CancelledError:
+        _breaker_abandon_probe(admission)
         raise
-    _breaker_success(plane, model)
+    except Exception:
+        _breaker_failure(admission)
+        raise
+    _breaker_success(admission)
     return result
 
 BUILD_AGENT_SYSTEM_PROMPT = (
@@ -2670,7 +2763,11 @@ async def _run_unified(
 
     async def _call(target: Literal["cli", "api"], call_prompt: str) -> dict[str, Any]:
         target_model = model or _lead_model(catalogs, target)
-        _breaker_before_call(target, target_model)
+        if target == "api":
+            _require_metered_api_enabled()
+            await enforce_caller_budget(STATE)
+        admission = _breaker_before_call(target, target_model)
+        capability_unavailable = False
         try:
             if target == "cli":
                 build_prompt = call_prompt
@@ -2692,15 +2789,10 @@ async def _run_unified(
                 )
                 if not result.get("model"):
                     result["model"] = target_model
-                if str(result.get("text") or "").strip().startswith(
+                capability_unavailable = str(result.get("text") or "").strip().startswith(
                     CAPABILITY_UNAVAILABLE_PREFIX
-                ):
-                    raise RuntimeError(
-                        "Grok Build reported a required capability unavailable"
-                    )
+                )
             else:
-                _require_metered_api_enabled()
-                await enforce_caller_budget(STATE)
                 # The API plane only accepts low/medium/high. Clamp the wider CLI
                 # ladder (none/minimal/xhigh/max) to the nearest API level so
                 # cross-plane recovery stays seamless instead of erroring.
@@ -2724,10 +2816,15 @@ async def _run_unified(
                     max_turns=max_turns if agentic else None,
                     max_tokens=max_output_tokens,
                 )
-        except Exception:
-            _breaker_failure(target, target_model)
+        except asyncio.CancelledError:
+            _breaker_abandon_probe(admission)
             raise
-        _breaker_success(target, target_model)
+        except Exception:
+            _breaker_failure(admission)
+            raise
+        _breaker_success(admission)
+        if capability_unavailable:
+            raise RuntimeError("Grok Build reported a required capability unavailable")
         return result
 
     async def _call_with_recovery(target: Literal["cli", "api"]) -> dict[str, Any]:
