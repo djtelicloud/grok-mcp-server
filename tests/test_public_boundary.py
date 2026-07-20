@@ -219,6 +219,61 @@ async def test_api_only_capability_explicitly_selects_api(monkeypatch: pytest.Mo
 
 
 @pytest.mark.asyncio
+async def test_readyz_rejects_healthy_first_run_without_grok_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_catalogs(*, refresh: bool = False) -> dict:
+        return _catalogs(
+            cli_ready=False,
+            api_ready=False,
+            cli_models=[],
+            api_models=[],
+        )
+
+    class HealthyState:
+        async def health(self) -> bool:
+            return True
+
+    monkeypatch.setattr(server, "_catalogs", fake_catalogs)
+    monkeypatch.setattr(server, "STATE", HealthyState())
+    monkeypatch.setattr(server, "is_cloudrun_runtime", lambda: False)
+
+    response = await server.readyz(None)
+    payload = json.loads(response.body)
+
+    assert response.status_code == 503
+    assert payload["status"] == "not_ready"
+    assert payload["bootstrap"]["status"] == "BLOCKED"
+    assert payload["bootstrap"]["can_chat"] is False
+    assert payload["state"] == {"ready": True, "backend": "sqlite"}
+
+
+@pytest.mark.asyncio
+async def test_readyz_accepts_healthy_runtime_with_live_cli_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_catalogs(*, refresh: bool = False) -> dict:
+        return _catalogs(api_ready=False, api_models=[])
+
+    class HealthyState:
+        async def health(self) -> bool:
+            return True
+
+    monkeypatch.setattr(server, "_catalogs", fake_catalogs)
+    monkeypatch.setattr(server, "STATE", HealthyState())
+    monkeypatch.setattr(server, "is_cloudrun_runtime", lambda: False)
+
+    response = await server.readyz(None)
+    payload = json.loads(response.body)
+
+    assert response.status_code == 200
+    assert payload["status"] == "ready"
+    assert payload["bootstrap"]["status"] == "OK"
+    assert payload["bootstrap"]["can_chat"] is True
+    assert payload["state"] == {"ready": True, "backend": "sqlite"}
+
+
+@pytest.mark.asyncio
 async def test_self_description_is_generated_from_live_boundary(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
