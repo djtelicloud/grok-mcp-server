@@ -44,11 +44,19 @@ def test_layer_env_smoke_gemma(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_task_rag_honesty_mode(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(server, "TASK_RAG_ACTIVE", True)
     monkeypatch.setattr(server, "CHAT_MEMORY_ALWAYS", True)
-    mode = "local_sqlite_knowledge" if server.TASK_RAG_ACTIVE or server.CHAT_MEMORY_ALWAYS else "off"
+    mode = (
+        "local_sqlite_knowledge"
+        if server.TASK_RAG_ACTIVE or server.CHAT_MEMORY_ALWAYS
+        else "off"
+    )
     assert mode == "local_sqlite_knowledge"
     monkeypatch.setattr(server, "TASK_RAG_ACTIVE", False)
     monkeypatch.setattr(server, "CHAT_MEMORY_ALWAYS", False)
-    mode_off = "local_sqlite_knowledge" if server.TASK_RAG_ACTIVE or server.CHAT_MEMORY_ALWAYS else "off"
+    mode_off = (
+        "local_sqlite_knowledge"
+        if server.TASK_RAG_ACTIVE or server.CHAT_MEMORY_ALWAYS
+        else "off"
+    )
     assert mode_off == "off"
 
 
