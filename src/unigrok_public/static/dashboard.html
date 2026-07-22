@@ -127,6 +127,8 @@
     <article class="card wide"><div class="label">Top callers</div><div id="callers" class="bars"></div></article>
     <article class="card wide"><div class="label">Fallback categories</div><div id="fallbacks" class="bars"></div></article>
     <article class="card full"><div class="label">Runtime</div><div id="runtime" class="breakers"><div class="empty">Loading …</div></div></article>
+    <article class="card wide"><div class="label">Build &amp; durable work</div><div id="build" class="breakers"><div class="empty">Loading …</div></div></article>
+    <article class="card wide"><div class="label">Policy &amp; governance</div><div id="policy" class="kv"></div></article>
     <article class="card full"><div class="label">Connect an IDE · endpoint <span id="mcpendpoint">/mcp</span></div>
       <div id="clients" class="planes"></div>
       <pre id="mcpsnippet" class="snippet">…</pre>
@@ -201,7 +203,7 @@ const METERED_KINDS=new Set(['web_search','x_search','remote_code_execution','ch
 const KIND_COL=n=>METERED_KINDS.has(n)?lvHex.warning:'#4a5675';   // metered (costs) vs free (neutral)
 const ROUTE_COL=n=>n==='error'?lvHex.threat:GRADFILL;             // only error carries a level
 const MODEL_COL=()=>GRADFILL;                                     // model choice has no severity
-const UI_BUILD='unigrok-ui-v1.1.0-r11';
+const UI_BUILD='unigrok-ui-v1.1.0-r12';
 // Unified 3-tier switcher: each tab links to its own surface on the same host.
 // The active tier is the current port; ?preview=sky|space lets one running
 // container show a higher tier's panels for review. Hierarchical scoping:
@@ -314,6 +316,22 @@ async function refresh(){try{const [ready,b,rt]=await Promise.all([fetch('/ready
   $('runtime').innerHTML=rt?[`<b>${esc(rt.mode)}</b>`,esc(rt.state_backend),`${rt.tool_count??'—'} tools`,
     `${esc(rt.version)} · ${UI_BUILD}`].map(x=>`<div class="breaker">${x}</div>`).join(''):
     `<div class="breaker">runtime unavailable · ${UI_BUILD}</div>`;
+  // Build & durable work from the ACP metrics; active work reads great, idle expected.
+  const gb=rt?.grok_build||{},inflight=gb.in_flight||0;
+  $('build').innerHTML=[
+    `<b>${esc(gb.transport||'—')}</b>`,
+    `<span class="lv-${inflight?'great':'expected'}">in-flight ${inflight}</span>`,
+    `ready workers ${gb.ready_workers??'—'}`,
+    `completed turns ${gb.completed_turns??0}`,
+  ].map(x=>`<div class="breaker">${x}</div>`).join('');
+  // Policy & governance: spend-enabling settings read warning; safe defaults expected.
+  const ra=rt?.routing_advisor||{},se=rt?.semantic_evaluation||{},sp=rt?.api_spend_enforcement||{},au=rt?.autonomy||{};
+  $('policy').innerHTML=`<span>Routing</span><b class="lv-expected">live discovery · ${ra.automatic_model_experiments?'auto-experiments ON':'no auto-experiments'}</b>
+    <span>Semantic eval</span><b class="lv-${se.automatic_judge_spend?'warning':'expected'}">${esc(se.mode||'—')} · ${se.automatic_judge_spend?'auto-judge spend':'no auto spend'}</b>
+    <span>API spend</span><b class="lv-${sp.owner_enabled?'warning':'expected'}">${sp.owner_enabled?'metered enabled':'metered off'}${sp.per_request_confirmation_required?' · confirm each':''}</b>
+    <span>Autonomy</span><b class="lv-expected">${au.enabled?'on':'off'}${au.mission_v2?' · mission v2':''} · verify ${au.verify_literal?'literal':'off'}</b>
+    <span>Needle</span><b class="lv-${rt?.needle_active?'warning':'expected'}">${rt?.needle_active?'ACTIVE':'inactive'}</b>
+    <span>Recovery</span><b class="lv-expected">${esc(rt?.completion_recovery||'—')}</b>`;
   const planeUse={};(t.planes||[]).forEach(x=>planeUse[x.name]={calls:x.calls,cost:x.cost_usd});
   $('routing').innerHTML=['cli','api','local'].map(p=>planeTile(p,ready.planes?.[p],planeUse[p])).join('');
   // Connect panel: known IDE clients cross-referenced with live caller telemetry.

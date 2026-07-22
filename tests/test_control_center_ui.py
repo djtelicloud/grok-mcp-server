@@ -71,6 +71,15 @@ def test_connect_panel_and_plane_usage() -> None:
     assert "XAI_API_KEY" not in html and "api_key" not in html
 
 
+def test_governance_and_build_panels() -> None:
+    # Smart adds from real /runtimez data: build/durable metrics and the
+    # policy/governance flags (spend-enabling reads warning).
+    html = DASHBOARD.read_text(encoding="utf-8")
+    assert 'id="build"' in html and 'id="policy"' in html
+    assert "grok_build" in html and "api_spend_enforcement" in html
+    assert "routing_advisor" in html and "automatic_judge_spend" in html
+
+
 def test_tier_nav_renders_all_three_surfaces() -> None:
     # Sponsor decision: the unified switcher shows all three tiers and links
     # each to its own surface port (public 4765, sky 4768, space 4769). Higher
