@@ -49,6 +49,20 @@ def test_tier_nav_renders_all_three_surfaces() -> None:
         assert token in html
 
 
+def test_tier_scoped_panels_present_and_gated() -> None:
+    # Sky/Space panels exist but are display:none by default; JS reveals them
+    # only when the active tier warrants (hierarchical scoping). Sample data is
+    # clearly marked and no sealed READY / non-null gate_id is invented.
+    html = DASHBOARD.read_text(encoding="utf-8")
+    assert 'id="sky-tier"' in html and 'id="space-tier"' in html
+    assert html.count('style="display:none"') >= 2
+    for panel in ("4-lane swarm grid", "Claim plane", "security monitor"):
+        assert panel.lower() in html.lower()
+    assert "SAMPLE" in html
+    assert "gate_id null" in html.lower() or "gate_id" in html
+    assert "sealed READY" not in html or "no sealed READY" in html
+
+
 def test_runtimez_serves_public_tool_registry() -> None:
     from unigrok_public.server import PUBLIC_TOOLS, _runtime_public_tools
 

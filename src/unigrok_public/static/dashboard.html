@@ -54,6 +54,20 @@
     @media(max-width:950px){.planes{grid-template-columns:1fr}}
     .tool-flag{font-size:10px;font-weight:800;letter-spacing:.08em;border-radius:99px;padding:2px 8px;
       color:#ffc1ca;background:#2a1218;margin-left:8px}td.wrap{white-space:normal;min-width:260px;color:var(--muted)}
+    .tier-section{margin-top:16px}
+    .tierhead{display:flex;align-items:center;gap:10px;font-weight:800;letter-spacing:.06em;font-size:13px;color:var(--text)}
+    .sample{font-size:10px;font-weight:800;letter-spacing:.08em;border-radius:99px;padding:2px 9px;color:var(--amber);background:#2e2412}
+    .tiernote{color:var(--muted);font-weight:600;font-size:12.5px;margin-left:auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .lanes{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:14px}
+    .lane{border:1px solid var(--line);border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:8px;min-width:0}
+    .lane-tag{font-size:10px;font-weight:800;letter-spacing:.1em;color:var(--cyan)}
+    .lane-owner{font-weight:750;font-size:14px}
+    .lane-state{font-size:11px;font-weight:750;border-radius:99px;padding:3px 10px;align-self:flex-start;background:#141c33;color:var(--muted)}
+    .lane-state.active{color:#baf7c7;background:#12291a}.lane-state.probe{color:#bcd8ff;background:#152541}
+    .lane-detail{color:var(--muted);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    @media(max-width:950px){.lanes{grid-template-columns:1fr 1fr}}
+    .kv{display:grid;grid-template-columns:auto 1fr;gap:8px 18px;margin-top:14px;font-size:13.5px}
+    .kv span{color:var(--muted)}.kv b{font-weight:650;font-variant-numeric:tabular-nums}
     @media(max-width:950px){.card,.card.wide{grid-column:span 6}}@media(max-width:620px){header{display:block}
       .status{justify-content:flex-start;margin-top:16px}.card,.card.wide{grid-column:1/-1}}
   </style>
@@ -83,29 +97,106 @@
     <article class="card full"><div class="label">Recent receipts</div><div class="scroll"><table><thead><tr>
       <th>Time</th><th>ID</th><th>Caller</th><th>Kind</th><th>Route</th><th>Plane</th><th>Model</th><th>Latency</th><th>Cost</th>
       <th>Fallback</th><th>Stop</th><th>Verified</th></tr></thead><tbody id="recent"></tbody></table></div></article>
-  </section><div class="footer">Refreshes every 10 seconds · telemetry stores receipts and explicit outcomes, never prompts.</div>
+  </section>
+
+  <section class="grid tier-section" id="sky-tier" style="display:none">
+    <article class="card full tierhead"><span class="tier-dot sky"></span>@skygrok Sky Observer · Tier 2
+      <span class="sample">SAMPLE</span><span class="tiernote">panels awaiting live wiring on :4768</span></article>
+    <article class="card full"><div class="label">4-lane swarm grid</div><div id="swarmgrid" class="lanes"></div></article>
+    <article class="card wide"><div class="label">Circuit breakers &amp; trip rates</div><div id="skybreakers" class="breakers"></div></article>
+    <article class="card wide"><div class="label">P95 / P50 latency distribution</div><div class="scroll"><table><thead><tr>
+      <th>Port</th><th>Surface</th><th>P50</th><th>P95</th></tr></thead><tbody id="latdist"></tbody></table></div></article>
+  </section>
+
+  <section class="grid tier-section" id="space-tier" style="display:none">
+    <article class="card full tierhead"><span class="tier-dot space"></span>@spacegrok Space Awareness · Tier 3 · SPACE=DARK
+      <span class="sample">SAMPLE</span><span class="tiernote">read-only monitor · gate_id null · ABSTAIN OPEN preserved</span></article>
+    <article class="card full"><div class="label">Claim plane &amp; verification proof matrix</div><div class="scroll"><table><thead><tr>
+      <th>Tip</th><th>Claim</th><th>Predicate</th><th>Proof (sha256)</th><th>Verified</th></tr></thead><tbody id="claimmatrix"></tbody></table></div></article>
+    <article class="card wide"><div class="label">Memory &amp; RAG index telemetry</div><div id="ragstats" class="kv"></div></article>
+    <article class="card wide"><div class="label">Space awareness security monitor</div><div id="spacesec" class="kv"></div></article>
+  </section>
+
+  <div class="footer">Refreshes every 10 seconds · telemetry stores receipts and explicit outcomes, never prompts.</div>
 </main><script>
 const $=id=>document.getElementById(id), esc=s=>String(s??'—').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function bars(id,items){const root=$(id),max=Math.max(1,...items.map(x=>x.calls||0));root.innerHTML=items.length?
   items.slice(0,8).map(x=>`<div class="bar-row"><div class="bar-label" title="${esc(x.name)}">${esc(x.name)}</div>
   <div class="track"><div class="fill" style="width:${100*(x.calls||0)/max}%"></div></div><div class="value">${x.calls||0}</div></div>`).join(''):
   '<div class="empty">No samples yet.</div>'}
-const UI_BUILD='unigrok-ui-v1.1.0-r3';
-// Unified 3-tier switcher: each tab links to its own surface on the same host,
-// active tab derived from the current port. Higher tiers still enforce their
-// own auth on arrival — this is navigation, not access.
+const UI_BUILD='unigrok-ui-v1.1.0-r4';
+// Unified 3-tier switcher: each tab links to its own surface on the same host.
+// The active tier is the current port; ?preview=sky|space lets one running
+// container show a higher tier's panels for review. Hierarchical scoping:
+// each tier renders its own panels plus every lower tier's. Higher tiers still
+// enforce their own auth on arrival — this is navigation, not access.
 const TIERS=[
   {id:'public',label:'@grok Public Core',port:'4765'},
   {id:'sky',label:'@skygrok Sky Observer',port:'4768'},
   {id:'space',label:'@spacegrok Space Awareness',port:'4769'},
 ];
+const LEVEL={public:0,sky:1,space:2};
 const herePort=location.port||(location.protocol==='https:'?'443':'80');
-const activePort=TIERS.some(t=>t.port===herePort)?herePort:'4765';
+const preview=new URLSearchParams(location.search).get('preview');
+const portTier=(TIERS.find(t=>t.port===herePort)||{}).id||'public';
+const activeTier=(preview&&LEVEL[preview]!=null)?preview:portTier;
+const tierLevel=LEVEL[activeTier];
 document.getElementById('tiernav').insertAdjacentHTML('beforeend',TIERS.map(t=>{
   const href=`${location.protocol}//${location.hostname}:${t.port}/ui/`;
-  return `<a class="tier-tab${t.port===activePort?' active':''}" href="${href}">`+
+  return `<a class="tier-tab${t.id===activeTier?' active':''}" href="${href}">`+
     `<span class="tier-dot ${t.id}"></span>${t.label}</a>`;
 }).join(''));
+// Tier-scoped panels: sample structure from the plan, clearly marked; live data
+// wires on the real surfaces (private overlay), never on the public core.
+const SKY={
+  lanes:[
+    {tag:'L1 · TRAIN',owner:'Claude',state:'active',detail:'r2 ckpt100 · 120/120'},
+    {tag:'L2 · MEASURE',owner:'Codex',state:'idle',detail:'snapshot deploys · on GO'},
+    {tag:'L3 · PROBE',owner:'Antigravity Gemini',state:'probe',detail:'ui-surface probe · ro'},
+    {tag:'L4 · MONITOR',owner:'Cursor Ground Lead',state:'active',detail:'20s diff · manifests'},
+  ],
+  breakers:[
+    {name:'cli',open:false,failures:0,trips:0},
+    {name:'api',open:false,failures:0,trips:0},
+    {name:'local',open:false,failures:0,trips:0},
+  ],
+  latency:[
+    {port:'4765',surface:'public core',p50:'—',p95:'—'},
+    {port:'4768',surface:'sky observer',p50:'—',p95:'—'},
+    {port:'4775',surface:'public alt',p50:'—',p95:'—'},
+  ],
+};
+const SPACE={
+  claims:[
+    {tip:'b796776',claim:'READY · claim plane',pred:'bounded verifiable domain',proof:'sample — wires from receipts',ok:'claim'},
+    {tip:'d08210ca',claim:'r2 ckpt100 scorecard',pred:'Wilson L ≥ 0.969',proof:'sample — wires from SCORECARD.json',ok:'claim'},
+    {tip:'—',claim:'all-traffic ABSTAIN',pred:'floor OPEN',proof:'gate_id null',ok:'open'},
+  ],
+};
+function renderSky(){
+  $('swarmgrid').innerHTML=SKY.lanes.map(l=>`<div class="lane"><span class="lane-tag">${esc(l.tag)}</span>
+    <span class="lane-owner">${esc(l.owner)}</span><span class="lane-state ${l.state}">${esc(l.state)}</span>
+    <span class="lane-detail" title="${esc(l.detail)}">${esc(l.detail)}</span></div>`).join('');
+  $('skybreakers').innerHTML=SKY.breakers.map(b=>`<div class="breaker ${b.open?'open':''}"><b>${esc(b.name)}</b> · ${b.open?'OPEN':'closed'} · failures ${b.failures} · trips ${b.trips}</div>`).join('');
+  $('latdist').innerHTML=SKY.latency.map(r=>`<tr><td>${esc(r.port)}</td><td>${esc(r.surface)}</td><td>${esc(r.p50)}</td><td>${esc(r.p95)}</td></tr>`).join('');
+}
+function renderSpace(rt){
+  $('claimmatrix').innerHTML=SPACE.claims.map(c=>`<tr><td>${esc(c.tip)}</td><td>${esc(c.claim)}</td><td>${esc(c.pred)}</td>
+    <td class="wrap">${esc(c.proof)}</td><td>${c.ok==='open'?'ABSTAIN':'claim-plane'}</td></tr>`).join('');
+  const backend=rt?.state_backend||'sqlite',tools=rt?.tool_count??'—';
+  $('ragstats').innerHTML=`<span>State backend</span><b>${esc(backend)}</b>
+    <span>RAG mode</span><b>local_sqlite_knowledge <span class="sample">sample</span></b>
+    <span>Stored facts</span><b>— <span class="sample">wires from /runtimez</span></b>
+    <span>xAI collections</span><b>label-only · never named</b>
+    <span>Tools exposed</span><b>${esc(String(tools))}</b>`;
+  $('spacesec').innerHTML=`<span>Policy</span><b>SPACE=DARK</b>
+    <span>Write access</span><b>zero-write · read-only monitor</b>
+    <span>Claim plane</span><b>evidence-only · no sealed READY</b>
+    <span>gate_id</span><b>null (preserved)</b>
+    <span>Diff</span><b>DIFF_OFF</b>`;
+}
+$('sky-tier').style.display=tierLevel>=1?'':'none';
+$('space-tier').style.display=tierLevel>=2?'':'none';
 function planeTile(name,p){const on=!!p?.ready;
   const detail=name==='local'
     ? (p?.configured?`runtime ${p.runtime_up?'up':'down'} · fail-closed helper`:'not configured · fail-closed')
@@ -132,6 +223,8 @@ async function refresh(){try{const [ready,b,rt]=await Promise.all([fetch('/ready
   $('tools').innerHTML=tools.length?tools.map(t=>`<tr><td>${esc(t.name)}${t.destructive?'<span class="tool-flag">DESTRUCTIVE</span>':''}</td>
     <td>${esc(t.plane)}</td><td>${esc(t.billing_class)}</td><td>${esc(t.confirmation_policy)}</td>
     <td class="wrap">${esc(t.purpose)}</td></tr>`).join(''):'<tr><td colspan="5" class="empty">Registry unavailable.</td></tr>';
+  if(tierLevel>=1)renderSky();
+  if(tierLevel>=2)renderSpace(rt);
   const bs=b.circuit_breakers||{};$('breakers').innerHTML=Object.keys(bs).length?Object.entries(bs).map(([k,v])=>
     `<div class="breaker ${v.open?'open':''}"><b>${esc(k)}</b> · ${v.open?'OPEN':'closed'} · failures ${v.failures} · trips ${v.trips}</div>`).join(''):'<div class="empty">No provider calls recorded.</div>';
   $('recent').innerHTML=(t.recent||[]).map(r=>`<tr><td>${esc((r.created_at||'').slice(11,19))}</td><td>${r.id}</td><td>${esc(r.caller)}</td>
