@@ -4,6 +4,12 @@ All notable changes to the public UniGrok gateway.
 
 ## [Unreleased]
 
+### Added
+- Experimental `gemmagrok-local` Compose profile and standalone MCP helper for an
+  explicitly selected, operator-owned local model runtime. The helper is loopback-only,
+  exposes `chat`/`status`, receives no Grok credentials, and is not part of automatic
+  `@grok` recovery.
+
 ### Changed
 - Runtime limits that formerly behaved as fixed constants are now clamped environment
   controls and are reported by discovery/runtime receipts: agent sync window and turn
