@@ -16,6 +16,7 @@
 - Preserve CLI isolation in `unigrok_public.server`: disposable empty workspace,
   disposable configuration home, OAuth-only subprocess environment, and denied local
   file/shell/edit/MCP capabilities.
+- Factory key homes: Ground `../.env` (repo root); Sky/Space under `~/.docker/agentixos/*`. Never `grok-mcp-server/.env`.
 - Pass only `XAI_API_KEY` into the API process. Never pass it to the CLI child, never
   print it, and never place it in an IDE MCP configuration.
 - Do not hard-code or allowlist Grok language model ids. Discover CLI and API catalogs

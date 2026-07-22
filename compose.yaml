@@ -9,6 +9,7 @@ services:
     container_name: unigrok
     ports:
       - "127.0.0.1:${UNIGROK_PORT:-4765}:8080"
+    # Ground keys: inject ONLY XAI_API_KEY via compose --env-file (host SoT), not full env dump.
     environment:
       UNIGROK_HOST: 0.0.0.0
       PORT: 8080
@@ -47,7 +48,13 @@ services:
       UNIGROK_MAX_WORKSPACE_CONTEXT_CHARS: ${UNIGROK_MAX_WORKSPACE_CONTEXT_CHARS:-100000}
       UNIGROK_ENABLE_METERED_API: ${UNIGROK_ENABLE_METERED_API:-true}
       UNIGROK_API_MODEL: ${UNIGROK_API_MODEL:-}
-      XAI_API_KEY: ${XAI_API_KEY:-}
+      # Inference key allowlist (first non-empty wins for XAI_API_KEY).
+      # Never inject multi-provider C2 keys here.
+      XAI_PLANE_API: ${XAI_PLANE_API:-}
+      XAI_API_KEY_SKY_INFERENCE: ${XAI_API_KEY_SKY_INFERENCE:-}
+      XAI_API_KEY_GROUND: ${XAI_API_KEY_GROUND:-}
+      XAI_API_KEY_UNIGROK_GROUND: ${XAI_API_KEY_UNIGROK_GROUND:-}
+      XAI_API_KEY: ${XAI_API_KEY:-${XAI_API_KEY_SKY_INFERENCE:-${XAI_API_KEY_GROUND:-${XAI_API_KEY_UNIGROK_GROUND:-}}}}
     volumes:
       - grok-cli-auth:/home/appuser/.grok
       - grok-public-state:/state

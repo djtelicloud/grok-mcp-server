@@ -366,7 +366,23 @@ UNIGROK_LAYER = _normalize_layer_name(os.environ.get("UNIGROK_LAYER", ""))
 UNIGROK_LAYER_COLLECTION = os.environ.get("UNIGROK_LAYER_COLLECTION", "").strip()
 
 # --- offline local plane constants ---
-LOCAL_RUNTIME_URL = os.environ.get("UNIGROK_LOCAL_RUNTIME_URL", "").strip()
+def _resolve_local_runtime_url() -> str:
+    """Local plane is automatic: default Docker Model Runner unless disabled.
+
+    Explicit ``UNIGROK_LOCAL_RUNTIME_URL`` always wins. When unset, default to
+    host DMR at ``host.docker.internal:12434`` unless ``UNIGROK_LOCAL_AUTO`` is
+    off/false/0. Probe still fail-closes if the runtime is absent.
+    """
+    explicit = os.environ.get("UNIGROK_LOCAL_RUNTIME_URL", "").strip()
+    if explicit:
+        return explicit
+    mode = os.environ.get("UNIGROK_LOCAL_AUTO", "on").strip().lower()
+    if mode in {"0", "false", "off", "no"}:
+        return ""
+    return "http://host.docker.internal:12434"
+
+
+LOCAL_RUNTIME_URL = _resolve_local_runtime_url()
 LOCAL_PROBE_TIMEOUT_SECONDS = _bounded_int("UNIGROK_LOCAL_PROBE_TIMEOUT", 5, 1, 60)
 _LOCAL_PROBE_BACKENDS = None
 LOCAL_DIRECT_TALK_MODE = os.environ.get("UNIGROK_LOCAL_DIRECT_TALK_MODE", "").strip().lower()

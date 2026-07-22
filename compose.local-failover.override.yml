@@ -1,0 +1,8 @@
+services:
+  grok-mcp:
+    image: ${UNIGROK_IMAGE:-unigrok:public-main-b796776}
+    environment:
+      UNIGROK_LOCAL_RUNTIME_URL: ${UNIGROK_LOCAL_RUNTIME_URL:-http://host.docker.internal:12434}
+      UNIGROK_LOCAL_PROBE_TIMEOUT: ${UNIGROK_LOCAL_PROBE_TIMEOUT:-5}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
