@@ -2908,6 +2908,15 @@ async def _run_unified(
     max_output_tokens: int | None = None,
     nonanswer_recovery: bool = True,
 ) -> dict[str, Any]:
+    if DIRECT_TALK_ACTIVE:
+        return await _serve_local_direct_noncertified(
+            prompt,
+            system_context=system_context,
+            allow_web=allow_web,
+            allow_x_search=allow_x_search,
+            allow_code=allow_code,
+        )
+
     # Silent-think doctrine (compute != print): reasoning effort stays high while a
     # tiny output cap is applied to KNOWN-SMALL emits (votes) so metered API output
     # tokens do not balloon. CLI is flat-rate and has no output cap, so this only
@@ -7033,10 +7042,6 @@ def main() -> None:
     uvicorn.run(app, host=mcp.settings.host, port=mcp.settings.port)
 
 
-if __name__ == "__main__":
-    main()
-
-
 async def _apply_continue_bound(result: dict[str, Any]) -> dict[str, Any]:
     """§5.5: shed/non_answer → status=continue with bounded continue_count.
 
@@ -7720,7 +7725,7 @@ async def _serve_local_direct_noncertified(
         )
     messages.append({"role": "user", "content": prompt})
 
-    _breaker_before_call("local", LOCAL_DIRECT_MODEL)
+    admission = _breaker_before_call("local", LOCAL_DIRECT_MODEL)
     try:
         got = await _openai_compat_chat(
             LOCAL_RUNTIME_URL,
@@ -7729,9 +7734,12 @@ async def _serve_local_direct_noncertified(
             max_tokens=None,
             timeout=BUILD_TIMEOUT_SECONDS,
         )
-        _breaker_success("local", LOCAL_DIRECT_MODEL)
+        _breaker_success(admission)
+    except asyncio.CancelledError:
+        _breaker_abandon_probe(admission)
+        raise
     except Exception:
-        _breaker_failure("local", LOCAL_DIRECT_MODEL)
+        _breaker_failure(admission)
         env = _stamp(
             {
                 "text": "The local model runtime did not answer; direct talk is degraded.",
@@ -8061,3 +8069,5 @@ def _storm_route_tiers_gated() -> bool:
     return bool(_STORM_429.get("half_open"))
 
 
+if __name__ == "__main__":
+    main()
