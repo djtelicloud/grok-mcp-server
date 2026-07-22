@@ -3,7 +3,7 @@
 Owner: Claude lane. This lane owns the pipeline through the Docker gate. Codex
 handoff for public release happens only after the sponsor approves the UI work.
 
-Reference build: `unigrok-ui-v1.1.0-r9` (the build pin shown in the Runtime card).
+Reference build: `unigrok-ui-v1.1.0-r13` (the build pin shown in the Runtime card).
 
 ## Purpose
 
@@ -53,9 +53,9 @@ navigation, not access.
 
 | Tier | Port | Panels |
 | --- | --- | --- |
-| `@grok` Public Core | 4765 | metric tiles, routing planes, plane/kind/route/model/caller/fallback group-bys, runtime, tool surface, receipts, breakers |
-| `@skygrok` Sky Observer | 4768 | 4-lane swarm grid, breakers + trip rates, P95 latency |
-| `@spacegrok` Space Awareness | 4769 | claim-plane by-state + proof matrix, memory/RAG, SPACE=DARK security monitor |
+| `@grok` Public Core | 4765 | metric tiles, routing planes (+per-plane usage), plane/kind/route/model/caller/fallback group-bys, runtime, build & durable work, policy & governance, connect-an-IDE, tool surface, receipts, breakers |
+| `@skygrok` Sky Observer | 4768 | 4-lane swarm grid, breakers + trip rates, P95 latency, GitHub reviews (Grok-score ring + PR standouts), live-run streaming |
+| `@spacegrok` Space Awareness | 4769 | claim-plane by-state + proof matrix, memory/RAG, SPACE=DARK security monitor, sealed report card, linked devices |
 
 Tier data on sky/space is **sample**, badged, and wires to live data only on the
 private-overlay surfaces — never on the public core (`AGENTS.md` boundary).
@@ -128,6 +128,25 @@ wins over any doc): page `#080b14` + nebula, card gradient `145deg #141c33e8 →
 5. No sealed READY and no non-null `gate_id` is ever invented; `gate_id null` and
    `ABSTAIN OPEN` are preserved on the Space tier.
 
+## Forge console fold
+
+The legacy 4766 console's features are absorbed into this design:
+
+- **Live on public**: per-plane usage (calls + recorded cost on the routing
+  card), connect-an-IDE (known clients cross-referenced with live caller
+  telemetry, copy-to-clipboard **non-secret** MCP config — url + `X-Client-ID`
+  only, endpoint from `/runtimez`), build & durable work (`grok_build` ACP
+  metrics; active in-flight reads great), policy & governance (routing advisor,
+  semantic-eval, API-spend, autonomy, needle, recovery — **spend-enabling
+  settings read warning amber**, safe defaults expected blue).
+- **Sample shells on sky**: GitHub reviews (Grok-score ring + PR standout table,
+  state-colored) and the live-run streaming strip (SSE depth/tool/cost events;
+  the Run trigger stays disabled until the contributor surface wires it — a
+  spend-capable POST is an operate feature, never faked as telemetry).
+- **Sample shells on space**: sealed report card (headline floor + Wilson
+  fair-range table; small samples stay in the small print) and linked devices
+  (one-time-code enrollment; mint/revoke wire to the control plane).
+
 ## Phases
 
 - **P0 — Truth** ✓ readyz-driven pills + regression test.
@@ -135,8 +154,11 @@ wins over any doc): page `#080b14` + nebula, card gradient `145deg #141c33e8 →
 - **P2 — Panes** ✓ routing planes, tools, tiers, receipt columns.
 - **P3 — Group-by + color** ✓ chart-card-first, severity standouts, level→color
   palette, per-panel coding, metric thresholds, legend.
+- **P3.5 — Forge fold** ✓ connect/usage/build/governance live; contributor
+  shells (reviews, live run, report card, devices) sample-badged on sky/space.
 - **P4 — Handoff (gated)** — after sponsor approval: Codex package for public
-  release. Not before.
+  release; private-overlay wiring for the sky/space shells lands in a local
+  session against the intelligence repo. Not before.
 
 ## Verification gate
 
