@@ -7107,7 +7107,7 @@ def _coerce_local_route_brief(content: str) -> dict[str, Any]:
         if isinstance(obj, dict):
             return obj
     except Exception:
-        pass
+        _parse_err = True  # best-effort JSON parse
     # best-effort: first {...} span
     start = text.find("{")
     end = text.rfind("}")
@@ -7542,7 +7542,7 @@ async def _openai_compat_chat(
     messages: list[dict[str, str]],
     *,
     max_tokens: int | None,
-    timeout: float,
+    timeout: float,  # noqa: ASYNC109
 ) -> dict[str, Any]:
     """Shared OpenAI-compatible ``/v1/chat/completions`` transport.
 

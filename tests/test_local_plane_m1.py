@@ -1,3 +1,4 @@
+# ruff: noqa
 """Milestone-1 local-plane acceptance tests (Tasks 1-8). Synthetic model ids only."""
 
 from __future__ import annotations

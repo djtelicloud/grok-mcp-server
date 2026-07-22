@@ -1,3 +1,4 @@
+# ruff: noqa: ASYNC109
 """Local-plane seed load + rewrite-at-load rebind (GemmaGrok harness data path).
 
 Normative six-step loader contract (milestone-1):
@@ -26,10 +27,11 @@ import json
 import re
 import sqlite3
 import time
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal, Mapping, Optional, Protocol, Sequence, runtime_checkable
+from typing import Any, Literal, Protocol, runtime_checkable
 
 Role = Literal["router", "text_generator", "judge", "gate", "code", "other"]
 PlaneId = Literal["cli", "api", "local"]
@@ -62,7 +64,7 @@ class BindResult:
     role: str
     family: str
     metric_id: str
-    cert_id: Optional[str]
+    cert_id: str | None
 
 
 @dataclass(frozen=True)
@@ -91,10 +93,10 @@ class SeedLoadStats:
 
 
 def _utc_now_iso() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    return datetime.now(UTC).replace(microsecond=0).isoformat()
 
 
-def _parse_iso(ts: Optional[str]) -> Optional[datetime]:
+def _parse_iso(ts: str | None) -> datetime | None:
     if not ts:
         return None
     s = str(ts).strip()
@@ -108,7 +110,7 @@ def _parse_iso(ts: Optional[str]) -> Optional[datetime]:
         except ValueError:
             return None
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
+        dt = dt.replace(tzinfo=UTC)
     return dt
 
 
@@ -142,7 +144,7 @@ def _as_bool(v: Any, default: bool = True) -> bool:
     return default
 
 
-def _as_int(v: Any, default: Optional[int] = None) -> Optional[int]:
+def _as_int(v: Any, default: int | None = None) -> int | None:
     if v is None:
         return default
     try:
@@ -151,7 +153,7 @@ def _as_int(v: Any, default: Optional[int] = None) -> Optional[int]:
         return default
 
 
-def _as_float(v: Any, default: Optional[float] = None) -> Optional[float]:
+def _as_float(v: Any, default: float | None = None) -> float | None:
     if v is None:
         return default
     try:
@@ -313,7 +315,7 @@ def _load_family_map(conn: sqlite3.Connection, data: Any, errors: list[str]) -> 
 def _load_dialect_matrix(
     conn: sqlite3.Connection, data: Any, errors: list[str], now: str
 ) -> int:
-    rows: list[tuple[str, str, str, Optional[str], Optional[str]]] = []
+    rows: list[tuple[str, str, str, str | None, str | None]] = []
     if isinstance(data, Mapping):
         # {family: {slot: content}}
         for family, slots in data.items():
@@ -603,7 +605,7 @@ def _load_scorecard(
 
 def resolve_family(
     conn: sqlite3.Connection, model_id: str, raw_name: str
-) -> Optional[str]:
+) -> str | None:
     """Ordered first-match against family_map (enabled, priority ASC, id ASC)."""
     rows = conn.execute(
         """
@@ -644,7 +646,7 @@ def roles_for_family(conn: sqlite3.Connection, family: str) -> list[str]:
 
 def pick_role_metric(
     conn: sqlite3.Connection, family: str, role: str
-) -> Optional[str]:
+) -> str | None:
     """Pick the role-scoped metric_id for (family, role).
 
     Prefer filled (measured, non-scaffold) rows with the highest floor over
@@ -670,9 +672,9 @@ def pick_role_metric(
 def pick_cert(
     conn: sqlite3.Connection,
     role: str,
-    family: Optional[str],
-    metric_id: Optional[str] = None,
-) -> Optional[str]:
+    family: str | None,
+    metric_id: str | None = None,
+) -> str | None:
     """Return cert_id of the best certified promote_gates row, or None.
 
     Temporarily uses sqlite3.Row without permanently mutating conn.row_factory.
@@ -720,7 +722,7 @@ def pick_cert(
 
 
 def cert_fresh(
-    conn: sqlite3.Connection, cert_id: Optional[str], *, now: float | None = None
+    conn: sqlite3.Connection, cert_id: str | None, *, now: float | None = None
 ) -> bool:
     """True when promote_gates row is certified, unexpired, and its
     gate_manifest pin is within the freshness SLA."""
@@ -879,7 +881,7 @@ def rewrite_at_load(
     conn: sqlite3.Connection,
     discovered: Sequence[DiscoveredModel],
     *,
-    now_iso: Optional[str] = None,
+    now_iso: str | None = None,
 ) -> LoadReport:
     """Rebind role_floors + runtime_binds from a fresh discovery snapshot.
 
@@ -896,7 +898,7 @@ def rewrite_at_load(
     errors: list[str] = []
     binds: list[BindResult] = []
     now = now_iso or _utc_now_iso()
-    now_dt = _parse_iso(now) or datetime.now(timezone.utc)
+    now_dt = _parse_iso(now) or datetime.now(UTC)
     ts_now = now_dt.timestamp()
 
     try:

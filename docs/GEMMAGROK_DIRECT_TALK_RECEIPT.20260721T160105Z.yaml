@@ -1,0 +1,89 @@
+schema: gemmagrok.named_peer_live.v1
+receipt_id: 20260721T160105Z-gemmagrok-direct-talk
+created_utc: 20260721 160105Z
+creator: claude
+scope: NAMED_PEER_DIRECT_TALK_NONCERTIFIED
+result: LIVE_AS_NAMED_NONCERTIFIED_PEER
+ruling_ref: "Codex T9 named-peer contract (thread 019f8555, 2026-07-21)"
+
+runtime:
+  repo: ~/Documents/agentixai/grok-mcp/grok-mcp-server
+  head: fbbec37f1a8717b48390b5da2151a29e147f7a10
+  working_tree: dirty
+  server_py_sha256: 5a6187ce6135a9750338d455185343ee22391364ca7c5fceb3fc0f9e6c10755b
+  image: unigrok:gemmagrok-direct-candidate
+  image_id: sha256:4657d02a272bdccd90b1537aed17e71b97062d7ddec8e83671ff89c0e6599422
+  image_build: offline overlay (FROM unigrok:1.1.0; COPY src/) — no network, no floor data
+
+backend:
+  runtime_url: http://host.docker.internal:12434
+  transport: openai_compat /v1/chat/completions (HTTP 200 observed)
+  direct_model_alias: gemma4
+  direct_model_id: docker.io/ai/gemma4:latest
+  provider: Docker Model Runner (host)
+
+deployment:
+  container: unigrok-gemmagrok
+  port: 127.0.0.1:4770 -> 8080
+  state_volume: unigrok-gemmagrok-direct-state (fresh, dedicated)
+  cli_auth_mount: none
+  xai_env_file: none
+  hardening: [cap_drop ALL, no-new-privileges]
+  replaced: stale xAI-backed unigrok-gemma (unigrok:sky-layer-patch) on :4770 — STOPPED (kept, not removed)
+
+mcp_identity:
+  serverInfo_name: GemmaGrok
+  version: "1.1.0"
+  tools_agent_chat_present: true
+  note: xAI-plane tools (web_search, x_search, generate_*, xai_*, remote_code_execution) remain LISTED but fail closed (no creds + metered disabled). Trimming the advertised surface in direct-talk mode is a follow-up for Codex's gate.
+
+live_evidence:
+  nonce: gg-20260721T160001Z-7f3a
+  chat_result_text: "gg-20260721T160001Z-7f3a"   # exact nonce echo -> a real model generated it
+  chat_contains_nonce: true
+  agent_result_text: "I am a large language model, identified by the token gg-20260721T160001Z-7f3a."
+  agent_contains_nonce: true
+  path: _run_unified -> _serve_local_direct_noncertified -> _openai_compat_chat (POST 200)
+
+isolation:
+  resolve_plane_reached: false          # chokepoint returns before _resolve_plane
+  xai_key_present: false
+  metered_api_enabled: false
+  cli_path: /bin/false
+  auth_path: /nonexistent/grok-auth.json
+  fallback_occurred: false
+  certified_local_plane_ready: false    # LOCAL_READY False -> direct-talk independent of floors
+  local_binds_used: none
+  floor_role: null
+  floor_metric_ids: []
+  capability_requests_fail_closed: true # web/x/code/media -> unsupported, never xAI (unit-tested)
+
+grok_at_4765_untouched:
+  container: unigrok
+  image: unigrok:team-ready-candidate
+  identity: "UniGrok xAI Gateway"
+  status: "Up 16h (healthy)"
+  changed_by_this_work: false
+
+tests:
+  full_suite: "235 passed (226 baseline + 6 new direct-talk + 3 no-failover guard)"
+  new_test_file: tests/test_local_direct_talk.py
+  no_failover_guard: tests/test_no_gemmagrok_default_failover.py PASSES (literal 'gemmagrok' kept out of server.py source)
+
+non_claims:
+  gate_id: null
+  all_traffic_abstain: OPEN
+  certification_status: NON_CERTIFIED
+  failover_eligible: false
+  is_default_failover_for_public_grok: false
+  readiness_claim: false
+  note: >
+    A pass means ONLY "live as a named NON-CERTIFIED peer." It is NOT certified local-plane
+    readiness, NOT bounded-domain failover evidence, and NOT authorization to add GemmaGrok to
+    public @grok recovery. Floor seeding, gate_id, ABSTAIN closure, and failover enrollment
+    remain David-only.
+
+ownership_followups:
+  codex: contract review + land the code gate; decide xAI-tool-surface trimming in direct-talk mode
+  cursor: independent named-peer dogfood
+  david: floor seeding / gate_id / ABSTAIN / @grok failover enrollment (all still his)
