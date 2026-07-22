@@ -10,6 +10,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from . import local_plane_loader
+
 SESSION_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
 SCOPE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
 TERM_PATTERN = re.compile(r"[A-Za-z0-9_]{2,}")
@@ -373,9 +375,8 @@ class PublicStateStore:
                 """
             )
 
-            schema_local = Path(__file__).with_name("schema_local_plane.sql")
-            if schema_local.is_file():
-                connection.executescript(schema_local.read_text(encoding="utf-8"))
+            self._ensure_local_plane_schema_sync(connection)
+            self._seed_local_plane_sync(connection)
 
             columns = {
                 str(row[1])
@@ -397,6 +398,167 @@ class PublicStateStore:
             )
             self._prune_retention_connection(connection)
             connection.commit()
+
+    def _ensure_local_plane_schema_sync(self, connection: sqlite3.Connection) -> None:
+        schema_path = Path(__file__).with_name("schema_local_plane.sql")
+        connection.executescript(schema_path.read_text(encoding="utf-8"))
+        defaults: list[tuple[str, Any]] = [
+            ("local_concurrency_budget", 2),
+            ("breaker_429", {"n": 5, "window_s": 60, "half_open_s": 30}),
+            ("continue_max_per_job_on_shed", 3),
+            ("catalog_ttl_s", 60),
+        ]
+        for key, value in defaults:
+            connection.execute(
+                """
+                INSERT OR IGNORE INTO local_plane_knobs (key, value_json, updated_at)
+                VALUES (?, ?, ?)
+                """,
+                (key, json.dumps(value), utc_now()),
+            )
+
+    def _seed_local_plane_sync(self, connection: sqlite3.Connection) -> None:
+        """Load optional local-plane seed data without making readiness implicit."""
+        seed_dir = Path(
+            os.environ.get("UNIGROK_LOCAL_SEED_DIR")
+            or (Path(__file__).parent / "data" / "local_plane")
+        )
+        if not seed_dir.is_dir():
+            return
+        try:
+            local_plane_loader.load_seed_assets(
+                connection,
+                dialect_matrix_path=seed_dir / "dialect_matrix.json",
+                family_map_path=seed_dir / "family_map.json",
+                scorecard_path=seed_dir / "scorecard.json",
+                gate_manifest_path=seed_dir / "gate_manifest.json",
+                promote_path=seed_dir / "promote.json",
+                traps_path=seed_dir / "traps.json",
+            )
+        except (sqlite3.Error, OSError, ValueError):
+            pass
+
+    async def local_knob(self, key: str, default: Any = None) -> Any:
+        def operation() -> Any:
+            with self._connect() as connection:
+                row = connection.execute(
+                    "SELECT value_json FROM local_plane_knobs WHERE key = ?",
+                    (key,),
+                ).fetchone()
+            if row is None:
+                return default
+            try:
+                return json.loads(str(row["value_json"]))
+            except (TypeError, ValueError, json.JSONDecodeError):
+                return default
+
+        return await self._read(operation)
+
+    async def rewrite_local_binds(self, discovered: list[dict[str, Any]]) -> dict[str, Any]:
+        def operation() -> dict[str, Any]:
+            models = [
+                local_plane_loader.DiscoveredModel(
+                    model_id=str(item["model_id"]),
+                    raw_name=str(item.get("raw_name") or item["model_id"]),
+                    runtime=str(item.get("runtime") or "other"),
+                    adapters=tuple(item.get("adapters") or ()),
+                )
+                for item in discovered or []
+                if isinstance(item, dict) and item.get("model_id")
+            ]
+            with self._connect() as connection:
+                report = local_plane_loader.rewrite_at_load(connection, models)
+            return {
+                "ok": report.ok,
+                "ready_candidate": report.ready_candidate,
+                "missing_min_roles": list(report.missing_min_roles),
+                "errors": list(report.errors),
+                "binds": [
+                    {
+                        "model_id": bind.model_id,
+                        "role": bind.role,
+                        "family": bind.family,
+                        "metric_id": bind.metric_id,
+                        "cert_id": bind.cert_id,
+                    }
+                    for bind in report.binds
+                ],
+            }
+
+        return dict(await self._write(operation))
+
+    async def local_data_ready(self) -> bool:
+        def operation() -> bool:
+            with self._connect() as connection:
+                return bool(local_plane_loader.plane_data_ready(connection))
+
+        return bool(await self._read(operation))
+
+    async def local_bind(self, model_id: str, role: str) -> dict[str, Any] | None:
+        def operation() -> dict[str, Any] | None:
+            with self._connect() as connection:
+                bind = local_plane_loader.get_bind(connection, model_id, role)
+            if bind is None:
+                return None
+            return {
+                "model_id": bind.model_id,
+                "role": bind.role,
+                "family": bind.family,
+                "metric_id": bind.metric_id,
+                "cert_id": bind.cert_id,
+            }
+
+        return await self._read(operation)
+
+    async def local_binds(
+        self,
+        model_id: str | None = None,
+        role: str | None = None,
+    ) -> list[dict[str, Any]]:
+        def operation() -> list[dict[str, Any]]:
+            with self._connect() as connection:
+                binds = local_plane_loader.list_binds(
+                    connection, model_id=model_id, role=role
+                )
+            return [
+                {
+                    "model_id": bind.model_id,
+                    "role": bind.role,
+                    "family": bind.family,
+                    "metric_id": bind.metric_id,
+                    "cert_id": bind.cert_id,
+                }
+                for bind in binds
+            ]
+
+        return list(await self._read(operation))
+
+    async def local_seed_assets(self, seed_dir: str) -> dict[str, Any]:
+        def operation() -> dict[str, Any]:
+            base = Path(seed_dir)
+            with self._connect() as connection:
+                stats = local_plane_loader.load_seed_assets(
+                    connection,
+                    dialect_matrix_path=base / "dialect_matrix.json",
+                    family_map_path=base / "family_map.json",
+                    scorecard_path=base / "scorecard.json",
+                    gate_manifest_path=base / "gate_manifest.json",
+                    promote_path=base / "promote.json",
+                    traps_path=base / "traps.json",
+                )
+            return {
+                "errors": list(stats.errors),
+                "counts": {
+                    "family_map": stats.family_map,
+                    "dialect_profiles": stats.dialect_profiles,
+                    "gate_manifest": stats.gate_manifest,
+                    "promote": stats.promote,
+                    "traps": stats.traps,
+                    "scorecard": stats.scorecard,
+                },
+            }
+
+        return dict(await self._write(operation))
 
     async def initialize(self) -> None:
         if self._initialized:

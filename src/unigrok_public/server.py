@@ -1828,18 +1828,30 @@ async def _probe_cli() -> dict[str, Any]:
 
 
 async def _catalogs(*, refresh: bool = False) -> dict[str, Any]:
+    global _CATALOG_CACHE
     now = time.monotonic()
     cache_key = xai_api.credential_cache_key()
+    if not isinstance(_CATALOG_CACHE, dict):
+        _CATALOG_CACHE = {}
     cached = _CATALOG_CACHE.get(cache_key)
     if not refresh and cached:
         cached_ready = bool(
-            cached[1]["cli"].get("ready") or cached[1]["api"].get("ready")
+            cached[1]["cli"].get("ready")
+            or cached[1]["api"].get("ready")
+            or (cached[1].get("local") or {}).get("ready")
         )
         cache_ttl = CATALOG_TTL_SECONDS if cached_ready else min(5, CATALOG_TTL_SECONDS)
         if now - cached[0] < cache_ttl:
             return cached[1]
-    cli, api = await asyncio.gather(_probe_cli(), xai_api.probe_models())
-    result = {"cli": cli, "api": api, "generated_at_monotonic": now}
+    cli, api, local = await asyncio.gather(
+        _probe_cli(), xai_api.probe_models(), _probe_local()
+    )
+    result = {
+        "cli": cli,
+        "api": api,
+        "local": local,
+        "generated_at_monotonic": now,
+    }
     _CATALOG_CACHE[cache_key] = (now, result)
     if len(_CATALOG_CACHE) > 32:
         oldest = min(_CATALOG_CACHE, key=lambda key: _CATALOG_CACHE[key][0])
@@ -1851,8 +1863,19 @@ def _api_ids(catalogs: dict[str, Any]) -> list[str]:
     return [str(item["id"]) for item in catalogs["api"].get("models", []) if item.get("id")]
 
 
-def _lead_model(catalogs: dict[str, Any], target: Literal["cli", "api"]) -> str | None:
+def _lead_model(
+    catalogs: dict[str, Any], target: Literal["cli", "api", "local"]
+) -> str | None:
     """Keep the live subscription default as lead across planes when it is shared."""
+    if target == "local":
+        local_cat = catalogs.get("local") or {}
+        router_models = [
+            str(item) for item in (local_cat.get("router_models") or []) if item
+        ]
+        lead = catalogs.get("cli", {}).get("default_model")
+        if lead and str(lead) in router_models:
+            return str(lead)
+        return router_models[0] if router_models else None
     lead = catalogs["cli"].get("default_model")
     target_ids = catalogs["cli"].get("models", []) if target == "cli" else _api_ids(catalogs)
     if lead and lead in target_ids:
@@ -2466,6 +2489,12 @@ def _receipt(
     fallback_from: str | None = None,
     fallback_reason: str | None = None,
 ) -> dict[str, Any]:
+    prior_trigger = str(result.get("trigger") or "none")
+    trigger = (
+        prior_trigger
+        if prior_trigger != "none"
+        else _canonical_trigger(fallback_reason)
+    )
     result.update(
         {
             "requested_plane": requested_plane,
@@ -2475,8 +2504,12 @@ def _receipt(
             "fallback_from": fallback_from,
             "fallback_reason": fallback_reason,
             "degraded": fallback_from is not None,
+            "trigger": trigger,
         }
     )
+    result.setdefault("continue_count", 0)
+    result.setdefault("router_source", "heuristic")
+    result.setdefault("heuristic_only", False)
     return result
 
 
@@ -2907,6 +2940,7 @@ async def _run_unified(
     system_context: str | None = None,
     max_output_tokens: int | None = None,
     nonanswer_recovery: bool = True,
+    prior_continue_count: int = 0,
 ) -> dict[str, Any]:
     if DIRECT_TALK_ACTIVE:
         return await _serve_local_direct_noncertified(
@@ -2915,6 +2949,7 @@ async def _run_unified(
             allow_web=allow_web,
             allow_x_search=allow_x_search,
             allow_code=allow_code,
+            prior_continue_count=prior_continue_count,
         )
 
     # Silent-think doctrine (compute != print): reasoning effort stays high while a
@@ -2928,6 +2963,15 @@ async def _run_unified(
     system_prompt = await _system_prompt(
         "agent" if agentic else "chat", extra_context=system_context
     )
+
+    if resolved == "local":
+        result = await _serve_local_offline(
+            prompt,
+            system_context=system_context,
+            prior_continue_count=prior_continue_count,
+        )
+        result["requested_plane"] = plane
+        return result
 
     async def _call(target: Literal["cli", "api"], call_prompt: str) -> dict[str, Any]:
         target_model = model or _lead_model(catalogs, target)
@@ -3061,9 +3105,49 @@ async def _run_unified(
             raise
         if fallback_policy != "cross_plane":
             raise
+        swap_reason = _classify_fallback_reason(resolved, exc)
         alternate = await _alternate_plane(resolved, model, requires_api=requires_api)
         if alternate is None:
             raise
+        if alternate == "local":
+            # The chooser reserves a slot to make the decision atomically; the
+            # full offline server owns its own slot lifecycle, so hand it back.
+            _local_slot_release()
+            try:
+                result = await _serve_local_offline(
+                    prompt,
+                    system_context=system_context,
+                    prior_continue_count=prior_continue_count,
+                )
+            except Exception as alternate_exc:
+                prior_attempts = _exception_usage_attempts(exc)
+                if prior_attempts:
+                    raise _with_incurred_usage(
+                        alternate_exc, prior_attempts
+                    ) from alternate_exc
+                raise
+            _merge_incurred_usage(
+                result,
+                _exception_usage_attempts(exc),
+                prepend=True,
+            )
+            offline_trigger = str(result.get("trigger") or "none")
+            overlay_reason = (
+                result.get("fallback_reason")
+                if offline_trigger != "none"
+                else swap_reason
+            )
+            receipt = _receipt(
+                result,
+                requested_plane=plane,
+                resolved_plane="local",
+                fallback_policy=fallback_policy,
+                fallback_from=resolved,
+                fallback_reason=str(overlay_reason or swap_reason),
+            )
+            if receipt.get("trigger") in {"shed", "non_answer"}:
+                return await _apply_continue_bound(receipt)
+            return receipt
         try:
             result = await _call_with_recovery(alternate)
         except Exception as alternate_exc:
@@ -3082,7 +3166,7 @@ async def _run_unified(
             resolved_plane=alternate,
             fallback_policy=fallback_policy,
             fallback_from=resolved,
-            fallback_reason=_classify_fallback_reason(resolved, exc),
+            fallback_reason=swap_reason,
         )
 
 
@@ -4224,6 +4308,7 @@ async def _execute_team_turn(
     depth: Literal["auto", "direct", "deep", "hive"] = "auto",
     num_voters: int = 5,
     persist_session: bool = True,
+    prior_continue_count: int = 0,
 ) -> dict[str, Any]:
     history = await STATE.load_messages(session) if session else []
     prior_pack: ContextPack | None = None
@@ -4281,6 +4366,15 @@ async def _execute_team_turn(
     media_block: dict[str, Any] | None = None
     if media_kind is not None and not _media_generation_available(catalogs, media_kind):
         media_block = _media_unavailable_result(media_kind)
+    offline_local = False
+    if media_block is None and plane == "auto" and model is None:
+        try:
+            resolved_primary, catalogs = await _resolve_plane(
+                plane, model, requires_api=False
+            )
+            offline_local = resolved_primary == "local"
+        except (RuntimeError, ValueError):
+            pass
     if media_block is not None:
         result: dict[str, Any] | None = media_block
         routing = {
@@ -4288,6 +4382,20 @@ async def _execute_team_turn(
             "specialist_prompt": provider_prompt,
             "router_model": None,
             "router_cost_usd": 0.0,
+        }
+    elif offline_local:
+        result = await _serve_local_offline(
+            provider_prompt,
+            system_context="\n\n".join(context_parts) or None,
+            prior_continue_count=prior_continue_count,
+        )
+        routing = {
+            "route": result["orchestration"]["route"],
+            "specialist_prompt": provider_prompt,
+            "router_model": None,
+            "router_cost_usd": 0.0,
+            "router_source": result.get("router_source", "local_router_floor"),
+            "heuristic_only": bool(result.get("heuristic_only", False)),
         }
     elif model is None and plane == "auto" and depth == "auto":
         heuristic = _heuristic_route(provider_prompt)
@@ -4382,6 +4490,8 @@ async def _execute_team_turn(
     router_attempts = _routing_usage_attempts(routing)
     if media_block is not None:
         pass  # honest capability message already set as result
+    elif offline_local:
+        pass  # full offline serve already produced the result
     elif depth == "hive":
         try:
             result = await _run_hive(
@@ -4433,6 +4543,7 @@ async def _execute_team_turn(
                 allow_x_search=allow_x_search,
                 allow_code=allow_code,
                 system_context="\n\n".join(context_parts) or None,
+                prior_continue_count=prior_continue_count,
             )
         except Exception as exc:
             if router_attempts:
@@ -7176,7 +7287,7 @@ async def _local_chat(
         messages.append({"role": "system", "content": system_prompt})
     messages.append({"role": "user", "content": prompt})
 
-    _breaker_before_call("local", lead_s)
+    admission = _breaker_before_call("local", lead_s)
     try:
         got = await _openai_compat_chat(
             LOCAL_RUNTIME_URL,
@@ -7185,7 +7296,7 @@ async def _local_chat(
             max_tokens=max_tokens,
             timeout=BUILD_TIMEOUT_SECONDS,
         )
-        _breaker_success("local", lead_s)
+        _breaker_success(admission)
         return {
             "text": got["text"],
             "model": lead_s,
@@ -7194,8 +7305,11 @@ async def _local_chat(
             "cost_usd": 0.0,
             "stop_reason": got["stop_reason"],
         }
+    except asyncio.CancelledError:
+        _breaker_abandon_probe(admission)
+        raise
     except Exception:
-        _breaker_failure("local", lead_s)
+        _breaker_failure(admission)
         raise
 
 
