@@ -1,6 +1,6 @@
 # UniGrok de-overfitting plan
 
-Hive-merged (ultra, mission-committed, ~$0.034). Doctrine:
+Design-review doctrine:
 
 > Freeze only near-physics envelopes. Everything else is a posterior:
 > shadow-measured, budget-capped, promotion-receipted, kill-switchable.
@@ -95,7 +95,7 @@ zero semaphore identity checks.
 
 | Item | State |
 |---|---|
-| Phase 2 contract-test rewrite | In progress this change |
-| Governor weight bundle (demote literals) | In progress this change |
-| Physics envelope module | Stub this change |
+| Phase 2 contract-test rewrite | Implemented for the named mechanism-test patterns |
+| Governor weight bundle (demote literals) | Implemented as a versioned bundle |
+| Physics envelope module | Implemented as the current minimal envelope module |
 | Phases 3–5 | Not started |

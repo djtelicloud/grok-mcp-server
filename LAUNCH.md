@@ -56,12 +56,12 @@ Status legend: [ ] open · [x] done · [~] partially proven
   optimization (forge loop for arbitrary files).
 - Function-path router; self-healing error messages; readability hive-vote
   layered on the mechanical gate.
-- Onboarding extraction (from internal donor research): dynamic settings plan (template +
-  deprecation map + classify-before-write, IDE executes) and reflex/synapse
+- Consent-first onboarding design: dynamic settings plan (template + deprecation map +
+  classify-before-write, IDE executes) and bounded fact routing
   memory (short auto-injected notes; per-turn relevance routing — maps onto
   the existing facts system). See docs/onboarding-extraction.md.
 - omlx eval discipline (fixed-seed stratified sampling, thinking-budget
   provenance) for the benchmark suite.
 - Structured micro-emit (silent-think full port) for short-answer hard tasks.
-- Needle tier: keep `needle_active: false` truthful; revive only behind the
-  promotion gates in the private design docs.
+- Needle tier: keep `needle_active: false` truthful; revive only after public promotion
+  gates, runtime code, and tests exist.

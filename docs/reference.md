@@ -154,6 +154,10 @@ http://localhost:4765/mcp
 
 Transport: Streamable HTTP. The MCP handshake, `/healthz`, `/readyz`, `/runtimez`,
 `grok_mcp_status`, and `grok_mcp_discover_self` all report version `1.1.0`.
+`/healthz`, `/runtimez`, and discovery also expose a non-secret
+`source_fingerprint`, which identifies the byte content and relative paths of the baked
+public runtime tree. For local Docker, compare it with the checkout using
+`uv run python scripts/check_runtime_parity.py --container unigrok`.
 
 The owner-operated hosted pilot uses `https://mcp.grokmcp.org/mcp`. It publishes
 OAuth protected-resource metadata and requires an active, correctly scoped Control
@@ -263,12 +267,23 @@ Environment values outside their range are clamped. `grok_mcp_discover_self` and
 | `UNIGROK_FILE_CONTENT_MAX_BYTES` | 2,000,000 | 1,024–10,000,000 |
 | `UNIGROK_API_MAX_INFLIGHT` | 4 | 1–16 |
 | `UNIGROK_API_MAX_FILE_INFLIGHT` | 2 | 1–4 |
+| `UNIGROK_BREAKER_FAILURES` | 3 | 2–20 |
+| `UNIGROK_BREAKER_COOLDOWN` | 30 s | 5–600 s |
 | `UNIGROK_CATALOG_TTL` | 60 s | 5–600 s |
 | `UNIGROK_STATE_RETENTION_HOURS` | 24 h | 1–720 h |
 
 `agent_result(wait_seconds)` is a separate per-poll argument: default 16 seconds,
 clamped to 1–20. `xai_get_file_content(max_bytes)` defaults to 500,000 and clamps to
 1,024–1,000,000 bytes, then remains bounded by the environment hard cap above.
+
+Circuit breakers are isolated by plane, credential generation, and model. `open=true`
+with a positive retry time means calls fail fast during cooldown; `open=true` with
+`retry_after_seconds=0` means the breaker is probe-ready, not closed. Exactly one
+half-open probe is admitted. Cancellation does not count as provider failure, but a
+replacement probe remains fenced through the longest configured provider deadline so a
+cancelled worker cannot overlap its replacement. Local policy or unavailable-capability
+decisions do not poison provider health. Inspect `/benchmarkz` or `/runtimez` before
+restarting merely to clear a breaker, because a restart can interrupt durable work.
 
 ## Local Compose team continuity
 

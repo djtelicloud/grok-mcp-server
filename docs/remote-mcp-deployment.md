@@ -82,6 +82,7 @@ Deploy the repository image to a dedicated service and set:
 | `UNIGROK_ALLOWED_ORIGINS` | Optional exact browser origins; omit when no browser client is approved |
 | `UNIGROK_REMOTE_BODY_MAX_BYTES` | Optional MCP body cap; defaults to 28 MB and clamps to 64 KB-32 MB |
 | `UNIGROK_CALLER_BUDGETS` | Optional JSON daily USD stop thresholds keyed by full canonical OAuth principal |
+| `UNIGROK_BREAKER_FAILURES` / `UNIGROK_BREAKER_COOLDOWN` | Optional provider breaker threshold/cooldown; defaults 3 failures / 30 seconds |
 | `UNIGROK_STATE_DIR` | `/tmp/unigrok` for the current instance-local deployment |
 | `XAI_API_KEY` | Owner-default xAI credential from a version-pinned secret |
 | `UNIGROK_PRINCIPAL_XAI_KEYS_JSON` | Optional secret JSON map from canonical OAuth principal to xAI key |
@@ -159,7 +160,8 @@ restarts as documented in the technical reference.
    - `/healthz` and `/readyz` return `200`;
    - unauthenticated `/mcp` returns `401`;
    - protected-resource and authorization-server metadata return `200`;
-   - the revision header identifies the candidate;
+   - `X-UniGrok-Revision` identifies the candidate and `source_fingerprint` matches the
+     tested image;
    - OAuth initialization, all-tools discovery, destructive-action rejection,
      and a real API invocation succeed.
 7. Run a bounded latency soak and inspect candidate logs for errors and 5xx

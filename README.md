@@ -278,6 +278,8 @@ See [SECURITY.md](SECURITY.md) for the complete public runtime boundary.
 
 | I want to… | Read |
 |---|---|
+| Understand the service and state machines | [Public architecture](docs/architecture.md) |
+| Prove source, Docker, and deployment readiness | [Team readiness](docs/team-readiness.md) |
 | See every tool and routing rule | [Technical reference](docs/reference.md) |
 | Understand or operate the authenticated hosted service | [Remote deployment](docs/remote-mcp-deployment.md) |
 | Run the explicit no-internet local helper | [Optional local-model helper](docs/offline-local-helper.md) |

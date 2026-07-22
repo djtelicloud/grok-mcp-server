@@ -5,16 +5,22 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: unigrok:1.1.0
+    image: ${UNIGROK_IMAGE:-unigrok:1.1.0}
     container_name: unigrok
     ports:
       - "127.0.0.1:${UNIGROK_PORT:-4765}:8080"
     environment:
       UNIGROK_HOST: 0.0.0.0
       PORT: 8080
+      # Factory: all chat/agent tools on all the time
+      UNIGROK_CHAT_TOOLS: ${UNIGROK_CHAT_TOOLS:-always}
+      UNIGROK_SWARM: ${UNIGROK_SWARM:-active}
+      UNIGROK_DEFAULT_LEVEL: ${UNIGROK_DEFAULT_LEVEL:-max}
       UNIGROK_AUTH_PATH: /home/appuser/.grok/auth.json
       UNIGROK_BUILD_TIMEOUT: ${UNIGROK_BUILD_TIMEOUT:-120}
       UNIGROK_API_TIMEOUT: ${UNIGROK_API_TIMEOUT:-120}
+      UNIGROK_BREAKER_FAILURES: ${UNIGROK_BREAKER_FAILURES:-3}
+      UNIGROK_BREAKER_COOLDOWN: ${UNIGROK_BREAKER_COOLDOWN:-30}
       # Live Docker defaults: autonomy + mission v2 on (override via .env).
       UNIGROK_AUTONOMY: ${UNIGROK_AUTONOMY:-true}
       UNIGROK_MISSION_V2: ${UNIGROK_MISSION_V2:-true}
@@ -65,7 +71,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: unigrok:1.1.0
+    image: ${UNIGROK_IMAGE:-unigrok:1.1.0}
     profiles: ["auth"]
     command: ["grok", "login", "--device-auth"]
     environment:

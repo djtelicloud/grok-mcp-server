@@ -1,6 +1,6 @@
 """P1 forge-surface hooks: default-unchanged, runtime UI mount, control-plane skeleton.
 
-Acceptance sheet: docs (private DoR) rows P1-P7 — surface flag defaulting,
+Acceptance sheet: docs acceptance sheet rows P1-P7 — surface flag defaulting,
 UNIGROK_UI_ROOT runtime mount with traversal safety, X-Forwarded-For never
 trusted for loopback, /ui never bearer-authed, forge skeleton 401s, telemetry
 contract parity.
