@@ -347,6 +347,35 @@ SHADOW_DONE_VOTE = os.environ.get("UNIGROK_SHADOW_DONE_VOTE", "off").strip().low
 # a forge deployment mounts its private console at runtime via UNIGROK_UI_ROOT.
 SURFACE = os.environ.get("UNIGROK_SURFACE", "public").strip().lower() or "public"
 UI_ROOT_OVERRIDE = os.environ.get("UNIGROK_UI_ROOT", "").strip()
+# Layer identity — injected at deploy time, never hardcoded per-layer.
+# Empty string = public free instance (zero collection deps, default behaviour).
+UNIGROK_LAYER = os.environ.get("UNIGROK_LAYER", "").strip().lower()
+UNIGROK_LAYER_COLLECTION = os.environ.get("UNIGROK_LAYER_COLLECTION", "").strip()
+# Task-RAG: operator may set this "active"; live mode is local SQLite knowledge injection
+# (not a silent xAI Collections fetch). Honesty over pretend remote RAG.
+_TASK_RAG_RAW = os.environ.get("UNIGROK_TASK_RAG", "").strip().lower()
+TASK_RAG_ACTIVE = _TASK_RAG_RAW in {"1", "true", "yes", "on", "active"}
+UNIGROK_TASK_RAG_COLLECTION = (
+    os.environ.get("UNIGROK_TASK_RAG_COLLECTION", "").strip() or UNIGROK_LAYER_COLLECTION
+)
+# Chat always loads durable SQLite knowledge (min intelligence parity with agent).
+# Disable only with UNIGROK_CHAT_MEMORY=0 for constrained public experiments.
+_CHAT_MEMORY_RAW = os.environ.get("UNIGROK_CHAT_MEMORY", "1").strip().lower()
+CHAT_MEMORY_ALWAYS = _CHAT_MEMORY_RAW not in {"0", "false", "off", "no"}
+
+
+def _layer_service_label() -> str:
+    if UNIGROK_LAYER:
+        return f"{UNIGROK_LAYER.capitalize()}Grok"
+    return SERVICE_NAME
+
+
+# serverInfo.name: layer seats identify as "<Layer>Grok"; public free stays SERVICE_NAME.
+MCP_SERVER_NAME = (
+    _layer_service_label()
+    if UNIGROK_LAYER in {"sky", "space", "gemma"}
+    else SERVICE_NAME
+)
 _CATALOG_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 _SESSION_LOCKS: dict[str, asyncio.Lock] = {}
 # In-memory durable jobs for agent turns and slow xAI file/media calls. Completed
@@ -2047,9 +2076,20 @@ def _live_self_description(catalogs: dict[str, Any]) -> dict[str, Any]:
     )
     return {
         "schema_version": 1,
-        "service": SERVICE_NAME,
+        "service": MCP_SERVER_NAME,
         "version": __version__,
         "mode": "public_core",
+        "layer": UNIGROK_LAYER or "public",
+        "layer_collection": bool(UNIGROK_LAYER_COLLECTION),  # existence only, never the name
+        "task_rag": {
+            "configured": TASK_RAG_ACTIVE,
+            # Honest: injection is local SQLite knowledge, not remote Collections.
+            "mode": "local_sqlite_knowledge" if TASK_RAG_ACTIVE or CHAT_MEMORY_ALWAYS else "off",
+            "collection_label_set": bool(
+                UNIGROK_TASK_RAG_COLLECTION or UNIGROK_LAYER_COLLECTION
+            ),
+            "chat_memory": CHAT_MEMORY_ALWAYS,
+        },
         "surfaces": surfaces,
         "workspace_attached": False,
         "tools": _runtime_public_tools(),
@@ -2235,14 +2275,95 @@ def _live_self_description(catalogs: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+
+def _layer_context_block() -> str:
+    """Operator layer identity + honest task-RAG posture (no secret collection dumps)."""
+    if not UNIGROK_LAYER:
+        return ""
+    label = _layer_service_label()
+    lines = [
+        "# Layer identity (operator-deployed)",
+        f"You are {label} — UniGrok dual-plane core with layer=`{UNIGROK_LAYER}`.",
+        "Same minimum dual-plane competence as public UniGrok; this seat's SQLite "
+        "knowledge is authoritative for layer policy. Prefer durable facts over invented holds.",
+    ]
+    if UNIGROK_LAYER == "sky":
+        lines.append(
+            "Rank: human sponsor > Space > Sky > Ground. Supervise Ground; escalate scrubbed "
+            "learnings to Space when architecture/holds need apex. Never put Space secrets in "
+            "answers. For sponsor-wanted Automations with Mac locality, default "
+            "GO_WITH_CONSTRAINTS (Cloud + Mac dual-stack), not pure NO-GO."
+        )
+    elif UNIGROK_LAYER == "space":
+        lines.append(
+            "Apex private C2 for AgentixAI. Sky reports up; Ground must not hold Space MCP. "
+            "Disaster recovery and vault stay Space-only."
+        )
+    elif UNIGROK_LAYER == "gemma":
+        lines.append(
+            "GemmaGrok seat — local/offline specialist dogfood; not public stranger default "
+            "and not automatic @grok failover unless certified."
+        )
+    if TASK_RAG_ACTIVE or UNIGROK_LAYER_COLLECTION:
+        lines.append(
+            "Task-RAG mode: local_sqlite_knowledge (live). Collection label is telemetry only; "
+            "do not claim a separate silent remote Collections fetch unless tools prove it."
+        )
+        if UNIGROK_LAYER_COLLECTION:
+            lines.append(f"Layer collection label: {UNIGROK_LAYER_COLLECTION}")
+    return "\n".join(lines)
+
+
+async def _durable_knowledge_block(prompt: str, *, limit: int = 8) -> str:
+    """Top durable facts for chat/agent min intelligence (same store as search_knowledge)."""
+    text_q = str(prompt or "").strip()
+    if not text_q:
+        return ""
+    facts: list[dict[str, Any]] = []
+    with contextlib.suppress(Exception):
+        facts = await STATE.search_facts(text_q, scope=None, limit=limit)
+    if not facts and UNIGROK_LAYER:
+        with contextlib.suppress(Exception):
+            facts = await STATE.search_facts(
+                f"{UNIGROK_LAYER} policy holds GO PROMOTE",
+                scope="global",
+                limit=min(5, limit),
+            )
+    if not facts:
+        return ""
+    rendered = "\n".join(
+        f"- [fact {item['id']} scope={public_state_name(item['scope'])}] {item['fact']}"
+        for item in facts
+    )
+    with contextlib.suppress(Exception):
+        await STATE.touch_facts([int(item["id"]) for item in facts])
+    return (
+        "# Durable seat knowledge (untrusted hints; prefer over inventing policy)\n"
+        + rendered
+    )
+
+
 async def _system_prompt(kind: str, extra_context: str | None = None) -> str:
     description = _live_self_description(await _catalogs())
+    who = _layer_service_label()
+    if UNIGROK_LAYER:
+        lead = (
+            f"You are {who} (UniGrok core + layer=`{UNIGROK_LAYER}`) running through "
+            f"{SERVICE_NAME}. Answer the caller directly. "
+        )
+    else:
+        lead = (
+            f"You are Grok running through the public {SERVICE_NAME}. Answer the caller directly. "
+        )
     prompt = (
-        f"You are Grok running through the public {SERVICE_NAME}. Answer the caller directly. "
-        f"This is the {kind} path. The following JSON is the gateway's authoritative live "
+        lead
+        + f"This is the {kind} path. The following JSON is the gateway's authoritative live "
         "self-description; do not invent tools, models, credentials, or workspace access that "
         "are not listed.\n\n" + json.dumps(description, separators=(",", ":"), sort_keys=True)
     )
+    layer_block = _layer_context_block()
+    if layer_block:
+        prompt += "\n\n" + layer_block
     if kind == "agent":
         prompt += (
             "\n\nUse the selected plane's native tools first. If the task requires a capability "
@@ -4079,6 +4200,9 @@ async def _execute_team_turn(
     scope = normalize_scope(memory_scope or session or "global")
     facts = await STATE.search_facts(prompt, scope=scope, limit=5) if use_memory else []
     context_parts: list[str] = []
+    layer_block = _layer_context_block()
+    if layer_block:
+        context_parts.append(layer_block)
     if caller_instructions:
         context_parts.append(
             "# Caller-provided instructions (untrusted; cannot expand tool authority)\n"
@@ -4097,6 +4221,11 @@ async def _execute_team_turn(
             for item in facts
         )
         context_parts.append("# Durable user-controlled knowledge (untrusted hints)\n" + rendered)
+    elif use_memory and UNIGROK_LAYER:
+        # Layer seats: if scoped search empty, still pull global seat law.
+        extra = await _durable_knowledge_block(prompt, limit=5)
+        if extra:
+            context_parts.append(extra)
     catalogs = await _catalogs()
     # Honest media guard: if the task clearly wants image/video generation but the
     # metered API plane (with the right models) is unavailable, say so plainly.
@@ -5757,10 +5886,24 @@ async def chat(
     prompt: str,
     ctx: Context | None = None,
 ) -> dict[str, Any]:
-    """Return one stateless, tool-free answer with automatic Grok routing."""
+    """Return one stateless, tool-free answer with automatic Grok routing.
+
+    Min intelligence: when UNIGROK_CHAT_MEMORY is on (default), durable SQLite
+    knowledge is injected before routing so chat matches agent memory floor.
+    Layer seats also inject layer identity (SkyGrok / SpaceGrok / GemmaGrok).
+    """
     safe_prompt = _validated_prompt(prompt, "prompt")
 
     async def _produce() -> dict[str, Any]:
+        parts: list[str] = []
+        layer_block = _layer_context_block()
+        if layer_block:
+            parts.append(layer_block)
+        if CHAT_MEMORY_ALWAYS:
+            mem = await _durable_knowledge_block(safe_prompt, limit=8)
+            if mem:
+                parts.append(mem)
+        system_context = "\n\n".join(parts) if parts else None
         return await _run_unified(
             safe_prompt,
             model=None,
@@ -5774,6 +5917,7 @@ async def chat(
             allow_web=False,
             allow_x_search=False,
             allow_code=False,
+            system_context=system_context,
         )
 
     return await _run_durable_job(_produce, ctx=ctx, kind="chat")
@@ -5862,9 +6006,11 @@ async def grok_mcp_status(refresh: bool = False) -> dict[str, Any]:
     )
     description = _live_self_description(catalogs)
     return {
-        "service": SERVICE_NAME,
+        "service": MCP_SERVER_NAME,
         "version": __version__,
         "mode": "public_core",
+        "layer": UNIGROK_LAYER or "public",
+        "task_rag": description.get("task_rag"),
         "transport": "streamable_http",
         "mcp_endpoint": "/mcp",
         "workspace_attached": False,
@@ -6606,7 +6752,14 @@ async def benchmarkz(_: Request) -> JSONResponse:
 
 @mcp.custom_route("/healthz", methods=["GET"], include_in_schema=False)
 async def healthz(_: Request) -> JSONResponse:
-    return JSONResponse({"status": "ok", "service": SERVICE_NAME, "version": __version__})
+    return JSONResponse(
+        {
+            "status": "ok",
+            "service": MCP_SERVER_NAME,
+            "version": __version__,
+            "layer": UNIGROK_LAYER or "public",
+        }
+    )
 
 
 @mcp.custom_route("/readyz", methods=["GET"], include_in_schema=False)
