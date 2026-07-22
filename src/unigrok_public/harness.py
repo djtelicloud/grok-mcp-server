@@ -192,7 +192,7 @@ _HIVE_VOTE_JSON_RE = re.compile(r"\{[^{}]*\"v\"\s*:\s*\"(?:pass|fail|risk)\"[^{}
 
 def number_draft_lines(draft: str) -> str:
     """Diff-style index: number every draft line so votes can anchor precisely."""
-    # Hive-optimized via dogfood_optimize.py (telemetry 111): +22.6% measured.
+    # Hive-optimized via dogfood_optimize.py: +22.6% measured.
     return "\n".join(
         f"L{i}: {line}" for i, line in enumerate(str(draft or "").splitlines(), 1)
     )
@@ -211,7 +211,7 @@ def build_vote_prompt(task: str, draft: str, persona: dict[str, str]) -> str:
 
 
 def parse_hive_vote(text: str) -> dict[str, Any] | None:
-    # Hive-optimized via dogfood_optimize.py (telemetry 134): +18.0% measured.
+    # Hive-optimized via dogfood_optimize.py: +18.0% measured.
     match = _HIVE_VOTE_JSON_RE.search(str(text or ""))
     if not match:
         return None
@@ -350,7 +350,7 @@ def parse_done_vote(text: str) -> bool | None:
 
 def majority(values: list[str], default: str) -> str:
     """Plain-code vote count; ties break toward the first-seen most common value."""
-    # Hive-optimized via dogfood_optimize.py (telemetry 132): +20.8% measured.
+    # Hive-optimized via dogfood_optimize.py: +20.8% measured.
     if not values:
         return default
     counts: dict[str, int] = {}
@@ -505,7 +505,7 @@ def _looks_like_plan(text: str) -> bool:
 def is_nonanswer_completion(content: Any, *, prompt: str = "") -> bool:
     """Reject an empty promise or unsolicited plan that delivers no result."""
 
-    # Hive-optimized via dogfood_optimize.py (telemetry 122): +18.0% measured.
+    # Hive-optimized via dogfood_optimize.py: +18.0% measured.
     if not isinstance(content, str):
         return True
     stripped = content.strip()

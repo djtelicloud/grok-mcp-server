@@ -36,7 +36,7 @@ direct route, and reported $0 metered API cost. Its verified telemetry receipt i
 
 For the second pass, Grok used the `ultra` hive route with five votes and a merge pass
 across the CLI and API planes. The receipt reports five personas (`critic`, `gate`,
-`bounty`, `spec`, and `failures`), a metered cost of $0.0370508, and telemetry ID 381.
+`bounty`, `spec`, and `failures`), a session telemetry recorded.
 That receipt is recorded as a verified success. The known `xai_list_files` timeout was
 not involved in either round; no file-list tool was used.
 
