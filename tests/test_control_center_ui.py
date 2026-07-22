@@ -25,11 +25,30 @@ def test_service_pill_never_hardcodes_ready() -> None:
 
 def test_dashboard_carries_new_panes_and_receipt_columns() -> None:
     html = DASHBOARD.read_text(encoding="utf-8")
-    for pane_id in ('id="planes"', 'id="kinds"', 'id="runtime"'):
+    for pane_id in ('id="planes"', 'id="kinds"', 'id="runtime"', 'id="routing"', 'id="tools"'):
         assert pane_id in html
     for column in ("<th>Time</th>", "<th>Kind</th>", "<th>Stop</th>"):
         assert column in html
     assert "UI_BUILD" in html
+
+
+def test_public_tier_nav_links_only_its_own_surface() -> None:
+    # The public page renders its own tier and must never link or name the
+    # higher-trust surfaces (anti-fingerprinting: no forge/sky/space hints).
+    html = DASHBOARD.read_text(encoding="utf-8")
+    assert 'id="tiernav"' in html
+    for leak in ("4766", "4768", "4769", "skygrok", "spacegrok", "forge"):
+        assert leak not in html.lower()
+
+
+def test_runtimez_serves_public_tool_registry() -> None:
+    from unigrok_public.server import PUBLIC_TOOLS, _runtime_public_tools
+
+    tools = _runtime_public_tools()
+    assert len(tools) == len(PUBLIC_TOOLS)
+    sample = tools[0]
+    for field in ("name", "plane", "purpose", "billing_class", "destructive"):
+        assert field in sample
 
 
 def test_dashboard_keeps_single_inline_script_for_nonce() -> None:

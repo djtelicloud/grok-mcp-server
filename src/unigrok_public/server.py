@@ -7027,6 +7027,7 @@ async def runtimez(_: Request) -> JSONResponse:
                 "authorization_source": "server_owner_configuration",
             },
             "tool_count": len(PUBLIC_TOOLS),
+            "tools": _runtime_public_tools(),
             "mcp_endpoint": "/mcp",
             "needle_active": False,
             "autonomy": {
