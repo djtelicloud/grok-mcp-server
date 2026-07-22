@@ -14,6 +14,7 @@ SESSION_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
 SCOPE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
 TERM_PATTERN = re.compile(r"[A-Za-z0-9_]{2,}")
 TENANT_SCOPE_PATTERN = re.compile(r"^(tenant-[0-9a-f]{24}):")
+TENANT_SCOPE_GLOB = "tenant-" + "[0-9a-f]" * 24 + ":*"
 DURABLE_TEXT_MAX_BYTES = 100_000
 
 _SECRET_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
@@ -733,7 +734,9 @@ class PublicStateStore:
                 ).fetchall()
             else:
                 rows = connection.execute(
-                    "SELECT * FROM knowledge ORDER BY id DESC LIMIT 400"
+                    "SELECT * FROM knowledge WHERE scope NOT GLOB ? "
+                    "ORDER BY id DESC LIMIT 400",
+                    (TENANT_SCOPE_GLOB,),
                 ).fetchall()
         scored: list[dict[str, Any]] = []
         for row in rows:
