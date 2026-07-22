@@ -194,6 +194,11 @@ and a bounded diff. Six functions shipped this way (up to +52.8% measured). Sub-
 This routing section describes local Compose. The authenticated hosted pilot disables
 the CLI plane and uses the metered API only.
 
+Need an explicitly selected helper when the network is unavailable? The
+[optional local-model helper](docs/offline-local-helper.md) runs as a separate,
+default-off MCP server. It is not a third `@grok` plane and never activates on an
+authentication or provider failure.
+
 ```mermaid
 flowchart TD
     T["{ task: Your request }"] --> L["Live-discovered Grok lead"]
@@ -275,6 +280,7 @@ See [SECURITY.md](SECURITY.md) for the complete public runtime boundary.
 |---|---|
 | See every tool and routing rule | [Technical reference](docs/reference.md) |
 | Understand or operate the authenticated hosted service | [Remote deployment](docs/remote-mcp-deployment.md) |
+| Run the explicit no-internet local helper | [Optional local-model helper](docs/offline-local-helper.md) |
 | Drive `agent` from an IDE agent | [Technical reference](docs/reference.md#how-an-ide-agent-should-drive-agent) |
 | Develop or acceptance-test UniGrok | [Development guide](docs/development.md) |
 | See what has limited soak and how to report a miss | [Known limits](docs/known-limits.md) |

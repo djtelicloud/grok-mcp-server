@@ -81,6 +81,42 @@ services:
     security_opt:
       - no-new-privileges:true
 
+  # Explicit, default-off local-model helper. This is a separate MCP server and
+  # is never selected by the public @grok routing or credential recovery path.
+  gemmagrok-local:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: unigrok:1.1.0
+    profiles: ["offline"]
+    command: ["/app/.venv/bin/python", "-m", "unigrok_public.gemmagrok_peer"]
+    ports:
+      - "127.0.0.1:${GEMMAGROK_PORT:-4777}:8080"
+    environment:
+      GEMMAGROK_HOST: 0.0.0.0
+      GEMMAGROK_TRANSPORT: streamable-http
+      PORT: 8080
+      GEMMAGROK_RUNTIME_URL: http://host.docker.internal:${GEMMAGROK_RUNTIME_PORT:-8081}
+      GEMMAGROK_MODEL_ID: ${GEMMAGROK_MODEL_ID:-}
+      GEMMAGROK_TIMEOUT_SECONDS: ${GEMMAGROK_TIMEOUT_SECONDS:-120}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m,uid=1000,gid=1000,mode=0700
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    init: true
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=5)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
 volumes:
   grok-cli-auth:
     name: unigrok-cli-auth
