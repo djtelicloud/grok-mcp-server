@@ -1,10 +1,10 @@
-# UniGrok Sleep / Consolidation Plane (hive-merged)
+# UniGrok sleep and consolidation design
 
 **Miss acknowledged:** the awake-only plan (A0′–A4) described cognition that
 starts when MCP arrives. Humans also consolidate while idle. Without a sleep
 plane, Docker is half-dead between chats and every live hit pays cold-start tax.
 
-**Hive verdict (telemetry 397):** Sleep is a **real miss as a hemisphere**, but
+**Design verdict:** Sleep is a **real miss as a hemisphere**, but
 **overreach as “fill Docker with a second brain.”** Ship it as a **preemptible,
 receipted, non-committing maintenance generator** that only decreases a measured
 `V_sleep`. Live path owns CommitDone forever. Default sleep **off** until awake

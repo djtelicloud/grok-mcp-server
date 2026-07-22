@@ -50,6 +50,15 @@ selected specialists and bounded recovery. Every result carries
 those receipts show a fallback to the API plane that you did not expect, file
 a bug with those fields — they tell most of the story.
 
+### Circuit-breaker states are intentionally conservative
+
+Breakers are isolated by plane, credential generation, and model. After the cooldown,
+only one half-open probe is admitted; other calls fail fast. A cancelled probe is fenced
+through the longest configured provider deadline because its underlying worker may still
+be stopping. This can look like an extended cooldown, but admitting an overlapping
+replacement could duplicate provider work. `/runtimez` and `benchmark_status` distinguish
+cooldown, probe-ready, and half-open states. See the [technical reference](reference.md#runtime-limits).
+
 ### Expected behavior, not bugs
 
 - **`xhigh` on the API plane auto-downgrades to `high`** instead of erroring.

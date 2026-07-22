@@ -1,7 +1,9 @@
-# UniGrok Autonomy + Intelligence Plan (hive-merged)
+# UniGrok autonomy and intelligence design record
 
-**Hive verdict: REVISE → ship A0′/A0/A1/A1.5 first; hold A3–A4 until commit truth is green.**  
-Critique: high/direct, mission-committed (`telemetry_id` 396). Ultra critique job may still be in deadline quanta — treat this merge as authoritative for sequencing.
+Status: A0′, A0, and A1.5 informed the shipping Mission V2 implementation. Later phases
+remain design-only unless the technical reference and runtime tests say otherwise.
+
+**Design verdict: REVISE → ship A0′/A0/A1/A1.5 first; hold A3–A4 until commit truth is green.**
 
 Companions: `docs/DEOVERFIT.md`, **`docs/SLEEP_PLANE.md`** (idle consolidation —
 the hemisphere this plan originally missed). Goal: max useful autonomy in Docker
@@ -10,7 +12,7 @@ gates are class-conditional posteriors.
 
 ---
 
-## Proven anomaly (live)
+## Historical anomaly (resolved)
 
 | Fact | Detail |
 |---|---|
@@ -18,9 +20,10 @@ gates are class-conditional posteriors.
 | Model | Correct: `MCP_LIVE_OK` |
 | Mission V2 | `continue`, `committed=false` |
 | Gaps | `answer_too_short`, `token_echo`, `insufficient_evidence` |
-| Why stuck | No legal repair under that acceptance → continue has no progress |
+| Why stuck | No legal repair under that acceptance → continue had no progress |
+| Resolution | Literal task classification and exact-match CommitDone, covered by regression tests |
 
-**Root cause (hive):** class-mismatched verify — **substantial** gates fired on a **literal** mission. Not “model too short.”
+**Root cause:** class-mismatched verify — **substantial** gates fired on a **literal** mission. Not “model too short.”
 
 ---
 
@@ -175,9 +178,9 @@ Safest autonomy ≠ most rules. It means:
 
 | Item | State |
 |---|---|
-| Live anomaly | Confirmed |
-| Hive critique (awake) | Merged (REVISE sequencing) |
+| Literal false-continue anomaly | Resolved in task-class/verification code and regression tests |
+| Awake design review | Incorporated (REVISE sequencing) |
 | Sleep / consolidation plane | Specced in `docs/SLEEP_PLANE.md` (miss closed in docs) |
 | A0′ / A0 code | Implemented (`mission/task_class.py` + verify/autonomy) |
 | A1.5 unrepairable / same-state FailDone | Implemented (`should_terminal_fail` + epoch) |
-| S0 idle scheduler | After A0′/A0 ship gate |
+| S0 idle scheduler | Design only; not implemented |

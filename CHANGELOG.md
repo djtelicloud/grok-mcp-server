@@ -25,6 +25,20 @@ All notable changes to the public UniGrok gateway.
   with behavioral contracts. Needle remains inactive by default.
 
 ### Fixed
+- Durable shutdown is monotonic: an atomic interrupted transition cannot overwrite a
+  terminal result, shutdown cancellation preserves the honest `lost`/unknown-provider
+  payload, explicit cancellation remains distinguishable, and first restart polls make
+  orphaned running rows terminal and retention-eligible.
+- Every direct xAI API tool now participates in the per-credential/model circuit breaker;
+  budget policy runs exactly once before admission, local bounded-download refusals do
+  not poison provider health, and the metered-API kill switch covers file reads and
+  mutations as documented.
+- Circuit-breaker half-open probes are generation-fenced and serialized. Exactly one
+  probe runs after cooldown; stale completion and caller cancellation cannot clear or
+  corrupt a newer breaker epoch. Threshold/cooldown controls are wired through Compose
+  and reported by discovery/runtime receipts.
+- Session locks are reference-counted and pruned only after the holder and every queued
+  waiter leave, preventing both the prior dual-lock race and unbounded session-key growth.
 - Mission ownership and poll truth are generation-fenced end to end: claims are atomic,
   active quanta heartbeat, envelope/artifact/event/evidence writes require the exact
   owner, stale sweeper snapshots cannot revoke renewed leases, and job/autonomy mirrors
@@ -119,6 +133,9 @@ All notable changes to the public UniGrok gateway.
   actual bounded 600-second service-token lifetime.
 
 ### Documentation
+- Add a current public architecture, a source/Docker/public/hosted readiness matrix, a
+  release evidence template, runtime source fingerprints, a read-only container-parity
+  checker, and CI-enforced release-version parity.
 - Restore and update the authenticated remote-deployment runbook with the current OAuth,
   secret-version, tenant, instance-local-state, atomic-cutover, smoke, and rollback
   contracts; link the hosted pilot from README, reference, security, development, known
