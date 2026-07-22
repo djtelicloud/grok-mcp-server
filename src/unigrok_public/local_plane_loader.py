@@ -872,6 +872,104 @@ def get_knob(conn: sqlite3.Connection, key: str, default: Any = None) -> Any:
         return default
 
 
+
+def ensure_dogfood_min_roles(conn: sqlite3.Connection, *, family: str = "gemma") -> bool:
+    """Idempotent offline min-role seed so local.ready can arm without manual SQL.
+
+    Inserts family_map + filled router/text_generator floors + certified promote
+    pins when missing. Safe to call on every DB open. Does not invent product
+    promote truth — dogfood/offline gym only.
+    """
+    try:
+        n_map = int(conn.execute("SELECT COUNT(*) FROM family_map").fetchone()[0])
+        n_floor = int(
+            conn.execute(
+                "SELECT COUNT(*) FROM role_floors WHERE filled = 1 AND is_scaffold = 0 "
+                "AND role IN ('router', 'text_generator')"
+            ).fetchone()[0]
+        )
+    except sqlite3.Error:
+        return False
+    if n_map >= 1 and n_floor >= 2:
+        return False  # already funded
+
+    now = _utc_now_iso()
+    router_metric = f"router:{family}:offline-min"
+    tg_metric = f"text_generator:{family}:offline-min"
+    rules = (
+        ("substring", "ai/gemma", family, 5),
+        ("substring", "gemma", family, 10),
+        ("regex", r"(?i)gemma", family, 20),
+    )
+    try:
+        for kind, pattern, fam, prio in rules:
+            conn.execute(
+                """
+                INSERT INTO family_map (match_kind, pattern, family, priority, enabled)
+                VALUES (?, ?, ?, ?, 1)
+                ON CONFLICT(match_kind, pattern, family) DO UPDATE SET
+                  priority=excluded.priority, enabled=1
+                """,
+                (kind, pattern, fam, prio),
+            )
+        for metric_id, role in ((router_metric, "router"), (tg_metric, "text_generator")):
+            conn.execute(
+                """
+                INSERT INTO role_floors
+                  (metric_id, role, family, filled, is_scaffold, floor_value, sample_n, updated_at)
+                VALUES (?, ?, ?, 1, 0, 0.9, 1, ?)
+                ON CONFLICT(metric_id) DO UPDATE SET
+                  role=excluded.role,
+                  family=excluded.family,
+                  filled=1,
+                  is_scaffold=0,
+                  floor_value=excluded.floor_value,
+                  updated_at=excluded.updated_at
+                """,
+                (metric_id, role, family, now),
+            )
+        conn.execute(
+            """
+            INSERT INTO gate_manifest (asset_key, sha256, freshness_sla_s, pinned_at, notes)
+            VALUES ('promote_gates', 'offline-dogfood-seed-v1', ?, ?, 'auto offline min-role seed')
+            ON CONFLICT(asset_key) DO UPDATE SET
+              sha256=excluded.sha256,
+              freshness_sla_s=excluded.freshness_sla_s,
+              pinned_at=excluded.pinned_at,
+              notes=excluded.notes
+            """,
+            (30 * 86400, now),
+        )
+        for role, metric_id in (("router", router_metric), ("text_generator", tg_metric)):
+            cert_id = f"cert-offline-{role}-{family}"
+            conn.execute(
+                """
+                INSERT INTO promote_gates
+                  (cert_id, role, metric_id, status, family, manifest_key, certified_at, payload_json)
+                VALUES (?, ?, ?, 'certified', ?, 'promote_gates', ?, ?)
+                ON CONFLICT(cert_id) DO UPDATE SET
+                  role=excluded.role,
+                  metric_id=excluded.metric_id,
+                  status='certified',
+                  family=excluded.family,
+                  manifest_key=excluded.manifest_key,
+                  certified_at=excluded.certified_at,
+                  payload_json=excluded.payload_json
+                """,
+                (
+                    cert_id,
+                    role,
+                    metric_id,
+                    family,
+                    now,
+                    json.dumps({"seed": "offline-min-roles-auto"}),
+                ),
+            )
+        return True
+    except sqlite3.Error:
+        return False
+
+
 # ---------------------------------------------------------------------------
 # rewrite_at_load — single runtime keyspace, fail-closed min roles
 # ---------------------------------------------------------------------------

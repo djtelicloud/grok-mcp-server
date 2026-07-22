@@ -73,13 +73,16 @@ curl -fsSL https://x.ai/cli/install.sh | bash
 ```
 
 **xAI API key (optional, metered).** Adds vision, image/video, and silent failover.
-Copy the example env and add your key locally — never paste it into an IDE:
+Keep the key in the **service owner env** only — never IDE MCP JSON, never a second
+SoT under `src/`. Factory GroundCommand uses the monorepo Ground key home (parent
+`.env` / `KEY_HOMES.md`); generic installs can export `XAI_API_KEY` or use
+`docker compose --env-file <private-env>`.
 
-```bash
-cp example.env .env   # then edit .env and set XAI_API_KEY
-```
+Allowed inference env names (first non-empty wins):
+`XAI_API_KEY`, `XAI_API_KEY_SKY_INFERENCE`, `XAI_API_KEY_GROUND`,
+`XAI_API_KEY_UNIGROK_GROUND` (never management / Cursor tokens).
 
-Either path works alone; set both if you want everything.
+Either CLI login or API key works alone; set both if you want everything.
 
 ### 3. Start UniGrok
 

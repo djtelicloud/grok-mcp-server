@@ -418,24 +418,29 @@ class PublicStateStore:
             )
 
     def _seed_local_plane_sync(self, connection: sqlite3.Connection) -> None:
-        """Load optional local-plane seed data without making readiness implicit."""
+        """Load optional local-plane seed data + automatic offline min-role dogfood."""
         seed_dir = Path(
             os.environ.get("UNIGROK_LOCAL_SEED_DIR")
             or (Path(__file__).parent / "data" / "local_plane")
         )
-        if not seed_dir.is_dir():
-            return
+        if seed_dir.is_dir():
+            try:
+                local_plane_loader.load_seed_assets(
+                    connection,
+                    dialect_matrix_path=seed_dir / "dialect_matrix.json",
+                    family_map_path=seed_dir / "family_map.json",
+                    scorecard_path=seed_dir / "scorecard.json",
+                    gate_manifest_path=seed_dir / "gate_manifest.json",
+                    promote_path=seed_dir / "promote.json",
+                    traps_path=seed_dir / "traps.json",
+                )
+            except (sqlite3.Error, OSError, ValueError):
+                pass
+        # Automatic: fund router+text_generator when empty so local plane can arm
+        # whenever DMR is reachable (no manual per-seat SQL).
         try:
-            local_plane_loader.load_seed_assets(
-                connection,
-                dialect_matrix_path=seed_dir / "dialect_matrix.json",
-                family_map_path=seed_dir / "family_map.json",
-                scorecard_path=seed_dir / "scorecard.json",
-                gate_manifest_path=seed_dir / "gate_manifest.json",
-                promote_path=seed_dir / "promote.json",
-                traps_path=seed_dir / "traps.json",
-            )
-        except (sqlite3.Error, OSError, ValueError):
+            local_plane_loader.ensure_dogfood_min_roles(connection)
+        except (sqlite3.Error, AttributeError, ValueError):
             pass
 
     async def local_knob(self, key: str, default: Any = None) -> Any:
