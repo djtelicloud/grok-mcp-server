@@ -372,6 +372,11 @@ class PublicStateStore:
                 );
                 """
             )
+
+            schema_local = Path(__file__).with_name("schema_local_plane.sql")
+            if schema_local.is_file():
+                connection.executescript(schema_local.read_text(encoding="utf-8"))
+
             columns = {
                 str(row[1])
                 for row in connection.execute("PRAGMA table_info(autonomy_jobs)").fetchall()

@@ -28,7 +28,7 @@ from pydantic import BaseModel, Field
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
 
-from . import __version__, xai_api
+from . import __version__, local_plane_loader, xai_api
 from .autonomy import (
     JOB_COMPLETE,
     JOB_ERROR,
@@ -364,6 +364,34 @@ def _normalize_layer_name(value: str | None) -> str:
 
 UNIGROK_LAYER = _normalize_layer_name(os.environ.get("UNIGROK_LAYER", ""))
 UNIGROK_LAYER_COLLECTION = os.environ.get("UNIGROK_LAYER_COLLECTION", "").strip()
+
+# --- offline local plane constants ---
+LOCAL_RUNTIME_URL = os.environ.get("UNIGROK_LOCAL_RUNTIME_URL", "").strip()
+LOCAL_PROBE_TIMEOUT_SECONDS = _bounded_int("UNIGROK_LOCAL_PROBE_TIMEOUT", 5, 1, 60)
+_LOCAL_PROBE_BACKENDS = None
+LOCAL_DIRECT_TALK_MODE = os.environ.get("UNIGROK_LOCAL_DIRECT_TALK_MODE", "").strip().lower()
+LOCAL_DIRECT_MODEL = os.environ.get("UNIGROK_LOCAL_DIRECT_MODEL", "").strip()
+DIRECT_TALK_ACTIVE = (
+    UNIGROK_LAYER == "gemma"
+    and LOCAL_DIRECT_TALK_MODE == "non_certified"
+    and bool(LOCAL_RUNTIME_URL)
+    and bool(LOCAL_DIRECT_MODEL)
+)
+
+# §5.4 / §8.2.4 — 429-storm breaker. Thresholds are DATA (local_plane_knobs),
+# not hot-path decision constants. Prefer plain list (no new imports).
+# Keys: events (monotonic timestamps), open_until, half_open, _halfopen_s (cached).
+_STORM_429: dict[str, Any] = {
+    "events": [],
+    "open_until": 0.0,
+    "half_open": False,
+    "_halfopen_s": 30.0,
+    "probe_claimed": False,
+}
+_STORM_429_LOCK = asyncio.Lock()
+
+
+
 # Task-RAG: operator may set this "active"; live mode is local SQLite knowledge injection
 # (not a silent xAI Collections fetch). Honesty over pretend remote RAG.
 _TASK_RAG_RAW = os.environ.get("UNIGROK_TASK_RAG", "").strip().lower()
@@ -2397,7 +2425,7 @@ async def _resolve_plane(
     model: str | None,
     *,
     requires_api: bool,
-) -> tuple[Literal["cli", "api"], dict[str, Any]]:
+) -> tuple[Literal["cli", "api", "local"], dict[str, Any]]:
     catalogs = await _catalogs()
     if requested == "cli":
         if requires_api:
@@ -2411,6 +2439,7 @@ async def _resolve_plane(
         _assert_plane_ready("api", model, catalogs)
         return "api", catalogs
     if model:
+        # Model-pinned: remote catalogs only (local models are never caller-selectable).
         in_cli = model in catalogs["cli"].get("models", [])
         in_api = model in _api_ids(catalogs)
         if in_cli and catalogs["cli"].get("ready"):
@@ -2423,6 +2452,8 @@ async def _resolve_plane(
     if catalogs["api"].get("ready"):
         _require_metered_api_enabled()
         return "api", catalogs
+    if (catalogs.get("local") or {}).get("ready"):
+        return "local", catalogs
     raise RuntimeError("Neither Grok credential plane is ready")
 
 
@@ -2845,12 +2876,17 @@ async def _alternate_plane(
     model: str | None,
     *,
     requires_api: bool,
-) -> Literal["cli", "api"] | None:
+) -> Literal["cli", "api", "local"] | None:
+    catalogs = await _catalogs(refresh=True)
+    local_cat = catalogs.get("local") or {}
+    if local_cat.get("ready") and current != "local":
+        if await _local_slot_acquire():
+            return "local"
     alternate: Literal["cli", "api"] = "api" if current == "cli" else "cli"
     if alternate == "cli" and requires_api:
         return None
     try:
-        _assert_plane_ready(alternate, model, await _catalogs(refresh=True))
+        _assert_plane_ready(alternate, model, catalogs)
     except (RuntimeError, ValueError):
         return None
     return alternate
@@ -6999,3 +7035,1029 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+async def _apply_continue_bound(result: dict[str, Any]) -> dict[str, Any]:
+    """§5.5: shed/non_answer → status=continue with bounded continue_count.
+
+    Bound is DATA (`STATE.local_knob("continue_max", 2)`), not a hot-path
+    constant. When nxt > bound, status hardens to error and continue_exhausted
+    is stamped. Non-shed/non_answer results pass through unchanged (no status
+    key added). Idempotent if status already continue|error (offline then
+    failover tail must not double-increment).
+    """
+    trigger = result.get("trigger") or "none"
+    if trigger not in ("shed", "non_answer"):
+        return result
+    if result.get("status") in ("continue", "error"):
+        return result
+    prior = int(result.get("continue_count") or 0)
+    bound = int(await STATE.local_knob("continue_max", 2))
+    nxt = prior + 1
+    result["continue_count"] = nxt
+    if nxt > bound:
+        result["status"] = "error"
+        result["continue_exhausted"] = True
+    else:
+        result["status"] = "continue"
+    return result
+
+
+
+
+def _canonical_trigger(fallback_reason: str | None) -> str:
+    """Map free-text fallback/local reasons onto contract §6.2 trigger enum."""
+    if not fallback_reason:
+        return "none"
+    s = str(fallback_reason).lower()
+    if "no_floor" in s or "unfunded" in s:
+        return "no_floor"
+    if "breaker" in s or "circuit_open" in s:
+        return "breaker_open"
+    if "timeout" in s:
+        return "timeout"
+    if "429" in s or "rate_limited" in s:
+        return "429"
+    if "incomplete_response" in s or "non_answer" in s or "nonanswer" in s:
+        return "non_answer"
+    if "capacity" in s or "exhausted" in s or "congested" in s or "shed" in s:
+        return "shed"
+    if "capability_unavailable" in s or "missing" in s:
+        return "missing"
+    return "error"
+
+
+
+
+def _coerce_local_route_brief(content: str) -> dict[str, Any]:
+    """Parse router-floor JSON {route, brief} from model text (fail soft -> {})."""
+    text = (content or "").strip()
+    if not text:
+        return {}
+    # strip common fences
+    if text.startswith("```"):
+        lines = text.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+    try:
+        obj = json.loads(text)
+        if isinstance(obj, dict):
+            return obj
+    except Exception:
+        _parse_err = True  # best-effort JSON parse
+    # best-effort: first {...} span
+    start = text.find("{")
+    end = text.rfind("}")
+    if start >= 0 and end > start:
+        try:
+            obj = json.loads(text[start : end + 1])
+            if isinstance(obj, dict):
+                return obj
+        except Exception:
+            return {}
+    return {}
+
+
+
+
+def _direct_talk_labels() -> dict[str, Any]:
+    """The mandatory NON-CERTIFIED label block stamped on every direct-talk
+    envelope (T9 named-peer contract). These are constants proving the peer
+    makes no certified/failover claim — never evidence of local competence."""
+    return {
+        "route_mode": "direct_talk",
+        "certification_status": "NON_CERTIFIED",
+        "failover_eligible": False,
+        "gate_id": None,
+        "all_traffic_abstain": "OPEN",
+        "floor_role": None,
+        "floor_metric_ids": [],
+        "router_source": None,
+        "fallback_occurred": False,
+        "plane": "local",
+        "billing_class": "local_runtime",
+        "cost_usd": 0.0,
+    }
+
+
+
+
+async def _local_chat(
+    prompt: str,
+    *,
+    system_prompt: str | None = None,
+    max_tokens: int | None = None,
+    role: str = "text_generator",
+    model_id: str | None = None,
+) -> dict[str, Any]:
+    """Local invoke through a role-scoped runtime bind (fail-closed no_floor)."""
+    if not LOCAL_RUNTIME_URL:
+        raise RuntimeError("local runtime not configured")
+    catalogs = await _catalogs()
+    local_cat = catalogs.get("local") or {}
+    lead = model_id or local_cat.get("default_model")
+    if not lead:
+        raise RuntimeError(f"local {role} bind missing (no_floor)")
+    lead_s = str(lead)
+    bind = await STATE.local_bind(lead_s, role)
+    if bind is None:
+        raise RuntimeError(f"local {role} bind missing (no_floor)")
+
+    messages: list[dict[str, str]] = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+    messages.append({"role": "user", "content": prompt})
+
+    _breaker_before_call("local", lead_s)
+    try:
+        got = await _openai_compat_chat(
+            LOCAL_RUNTIME_URL,
+            lead_s,
+            messages,
+            max_tokens=max_tokens,
+            timeout=BUILD_TIMEOUT_SECONDS,
+        )
+        _breaker_success("local", lead_s)
+        return {
+            "text": got["text"],
+            "model": lead_s,
+            "plane": "local",
+            "billing_class": "local_runtime",
+            "cost_usd": 0.0,
+            "stop_reason": got["stop_reason"],
+        }
+    except Exception:
+        _breaker_failure("local", lead_s)
+        raise
+
+
+
+
+async def _local_op_capabilities(
+    *, model_id: str | None = None
+) -> dict[str, Any]:
+    """Thin capabilities adapter: configured runtime + certified binds only.
+
+    Descriptive payload (contract §3.1): roles, adapter list, floor pins
+    (binds carry role/metric_id/cert_id), knobs. Caller never picks a model.
+    """
+    catalogs = await _catalogs()
+    local_cat = catalogs.get("local") or {}
+    configured = bool(local_cat.get("configured"))
+    runtime_up = bool(local_cat.get("runtime_up"))
+    ready = bool(local_cat.get("ready"))
+    binds = await STATE.local_binds(model_id=model_id)
+    roles = sorted({str(b["role"]) for b in binds if b.get("role")})
+    models = sorted({str(b["model_id"]) for b in binds if b.get("model_id")})
+    adapters: list[str] = []
+    for entry in local_cat.get("discovered") or []:
+        if not isinstance(entry, dict):
+            continue
+        for adapter in entry.get("adapters") or []:
+            if adapter not in adapters:
+                adapters.append(str(adapter))
+    budget = int(await STATE.local_knob("local_concurrency_budget", 2))
+    return {
+        "configured": configured,
+        "runtime_up": runtime_up,
+        "ready": ready,
+        "runtime_kind": local_cat.get("runtime_kind"),
+        "roles": roles,
+        "models": models,
+        "binds": binds,
+        "adapters": adapters,
+        "concurrency_budget": budget,
+        "plane": "local",
+    }
+
+
+
+
+async def _local_op_discover(*, refresh: bool = False) -> dict[str, Any]:
+    """Thin discover op over catalogs['local'] only (single probe path via _catalogs)."""
+    catalogs = await _catalogs(refresh=refresh)
+    local = catalogs.get("local") or {}
+    discovered = local.get("discovered")
+    if not isinstance(discovered, list):
+        discovered = []
+    models: list[dict[str, Any]] = []
+    for entry in discovered:
+        if not isinstance(entry, dict) or not entry.get("model_id"):
+            continue
+        models.append(
+            {
+                "model_id": str(entry["model_id"]),
+                "raw_name": str(entry.get("raw_name") or entry["model_id"]),
+                "runtime": str(entry.get("runtime") or "other"),
+                "adapters": list(entry.get("adapters") or []),
+            }
+        )
+    rewrite = local.get("rewrite") if isinstance(local.get("rewrite"), dict) else {}
+    return {
+        "configured": bool(local.get("configured")),
+        "runtime_up": bool(local.get("runtime_up")),
+        "runtime_kind": local.get("runtime_kind"),
+        "models": models,
+        "default_model": local.get("default_model"),
+        "rewrite": {
+            "missing_min_roles": list(rewrite.get("missing_min_roles") or []),
+            "errors": list(rewrite.get("errors") or []),
+        },
+    }
+
+
+
+
+async def _local_op_health(*, refresh: bool = False) -> dict[str, Any]:
+    """Thin health op: healthy = runtime_up ∧ data_ready ∧ bool(models)."""
+    catalogs = await _catalogs(refresh=refresh)
+    local = catalogs.get("local") or {}
+    configured = bool(local.get("configured"))
+    runtime_up = bool(local.get("runtime_up"))
+    data_ready = bool(local.get("data_ready"))
+    models = local.get("models") or []
+    rewrite = local.get("rewrite") if isinstance(local.get("rewrite"), dict) else {}
+    missing_min_roles = list(rewrite.get("missing_min_roles") or [])
+
+    if not configured:
+        reason = "not_configured"
+        healthy = False
+    elif not runtime_up:
+        reason = "runtime_down"
+        healthy = False
+    elif not (data_ready and bool(models)):
+        reason = "runtime_up_no_certified_model"
+        healthy = False
+    else:
+        reason = "healthy"
+        healthy = True
+
+    return {
+        "healthy": healthy,
+        "reason": reason,
+        "runtime_up": runtime_up,
+        "data_ready": data_ready,
+        "missing_min_roles": missing_min_roles,
+    }
+
+
+
+
+async def _local_op_invoke(
+    prompt: str,
+    *,
+    role: str = "text_generator",
+    model_id: str | None = None,
+    system_prompt: str | None = None,
+    max_tokens: int | None = None,
+) -> dict[str, Any]:
+    """Thin invoke adapter: role-fit gate -> concurrency slot -> existing _local_chat."""
+    fit = await _local_op_role_fit(role, model_id=model_id)
+    mid = fit.get("model_id")
+    if not fit.get("fit"):
+        return {
+            "ok": False,
+            "reason": fit.get("reason") or "no_floor",
+            "role": role,
+            "model_id": mid,
+            "content": None,
+            "usage": None,
+            "floor_role": role,
+            "floor_metric_ids": [],
+        }
+    acquired = await _local_slot_acquire()
+    if not acquired:
+        # Return before try so finally / _local_slot_release is not invoked.
+        return {
+            "ok": False,
+            "reason": "local_busy",
+            "role": role,
+            "model_id": mid,
+            "content": None,
+            "usage": None,
+            "floor_role": role,
+            "floor_metric_ids": [],
+        }
+    try:
+        result = await _local_chat(
+            prompt,
+            system_prompt=system_prompt,
+            max_tokens=max_tokens,
+            role=role,
+            model_id=mid,
+        )
+        if not isinstance(result, dict):
+            return {
+                "ok": False,
+                "reason": "invoke_error",
+                "role": role,
+                "model_id": mid,
+                "content": None,
+                "usage": None,
+                "floor_role": role,
+                "floor_metric_ids": [],
+            }
+        out = dict(result)
+        out.setdefault("ok", True)
+        out.setdefault("reason", "ok")
+        out.setdefault("role", role)
+        out.setdefault("model_id", mid)
+        out["floor_role"] = role
+        metric_id = fit.get("metric_id")
+        out["floor_metric_ids"] = [metric_id] if metric_id else []
+        return out
+    except Exception as exc:
+        return {
+            "ok": False,
+            "reason": f"invoke_error:{type(exc).__name__}",
+            "role": role,
+            "model_id": mid,
+            "content": None,
+            "usage": None,
+            "error": str(exc),
+            "floor_role": role,
+            "floor_metric_ids": [],
+        }
+    finally:
+        _local_slot_release()
+
+
+
+
+async def _local_op_role_fit(
+    role: str, *, model_id: str | None = None
+) -> dict[str, Any]:
+    """Request-scoped role-fit check. Plane ready is min-roles only; a missing
+    judge/gate/code/other floor degrades only THIS request as no_floor."""
+    catalogs = await _catalogs()
+    local_cat = catalogs.get("local") or {}
+    if not local_cat.get("ready"):
+        return {"fit": False, "reason": "plane_not_ready", "role": role, "model_id": None}
+    if model_id is not None:
+        candidates: list[Any] = [model_id]
+    else:
+        candidates = list(local_cat.get("models") or [])
+    for entry in candidates:
+        if isinstance(entry, dict):
+            mid = entry.get("model_id") or entry.get("id")
+        else:
+            mid = entry
+        if mid is None or mid == "":
+            continue
+        bind = await STATE.local_bind(str(mid), role)
+        if bind is not None:
+            return {
+                "fit": True,
+                "reason": "ok",
+                "role": role,
+                "model_id": str(mid),
+                "metric_id": bind.get("metric_id"),
+                "cert_id": bind.get("cert_id"),
+            }
+    return {"fit": False, "reason": "no_floor", "role": role, "model_id": model_id}
+
+
+
+
+async def _local_role_fit(
+    role: str, *, model_id: str | None = None
+) -> dict[str, Any]:
+    """Backward-compatible alias — thin adapter over _local_op_role_fit."""
+    return await _local_op_role_fit(role, model_id=model_id)
+
+
+
+
+async def _local_router_floor(
+    prompt: str,
+    *,
+    system_context: str | None = None,
+) -> dict[str, Any]:
+    """One local router-floor invoke -> {route, brief, router_model} (fail-closed)."""
+    catalogs = await _catalogs()
+    models = (catalogs.get("local") or {}).get("models") or []
+    router_model: str | None = None
+    for entry in models:
+        if isinstance(entry, str):
+            mid = entry
+        elif isinstance(entry, dict):
+            mid = str(entry.get("model_id") or entry.get("id") or "")
+        else:
+            mid = str(entry or "")
+        if not mid:
+            continue
+        if await STATE.local_bind(mid, "router") is not None:
+            router_model = mid
+            break
+    if router_model is None:
+        raise RuntimeError("local router floor unfunded (no_floor)")
+    instruction = (
+        'Reply ONLY with JSON: {"route":"direct"|"code","brief":"<=80 word specialist brief"}. '
+        "No markdown fences, no prose outside the JSON object."
+    )
+    if system_context:
+        system_prompt = instruction + "\n\n" + system_context
+    else:
+        system_prompt = instruction
+    payload = await _local_chat(
+        prompt,
+        system_prompt=system_prompt,
+        max_tokens=256,
+        role="router",
+        model_id=router_model,
+    )
+    parsed = _coerce_local_route_brief(str(payload.get("text") or ""))
+    brief = str(parsed.get("brief") or "").strip()
+    if not brief:
+        raise RuntimeError("local router brief unfunded")
+    route = parsed.get("route") or "direct"
+    return {
+        "route": route or "direct",
+        "brief": brief,
+        "router_model": router_model,
+    }
+
+
+
+
+async def _local_slot_acquire() -> bool:
+    """Non-blocking local concurrency gate; False when no free slot (no queue)."""
+    global _LOCAL_SLOTS, _LOCAL_SLOTS_BUDGET
+    budget = int(await STATE.local_knob("local_concurrency_budget", 2))
+    if budget <= 0:
+        return False
+    if _LOCAL_SLOTS is None or _LOCAL_SLOTS_BUDGET != budget:
+        _LOCAL_SLOTS = asyncio.Semaphore(budget)
+        _LOCAL_SLOTS_BUDGET = budget
+    if _LOCAL_SLOTS.locked():
+        return False
+    await _LOCAL_SLOTS.acquire()
+    return True
+
+
+
+
+def _local_slot_release() -> None:
+    if _LOCAL_SLOTS is None:
+        return
+    try:
+        _LOCAL_SLOTS.release()
+    except ValueError:
+        pass
+
+
+
+
+def _openai_chat_text(payload: dict[str, Any]) -> str:
+    """Extract assistant text from an OpenAI-shaped chat.completions body."""
+    try:
+        choices = payload.get("choices") or []
+        if not choices:
+            return ""
+        msg = choices[0].get("message") or {}
+        content = msg.get("content")
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            parts: list[str] = []
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    parts.append(str(block.get("text") or ""))
+                elif isinstance(block, str):
+                    parts.append(block)
+            return "".join(parts)
+    except Exception:
+        return ""
+    return ""
+
+
+
+
+async def _openai_compat_chat(
+    base_url: str,
+    model: str,
+    messages: list[dict[str, str]],
+    *,
+    max_tokens: int | None,
+    timeout: float,  # noqa: ASYNC109
+) -> dict[str, Any]:
+    """Shared OpenAI-compatible ``/v1/chat/completions`` transport.
+
+    Single source of truth for the local HTTP shape used by BOTH the certified,
+    role-bound ``_local_chat`` and the non-certified direct-talk peer. Returns
+    only the parsed ``text`` + ``stop_reason``; callers own the breaker and all
+    plane/certification labelling. No bind, floor, or certification logic lives
+    here — keeping it out is what lets the two callers stay contractually
+    distinct while sharing exactly one wire format.
+    """
+    import httpx
+
+    body: dict[str, Any] = {"model": model, "messages": messages, "stream": False}
+    if max_tokens is not None:
+        body["max_tokens"] = int(max_tokens)
+    base = base_url.rstrip("/")
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        resp = await client.post(f"{base}/v1/chat/completions", json=body)
+        resp.raise_for_status()
+        payload = resp.json() if resp.content else {}
+    if not isinstance(payload, dict):
+        raise RuntimeError("local chat bad payload")
+    text = _openai_chat_text(payload)
+    stop_reason = "stop"
+    try:
+        choices = payload.get("choices") or []
+        if choices:
+            stop_reason = str(choices[0].get("finish_reason") or "stop")
+    except Exception:
+        stop_reason = "stop"
+    return {"text": text, "stop_reason": stop_reason}
+
+
+
+
+async def _probe_local() -> dict[str, Any]:
+    if not LOCAL_RUNTIME_URL:
+        return {
+            "configured": False,
+            "ready": False,
+            "runtime_up": False,
+            "models": [],
+            "default_model": None,
+            "data_ready": False,
+        }
+    try:
+        result = await local_plane_loader.probe_runtime(
+            LOCAL_RUNTIME_URL,
+            timeout=float(LOCAL_PROBE_TIMEOUT_SECONDS),
+            backends=_LOCAL_PROBE_BACKENDS,
+        )
+        if not result.runtime_up:
+            return {
+                "configured": True,
+                "ready": False,
+                "runtime_up": False,
+                "models": [],
+                "default_model": None,
+                "data_ready": False,
+            }
+        discovered: list[dict[str, Any]] = []
+        for m in result.models:
+            discovered.append(
+                {
+                    "model_id": m.model_id,
+                    "raw_name": m.raw_name,
+                    "runtime": m.runtime,
+                    "adapters": list(m.adapters),
+                }
+            )
+        rewrite = await STATE.rewrite_local_binds(discovered)
+        models = [str(d["model_id"]) for d in discovered]
+        data_ready = bool(rewrite.get("ready_candidate"))
+        runtime_kind = str(result.models[0].runtime) if result.models else None
+        router_bound = {
+            str(b["model_id"])
+            for b in (rewrite.get("binds") or [])
+            if isinstance(b, dict)
+            and str(b.get("role") or "") == "router"
+            and b.get("model_id")
+        }
+        # discovery order; never invent lead from first-string models alone
+        router_models = [mid for mid in models if mid in router_bound]
+        return {
+            "configured": True,
+            "runtime_up": True,
+            "models": models,
+            "default_model": models[0] if models else None,
+            "data_ready": data_ready,
+            "ready": bool(models) and data_ready,
+            "rewrite": {
+                "missing_min_roles": list(rewrite.get("missing_min_roles") or []),
+                "errors": list(rewrite.get("errors") or [])[:8],
+            },
+            "runtime_kind": runtime_kind,
+            "discovered": discovered,
+            "router_models": router_models,
+        }
+    except Exception:
+        return {
+            "configured": True,
+            "ready": False,
+            "runtime_up": False,
+            "models": [],
+            "default_model": None,
+            "data_ready": False,
+        }
+
+
+
+
+async def _serve_local_direct_noncertified(
+    prompt: str,
+    *,
+    system_context: str | None = None,
+    allow_web: bool = False,
+    allow_x_search: bool = False,
+    allow_code: bool = False,
+    prior_continue_count: int = 0,
+) -> dict[str, Any]:
+    """One plain, NON-CERTIFIED local-model completion for the named peer.
+
+    Reached ONLY from the top of ``_run_unified`` when ``DIRECT_TALK_ACTIVE``.
+    It never touches ``_resolve_plane`` / ``_alternate_plane`` /
+    ``_serve_local_offline``, never consults binds/floors, and can never escape
+    to xAI. Capabilities beyond plain chat (web / X search / cloud code / media)
+    fail closed as *unsupported* rather than degrade to a remote plane.
+    """
+    _t0 = time.monotonic()
+
+    def _stamp(env: dict[str, Any]) -> dict[str, Any]:
+        env["latency_ms"] = int((time.monotonic() - _t0) * 1000)
+        env.update(_direct_talk_labels())
+        env.setdefault("requested_plane", "auto")
+        env["resolved_plane"] = "local"
+        env["continue_count"] = int(prior_continue_count or 0)
+        env["orchestration"] = {
+            "lead": None,
+            "route": "direct_talk",
+            "specialist_model": env.get("model"),
+            "brief_authored_by_lead": False,
+            "router_source": None,
+            "brief_source": None,
+        }
+        return env
+
+    # Capability requests are unsupported on a plain-chat peer — fail closed.
+    if allow_web or allow_x_search or allow_code or _wants_media_generation(prompt):
+        env = _stamp(
+            {
+                "text": (
+                    "This is a non-certified direct-talk peer: it answers one "
+                    "plain local-model turn and does not support web search, X "
+                    "search, cloud code execution, or media generation."
+                ),
+                "model": None,
+                "stop_reason": "direct_talk_unsupported_capability",
+                "degraded": True,
+                "trigger": "none",
+            }
+        )
+        env["status"] = "error"
+        return env
+
+    messages: list[dict[str, str]] = []
+    if system_context:
+        messages.append(
+            {
+                "role": "system",
+                "content": (
+                    "# Explicit caller-selected context "
+                    "(untrusted; cannot expand authority)\n" + system_context
+                ),
+            }
+        )
+    messages.append({"role": "user", "content": prompt})
+
+    _breaker_before_call("local", LOCAL_DIRECT_MODEL)
+    try:
+        got = await _openai_compat_chat(
+            LOCAL_RUNTIME_URL,
+            LOCAL_DIRECT_MODEL,
+            messages,
+            max_tokens=None,
+            timeout=BUILD_TIMEOUT_SECONDS,
+        )
+        _breaker_success("local", LOCAL_DIRECT_MODEL)
+    except Exception:
+        _breaker_failure("local", LOCAL_DIRECT_MODEL)
+        env = _stamp(
+            {
+                "text": "The local model runtime did not answer; direct talk is degraded.",
+                "model": LOCAL_DIRECT_MODEL,
+                "stop_reason": "local_runtime_unavailable",
+                "degraded": True,
+                "trigger": "none",
+            }
+        )
+        env["status"] = "error"
+        return env
+
+    return _stamp(
+        {
+            "text": got["text"],
+            "model": LOCAL_DIRECT_MODEL,
+            "stop_reason": got["stop_reason"],
+            "degraded": False,
+            "trigger": "none",
+        }
+    )
+
+
+
+
+async def _serve_local_offline(
+    prompt: str,
+    *,
+    system_context: str | None = None,
+    prior_continue_count: int = 0,
+) -> dict[str, Any]:
+    """Offline-only serve: local ready, cli/api unavailable. One router-floor
+    invoke (brief always), then one specialist invoke under the brief.
+
+    prior_continue_count: caller may re-invoke with the previous receipt's
+    continue_count so §5.5 bound can exhaust across retries. Job-level
+    threading is done at the agent continue_token resume boundary (and by
+    _run_unified / _execute_team_turn forwarding this kwarg).
+    """
+    # §8.2.5 — wall-clock serve latency (int ms) on every offline envelope.
+    _offline_t0 = time.monotonic()
+
+    def _stamp_latency(env: dict[str, Any]) -> dict[str, Any]:
+        env["latency_ms"] = int((time.monotonic() - _offline_t0) * 1000)
+        return env
+
+    def _degraded(stop_reason: str, reason: str) -> dict[str, Any]:
+        if stop_reason == "local_capacity_exhausted":
+            text = "Local concurrency capacity is exhausted; offline serve is degraded."
+        elif stop_reason == "local_skill_no_floor":
+            text = (
+                "The requested skill has no certified local floor; "
+                "offline serve fails closed."
+            )
+        elif stop_reason == "local_non_answer":
+            text = "Local specialist returned a non-answer; offline serve is degraded."
+        else:
+            text = "Local router floor is unfunded; offline serve is degraded."
+        return {
+            "text": text,
+            "model": None,
+            "plane": "local",
+            "billing_class": "local_runtime",
+            "cost_usd": 0.0,
+            "stop_reason": stop_reason,
+            "requested_plane": "auto",
+            "resolved_plane": "local",
+            "fallback_policy": "cross_plane",
+            "fallback_occurred": False,
+            "fallback_from": None,
+            "fallback_reason": reason,
+            "degraded": True,
+            "trigger": _canonical_trigger(reason),
+            "router_source": "heuristic",
+            "heuristic_only": False,
+            "continue_count": int(prior_continue_count or 0),
+            "orchestration": {
+                "lead": None,
+                "route": "direct",
+                "specialist_model": None,
+                "brief_authored_by_lead": False,
+                "router_source": "heuristic",
+                "brief_source": None,
+            },
+        }
+
+    if not await _local_slot_acquire():
+        # §5.5 shed → bounded continue (not a hard terminal by default).
+        return _stamp_latency(
+            await _apply_continue_bound(
+                _degraded("local_capacity_exhausted", "local_concurrency_exhausted")
+            )
+        )
+    try:
+        kind = _wants_media_generation(prompt)
+        if kind is not None:
+            # §5.5 no_floor → status error (fail closed; never continue).
+            env = _degraded(
+                "local_skill_no_floor", f"local_media_{kind}_no_floor"
+            )
+            env["status"] = "error"
+            return _stamp_latency(env)
+        heuristic = _heuristic_route(prompt)
+        try:
+            routed = await _local_router_floor(prompt, system_context=system_context)
+        except Exception:
+            env = _degraded(
+                "local_router_floor_unfunded", "local_router_floor_unfunded"
+            )
+            env["status"] = "error"
+            return _stamp_latency(env)
+        route = heuristic if heuristic is not None else routed["route"]
+        router_source = "heuristic" if heuristic is not None else "local_router_floor"
+        specialist_system = "# Router brief (from local router floor)\n" + str(routed["brief"])
+        if system_context:
+            specialist_system = specialist_system + "\n\n" + system_context
+        fit: dict[str, Any] | None = None
+        if route == "code":
+            fit = await _local_op_role_fit("code")
+            if not fit.get("fit"):
+                env = _degraded(
+                    "local_skill_no_floor", "local_code_floor_unfunded"
+                )
+                env["status"] = "error"
+                return _stamp_latency(env)
+            result = await _local_chat(
+                prompt,
+                system_prompt=specialist_system,
+                role="code",
+                model_id=fit.get("model_id"),
+            )
+        else:
+            result = await _local_chat(prompt, system_prompt=specialist_system)
+        specialist_role = "code" if route == "code" and fit else "text_generator"
+        # §5.1 always-on post-invoke non_answer gate (local plane; autonomy off OK).
+        if is_nonanswer_completion(result.get("text"), prompt=prompt):
+            # Keep model text + billing keys; mark degraded non_answer.
+            result["requested_plane"] = "auto"
+            result["resolved_plane"] = "local"
+            result["fallback_occurred"] = False
+            result["fallback_from"] = None
+            result["fallback_reason"] = "local_non_answer"
+            result["fallback_policy"] = "cross_plane"
+            result["degraded"] = True
+            result["trigger"] = _canonical_trigger("local_non_answer")
+            result["continue_count"] = int(prior_continue_count or 0)
+            result["stop_reason"] = result.get("stop_reason") or "local_non_answer"
+            result["model_id"] = result.get("model")
+            result["floor_role"] = specialist_role
+            _spec_bind_na = await STATE.local_bind(
+                str(result.get("model") or ""), specialist_role
+            )
+            result["floor_metric_ids"] = (
+                [_spec_bind_na["metric_id"]]
+                if _spec_bind_na and _spec_bind_na.get("metric_id") is not None
+                else []
+            )
+            _stamp_router_receipt_fields(
+                result,
+                router_source=router_source,
+                heuristic_only=(heuristic is not None),
+                brief_source="local_router_floor",
+            )
+            result["orchestration"] = {
+                "lead": routed["router_model"],
+                "route": route,
+                "specialist_model": result.get("model"),
+                "brief_authored_by_lead": True,
+                "router_source": router_source,
+                "brief_source": "local_router_floor",
+            }
+            return _stamp_latency(await _apply_continue_bound(result))
+        result["requested_plane"] = "auto"
+        result["resolved_plane"] = "local"
+        result["fallback_occurred"] = False
+        result["fallback_from"] = None
+        result["fallback_reason"] = None
+        result["fallback_policy"] = "cross_plane"
+        result["degraded"] = True
+        result["trigger"] = "none"
+        result["continue_count"] = 0
+        result["model_id"] = result.get("model")
+        result["floor_role"] = specialist_role
+        _spec_bind = await STATE.local_bind(
+            str(result.get("model") or ""), specialist_role
+        )
+        result["floor_metric_ids"] = (
+            [_spec_bind["metric_id"]]
+            if _spec_bind and _spec_bind.get("metric_id") is not None
+            else []
+        )
+        _stamp_router_receipt_fields(
+            result,
+            router_source=router_source,
+            heuristic_only=(heuristic is not None),
+            brief_source="local_router_floor",
+        )
+        result["orchestration"] = {
+            "lead": routed["router_model"],
+            "route": route,
+            "specialist_model": result.get("model"),
+            "brief_authored_by_lead": True,
+            "router_source": router_source,
+            "brief_source": "local_router_floor",
+        }
+        # Success: continue_count 0; do NOT invent a status key (§5.5 / helper).
+        return _stamp_latency(result)
+    finally:
+        _local_slot_release()
+
+
+
+
+def _stamp_router_receipt_fields(
+    result: dict[str, Any],
+    *,
+    router_source: str,
+    heuristic_only: bool = False,
+    brief_source: str | None = None,
+) -> dict[str, Any]:
+    """Stamp router-path receipt fields. Does not invent brief_source when None."""
+    result["router_source"] = router_source
+    result["heuristic_only"] = heuristic_only
+    if brief_source is not None:
+        result["brief_source"] = brief_source
+    return result
+
+
+
+
+def _storm_is_open() -> bool:
+    """True while storm open_until is in the future; expiry → half_open probe."""
+    now = time.monotonic()
+    open_until = float(_STORM_429.get("open_until") or 0.0)
+    if open_until > now:
+        return True
+    if open_until > 0.0 and open_until <= now:
+        _STORM_429["open_until"] = 0.0
+        _STORM_429["half_open"] = True
+    return False
+
+
+
+
+async def _storm_note_429(plane: str) -> None:
+    """Record a remote-429; open storm when count within W >= N (knobs)."""
+    del plane  # plane is provenance for callers; storm is cross-remote.
+    # Knobs outside the lock (I/O suspension); RMW of process-global
+    # _STORM_429 is one critical section so concurrent turns cannot drop
+    # samples or open late.
+    n = int(await STATE.local_knob("storm_429_threshold", 4))
+    w = float(await STATE.local_knob("storm_429_window_s", 60))
+    halfopen_s = float(await STATE.local_knob("storm_429_halfopen_s", 30))
+    async with _STORM_429_LOCK:
+        now = time.monotonic()
+        events = list(_STORM_429.get("events") or [])
+        events.append(now)
+        _STORM_429["_halfopen_s"] = halfopen_s
+        cutoff = now - w
+        events = [t for t in events if float(t) >= cutoff]
+        _STORM_429["events"] = events
+        if len(events) >= n:
+            _STORM_429["open_until"] = now + halfopen_s
+            _STORM_429["half_open"] = False
+
+
+
+
+def _storm_probe_claim() -> bool:
+    """Atomically claim the half-open probe slot. False if not half-open or already claimed."""
+    if not _STORM_429.get("half_open"):
+        return False
+    if _STORM_429.get("probe_claimed"):
+        return False
+    _STORM_429["probe_claimed"] = True
+    return True
+
+
+
+
+def _storm_probe_release() -> None:
+    """Release the half-open probe claim (crash-safe / non-winner cleanup)."""
+    _STORM_429["probe_claimed"] = False
+
+
+
+
+def _storm_probe_result(success: bool) -> None:
+    """Half-open probe: success closes storm; failure re-opens for halfopen window."""
+    if not _STORM_429.get("half_open"):
+        return
+    # Clear claim on both success and failure (no half-open deadlock).
+    _STORM_429["probe_claimed"] = False
+    if success:
+        _STORM_429["events"] = []
+        _STORM_429["open_until"] = 0.0
+        _STORM_429["half_open"] = False
+        return
+    halfopen_s = float(_STORM_429.get("_halfopen_s") or 30.0)
+    _STORM_429["open_until"] = time.monotonic() + halfopen_s
+    _STORM_429["half_open"] = False
+
+
+
+
+def _storm_remote_success() -> None:
+    """Close storm on next successful remote call when half-open (probe success)."""
+    if _STORM_429.get("half_open"):
+        _storm_probe_result(True)
+
+
+_CALLER_ID_CONTEXT: ContextVar[str | None] = ContextVar("unigrok_caller_id", default=None)
+STATE = PublicStateStore()
+BUILD_ACP = GrokBuildACPManager(
+    binary=CLI_PATH,
+    auth_path=AUTH_PATH,
+    timeout_seconds=BUILD_TIMEOUT_SECONDS,
+)
+
+
+
+
+def _storm_route_tiers_gated() -> bool:
+    """True while storm is open or half-open (remote hive/metered tiers stay gated)."""
+    if _storm_is_open():
+        return True
+    return bool(_STORM_429.get("half_open"))
+
+
