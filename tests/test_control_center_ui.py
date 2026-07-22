@@ -32,13 +32,21 @@ def test_dashboard_carries_new_panes_and_receipt_columns() -> None:
     assert "UI_BUILD" in html
 
 
-def test_public_tier_nav_links_only_its_own_surface() -> None:
-    # The public page renders its own tier and must never link or name the
-    # higher-trust surfaces (anti-fingerprinting: no forge/sky/space hints).
+def test_tier_nav_renders_all_three_surfaces() -> None:
+    # Sponsor decision: the unified switcher shows all three tiers and links
+    # each to its own surface port (public 4765, sky 4768, space 4769). Higher
+    # tiers enforce their own auth on arrival; the nav is navigation, not access.
     html = DASHBOARD.read_text(encoding="utf-8")
     assert 'id="tiernav"' in html
-    for leak in ("4766", "4768", "4769", "skygrok", "spacegrok", "forge"):
-        assert leak not in html.lower()
+    for token in (
+        "@grok Public Core",
+        "@skygrok Sky Observer",
+        "@spacegrok Space Awareness",
+        "'4765'",
+        "'4768'",
+        "'4769'",
+    ):
+        assert token in html
 
 
 def test_runtimez_serves_public_tool_registry() -> None:
