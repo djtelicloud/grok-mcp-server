@@ -7008,6 +7008,7 @@ async def runtimez(_: Request) -> JSONResponse:
                     "models",
                     "routes",
                     "planes",
+                    "kinds",
                     "fallbacks",
                 )
             },

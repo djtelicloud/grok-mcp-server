@@ -253,6 +253,7 @@ async def test_cloudrun_runtimez_reports_instance_local_state(
             "models": {},
             "routes": {},
             "planes": {},
+            "kinds": {},
             "fallbacks": {},
         }
 

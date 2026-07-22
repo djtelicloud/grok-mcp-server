@@ -1380,6 +1380,7 @@ class PublicStateStore:
             "models": aggregate("model"),
             "routes": aggregate("route"),
             "planes": aggregate("resolved_plane"),
+            "kinds": aggregate("request_kind"),
             "fallbacks": aggregate("fallback_reason"),
             "recent": [
                 {

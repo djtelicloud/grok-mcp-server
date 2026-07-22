@@ -47,14 +47,17 @@
     <article class="card"><div class="label">Verified success</div><div id="success" class="metric">—</div></article>
     <article class="card"><div class="label">P95 latency</div><div id="p95" class="metric">0 <small>ms</small></div></article>
     <article class="card"><div class="label">Recorded API cost</div><div id="cost" class="metric">$0</div></article>
+    <article class="card wide"><div class="label">Plane mix</div><div id="planes" class="bars"></div></article>
+    <article class="card wide"><div class="label">Request kinds</div><div id="kinds" class="bars"></div></article>
     <article class="card wide"><div class="label">Route mix</div><div id="routes" class="bars"></div></article>
     <article class="card wide"><div class="label">Model mix</div><div id="models" class="bars"></div></article>
     <article class="card wide"><div class="label">Top callers</div><div id="callers" class="bars"></div></article>
     <article class="card wide"><div class="label">Fallback categories</div><div id="fallbacks" class="bars"></div></article>
+    <article class="card full"><div class="label">Runtime</div><div id="runtime" class="breakers"><div class="empty">Loading …</div></div></article>
     <article class="card full"><div class="label">Circuit breakers</div><div id="breakers" class="breakers"></div></article>
     <article class="card full"><div class="label">Recent receipts</div><div class="scroll"><table><thead><tr>
-      <th>ID</th><th>Caller</th><th>Route</th><th>Plane</th><th>Model</th><th>Latency</th><th>Cost</th>
-      <th>Fallback</th><th>Verified</th></tr></thead><tbody id="recent"></tbody></table></div></article>
+      <th>Time</th><th>ID</th><th>Caller</th><th>Kind</th><th>Route</th><th>Plane</th><th>Model</th><th>Latency</th><th>Cost</th>
+      <th>Fallback</th><th>Stop</th><th>Verified</th></tr></thead><tbody id="recent"></tbody></table></div></article>
   </section><div class="footer">Refreshes every 10 seconds · telemetry stores receipts and explicit outcomes, never prompts.</div>
 </main><script>
 const $=id=>document.getElementById(id), esc=s=>String(s??'—').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -62,18 +65,26 @@ function bars(id,items){const root=$(id),max=Math.max(1,...items.map(x=>x.calls|
   items.slice(0,8).map(x=>`<div class="bar-row"><div class="bar-label" title="${esc(x.name)}">${esc(x.name)}</div>
   <div class="track"><div class="fill" style="width:${100*(x.calls||0)/max}%"></div></div><div class="value">${x.calls||0}</div></div>`).join(''):
   '<div class="empty">No samples yet.</div>'}
-async function refresh(){try{const [ready,b]=await Promise.all([fetch('/readyz').then(r=>r.json()),fetch('/benchmarkz').then(r=>r.json())]);
-  const t=b.telemetry||{};$('service').textContent='Service ready';$('service').className='pill ok';
+const UI_BUILD='unigrok-ui-v1.1.0-r1';
+async function refresh(){try{const [ready,b,rt]=await Promise.all([fetch('/readyz').then(r=>r.json()),
+  fetch('/benchmarkz').then(r=>r.json()),fetch('/runtimez').then(r=>r.json()).catch(()=>null)]);
+  const t=b.telemetry||{},up=ready.status==='ready';
+  $('service').textContent=`Service ${esc(ready.status||'unknown')}`;$('service').className='pill'+(up?' ok':'');
   for(const p of ['cli','api']){const on=!!ready.planes?.[p]?.ready;$(p).textContent=`${p.toUpperCase()} ${on?'ready':'offline'}`;$(p).className='pill '+(on?'ok':'')}
   $('updated').textContent=new Date().toLocaleTimeString();$('samples').textContent=t.sample_size||0;
   $('success').textContent=t.verified_success_rate==null?'—':`${Math.round(t.verified_success_rate*100)}%`;
   $('p95').innerHTML=`${Math.round(t.latency_ms?.p95||0).toLocaleString('en-US')} <small>ms</small>`;$('cost').textContent=`$${Number(t.cost_usd||0).toFixed(4)}`;
+  bars('planes',(t.planes||[]).filter(x=>x.name!=='unknown'));bars('kinds',t.kinds||[]);
   bars('routes',t.routes||[]);bars('models',t.models||[]);bars('callers',t.callers||[]);bars('fallbacks',(t.fallbacks||[]).filter(x=>x.name!=='unknown'));
+  $('runtime').innerHTML=rt?[`<b>${esc(rt.mode)}</b>`,esc(rt.state_backend),`${rt.tool_count??'—'} tools`,
+    `${esc(rt.version)} · ${UI_BUILD}`].map(x=>`<div class="breaker">${x}</div>`).join(''):
+    `<div class="breaker">runtime unavailable · ${UI_BUILD}</div>`;
   const bs=b.circuit_breakers||{};$('breakers').innerHTML=Object.keys(bs).length?Object.entries(bs).map(([k,v])=>
     `<div class="breaker ${v.open?'open':''}"><b>${esc(k)}</b> · ${v.open?'OPEN':'closed'} · failures ${v.failures} · trips ${v.trips}</div>`).join(''):'<div class="empty">No provider calls recorded.</div>';
-  $('recent').innerHTML=(t.recent||[]).map(r=>`<tr><td>${r.id}</td><td>${esc(r.caller)}</td><td>${esc(r.route)}</td><td>${esc(r.resolved_plane)}</td>
+  $('recent').innerHTML=(t.recent||[]).map(r=>`<tr><td>${esc((r.created_at||'').slice(11,19))}</td><td>${r.id}</td><td>${esc(r.caller)}</td>
+    <td>${esc(r.request_kind)}</td><td>${esc(r.route)}</td><td>${esc(r.resolved_plane)}</td>
     <td>${esc(r.model)}</td><td>${r.latency_ms||0} ms</td><td>$${Number(r.cost_usd||0).toFixed(4)}</td><td>${esc(r.fallback_reason)}</td>
-    <td>${r.verified?(r.success?'pass':'fail'):'unverified'}</td></tr>`).join('');
+    <td>${esc(r.stop_reason)}</td><td>${r.verified?(r.success?'pass':'fail'):'unverified'}</td></tr>`).join('');
 }catch(e){$('service').textContent='Service unavailable';$('service').className='pill';$('updated').textContent='Retrying …'}}
 refresh();setInterval(refresh,10000);
 </script></body></html>
