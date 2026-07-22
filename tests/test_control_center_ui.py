@@ -60,6 +60,17 @@ def test_per_panel_color_coding_and_legend() -> None:
     assert "lv-great" in html and "lv-threat" in html
 
 
+def test_connect_panel_and_plane_usage() -> None:
+    # Forge fold: an MCP-connect panel (non-secret config, live client status)
+    # and per-plane usage reporting on the routing planes.
+    html = DASHBOARD.read_text(encoding="utf-8")
+    assert 'id="clients"' in html and 'id="mcpsnippet"' in html
+    assert "mcpConfig" in html and "X-Client-ID" in html
+    assert "planeUse" in html
+    # config must stay non-secret: no API key field wired into the snippet
+    assert "XAI_API_KEY" not in html and "api_key" not in html
+
+
 def test_tier_nav_renders_all_three_surfaces() -> None:
     # Sponsor decision: the unified switcher shows all three tiers and links
     # each to its own surface port (public 4765, sky 4768, space 4769). Higher
