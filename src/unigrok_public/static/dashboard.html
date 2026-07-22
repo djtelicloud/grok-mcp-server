@@ -97,6 +97,8 @@
     @media(max-width:950px){.lanes{grid-template-columns:1fr 1fr}}
     .kv{display:grid;grid-template-columns:auto 1fr;gap:8px 18px;margin-top:14px;font-size:13.5px}
     .kv span{color:var(--muted)}.kv b{font-weight:650;font-variant-numeric:tabular-nums}
+    .ring{display:inline-grid;place-items:center;position:relative;width:88px;height:88px;flex:none}
+    .ring b{position:absolute;font-size:20px;font-weight:850}
     @media(max-width:950px){.card,.card.wide{grid-column:span 6}}@media(max-width:620px){header{display:block}
       .status{justify-content:flex-start;margin-top:16px}.card,.card.wide{grid-column:1/-1}}
   </style>
@@ -153,6 +155,10 @@
     <article class="card full"><div class="label">4-lane swarm grid</div><div id="swarmgrid" class="lanes"></div></article>
     <article class="card wide"><div class="label">Circuit breakers &amp; trip rates</div><div id="skybreakers" class="breakers"></div></article>
     <article class="card wide"><div class="label">P95 latency by surface · ms</div><div id="latdist" class="bars"></div></article>
+    <article class="card full"><div class="label">GitHub reviews · Grok score <span class="sample">SAMPLE</span></div>
+      <div id="ghreviews" style="display:flex;gap:20px;align-items:center;margin-top:12px"></div></article>
+    <article class="card full"><div class="label">Live run · streaming <span class="sample">SAMPLE</span></div>
+      <div id="liverun"></div></article>
   </section>
 
   <section class="grid tier-section" id="space-tier" style="display:none">
@@ -164,6 +170,8 @@
         <th>Tip</th><th>Claim</th><th>Predicate</th><th>Proof (sha256)</th><th>Verified</th></tr></thead><tbody id="claimmatrix"></tbody></table></div></article>
     <article class="card wide"><div class="label">Memory &amp; RAG index telemetry</div><div id="ragstats" class="kv"></div></article>
     <article class="card wide"><div class="label">Space awareness security monitor</div><div id="spacesec" class="kv"></div></article>
+    <article class="card wide"><div class="label">Report card · sealed floor <span class="sample">SAMPLE</span></div><div id="reportcard"></div></article>
+    <article class="card wide"><div class="label">Linked devices <span class="sample">SAMPLE</span></div><div id="devices"></div></article>
   </section>
 
   <div class="footer">Refreshes every 10 seconds · telemetry stores receipts and explicit outcomes, never prompts.</div>
@@ -203,7 +211,7 @@ const METERED_KINDS=new Set(['web_search','x_search','remote_code_execution','ch
 const KIND_COL=n=>METERED_KINDS.has(n)?lvHex.warning:'#4a5675';   // metered (costs) vs free (neutral)
 const ROUTE_COL=n=>n==='error'?lvHex.threat:GRADFILL;             // only error carries a level
 const MODEL_COL=()=>GRADFILL;                                     // model choice has no severity
-const UI_BUILD='unigrok-ui-v1.1.0-r12';
+const UI_BUILD='unigrok-ui-v1.1.0-r13';
 // Unified 3-tier switcher: each tab links to its own surface on the same host.
 // The active tier is the current port; ?preview=sky|space lets one running
 // container show a higher tier's panels for review. Hierarchical scoping:
@@ -244,6 +252,18 @@ const SKY={
     {port:'4768',surface:'sky observer',p95:11},
     {port:'4775',surface:'public alt',p95:9},
   ],
+  github:{score:93,prs:[
+    {pr:'#508',what:'Forge groundwork in the public gateway',checks:'18/18',state:'merged'},
+    {pr:'#1',what:'Private Forge console overlay',checks:'7/7',state:'merged'},
+    {pr:'#2',what:'small probe fix',checks:'3/3',state:'waiting'},
+  ]},
+  run:[
+    {t:'depth 1',d:'route → cli · grok-4'},
+    {t:'tool',d:'web_search · start'},
+    {t:'tool',d:'web_search · end 412 ms'},
+    {t:'cost',d:'$0.0000 so far'},
+    {t:'depth 2',d:'compose answer'},
+  ],
 };
 const SPACE={
   claims:[
@@ -251,6 +271,11 @@ const SPACE={
     {tip:'d08210ca',claim:'r2 ckpt100 scorecard',pred:'Wilson L ≥ 0.969',proof:'sample — wires from SCORECARD.json',ok:'claim'},
     {tip:'—',claim:'all-traffic ABSTAIN',pred:'floor OPEN',proof:'gate_id null',ok:'open'},
   ],
+  report:{floor:87,rows:[
+    {test:'Answers verified correct',score:'41/44',range:'79–97%'},
+    {test:'Recovered after a failure',score:'9/11',range:'52–94%'},
+  ]},
+  devices:[{name:'MacBook Pro — this machine',linked:'Jul 19',status:'linked'}],
 };
 function renderSky(){
   const laneLv={active:'great',idle:'expected',probe:'good'};
@@ -260,6 +285,18 @@ function renderSky(){
   $('skybreakers').innerHTML=SKY.breakers.map(b=>`<div class="breaker ${b.open?'open':''}"><b>${esc(b.name)}</b> · <span class="lv-${b.open?'threat':'expected'}">${b.open?'OPEN':'closed'}</span> · failures ${b.failures} · trips ${b.trips}</div>`).join('');
   cbars('latdist',SKY.latency.map(r=>({name:`${r.port} · ${r.surface}`,val:r.p95,
     color:r.p95<10?lvHex.great:r.p95<20?lvHex.warning:lvHex.threat})));
+  const g=SKY.github,C=2*Math.PI*38,off=C*(1-g.score/100),stCol={merged:'great',waiting:'warning',open:'expected',closed:'threat'};
+  $('ghreviews').innerHTML=`<div class="ring"><svg width="88" height="88" viewBox="0 0 88 88">
+    <circle cx="44" cy="44" r="38" fill="none" stroke="#202b47" stroke-width="8"/>
+    <circle cx="44" cy="44" r="38" fill="none" stroke="url(#rg)" stroke-width="8" stroke-linecap="round"
+      stroke-dasharray="${C.toFixed(0)}" stroke-dashoffset="${off.toFixed(0)}" transform="rotate(-90 44 44)"/>
+    <defs><linearGradient id="rg"><stop offset="0%" stop-color="#58a6ff"/><stop offset="100%" stop-color="#bc8cff"/></linearGradient></defs></svg>
+    <b>${g.score}%</b></div>
+    <div class="scroll" style="flex:1"><table><thead><tr><th>PR</th><th>What</th><th>Checks</th><th>State</th></tr></thead><tbody>${
+    g.prs.map(p=>`<tr><td>${esc(p.pr)}</td><td class="wrap">${esc(p.what)}</td><td>${esc(p.checks)}</td>
+      <td><span class="lv-${stCol[p.state]||'expected'}">${esc(p.state)}</span></td></tr>`).join('')}</tbody></table></div>`;
+  $('liverun').innerHTML=`<div class="breakers">${SKY.run.map(s=>`<div class="breaker"><b>${esc(s.t)}</b> · ${esc(s.d)}</div>`).join('')}</div>
+    <div class="hint">Live SSE run events (depth, tool start/end, cost-so-far). <button class="copybtn" disabled>Run — contributor</button></div>`;
 }
 function renderSpace(rt){
   const cs={};SPACE.claims.forEach(c=>{const k=c.ok==='open'?'ABSTAIN':'claim-plane';cs[k]=(cs[k]||0)+1;});
@@ -277,6 +314,14 @@ function renderSpace(rt){
     <span>Claim plane</span><b class="lv-expected">evidence-only · no sealed READY</b>
     <span>gate_id</span><b class="lv-expected">null (preserved)</b>
     <span>Diff</span><b class="lv-expected">DIFF_OFF</b>`;
+  const rc=SPACE.report;
+  $('reportcard').innerHTML=`<div class="metric lv-${rc.floor>=85?'great':rc.floor>=70?'warning':'threat'}">${rc.floor}<small>% floor</small></div>
+    <div class="hint">The one headline-eligible number: even with bad luck, the true pass rate is at least this. Sealed — shown, never edited.</div>
+    <div class="scroll" style="margin-top:12px"><table><thead><tr><th>Test</th><th>Score</th><th>Fair range</th></tr></thead><tbody>${
+    rc.rows.map(r=>`<tr><td>${esc(r.test)}</td><td>${esc(r.score)}</td><td>${esc(r.range)}</td></tr>`).join('')}</tbody></table></div>`;
+  $('devices').innerHTML=`<div class="scroll"><table><thead><tr><th>Machine</th><th>Linked</th><th>Status</th></tr></thead><tbody>${
+    SPACE.devices.map(d=>`<tr><td>${esc(d.name)}</td><td>${esc(d.linked)}</td><td><span class="lv-great">${esc(d.status)}</span></td></tr>`).join('')}</tbody></table></div>
+    <div class="hint">Link another machine: mint a one-time code, paste into that machine's console. <button class="copybtn" disabled>Get link code</button></div>`;
 }
 $('sky-tier').style.display=tierLevel>=1?'':'none';
 $('space-tier').style.display=tierLevel>=2?'':'none';

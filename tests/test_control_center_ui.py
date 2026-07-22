@@ -80,6 +80,16 @@ def test_governance_and_build_panels() -> None:
     assert "routing_advisor" in html and "automatic_judge_spend" in html
 
 
+def test_contributor_sample_panels_gated() -> None:
+    # Sky/Space contributor shells (reviews, live run, report card, devices)
+    # exist, are badged SAMPLE, and live inside the tier-gated sections.
+    html = DASHBOARD.read_text(encoding="utf-8")
+    for pane_id in ('id="ghreviews"', 'id="liverun"', 'id="reportcard"', 'id="devices"'):
+        assert pane_id in html
+    # sealed report card must not headline a fabricated non-floor claim
+    assert "sealed" in html.lower() and "% floor" in html
+
+
 def test_tier_nav_renders_all_three_surfaces() -> None:
     # Sponsor decision: the unified switcher shows all three tiers and links
     # each to its own surface port (public 4765, sky 4768, space 4769). Higher
