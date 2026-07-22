@@ -36,7 +36,13 @@ def test_tables_replaced_by_groupby_and_standouts() -> None:
     # Tools and receipts lead with a group-by chart card; only ranked standouts
     # (severity math) drop to a compact table, full detail behind a <details>.
     html = DASHBOARD.read_text(encoding="utf-8")
-    for pane_id in ('id="toolbill"', 'id="outcomes"', 'id="risktools"', 'id="standouts"'):
+    for pane_id in (
+        'id="toolbill"',
+        'id="outcomes"',
+        'id="risktools"',
+        'id="standouts"',
+        'id="claimstate"',
+    ):
         assert pane_id in html
     assert "function cbars(" in html
     assert "const rsev=" in html  # per-receipt severity scoring
