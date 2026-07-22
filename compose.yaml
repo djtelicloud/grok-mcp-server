@@ -5,7 +5,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: ${UNIGROK_IMAGE:-unigrok:sky-layer-patch}
+    image: ${UNIGROK_IMAGE:-unigrok:1.1.0}
     container_name: unigrok
     ports:
       - "127.0.0.1:${UNIGROK_PORT:-4765}:8080"
