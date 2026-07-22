@@ -945,7 +945,8 @@ def ensure_dogfood_min_roles(conn: sqlite3.Connection, *, family: str = "gemma")
             conn.execute(
                 """
                 INSERT INTO promote_gates
-                  (cert_id, role, metric_id, status, family, manifest_key, certified_at, payload_json)
+                  (cert_id, role, metric_id, status, family,
+                   manifest_key, certified_at, payload_json)
                 VALUES (?, ?, ?, 'certified', ?, 'promote_gates', ?, ?)
                 ON CONFLICT(cert_id) DO UPDATE SET
                   role=excluded.role,
