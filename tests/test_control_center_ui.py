@@ -90,6 +90,14 @@ def test_contributor_sample_panels_gated() -> None:
     assert "sealed" in html.lower() and "% floor" in html
 
 
+def test_severity_scoring_handles_numeric_success() -> None:
+    # SQLite serializes success as 0/1 ints; a strict ===false comparison would
+    # silently drop every failed receipt from the standout ranking.
+    html = DASHBOARD.read_text(encoding="utf-8")
+    assert "r.success===false" not in html
+    assert "r.verified&&!r.success" in html
+
+
 def test_tier_nav_renders_all_three_surfaces() -> None:
     # Sponsor decision: the unified switcher shows all three tiers and links
     # each to its own surface port (public 4765, sky 4768, space 4769). Higher

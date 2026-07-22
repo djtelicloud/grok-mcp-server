@@ -412,7 +412,8 @@ async function refresh(){try{const [ready,b,rt]=await Promise.all([fetch('/ready
   cbars('outcomes',[{name:'pass',val:pass,color:'#3fa266'},{name:'fail',val:fail,color:'#dd7f76'},{name:'unverified',val:unver,color:'#4a5675'}]);
   // severity score per receipt: fail 100, fallback 40, slow (vs p95) up to 40, cost up to 30
   const p95=t.latency_ms?.p95||0;
-  const rsev=r=>{let s=0;const f=[];if(r.verified&&r.success===false){s+=100;f.push(['failed','threat']);}
+  // NB: success arrives as 0/1 ints from SQLite JSON — never compare ===false.
+  const rsev=r=>{let s=0;const f=[];if(r.verified&&!r.success){s+=100;f.push(['failed','threat']);}
     if(r.fallback_reason){s+=40;f.push(['fallback','warning']);}
     const lat=r.latency_ms||0;if(p95>0&&lat>p95){s+=Math.min(40,20*lat/p95);f.push(['slow','warning']);}
     const c=Number(r.cost_usd||0);if(c>0){s+=Math.min(30,c*1000);f.push(['$'+c.toFixed(4),'expected']);}
