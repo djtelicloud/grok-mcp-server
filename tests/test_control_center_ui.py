@@ -49,6 +49,17 @@ def test_tables_replaced_by_groupby_and_standouts() -> None:
     assert html.count("<details") >= 2  # full tool + receipt lists collapsed
 
 
+def test_per_panel_color_coding_and_legend() -> None:
+    # Each dimension panel gets a meaningful hue (planes/kinds/routes/models),
+    # metric tiles threshold-color, and a level legend decodes the palette.
+    html = DASHBOARD.read_text(encoding="utf-8")
+    assert "function pbars(" in html
+    for fn in ("PLANE_COL", "KIND_COL", "ROUTE_COL", "MODEL_COL", "METERED_KINDS"):
+        assert fn in html
+    assert 'class="legend"' in html
+    assert "lv-great" in html and "lv-threat" in html
+
+
 def test_tier_nav_renders_all_three_surfaces() -> None:
     # Sponsor decision: the unified switcher shows all three tiers and links
     # each to its own surface port (public 4765, sky 4768, space 4769). Higher
