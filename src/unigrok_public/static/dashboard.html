@@ -68,6 +68,11 @@
     .lv-great{color:#3fa266}.lv-good{color:#81a1c1}.lv-expected{color:#7bafe9}
     .lv-warning{color:#f1b467}.lv-threat{color:#dd7f76}.lv-critical{color:#fc6b83}
     .pill.lv-great,.pill.lv-good,.pill.lv-expected,.pill.lv-warning,.pill.lv-threat,.pill.lv-critical{font-weight:700}
+    .more{margin-top:14px}
+    .more>summary{cursor:pointer;color:var(--cyan);font-size:12px;font-weight:750;letter-spacing:.04em;list-style:none;padding:4px 0}
+    .more>summary::-webkit-details-marker{display:none}
+    .more>summary::before{content:"▸  "}.more[open]>summary::before{content:"▾  "}
+    .flagcell span{margin-right:6px;font-weight:700;font-size:12px}
     .tier-section{margin-top:16px}
     .tierhead{display:flex;align-items:center;gap:10px;font-weight:800;letter-spacing:.06em;font-size:13px;color:var(--text)}
     .sample{font-size:10px;font-weight:800;letter-spacing:.08em;border-radius:99px;padding:2px 9px;color:var(--amber);background:#2e2412}
@@ -105,12 +110,18 @@
     <article class="card wide"><div class="label">Top callers</div><div id="callers" class="bars"></div></article>
     <article class="card wide"><div class="label">Fallback categories</div><div id="fallbacks" class="bars"></div></article>
     <article class="card full"><div class="label">Runtime</div><div id="runtime" class="breakers"><div class="empty">Loading …</div></div></article>
-    <article class="card full"><div class="label" id="toolslabel">Exposed tools</div><div class="scroll bounded"><table><thead><tr>
-      <th>Tool</th><th>Plane</th><th>Billing</th><th>Confirmation</th><th>Purpose</th></tr></thead><tbody id="tools"></tbody></table></div></article>
+    <article class="card wide"><div class="label" id="toolslabel">Tool surface · by billing</div><div id="toolbill" class="bars"></div></article>
+    <article class="card wide"><div class="label" id="risklabel">Destructive tools</div><div class="scroll"><table><thead><tr>
+      <th>Tool</th><th>Plane</th><th>Confirmation</th></tr></thead><tbody id="risktools"></tbody></table></div>
+      <details class="more"><summary>Show full registry (<span id="toolcount">29</span> tools)</summary><div class="scroll bounded"><table><thead><tr>
+        <th>Tool</th><th>Plane</th><th>Billing</th><th>Confirmation</th><th>Purpose</th></tr></thead><tbody id="tools"></tbody></table></div></details></article>
     <article class="card full"><div class="label">Circuit breakers</div><div id="breakers" class="breakers"></div></article>
-    <article class="card full"><div class="label" id="recentlabel">Recent receipts</div><div class="scroll bounded"><table><thead><tr>
-      <th>Time</th><th>ID</th><th>Caller</th><th>Kind</th><th>Route</th><th>Plane</th><th>Model</th><th>Latency</th><th>Cost</th>
-      <th>Fallback</th><th>Stop</th><th>Verified</th></tr></thead><tbody id="recent"></tbody></table></div></article>
+    <article class="card wide"><div class="label">Receipt outcomes</div><div id="outcomes" class="bars"></div></article>
+    <article class="card wide"><div class="label" id="standoutlabel">Receipts needing attention</div><div class="scroll"><table><thead><tr>
+      <th>Time</th><th>Caller</th><th>Kind</th><th>Why</th><th>Latency</th><th>Cost</th><th>Status</th></tr></thead><tbody id="standouts"></tbody></table></div>
+      <details class="more"><summary>Show all (<span id="recentcount">25</span> receipts)</summary><div class="scroll bounded"><table><thead><tr>
+        <th>Time</th><th>ID</th><th>Caller</th><th>Kind</th><th>Route</th><th>Plane</th><th>Model</th><th>Latency</th><th>Cost</th>
+        <th>Fallback</th><th>Stop</th><th>Verified</th></tr></thead><tbody id="recent"></tbody></table></div></details></article>
   </section>
 
   <section class="grid tier-section" id="sky-tier" style="display:none">
@@ -118,8 +129,7 @@
       <span class="sample">SAMPLE</span><span class="tiernote">panels awaiting live wiring on :4768</span></article>
     <article class="card full"><div class="label">4-lane swarm grid</div><div id="swarmgrid" class="lanes"></div></article>
     <article class="card wide"><div class="label">Circuit breakers &amp; trip rates</div><div id="skybreakers" class="breakers"></div></article>
-    <article class="card wide"><div class="label">P95 / P50 latency distribution</div><div class="scroll"><table><thead><tr>
-      <th>Port</th><th>Surface</th><th>P50</th><th>P95</th></tr></thead><tbody id="latdist"></tbody></table></div></article>
+    <article class="card wide"><div class="label">P95 latency by surface · ms</div><div id="latdist" class="bars"></div></article>
   </section>
 
   <section class="grid tier-section" id="space-tier" style="display:none">
@@ -149,7 +159,12 @@ function bars(id,items){const root=$(id),max=Math.max(1,...items.map(x=>x.calls|
   items.slice(0,8).map(x=>`<div class="bar-row"><div class="bar-label" title="${esc(x.name)}">${esc(x.name)}</div>
   <div class="track"><div class="fill" style="width:${100*(x.calls||0)/max}%"></div></div><div class="value">${x.calls||0}</div></div>`).join(''):
   '<div class="empty">No samples yet.</div>'}
-const UI_BUILD='unigrok-ui-v1.1.0-r6';
+// Colored group-by bars: items are {name, val, color}. Ranked highest-first.
+function cbars(id,items){const root=$(id),max=Math.max(1,...items.map(x=>x.val||0));root.innerHTML=items.length?
+  items.map(x=>`<div class="bar-row"><div class="bar-label" title="${esc(x.name)}">${esc(x.name)}</div>
+  <div class="track"><div class="fill" style="width:${100*(x.val||0)/max}%;background:${x.color}"></div></div><div class="value">${x.val||0}</div></div>`).join(''):
+  '<div class="empty">No data.</div>'}
+const UI_BUILD='unigrok-ui-v1.1.0-r7';
 // Unified 3-tier switcher: each tab links to its own surface on the same host.
 // The active tier is the current port; ?preview=sky|space lets one running
 // container show a higher tier's panels for review. Hierarchical scoping:
@@ -186,9 +201,9 @@ const SKY={
     {name:'local',open:false,failures:0,trips:0},
   ],
   latency:[
-    {port:'4765',surface:'public core',p50:'—',p95:'—'},
-    {port:'4768',surface:'sky observer',p50:'—',p95:'—'},
-    {port:'4775',surface:'public alt',p50:'—',p95:'—'},
+    {port:'4765',surface:'public core',p95:8},
+    {port:'4768',surface:'sky observer',p95:11},
+    {port:'4775',surface:'public alt',p95:9},
   ],
 };
 const SPACE={
@@ -204,7 +219,7 @@ function renderSky(){
     <span class="lane-owner">${esc(l.owner)}</span><span class="lane-state ${l.state} lv-${laneLv[l.state]||'expected'}">${esc(l.state)}</span>
     <span class="lane-detail" title="${esc(l.detail)}">${esc(l.detail)}</span></div>`).join('');
   $('skybreakers').innerHTML=SKY.breakers.map(b=>`<div class="breaker ${b.open?'open':''}"><b>${esc(b.name)}</b> · <span class="lv-${b.open?'threat':'expected'}">${b.open?'OPEN':'closed'}</span> · failures ${b.failures} · trips ${b.trips}</div>`).join('');
-  $('latdist').innerHTML=SKY.latency.map(r=>`<tr><td>${esc(r.port)}</td><td>${esc(r.surface)}</td><td>${esc(r.p50)}</td><td>${esc(r.p95)}</td></tr>`).join('');
+  cbars('latdist',SKY.latency.map(r=>({name:`${r.port} · ${r.surface}`,val:r.p95,color:'linear-gradient(90deg,var(--blue),var(--purple))'})));
 }
 function renderSpace(rt){
   $('claimmatrix').innerHTML=SPACE.claims.map(c=>`<tr><td>${esc(c.tip)}</td><td>${lv(c.claim)}</td><td>${lv(c.pred)}</td>
@@ -245,7 +260,16 @@ async function refresh(){try{const [ready,b,rt]=await Promise.all([fetch('/ready
     `${esc(rt.version)} · ${UI_BUILD}`].map(x=>`<div class="breaker">${x}</div>`).join(''):
     `<div class="breaker">runtime unavailable · ${UI_BUILD}</div>`;
   $('routing').innerHTML=['cli','api','local'].map(p=>planeTile(p,ready.planes?.[p])).join('');
-  const tools=rt?.tools||[];$('toolslabel').textContent=`Exposed tools · ${tools.length||'—'}`;
+  const tools=rt?.tools||[];$('toolslabel').textContent=`Tool surface · ${tools.length||'—'} · by billing`;$('toolcount').textContent=tools.length;
+  // group-by billing class, ranked by exposure severity (metered/destructive first)
+  const billMeta={metered:{c:'#f0b95b',w:3},api_account:{c:'#58a6ff',w:2},conditional:{c:'#58e6d9',w:2},non_metered:{c:'#4a5675',w:1}};
+  const byBill={};tools.forEach(t=>byBill[t.billing_class]=(byBill[t.billing_class]||0)+1);
+  cbars('toolbill',Object.entries(byBill).map(([k,v])=>({name:k,val:v,color:(billMeta[k]||{}).c||'#4a5675',w:(billMeta[k]||{}).w||0}))
+    .sort((a,b)=>(b.w-a.w)||(b.val-a.val)));
+  const risk=tools.filter(t=>t.destructive).sort((a,b)=>(b.billing_class==='metered')-(a.billing_class==='metered'));
+  $('risklabel').textContent=`Destructive tools · ${risk.length}`;
+  $('risktools').innerHTML=risk.length?risk.map(t=>`<tr><td>${esc(t.name)} <span class="tool-flag">DELETE</span></td>
+    <td>${esc(t.plane)}</td><td><span class="lv-threat">${esc(t.confirmation_policy)}</span></td></tr>`).join(''):'<tr><td colspan="3" class="empty">No destructive tools exposed.</td></tr>';
   $('tools').innerHTML=tools.length?tools.map(t=>`<tr><td>${esc(t.name)}${t.destructive?'<span class="tool-flag">DESTRUCTIVE</span>':''}</td>
     <td>${esc(t.plane)}</td><td><span class="bill ${esc(t.billing_class)}">${esc(t.billing_class)}</span></td><td>${esc(t.confirmation_policy)}</td>
     <td class="wrap">${esc(t.purpose)}</td></tr>`).join(''):'<tr><td colspan="5" class="empty">Registry unavailable.</td></tr>';
@@ -253,8 +277,25 @@ async function refresh(){try{const [ready,b,rt]=await Promise.all([fetch('/ready
   if(tierLevel>=2)renderSpace(rt);
   const bs=b.circuit_breakers||{};$('breakers').innerHTML=Object.keys(bs).length?Object.entries(bs).map(([k,v])=>
     `<div class="breaker ${v.open?'open':''}"><b>${esc(k)}</b> · <span class="lv-${v.open?'threat':'expected'}">${v.open?'OPEN':'closed'}</span> · failures ${v.failures} · trips ${v.trips}</div>`).join(''):'<div class="empty">No provider calls recorded.</div>';
-  const recent=t.recent||[];
-  $('recentlabel').textContent=`Recent receipts · last ${recent.length} of ${t.sample_size||0}`;
+  const recent=t.recent||[];$('recentcount').textContent=recent.length;
+  // group-by outcome (from verified aggregate), colored by level
+  const vs=t.verified_samples||0,sr=t.verified_success_rate;
+  const pass=sr==null?0:Math.round(sr*vs),fail=Math.max(0,vs-pass),unver=Math.max(0,(t.sample_size||0)-vs);
+  cbars('outcomes',[{name:'pass',val:pass,color:'#3fa266'},{name:'fail',val:fail,color:'#dd7f76'},{name:'unverified',val:unver,color:'#4a5675'}]);
+  // severity score per receipt: fail 100, fallback 40, slow (vs p95) up to 40, cost up to 30
+  const p95=t.latency_ms?.p95||0;
+  const rsev=r=>{let s=0;const f=[];if(r.verified&&r.success===false){s+=100;f.push(['failed','threat']);}
+    if(r.fallback_reason){s+=40;f.push(['fallback','warning']);}
+    const lat=r.latency_ms||0;if(p95>0&&lat>p95){s+=Math.min(40,20*lat/p95);f.push(['slow','warning']);}
+    const c=Number(r.cost_usd||0);if(c>0){s+=Math.min(30,c*1000);f.push(['$'+c.toFixed(4),'expected']);}
+    return{s,f};};
+  const flagged=recent.map(r=>({r,...rsev(r)})).filter(x=>x.f.length).sort((a,b)=>b.s-a.s).slice(0,8);
+  $('standoutlabel').textContent=`Receipts needing attention · ${flagged.length} of ${recent.length}`;
+  $('standouts').innerHTML=flagged.length?flagged.map(({r,f})=>{const vc=r.verified?(r.success?'pass':'fail'):'unv',vl=r.verified?(r.success?'pass':'fail'):'unverified';
+    return `<tr><td>${esc((r.created_at||'').slice(11,19))}</td><td>${esc(r.caller)}</td><td>${esc(r.request_kind)}</td>
+    <td class="flagcell">${f.map(([t2,l])=>`<span class="lv-${l}">${esc(t2)}</span>`).join('')}</td>
+    <td>${r.latency_ms||0} ms</td><td>$${Number(r.cost_usd||0).toFixed(4)}</td><td><span class="rc ${vc}">${vl}</span></td></tr>`}).join(''):
+    '<tr><td colspan="7" class="empty">No standout receipts — all nominal.</td></tr>';
   $('recent').innerHTML=recent.map(r=>{const vc=r.verified?(r.success?'pass':'fail'):'unv',vl=r.verified?(r.success?'pass':'fail'):'unverified';
     return `<tr><td>${esc((r.created_at||'').slice(11,19))}</td><td>${r.id}</td><td>${esc(r.caller)}</td>
     <td>${esc(r.request_kind)}</td><td>${esc(r.route)}</td><td>${esc(r.resolved_plane)}</td>

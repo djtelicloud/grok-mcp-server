@@ -32,6 +32,17 @@ def test_dashboard_carries_new_panes_and_receipt_columns() -> None:
     assert "UI_BUILD" in html
 
 
+def test_tables_replaced_by_groupby_and_standouts() -> None:
+    # Tools and receipts lead with a group-by chart card; only ranked standouts
+    # (severity math) drop to a compact table, full detail behind a <details>.
+    html = DASHBOARD.read_text(encoding="utf-8")
+    for pane_id in ('id="toolbill"', 'id="outcomes"', 'id="risktools"', 'id="standouts"'):
+        assert pane_id in html
+    assert "function cbars(" in html
+    assert "const rsev=" in html  # per-receipt severity scoring
+    assert html.count("<details") >= 2  # full tool + receipt lists collapsed
+
+
 def test_tier_nav_renders_all_three_surfaces() -> None:
     # Sponsor decision: the unified switcher shows all three tiers and links
     # each to its own surface port (public 4765, sky 4768, space 4769). Higher
