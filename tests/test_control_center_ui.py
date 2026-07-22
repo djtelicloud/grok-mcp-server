@@ -63,6 +63,17 @@ def test_tier_scoped_panels_present_and_gated() -> None:
     assert "sealed READY" not in html or "no sealed READY" in html
 
 
+def test_level_color_palette_wired() -> None:
+    # The six-level canvas palette (dark hexes) and a levelOf() classifier drive
+    # status-text color across service/plane/breaker/claim-plane surfaces.
+    html = DASHBOARD.read_text(encoding="utf-8")
+    for hexval in ("#3fa266", "#81a1c1", "#7bafe9", "#f1b467", "#dd7f76", "#fc6b83"):
+        assert hexval in html.lower()
+    for cls in (".lv-great", ".lv-good", ".lv-expected", ".lv-threat", ".lv-critical"):
+        assert cls in html
+    assert "function levelOf(" in html
+
+
 def test_runtimez_serves_public_tool_registry() -> None:
     from unigrok_public.server import PUBLIC_TOOLS, _runtime_public_tools
 
