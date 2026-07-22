@@ -54,6 +54,14 @@
     @media(max-width:950px){.planes{grid-template-columns:1fr}}
     .tool-flag{font-size:10px;font-weight:800;letter-spacing:.08em;border-radius:99px;padding:2px 8px;
       color:#ffc1ca;background:#2a1218;margin-left:8px}td.wrap{white-space:normal;min-width:260px;color:var(--muted)}
+    .scroll.bounded{max-height:360px}
+    .scroll.bounded table thead th{position:sticky;top:0;background:#101a2e;z-index:1}
+    .scroll.bounded tbody tr:hover td{background:#141c3355}
+    .rc{font-size:11px;font-weight:750;border-radius:99px;padding:2px 9px}
+    .rc.pass{color:#baf7c7;background:#12291a}.rc.fail{color:#ffc1ca;background:#2a1218}.rc.unv{color:var(--muted);background:#141c33}
+    .bill{font-size:10px;font-weight:750;border-radius:99px;padding:2px 8px;letter-spacing:.03em}
+    .bill.metered{color:var(--amber);background:#2e2412}.bill.api_account{color:#bcd8ff;background:#152541}
+    .bill.conditional{color:var(--cyan);background:#123028}.bill.non_metered{color:var(--muted);background:#141c33}
     .tier-section{margin-top:16px}
     .tierhead{display:flex;align-items:center;gap:10px;font-weight:800;letter-spacing:.06em;font-size:13px;color:var(--text)}
     .sample{font-size:10px;font-weight:800;letter-spacing:.08em;border-radius:99px;padding:2px 9px;color:var(--amber);background:#2e2412}
@@ -91,10 +99,10 @@
     <article class="card wide"><div class="label">Top callers</div><div id="callers" class="bars"></div></article>
     <article class="card wide"><div class="label">Fallback categories</div><div id="fallbacks" class="bars"></div></article>
     <article class="card full"><div class="label">Runtime</div><div id="runtime" class="breakers"><div class="empty">Loading …</div></div></article>
-    <article class="card full"><div class="label" id="toolslabel">Exposed tools</div><div class="scroll"><table><thead><tr>
+    <article class="card full"><div class="label" id="toolslabel">Exposed tools</div><div class="scroll bounded"><table><thead><tr>
       <th>Tool</th><th>Plane</th><th>Billing</th><th>Confirmation</th><th>Purpose</th></tr></thead><tbody id="tools"></tbody></table></div></article>
     <article class="card full"><div class="label">Circuit breakers</div><div id="breakers" class="breakers"></div></article>
-    <article class="card full"><div class="label">Recent receipts</div><div class="scroll"><table><thead><tr>
+    <article class="card full"><div class="label" id="recentlabel">Recent receipts</div><div class="scroll bounded"><table><thead><tr>
       <th>Time</th><th>ID</th><th>Caller</th><th>Kind</th><th>Route</th><th>Plane</th><th>Model</th><th>Latency</th><th>Cost</th>
       <th>Fallback</th><th>Stop</th><th>Verified</th></tr></thead><tbody id="recent"></tbody></table></div></article>
   </section>
@@ -124,7 +132,7 @@ function bars(id,items){const root=$(id),max=Math.max(1,...items.map(x=>x.calls|
   items.slice(0,8).map(x=>`<div class="bar-row"><div class="bar-label" title="${esc(x.name)}">${esc(x.name)}</div>
   <div class="track"><div class="fill" style="width:${100*(x.calls||0)/max}%"></div></div><div class="value">${x.calls||0}</div></div>`).join(''):
   '<div class="empty">No samples yet.</div>'}
-const UI_BUILD='unigrok-ui-v1.1.0-r4';
+const UI_BUILD='unigrok-ui-v1.1.0-r5';
 // Unified 3-tier switcher: each tab links to its own surface on the same host.
 // The active tier is the current port; ?preview=sky|space lets one running
 // container show a higher tier's panels for review. Hierarchical scoping:
@@ -221,16 +229,19 @@ async function refresh(){try{const [ready,b,rt]=await Promise.all([fetch('/ready
   $('routing').innerHTML=['cli','api','local'].map(p=>planeTile(p,ready.planes?.[p])).join('');
   const tools=rt?.tools||[];$('toolslabel').textContent=`Exposed tools · ${tools.length||'—'}`;
   $('tools').innerHTML=tools.length?tools.map(t=>`<tr><td>${esc(t.name)}${t.destructive?'<span class="tool-flag">DESTRUCTIVE</span>':''}</td>
-    <td>${esc(t.plane)}</td><td>${esc(t.billing_class)}</td><td>${esc(t.confirmation_policy)}</td>
+    <td>${esc(t.plane)}</td><td><span class="bill ${esc(t.billing_class)}">${esc(t.billing_class)}</span></td><td>${esc(t.confirmation_policy)}</td>
     <td class="wrap">${esc(t.purpose)}</td></tr>`).join(''):'<tr><td colspan="5" class="empty">Registry unavailable.</td></tr>';
   if(tierLevel>=1)renderSky();
   if(tierLevel>=2)renderSpace(rt);
   const bs=b.circuit_breakers||{};$('breakers').innerHTML=Object.keys(bs).length?Object.entries(bs).map(([k,v])=>
     `<div class="breaker ${v.open?'open':''}"><b>${esc(k)}</b> · ${v.open?'OPEN':'closed'} · failures ${v.failures} · trips ${v.trips}</div>`).join(''):'<div class="empty">No provider calls recorded.</div>';
-  $('recent').innerHTML=(t.recent||[]).map(r=>`<tr><td>${esc((r.created_at||'').slice(11,19))}</td><td>${r.id}</td><td>${esc(r.caller)}</td>
+  const recent=t.recent||[];
+  $('recentlabel').textContent=`Recent receipts · last ${recent.length} of ${t.sample_size||0}`;
+  $('recent').innerHTML=recent.map(r=>{const vc=r.verified?(r.success?'pass':'fail'):'unv',vl=r.verified?(r.success?'pass':'fail'):'unverified';
+    return `<tr><td>${esc((r.created_at||'').slice(11,19))}</td><td>${r.id}</td><td>${esc(r.caller)}</td>
     <td>${esc(r.request_kind)}</td><td>${esc(r.route)}</td><td>${esc(r.resolved_plane)}</td>
     <td>${esc(r.model)}</td><td>${r.latency_ms||0} ms</td><td>$${Number(r.cost_usd||0).toFixed(4)}</td><td>${esc(r.fallback_reason)}</td>
-    <td>${esc(r.stop_reason)}</td><td>${r.verified?(r.success?'pass':'fail'):'unverified'}</td></tr>`).join('');
+    <td>${esc(r.stop_reason)}</td><td><span class="rc ${vc}">${vl}</span></td></tr>`}).join('');
 }catch(e){$('service').textContent='Service unavailable';$('service').className='pill';$('updated').textContent='Retrying …'}}
 refresh();setInterval(refresh,10000);
 </script></body></html>
