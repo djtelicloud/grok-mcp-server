@@ -251,6 +251,28 @@ The legacy 4766 console's features are absorbed into this design:
   release; private-overlay wiring for the sky/space shells lands in a local
   session against the intelligence repo. Not before.
 
+## Forge staging gate (prod rehearsal)
+
+Forge (4766, `--live`) is treated as production during approval: real CLI auth
+volume, real state volume, real metered key via the checkout `.env` — full
+situation awareness, no pretend states. Approval to core requires all of:
+
+- [ ] Service pill `ready`; CLI **and** API tiles green with live model lists
+      (local tile shows its true probe state — ready, runtime down, or off).
+- [ ] Policy strip `cli_first · effective cli`, not degraded; governance shows
+      only owner-intended notices (`metered_api_enabled_by_owner` is expected
+      when spend is armed; anything else gets explained or fixed).
+- [ ] Cost dial equals the receipts' recorded spend, split by plane; receipts
+      severity standouts are live traffic, not `dev-seed:*`.
+- [ ] Tier nav ports match the operator's factory layout; `layer` names the
+      tier the instance actually serves.
+- [ ] Stored-facts count non-zero and matching the operator's store.
+- [ ] Zero page errors in the browser console over a full 10 s poll cycle,
+      including one forced `/runtimez` outage (panels must degrade honestly).
+- [ ] Byte parity: container `dashboard.html` sha256 equals the bundle's.
+
+Only after this live pass does the P4 Codex handoff proceed.
+
 ## Verification gate
 
 Every round before showing work: `uv run ruff check .`, `uv run pytest -q`,
