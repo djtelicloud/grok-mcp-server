@@ -6,6 +6,7 @@ carry the Time/Kind/Stop receipt columns.
 """
 
 import asyncio
+import re
 from pathlib import Path
 
 from unigrok_public import server
@@ -15,12 +16,12 @@ DASHBOARD = Path(server.__file__).parent / "static" / "dashboard.html"
 
 
 def test_service_pill_never_hardcodes_ready() -> None:
-    # The old page unconditionally claimed "Service ready". The pill must
-    # render readyz.status verbatim instead; the literal claim may not return.
+    # The pill text must be interpolated from readyz.status, not any fixed
+    # string. Pin the template fragment so re-hardcoding it fails the test.
     html = DASHBOARD.read_text(encoding="utf-8")
     assert "'Service ready'" not in html
     assert '"Service ready"' not in html
-    assert "ready.status" in html
+    assert "`Service ${ready.status" in html
 
 
 def test_dashboard_carries_new_panes_and_receipt_columns() -> None:
@@ -65,10 +66,67 @@ def test_connect_panel_and_plane_usage() -> None:
     # and per-plane usage reporting on the routing planes.
     html = DASHBOARD.read_text(encoding="utf-8")
     assert 'id="clients"' in html and 'id="mcpsnippet"' in html
-    assert "mcpConfig" in html and "X-Client-ID" in html
     assert "planeUse" in html
-    # config must stay non-secret: no API key field wired into the snippet
-    assert "XAI_API_KEY" not in html and "api_key" not in html
+    # Extract the mcpConfig definition and assert its shape positively: only a
+    # url and a single X-Client-ID header — no credential field of any kind.
+    m = re.search(r"const mcpConfig=.*?;", html)
+    assert m, "mcpConfig definition not found"
+    cfg = m.group(0)
+    assert "url:" in cfg and "'X-Client-ID'" in cfg
+    for secret in ("Authorization", "Bearer", "apiKey", "api_key", "XAI_API_KEY", "token"):
+        assert secret not in cfg
+
+
+def test_delegated_copy_listener_is_leak_free() -> None:
+    # Exactly one addEventListener, delegated on the persistent #clients
+    # container so the 10 s re-render can't stack listeners; no inline onclick.
+    html = DASHBOARD.read_text(encoding="utf-8")
+    assert "$('clients').addEventListener('click'" in html
+    assert html.count("addEventListener") == 1
+    assert "data-client" in html and "onclick=" not in html
+
+
+def test_severity_ranking_weights_and_slice() -> None:
+    # rsev's weights, descending sort, and top-8 cap are the contract behind the
+    # "needing attention" panel; pin them so a silent reorder/uncap fails.
+    html = DASHBOARD.read_text(encoding="utf-8")
+    for frag in (
+        "s+=100",
+        "s+=40",
+        "Math.min(40,",
+        "Math.min(30,",
+        ".sort((a,b)=>b.s-a.s)",
+        ".slice(0,8)",
+    ):
+        assert frag in html
+    # cost must not flag every metered call — only notably expensive ones
+    assert "c>=0.01" in html
+
+
+def test_null_feed_never_fabricates_safe_state() -> None:
+    # When a feed is unreachable the board shows "unavailable"/"—", never a
+    # fabricated safe default (metered off / no destructive tools / sqlite).
+    html = DASHBOARD.read_text(encoding="utf-8")
+    build_guard = "if(!rt){$('build').innerHTML="
+    assert build_guard in html and "runtime unavailable" in html
+    assert "if(!rt){$('policy').innerHTML=" in html
+    assert "!rt?'<tr><td colspan=\"3\" class=\"empty\">Registry unavailable.</td></tr>'" in html
+    assert "rt?.state_backend||'sqlite'" not in html
+    assert "Service unreachable" in html
+    # independent per-feed catches so one failure can't sink the others
+    assert html.count(".catch(()=>null)") >= 3
+
+
+def test_tier_gating_reveal_is_pinned() -> None:
+    # The hierarchical reveal is the load-bearing access rule; assert it
+    # verbatim so deleting or inverting it fails.
+    html = DASHBOARD.read_text(encoding="utf-8")
+    assert "{public:0,sky:1,space:2}" in html
+    assert ".get('preview')" in html
+    assert "$('sky-tier').style.display=tierLevel>=1?'':'none'" in html
+    assert "$('space-tier').style.display=tierLevel>=2?'':'none'" in html
+    assert "if(tierLevel>=1)renderSky()" in html
+    assert "if(tierLevel>=2)renderSpace(" in html
 
 
 def test_governance_and_build_panels() -> None:
@@ -81,11 +139,16 @@ def test_governance_and_build_panels() -> None:
 
 
 def test_contributor_sample_panels_gated() -> None:
-    # Sky/Space contributor shells (reviews, live run, report card, devices)
-    # exist, are badged SAMPLE, and live inside the tier-gated sections.
+    # Sky/Space contributor shells live INSIDE their tier sections (positional
+    # containment), so tier gating actually governs them.
     html = DASHBOARD.read_text(encoding="utf-8")
-    for pane_id in ('id="ghreviews"', 'id="liverun"', 'id="reportcard"', 'id="devices"'):
-        assert pane_id in html
+    assert (
+        html.index('id="sky-tier"')
+        < html.index('id="ghreviews"')
+        < html.index('id="space-tier"')
+        < html.index('id="reportcard"')
+    )
+    assert 'id="liverun"' in html and 'id="devices"' in html
     # sealed report card must not headline a fabricated non-floor claim
     assert "sealed" in html.lower() and "% floor" in html
 
@@ -104,15 +167,13 @@ def test_tier_nav_renders_all_three_surfaces() -> None:
     # tiers enforce their own auth on arrival; the nav is navigation, not access.
     html = DASHBOARD.read_text(encoding="utf-8")
     assert 'id="tiernav"' in html
-    for token in (
-        "@grok Public Core",
-        "@skygrok Sky Observer",
-        "@spacegrok Space Awareness",
-        "'4765'",
-        "'4768'",
-        "'4769'",
+    # Full tuples, not bare ports (a port can appear in unrelated sample data).
+    for tup in (
+        "{id:'public',label:'@grok Public Core',port:'4765'}",
+        "{id:'sky',label:'@skygrok Sky Observer',port:'4768'}",
+        "{id:'space',label:'@spacegrok Space Awareness',port:'4769'}",
     ):
-        assert token in html
+        assert tup in html
 
 
 def test_tier_scoped_panels_present_and_gated() -> None:
@@ -125,8 +186,11 @@ def test_tier_scoped_panels_present_and_gated() -> None:
     for panel in ("4-lane swarm grid", "Claim plane", "security monitor"):
         assert panel.lower() in html.lower()
     assert "SAMPLE" in html
-    assert "gate_id null" in html.lower() or "gate_id" in html
-    assert "sealed READY" not in html or "no sealed READY" in html
+    # gate_id must be null (anchored — the OR-fallback version was tautological)
+    assert "gate_id null" in html.lower()
+    assert not re.findall(r"gate_id (?!null)\S+", html.lower())
+    # every "sealed READY" occurrence must be negated ("no sealed READY")
+    assert re.findall(r"(?<!no )sealed READY", html) == []
 
 
 def test_level_color_palette_wired() -> None:
@@ -135,7 +199,14 @@ def test_level_color_palette_wired() -> None:
     html = DASHBOARD.read_text(encoding="utf-8")
     for hexval in ("#3fa266", "#81a1c1", "#7bafe9", "#f1b467", "#dd7f76", "#fc6b83"):
         assert hexval in html.lower()
-    for cls in (".lv-great", ".lv-good", ".lv-expected", ".lv-threat", ".lv-critical"):
+    for cls in (
+        ".lv-great",
+        ".lv-good",
+        ".lv-expected",
+        ".lv-warning",
+        ".lv-threat",
+        ".lv-critical",
+    ):
         assert cls in html
     assert "function levelOf(" in html
 
