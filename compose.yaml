@@ -48,6 +48,10 @@ services:
       UNIGROK_MAX_WORKSPACE_CONTEXT_CHARS: ${UNIGROK_MAX_WORKSPACE_CONTEXT_CHARS:-100000}
       UNIGROK_ENABLE_METERED_API: ${UNIGROK_ENABLE_METERED_API:-true}
       UNIGROK_API_MODEL: ${UNIGROK_API_MODEL:-}
+      # Control Center tier nav: host ports for the /ui/ switcher (loopback-bound).
+      UNIGROK_PUBLIC_PORT: ${UNIGROK_PORT:-4765}
+      UNIGROK_SKY_PORT: ${UNIGROK_SKY_PORT:-4768}
+      UNIGROK_SPACE_PORT: ${UNIGROK_SPACE_PORT:-4769}
       # Inference key allowlist (first non-empty wins for XAI_API_KEY).
       # Never inject multi-provider C2 keys here.
       XAI_PLANE_API: ${XAI_PLANE_API:-}

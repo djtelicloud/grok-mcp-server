@@ -289,7 +289,7 @@ const METERED_KINDS=new Set(['web_search','x_search','remote_code_execution','ch
 const KIND_COL=n=>METERED_KINDS.has(n)?lvHex.warning:'#4a5675';   // metered (costs) vs free (neutral)
 const ROUTE_COL=n=>n==='error'?lvHex.threat:GRADFILL;             // only error carries a level
 const MODEL_COL=()=>GRADFILL;                                     // model choice has no severity
-const UI_BUILD='unigrok-ui-v1.1.0-r18';
+const UI_BUILD='unigrok-ui-v1.1.0-r19';
 // Unified 3-tier switcher: each tab links to its own surface on the same host.
 // The active tier is the current port; ?preview=sky|space lets one running
 // container show a higher tier's panels for review. Hierarchical scoping:
@@ -354,6 +354,17 @@ function applyTier(){const ti=TIERS.find(x=>x.id===activeTier)||TIERS[0];
   renderDrawer();
 }
 applyTier();
+// Server truth wins over port-sniffing: /runtimez.layer names the tier this
+// instance actually serves, and tier_nav carries the Docker-configured host
+// ports (loopback-bound; the hosted runtime omits the block). ?preview= keeps
+// review priority; absent feeds change nothing.
+function applyRuntimeTier(rt){
+  if(!rt)return;
+  if(rt.tier_nav){TIERS.forEach(ti=>{const p=rt.tier_nav[ti.id];
+    if(p){ti.port=String(p);const a=document.querySelector(`.tier-tab[data-tier="${ti.id}"]`);
+      if(a)a.href=`${location.protocol}//${location.hostname}:${ti.port}/ui/`;}});}
+  if(!preview&&LEVEL[rt.layer]!=null&&rt.layer!==activeTier){activeTier=rt.layer;applyTier();}
+}
 // One delegated click handler for the drawer (open/close/navigate) + Esc.
 document.addEventListener('click',e=>{
   if(e.target.closest('#dmenu')){document.body.classList.add('drawer-open');return;}
@@ -434,11 +445,11 @@ function renderSpace(rt){
   cbars('claimstate',[['claim-plane','#81a1c1'],['ABSTAIN','#7bafe9']].filter(([k])=>cs[k]).map(([k,col])=>({name:k,val:cs[k],color:col})));
   $('claimmatrix').innerHTML=SPACE.claims.map(c=>`<tr><td>${esc(c.tip)}</td><td>${lv(c.claim)}</td><td>${lv(c.pred)}</td>
     <td class="wrap">${esc(c.proof)}</td><td>${lv(c.ok==='open'?'ABSTAIN':'claim-plane')}</td></tr>`).join('');
-  const backend=rt?.state_backend||'—',tools=rt?.tool_count??'—';
+  const backend=rt?.state_backend||'—',tools=rt?.tool_count??'—',tr=rt?.task_rag;
   $('ragstats').innerHTML=`<span>State backend</span><b>${esc(backend)}</b>
-    <span>RAG mode</span><b>local_sqlite_knowledge <span class="sample">sample</span></b>
-    <span>Stored facts</span><b>— <span class="sample">wires from /runtimez</span></b>
-    <span>xAI collections</span><b>label-only · never named</b>
+    <span>RAG mode</span><b>${tr?esc(tr.mode||'—'):'—'}</b>
+    <span>Stored facts</span><b>${tr&&tr.fact_count!=null?Number(tr.fact_count).toLocaleString('en-US'):'—'}</b>
+    <span>xAI collections</span><b>${tr?.collection_label_set?'label set':'no label'} · never named</b>
     <span>Tools exposed</span><b>${esc(String(tools))}</b>`;
   $('spacesec').innerHTML=`<span>Policy</span><b class="lv-expected">SPACE=DARK</b>
     <span>Write access</span><b class="lv-expected">zero-write · read-only monitor</b>
@@ -523,6 +534,7 @@ async function refresh(){if(refresh.busy)return;refresh.busy=true;try{const [rea
   pbars('callers',t.callers||[],()=>GRADFILL);   // identities carry no level
   pbars('fallbacks',(t.fallbacks||[]).filter(x=>x.name!=='unknown'),()=>lvHex.warning);  // fallbacks are degraded events
   $('runtime').innerHTML=rt?[`<b>${esc(rt.mode)}</b>`,esc(rt.state_backend),`${rt.tool_count??'—'} tools`,
+    `${rt.task_rag?.fact_count??'—'} durable facts`,
     `${esc(rt.version)} · ${UI_BUILD}`].map(x=>`<div class="breaker">${x}</div>`).join(''):
     `<div class="breaker">runtime unavailable · ${UI_BUILD}</div>`;
   // Build & durable work — em-dash out when /runtimez is unreachable, never "0/idle".
@@ -543,9 +555,20 @@ async function refresh(){if(refresh.busy)return;refresh.busy=true;try{const [rea
       <span>API spend</span><b class="lv-${sp.owner_enabled?'warning':'expected'}">${sp.owner_enabled?'metered enabled':'metered off'}${sp.per_request_confirmation_required?' · confirm each':''}</b>
       <span>Autonomy</span><b class="lv-expected">${au.enabled?'on':'off'}${au.mission_v2?' · mission v2':''} · verify ${au.verify_literal?'literal':'off'}</b>
       <span>Needle</span><b class="lv-${rt.needle_active?'warning':'expected'}">${rt.needle_active?'ACTIVE':'inactive'}</b>
-      <span>Recovery</span><b class="lv-expected">${esc(rt.completion_recovery||'—')}</b>`;}
+      <span>Recovery</span><b class="lv-expected">${esc(rt.completion_recovery||'—')}</b>`+
+      // Plane notices: static server templates (never embed key material).
+      (rt.credential_planes?.notices||[]).map(n=>`<span>Notice</span><b class="lv-${
+        n.severity==='warning'?'warning':'expected'}">${esc(n.summary||n.id||'')}</b>`).join('');}
+  applyRuntimeTier(rt);
   const planeUse={};(t.planes||[]).forEach(x=>planeUse[x.name]={calls:x.calls,cost:x.cost_usd});
-  $('routing').innerHTML=['cli','api','local'].map(p=>planeTile(p,ready?.planes?.[p],planeUse[p])).join('');
+  // Policy strip: routing posture from credential_planes (server truth, never
+  // inferred client-side). Degraded reads warning; no usable plane reads threat.
+  const cp=rt?.credential_planes;
+  const cpStrip=!cp?'':`<div class="plane-row" style="grid-column:1/-1"><div class="plane-head">
+    <span class="plane-name">policy</span>
+    <span class="plane-state lv-${cp.effective_plane?(cp.degraded?'warning':'great'):'threat'}">${
+    esc(cp.policy||'—')} · effective ${esc(cp.effective_plane||'none')}${cp.degraded?' · degraded':''}</span></div></div>`;
+  $('routing').innerHTML=cpStrip+['cli','api','local'].map(p=>planeTile(p,ready?.planes?.[p],planeUse[p])).join('');
   // Connect panel: known IDE clients cross-referenced with live caller telemetry.
   MCP_EP=rt?.mcp_endpoint||'/mcp';$('mcpendpoint').textContent=MCP_EP;
   const seen={};(t.callers||[]).forEach(x=>seen[x.name]=x.calls);
@@ -558,7 +581,7 @@ async function refresh(){if(refresh.busy)return;refresh.busy=true;try{const [rea
   if($('mcpsnippet').textContent==='…')updSnippets();
   const tools=rt?.tools||[];$('toolslabel').textContent=`Tool surface · ${rt?tools.length:'—'} · by billing`;$('toolcount').textContent=rt?tools.length:'—';
   // group-by billing class, ranked by exposure severity (metered/destructive first)
-  const billMeta={metered:{c:'#f0b95b',w:3},api_account:{c:'#58a6ff',w:2},conditional:{c:'#58e6d9',w:2},non_metered:{c:'#4a5675',w:1}};
+  const billMeta={metered:{c:'#f0b95b',w:3},api_account:{c:'#58a6ff',w:2},conditional:{c:'#58e6d9',w:2},local_runtime:{c:'#7bafe9',w:1},non_metered:{c:'#4a5675',w:1}};
   const byBill={};tools.forEach(t=>byBill[t.billing_class]=(byBill[t.billing_class]||0)+1);
   cbars('toolbill',Object.entries(byBill).map(([k,v])=>({name:k,val:v,color:(billMeta[k]||{}).c||'#4a5675',w:(billMeta[k]||{}).w||0}))
     .sort((a,b)=>(b.w-a.w)||(b.val-a.val)));

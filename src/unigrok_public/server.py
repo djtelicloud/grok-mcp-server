@@ -383,6 +383,12 @@ def _resolve_local_runtime_url() -> str:
 
 
 LOCAL_RUNTIME_URL = _resolve_local_runtime_url()
+
+# Tier-nav host ports for the Control Center switcher. Loopback-bound by
+# compose; the hosted runtime omits the block entirely (no local ports exist).
+PUBLIC_TIER_PORT = _bounded_int("UNIGROK_PUBLIC_PORT", 4765, 1, 65535)
+SKY_TIER_PORT = _bounded_int("UNIGROK_SKY_PORT", 4768, 1, 65535)
+SPACE_TIER_PORT = _bounded_int("UNIGROK_SPACE_PORT", 4769, 1, 65535)
 LOCAL_PROBE_TIMEOUT_SECONDS = _bounded_int("UNIGROK_LOCAL_PROBE_TIMEOUT", 5, 1, 60)
 _LOCAL_PROBE_BACKENDS = None
 LOCAL_DIRECT_TALK_MODE = os.environ.get("UNIGROK_LOCAL_DIRECT_TALK_MODE", "").strip().lower()
@@ -6959,13 +6965,18 @@ async def readyz(_: Request) -> JSONResponse:
 
 @mcp.custom_route("/runtimez", methods=["GET"], include_in_schema=False)
 async def runtimez(_: Request) -> JSONResponse:
-    telemetry = await STATE.telemetry_summary(limit=1000, caller=_tenant_caller())
+    telemetry, fact_count, catalogs = await asyncio.gather(
+        STATE.telemetry_summary(limit=1000, caller=_tenant_caller()),
+        STATE.count_facts(),
+        _catalogs(),
+    )
     runtime_contract = _runtime_state_contract()
-    return JSONResponse(
-        {
+    description = _live_self_description(catalogs)
+    payload: dict[str, Any] = {
             "service": SERVICE_NAME,
             "version": __version__,
             "mode": "public_core",
+            "layer": UNIGROK_LAYER or "public",
             "workspace_attached": False,
             "requires_project_files": False,
             "state_persistence": runtime_contract["state_persistence"],
@@ -7046,8 +7057,16 @@ async def runtimez(_: Request) -> JSONResponse:
                 not in {"0", "false", "off", "no"},
                 "context_pack": context_pack_mode(),
             },
+            "task_rag": {**description["task_rag"], "fact_count": fact_count},
+            "credential_planes": description["credential_planes"],
+    }
+    if not is_cloudrun_runtime():
+        payload["tier_nav"] = {
+            "public": PUBLIC_TIER_PORT,
+            "sky": SKY_TIER_PORT,
+            "space": SPACE_TIER_PORT,
         }
-    )
+    return JSONResponse(payload)
 
 
 class CallerIdentityMiddleware:

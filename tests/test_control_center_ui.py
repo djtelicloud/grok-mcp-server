@@ -286,3 +286,50 @@ def test_telemetry_summary_exposes_kind_and_plane_aggregates(tmp_path: Path) -> 
     recent = summary["recent"][0]
     for field in ("created_at", "request_kind", "stop_reason"):
         assert field in recent
+
+
+def test_state_store_counts_durable_facts(tmp_path: Path) -> None:
+    store = PublicStateStore(tmp_path / "state.db")
+    assert asyncio.run(store.count_facts()) == 0
+    asyncio.run(store.save_fact("the deck is gold", scope="global", source="manual"))
+    asyncio.run(store.save_fact("tiers ascend", scope="global", source="manual"))
+    assert asyncio.run(store.count_facts()) == 2
+
+
+def test_tier_nav_ports_are_bounded_env_values() -> None:
+    # tier_nav ports come from names-only env params; the hosted runtime
+    # omits the block entirely (asserted via the cloudrun gate in runtimez).
+    from unigrok_public.server import (
+        PUBLIC_TIER_PORT,
+        SKY_TIER_PORT,
+        SPACE_TIER_PORT,
+    )
+
+    assert (PUBLIC_TIER_PORT, SKY_TIER_PORT, SPACE_TIER_PORT) == (4765, 4768, 4769)
+    source = Path("src/unigrok_public/server.py").read_text(encoding="utf-8")
+    gate = source[source.index("async def runtimez") :]
+    gate = gate[: gate.index("class CallerIdentityMiddleware")]
+    assert 'if not is_cloudrun_runtime():' in gate
+    assert '"tier_nav"' in gate
+    # /runtimez surfaces the tier feeds the deck consumes.
+    for key in ('"layer"', '"task_rag"', '"credential_planes"', '"fact_count"'):
+        assert key in gate
+
+
+def test_dashboard_consumes_server_tier_truth() -> None:
+    html = DASHBOARD.read_text(encoding="utf-8")
+    # Server layer wins over port sniffing; nav ports come from tier_nav.
+    assert "function applyRuntimeTier(rt)" in html
+    assert "rt.tier_nav" in html
+    assert "LEVEL[rt.layer]" in html
+    assert "applyRuntimeTier(rt);" in html
+    # Credential-planes posture renders server truth, threat when no plane.
+    assert "rt?.credential_planes" in html
+    assert "cp.effective_plane" in html
+    # Notices are static server templates; warning severity maps to warning.
+    assert "credential_planes?.notices" in html
+    # Real RAG stats replace the sample placeholders.
+    assert "wires from /runtimez" not in html
+    assert "fact_count" in html
+    # Local-runtime billing class carries the local plane blue.
+    assert "local_runtime:{c:'#7bafe9'" in html
