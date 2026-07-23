@@ -1,0 +1,19 @@
+{
+  "synapse": 1,
+  "type": "reflection.request",
+  "subject": "data->access matrix (docs/design/ui-data-pipeline.md)",
+  "commit": "beb720f",
+  "artifacts": {
+    "grok_reflect_matrix.py": "sha256:053938877660c808b0c8abc085ab9422a0e91ae48ceb755caa7c70b85caed432",
+    "unigrok-ui-pipeline-r18b.bundle": "sha256:fd5841ab75dfc2184e9a7ab8d4ba788ef1e783ed67f62f116ad094cbf09d3537"
+  },
+  "requested": "two-round @grok red-team of the tier access matrix on the live forge (4766, cli plane)",
+  "expected_response": {
+    "note": "reflection.receipt appended on refs/notes/synapse @ beb720f",
+    "payload": "sha256 of grok_reflect_matrix.out.md + status + top5 fact ids",
+    "knowledge_pub": "TOP-5 published via remember_fact, session djtelicloud-grok-mcp-server:ui-access-matrix"
+  },
+  "transport": "bundle (bootstrap); notes-ref push/fetch once sanctioned",
+  "from": "claude-lane",
+  "status": "awaiting-reflection"
+}
