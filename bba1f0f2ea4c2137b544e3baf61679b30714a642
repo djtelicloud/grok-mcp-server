@@ -1,0 +1,7 @@
+reflection.receipt
+provider: codex
+pr: 523
+cause: latent #519 auto-seed and credential-label contract drift
+change: fixture-local isolation; positive auto-seed coverage; shared owner generation slot
+verification: focused 115 passed; full 549 passed, 7 skipped; ruff/release/docs contracts OK
+status: READY_FOR_CI
