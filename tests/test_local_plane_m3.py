@@ -1808,7 +1808,10 @@ _CANONICAL_TRIGGER_CASES = (
 
 
 @pytest.fixture
-def store7(tmp_path: Path) -> PublicStateStore:
+def store7(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> PublicStateStore:
+    # These two acceptance cases import seed_ready() to build exact manual
+    # fixtures, so suppress only the production auto-seed for this store.
+    monkeypatch.setattr(lpl, "ensure_dogfood_min_roles", lambda _connection: False)
     s = PublicStateStore(tmp_path / "state7.db")
     asyncio.run(s.initialize())
     return s

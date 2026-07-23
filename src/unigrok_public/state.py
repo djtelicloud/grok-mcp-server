@@ -947,6 +947,14 @@ class PublicStateStore:
         ids = list(dict.fromkeys(int(value) for value in fact_ids))
         await self._write(self._touch_facts_sync, ids)
 
+    def _count_facts_sync(self) -> int:
+        with self._connect() as connection:
+            row = connection.execute("SELECT COUNT(*) FROM knowledge").fetchone()
+        return int(row[0])
+
+    async def count_facts(self) -> int:
+        return int(await self._read(self._count_facts_sync))
+
     def _delete_fact_sync(self, fact_id: int, scope_prefix: str | None) -> bool:
         with self._connect() as connection:
             if scope_prefix:
@@ -1380,6 +1388,7 @@ class PublicStateStore:
             "models": aggregate("model"),
             "routes": aggregate("route"),
             "planes": aggregate("resolved_plane"),
+            "kinds": aggregate("request_kind"),
             "fallbacks": aggregate("fallback_reason"),
             "recent": [
                 {
@@ -1400,7 +1409,7 @@ class PublicStateStore:
                         "stop_reason",
                     )
                 }
-                for item in items[:25]
+                for item in items[:50]
             ],
         }
 

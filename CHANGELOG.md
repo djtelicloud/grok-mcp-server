@@ -5,6 +5,10 @@ All notable changes to the public UniGrok gateway.
 ## [Unreleased]
 
 ### Added
+- Forge r25 Cloud-first contributor linking reuses the established Control
+  dynamic-registration + PKCE flow and remembered GitHub App session. The scoped
+  UniGrok link is stored in the Forge-owned state volume and rechecked against
+  current repository access; GitHub Device Flow remains an explicit fallback.
 - Experimental `gemmagrok-local` Compose profile and standalone MCP helper for an
   explicitly selected, operator-owned local model runtime. The helper is loopback-only,
   exposes `chat`/`status`, receives no Grok credentials, and is not part of automatic
@@ -25,6 +29,12 @@ All notable changes to the public UniGrok gateway.
   with behavioral contracts. Needle remains inactive by default.
 
 ### Fixed
+- Forge contributor identity now survives page, browser, process, and container
+  restarts. Device-flow sessions use a durable signed HttpOnly cookie, while the
+  preferred Cloud link persists only its scoped UniGrok token in a `0600` vault.
+  A signed-out Forge now resumes an existing Control/GitHub login automatically,
+  keeps device authorization as the outage fallback, and makes explicit logout
+  opt out of automatic relinking.
 - Durable shutdown is monotonic: an atomic interrupted transition cannot overwrite a
   terminal result, shutdown cancellation preserves the honest `lost`/unknown-provider
   payload, explicit cancellation remains distinguishable, and first restart polls make

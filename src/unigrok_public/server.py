@@ -28,7 +28,7 @@ from pydantic import BaseModel, Field
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
 
-from . import __version__, local_plane_loader, xai_api
+from . import __version__, github_auth, local_plane_loader, xai_api
 from .autonomy import (
     JOB_COMPLETE,
     JOB_ERROR,
@@ -383,6 +383,32 @@ def _resolve_local_runtime_url() -> str:
 
 
 LOCAL_RUNTIME_URL = _resolve_local_runtime_url()
+
+# Tier-nav targets for the Control Center switcher. Each tier may carry its
+# own full URL (factory surfaces live on distinct origins); the port is the
+# same-host fallback when no URL is configured. The hosted runtime omits the
+# block entirely.
+PUBLIC_TIER_PORT = _bounded_int("UNIGROK_PUBLIC_PORT", 4765, 1, 65535)
+SKY_TIER_PORT = _bounded_int("UNIGROK_SKY_PORT", 4768, 1, 65535)
+SPACE_TIER_PORT = _bounded_int("UNIGROK_SPACE_PORT", 4769, 1, 65535)
+
+
+def _tier_url(name: str) -> str | None:
+    """Validated per-tier origin from env; never credentials, never long."""
+    raw = os.environ.get(name, "").strip()
+    if not raw or len(raw) > 200 or "@" in raw:
+        return None
+    if not raw.startswith(("http://", "https://")):
+        return None
+    return raw.rstrip("/")
+
+
+def _tier_nav() -> dict[str, dict[str, Any]]:
+    return {
+        "public": {"port": PUBLIC_TIER_PORT, "url": _tier_url("UNIGROK_PUBLIC_URL")},
+        "sky": {"port": SKY_TIER_PORT, "url": _tier_url("UNIGROK_SKY_URL")},
+        "space": {"port": SPACE_TIER_PORT, "url": _tier_url("UNIGROK_SPACE_URL")},
+    }
 LOCAL_PROBE_TIMEOUT_SECONDS = _bounded_int("UNIGROK_LOCAL_PROBE_TIMEOUT", 5, 1, 60)
 _LOCAL_PROBE_BACKENDS = None
 LOCAL_DIRECT_TALK_MODE = os.environ.get("UNIGROK_LOCAL_DIRECT_TALK_MODE", "").strip().lower()
@@ -6813,21 +6839,269 @@ async def ui_asset(request: Request) -> Response:
     return _resolve_ui_asset(request.path_params.get("asset_path", ""))
 
 
-@mcp.custom_route("/control", methods=["GET"], include_in_schema=False)
-@mcp.custom_route("/auth/github", methods=["GET"], include_in_schema=False)
-@mcp.custom_route("/api/me", methods=["GET"], include_in_schema=False)
-async def forge_control_plane_stub(request: Request) -> Response:
-    """Contributor control-plane skeleton.
+def _forge_control_callback_url() -> str:
+    """Canonical loopback callback; never trust a request Host header."""
+    configured = _tier_url("UNIGROK_PUBLIC_URL")
+    if configured:
+        try:
+            parsed = urlsplit(configured)
+            if (
+                parsed.scheme == "http"
+                and parsed.hostname in {"127.0.0.1", "localhost", "::1"}
+                and parsed.port
+                and parsed.path in {"", "/"}
+                and not parsed.query
+                and not parsed.fragment
+                and not parsed.username
+                and not parsed.password
+            ):
+                return f"{configured.rstrip('/')}/auth/control/callback"
+        except ValueError:
+            pass
+    return f"http://127.0.0.1:{PUBLIC_TIER_PORT}/auth/control/callback"
 
-    On the public surface these paths stay indistinguishable from unregistered
-    routes (identity-free 4765 contract). On the forge surface they exist but
-    answer 401 until the GitHub OAuth slice lands — no cookie, no bearer, no
-    body detail. The loopback helper is intentionally not consulted here: the
-    operator exemption applies to /ui, never to identity endpoints.
-    """
+
+def _forge_request_is_canonical(request: Request) -> bool:
+    """Accept Forge auth only through the loopback-published canonical Host."""
+    raw_host = request.headers.get("host", "").strip()
+    if not raw_host or len(raw_host) > 255:
+        return False
+    try:
+        supplied = urlsplit(f"http://{raw_host}")
+        expected = urlsplit(_forge_control_callback_url())
+        return (
+            supplied.hostname in {"127.0.0.1", "localhost", "::1"}
+            and supplied.port == expected.port
+            and supplied.username is None
+            and supplied.password is None
+            and supplied.path == ""
+            and not supplied.query
+            and not supplied.fragment
+        )
+    except ValueError:
+        return False
+
+
+def _forge_auth_guard(request: Request) -> Response | None:
     if SURFACE != "forge":
         return PlainTextResponse("Not Found", status_code=404)
-    return JSONResponse({"error": "authentication_required"}, status_code=401)
+    if not _forge_request_is_canonical(request):
+        return PlainTextResponse(
+            "Forbidden",
+            status_code=403,
+            headers={"cache-control": "no-store"},
+        )
+    return None
+
+
+def _forge_csrf_is_valid(request: Request) -> bool:
+    """Require a non-simple same-loopback request for Forge auth mutations."""
+    if request.headers.get("x-unigrok-csrf") != "1":
+        return False
+    origin = request.headers.get("origin")
+    if not origin:
+        return True
+    try:
+        supplied = urlsplit(origin)
+        expected = urlsplit(_forge_control_callback_url())
+        return (
+            supplied.scheme == "http"
+            and supplied.hostname in {"127.0.0.1", "localhost", "::1"}
+            and supplied.port == expected.port
+            and supplied.username is None
+            and supplied.password is None
+            and supplied.path in {"", "/"}
+            and not supplied.query
+            and not supplied.fragment
+        )
+    except ValueError:
+        return False
+
+
+@mcp.custom_route("/control", methods=["GET"], include_in_schema=False)
+@mcp.custom_route("/api/me", methods=["GET"], include_in_schema=False)
+async def forge_identity(request: Request) -> Response:
+    """GitHub-gated identity on the forge surface.
+
+    Public surface: indistinguishable from unregistered routes (identity-free
+    4765 contract). Forge: 401 signed out, 200 {login, tier} once the device
+    flow completes. The loopback /ui operator exemption never applies here.
+    """
+    guard = _forge_auth_guard(request)
+    if guard is not None:
+        return guard
+    device_session = github_auth.session_info(
+        request.cookies.get(github_auth.SESSION_COOKIE)
+    )
+    control_session = await github_auth.control_session_info(None)
+    if control_session and control_session.get("error") == "authorization_unavailable":
+        if device_session:
+            return JSONResponse(
+                device_session,
+                headers={"cache-control": "no-store"},
+            )
+        return JSONResponse(
+            {"error": "authorization_unavailable"},
+            status_code=503,
+            headers={"cache-control": "no-store"},
+        )
+    if control_session:
+        return JSONResponse(control_session, headers={"cache-control": "no-store"})
+    if not device_session:
+        return JSONResponse(
+            {"error": "authentication_required"},
+            status_code=401,
+            headers={"cache-control": "no-store"},
+        )
+    return JSONResponse(device_session, headers={"cache-control": "no-store"})
+
+
+@mcp.custom_route("/auth/control/start", methods=["GET"], include_in_schema=False)
+async def forge_control_start(request: Request) -> Response:
+    """Prefer the existing Cloud OAuth/PKCE registration and GitHub session."""
+    guard = _forge_auth_guard(request)
+    if guard is not None:
+        return guard
+    result = await github_auth.start_control_flow(_forge_control_callback_url())
+    authorization_url = str(result.get("authorization_url") or "")
+    if not authorization_url:
+        return Response(
+            status_code=302,
+            headers={
+                "cache-control": "no-store",
+                "location": "/ui/?control=unavailable",
+                "referrer-policy": "no-referrer",
+            },
+        )
+    return Response(
+        status_code=302,
+        headers={
+            "cache-control": "no-store",
+            "location": authorization_url,
+            "referrer-policy": "no-referrer",
+        },
+    )
+
+
+@mcp.custom_route(
+    "/auth/control/callback",
+    methods=["GET"],
+    include_in_schema=False,
+)
+async def forge_control_callback(request: Request) -> Response:
+    """Finish the loopback PKCE exchange without exposing tokens to page scripts."""
+    guard = _forge_auth_guard(request)
+    if guard is not None:
+        return guard
+    query = request.query_params
+    states = query.getlist("state")
+    codes = query.getlist("code")
+    if len(states) != 1 or len(codes) != 1:
+        return PlainTextResponse(
+            "Cloud sign-in could not be completed.",
+            status_code=400,
+            headers={"cache-control": "no-store"},
+        )
+    result = await github_auth.finish_control_flow(states[0], codes[0])
+    if not result.get("login"):
+        return PlainTextResponse(
+            "Cloud sign-in could not be completed.",
+            status_code=400,
+            headers={"cache-control": "no-store"},
+        )
+    response = Response(
+        status_code=302,
+        headers={
+            "cache-control": "no-store",
+            "location": "/ui/",
+            "referrer-policy": "no-referrer",
+        },
+    )
+    return response
+
+
+@mcp.custom_route("/auth/github", methods=["GET"], include_in_schema=False)
+@mcp.custom_route("/auth/github/start", methods=["POST"], include_in_schema=False)
+async def forge_github_start(request: Request) -> Response:
+    """Kick the GitHub device flow (real auth; no secret, no stored token)."""
+    guard = _forge_auth_guard(request)
+    if guard is not None:
+        return guard
+    if not _forge_csrf_is_valid(request):
+        return JSONResponse(
+            {"error": "csrf_required"},
+            status_code=403,
+            headers={"cache-control": "no-store"},
+        )
+    if not github_auth.client_id():
+        return JSONResponse(
+            {
+                "error": "github_oauth_not_configured",
+                "hint": "set UNIGROK_GITHUB_CLIENT_ID in the forge environment",
+            },
+            status_code=501,
+        )
+    result = await github_auth.start_flow()
+    return JSONResponse(result, status_code=502 if "error" in result else 200)
+
+
+@mcp.custom_route("/auth/github/poll", methods=["POST"], include_in_schema=False)
+async def forge_github_poll(request: Request) -> Response:
+    guard = _forge_auth_guard(request)
+    if guard is not None:
+        return guard
+    if not _forge_csrf_is_valid(request):
+        return JSONResponse(
+            {"error": "csrf_required"},
+            status_code=403,
+            headers={"cache-control": "no-store"},
+        )
+    try:
+        body = await request.json()
+    except ValueError:
+        body = {}
+    result = await github_auth.poll_flow(str((body or {}).get("flow") or ""))
+    sid = result.pop("session", None)
+    status = 200
+    if "error" in result:
+        status = {
+            "github_unreachable": 502,
+            "session_unavailable": 503,
+        }.get(result["error"], 400)
+    response = JSONResponse(result, status_code=status)
+    if sid:
+        # Loopback http: HttpOnly + SameSite keep the session out of scripts
+        # and cross-site posts; Secure is meaningless without TLS here.
+        response.set_cookie(
+            github_auth.SESSION_COOKIE,
+            sid,
+            max_age=12 * 3600,
+            httponly=True,
+            samesite="lax",
+            path="/",
+        )
+    return response
+
+
+@mcp.custom_route("/auth/logout", methods=["POST"], include_in_schema=False)
+async def forge_logout(request: Request) -> Response:
+    guard = _forge_auth_guard(request)
+    if guard is not None:
+        return guard
+    if not _forge_csrf_is_valid(request):
+        return JSONResponse(
+            {"error": "csrf_required"},
+            status_code=403,
+            headers={"cache-control": "no-store"},
+        )
+    github_auth.end_session(request.cookies.get(github_auth.SESSION_COOKIE))
+    github_auth.end_control_session(None)
+    response = JSONResponse(
+        {"status": "signed_out"},
+        headers={"cache-control": "no-store"},
+    )
+    response.delete_cookie(github_auth.SESSION_COOKIE, path="/")
+    return response
 
 
 @mcp.custom_route("/.well-known/webmcp", methods=["GET"], include_in_schema=False)
@@ -6959,13 +7233,18 @@ async def readyz(_: Request) -> JSONResponse:
 
 @mcp.custom_route("/runtimez", methods=["GET"], include_in_schema=False)
 async def runtimez(_: Request) -> JSONResponse:
-    telemetry = await STATE.telemetry_summary(limit=1000, caller=_tenant_caller())
+    telemetry, fact_count, catalogs = await asyncio.gather(
+        STATE.telemetry_summary(limit=1000, caller=_tenant_caller()),
+        STATE.count_facts(),
+        _catalogs(),
+    )
     runtime_contract = _runtime_state_contract()
-    return JSONResponse(
-        {
+    description = _live_self_description(catalogs)
+    payload: dict[str, Any] = {
             "service": SERVICE_NAME,
             "version": __version__,
             "mode": "public_core",
+            "layer": UNIGROK_LAYER or "public",
             "workspace_attached": False,
             "requires_project_files": False,
             "state_persistence": runtime_contract["state_persistence"],
@@ -7008,6 +7287,7 @@ async def runtimez(_: Request) -> JSONResponse:
                     "models",
                     "routes",
                     "planes",
+                    "kinds",
                     "fallbacks",
                 )
             },
@@ -7026,6 +7306,7 @@ async def runtimez(_: Request) -> JSONResponse:
                 "authorization_source": "server_owner_configuration",
             },
             "tool_count": len(PUBLIC_TOOLS),
+            "tools": _runtime_public_tools(),
             "mcp_endpoint": "/mcp",
             "needle_active": False,
             "autonomy": {
@@ -7044,8 +7325,12 @@ async def runtimez(_: Request) -> JSONResponse:
                 not in {"0", "false", "off", "no"},
                 "context_pack": context_pack_mode(),
             },
-        }
-    )
+            "task_rag": {**description["task_rag"], "fact_count": fact_count},
+            "credential_planes": description["credential_planes"],
+    }
+    if not is_cloudrun_runtime():
+        payload["tier_nav"] = _tier_nav()
+    return JSONResponse(payload)
 
 
 class CallerIdentityMiddleware:

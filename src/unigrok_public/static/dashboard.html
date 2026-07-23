@@ -4,76 +4,712 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>UniGrok Control Center</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='13' fill='%23080b14' stroke='%2358e6d9' stroke-width='3'/%3E%3Ccircle cx='16' cy='16' r='5' fill='%2358a6ff'/%3E%3C/svg%3E">
   <style>
     :root{color-scheme:dark;--bg:#080b14;--panel:#11172a;--line:#263252;--text:#edf2ff;
       --muted:#95a4c8;--cyan:#58e6d9;--blue:#58a6ff;--purple:#bc8cff;--green:#3fb950;
       --amber:#f0b95b;--red:#ff6b7a}*{box-sizing:border-box}body{margin:0;background:
       radial-gradient(circle at 15% 0,#192755 0,transparent 32%),
       radial-gradient(circle at 90% 10%,#30205b 0,transparent 28%),var(--bg);
-      color:var(--text);font:14px/1.45 Inter,ui-sans-serif,system-ui,sans-serif;min-height:100vh}
-    main{width:min(1380px,94vw);margin:auto;padding:34px 0 60px}header{display:flex;align-items:end;
-      justify-content:space-between;gap:24px;margin-bottom:25px}h1{font-size:clamp(30px,5vw,58px);
+      color:var(--text);font:clamp(14.5px,0.4vw+11px,17.5px)/1.5 Inter,ui-sans-serif,system-ui,sans-serif;min-height:100vh}
+    main{width:min(1560px,96vw);margin:auto;padding:clamp(20px,3vw,38px) 0 60px}header{display:flex;align-items:end;
+      justify-content:space-between;gap:24px;margin-bottom:25px}h1{font-size:clamp(34px,3.4vw+14px,60px);
       letter-spacing:-.055em;margin:0;background:linear-gradient(100deg,#fff 10%,var(--cyan),var(--purple));
       -webkit-background-clip:text;color:transparent}.eyebrow{color:var(--cyan);font-weight:800;
-      letter-spacing:.16em;text-transform:uppercase}.sub{color:var(--muted);font-size:16px;margin-top:7px}
+      letter-spacing:.16em;text-transform:uppercase;font-size:clamp(11.5px,0.3vw+9.5px,13.5px)}
+    .sub{color:var(--muted);font-size:clamp(15px,0.4vw+12px,18px);margin-top:7px}
     .status{display:flex;gap:9px;flex-wrap:wrap;justify-content:flex-end}.pill{border:1px solid var(--line);
-      background:#0d1324cc;border-radius:99px;padding:7px 12px;color:var(--muted)}.pill.ok{color:#baf7c7;
-      border-color:#256c3a}.grid{display:grid;grid-template-columns:repeat(12,1fr);gap:14px}.card{grid-column:span 3;
+      background:#0d1324cc;border-radius:99px;padding:7px 13px;color:var(--muted);
+      font-size:clamp(12.5px,0.3vw+10.5px,14.5px);font-weight:650}
+    .pill[class*="lv-"]{border-color:color-mix(in srgb,currentColor 45%,#263252)}
+    .grid{display:grid;grid-template-columns:repeat(12,1fr);gap:14px}.card{grid-column:span 3;
       background:linear-gradient(145deg,#141c33e8,#0d1222e8);border:1px solid var(--line);border-radius:18px;
-      padding:18px;box-shadow:0 18px 50px #0005;min-width:0}.card.wide{grid-column:span 6}.card.full{grid-column:1/-1}
-    .label{color:var(--muted);font-size:12px;font-weight:750;letter-spacing:.09em;text-transform:uppercase}
-    .metric{font-size:34px;font-weight:850;letter-spacing:-.04em;margin-top:6px}.metric small{font-size:14px;
-      color:var(--muted);letter-spacing:0}.bars{display:grid;gap:10px;margin-top:15px}.bar-row{display:grid;
-      grid-template-columns:minmax(90px,1fr) 4fr 60px;gap:10px;align-items:center}.bar-label{overflow:hidden;
-      text-overflow:ellipsis;white-space:nowrap;color:#cad5f2}.track{height:10px;border-radius:9px;background:#202b47;
+      padding:clamp(14px,1.1vw,20px);box-shadow:0 18px 50px #0005;min-width:0;
+      transition:border-color .15s}.card:hover{border-color:#324067}
+    .card.wide{grid-column:span 6}.card.full{grid-column:1/-1}
+    .label{color:#a9b8dc;font-size:clamp(11.5px,0.28vw+9.8px,13.5px);font-weight:750;letter-spacing:.09em;text-transform:uppercase}
+    .metric{font-size:clamp(30px,1.5vw+22px,44px);font-weight:850;letter-spacing:-.04em;margin-top:6px}
+    .metric small{font-size:.42em;color:var(--muted);letter-spacing:0}
+    .gwrap{position:relative;display:flex;flex-direction:column;align-items:center;margin-top:4px}
+    .gsvg{width:min(100%,210px);display:block}
+    .garc{fill:none;stroke-width:10;stroke-linecap:round}
+    .gbig{position:absolute;top:37%;width:100%;text-align:center;font-weight:850;white-space:nowrap;
+      font-size:clamp(22px,1.1vw+15px,32px);letter-spacing:-.03em;font-variant-numeric:tabular-nums}
+    .gbig small{font-size:.44em;color:var(--muted);font-weight:700}
+    .gsmall{color:var(--muted);font-size:clamp(11.5px,0.25vw+10px,13.5px);text-align:center;margin-top:-8px}
+    .bars{display:grid;gap:11px;margin-top:15px}.bar-row{display:grid;
+      grid-template-columns:minmax(90px,1fr) 4fr 64px;gap:10px;align-items:center}.bar-label{overflow:hidden;
+      text-overflow:ellipsis;white-space:nowrap;color:#cad5f2;font-size:clamp(13px,0.3vw+11px,15.5px)}
+    .track{height:12px;border-radius:9px;background:#202b47;
       overflow:hidden}.fill{height:100%;border-radius:9px;background:linear-gradient(90deg,var(--blue),var(--purple))}
-    .value{text-align:right;color:var(--muted);font-variant-numeric:tabular-nums}table{width:100%;border-collapse:collapse;
-      margin-top:12px}th,td{text-align:left;padding:10px;border-bottom:1px solid #202a44;white-space:nowrap}
-    th{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.07em}td{font-variant-numeric:tabular-nums}
+    .value{text-align:right;color:#cad5f2;font-variant-numeric:tabular-nums;font-size:clamp(12.5px,0.3vw+10.5px,15px)}
+    table{width:100%;border-collapse:collapse;margin-top:12px}
+    th,td{text-align:left;padding:clamp(9px,0.7vw,12px) clamp(9px,0.8vw,13px);border-bottom:1px solid #202a44;white-space:nowrap}
+    th{color:var(--muted);font-size:clamp(10.5px,0.24vw+9px,12px);text-transform:uppercase;letter-spacing:.07em}
+    td{font-variant-numeric:tabular-nums;font-size:clamp(13px,0.3vw+11px,15px)}
     .scroll{overflow:auto}.empty{color:var(--muted);padding:18px 0}.breakers{display:flex;gap:10px;flex-wrap:wrap;
-      margin-top:13px}.breaker{border:1px solid var(--line);border-radius:12px;padding:10px 12px;color:var(--muted)}
-    .breaker.open{border-color:#8a3042;color:#ffc1ca}.footer{color:var(--muted);margin-top:18px;font-size:12px}
-    @media(max-width:950px){.card,.card.wide{grid-column:span 6}}@media(max-width:620px){header{display:block}
+      margin-top:13px}.breaker{border:1px solid var(--line);border-radius:12px;padding:10px 14px;color:var(--muted);
+      font-size:clamp(13px,0.3vw+11px,15px)}
+    .breaker.open{border-color:#8a3042;color:#ffc1ca}
+    .footer{color:var(--muted);margin-top:18px;font-size:clamp(12px,0.26vw+10px,13.5px)}
+    .tier-nav{display:flex;align-items:center;gap:10px;margin:0 0 18px;padding:9px 14px;border:1px solid var(--line);
+      border-radius:14px;background:#0d132480;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);flex-wrap:wrap}
+    .tier-label{color:var(--muted);font-size:clamp(11px,0.24vw+9.5px,12.5px);font-weight:750;letter-spacing:.12em;text-transform:uppercase}
+    .tier-tab{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:99px;
+      padding:7px 15px;color:var(--muted);font-weight:650;font-size:clamp(13px,0.3vw+11px,15.5px);
+      text-decoration:none;transition:color .12s,border-color .12s}
+    .menu-btn{border:1px solid var(--line);background:#0d1324cc;color:var(--text);border-radius:10px;
+      padding:6px 13px;font-size:clamp(15px,0.34vw+12px,18px);cursor:pointer;line-height:1;transition:border-color .12s}
+    .menu-btn:hover{border-color:var(--cyan)}
+    .signin{margin-left:auto;order:99;display:inline-flex;align-items:center;border:1px solid #1e5f5a;
+      background:linear-gradient(90deg,#12302880,#15254180);color:#baf7c7;border-radius:99px;padding:7px 16px;
+      font-weight:750;font-size:clamp(12.5px,0.3vw+10.5px,14.5px);text-decoration:none;transition:box-shadow .15s}
+    .signin:hover{box-shadow:0 0 14px #3fa26644}
+    .signin-alt{order:100;display:none;color:#9bb6d8;font-size:clamp(10.5px,0.22vw+9.5px,12px);
+      text-decoration:underline;text-underline-offset:2px;white-space:nowrap}
+    .ghflow{order:100;margin-left:8px;font-size:clamp(11px,0.25vw+10px,12.5px);color:var(--muted);
+      display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
+    .ghflow b{color:#58e6d9;letter-spacing:.08em}.ghflow a{color:#58a6ff}
+    .backdrop{position:fixed;inset:0;background:#04060cbb;opacity:0;pointer-events:none;transition:opacity .18s;z-index:40}
+    body.drawer-open .backdrop{opacity:1;pointer-events:auto}
+    .drawer{position:fixed;top:0;left:0;bottom:0;width:min(330px,88vw);background:#0d1324f5;
+      border-right:1px solid var(--line);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+      transform:translateX(-103%);transition:transform .2s ease;z-index:41;padding:20px 16px;overflow-y:auto;
+      display:flex;flex-direction:column}
+    body.drawer-open .drawer{transform:none}
+    .drawer-head{display:flex;align-items:center;gap:10px;font-weight:800;letter-spacing:.06em;
+      font-size:clamp(14px,0.32vw+12px,16.5px);margin-bottom:10px}
+    .dclose{margin-left:auto;border:1px solid var(--line);background:none;color:var(--muted);border-radius:9px;
+      padding:4px 10px;cursor:pointer;font-size:13px}.dclose:hover{color:var(--text);border-color:var(--red)}
+    .dgroup{margin:16px 0 5px;font-size:clamp(10.5px,0.24vw+9px,12px);letter-spacing:.14em;text-transform:uppercase;
+      color:var(--cyan);font-weight:800}
+    .ditem{display:flex;align-items:center;gap:9px;width:100%;padding:9px 12px;border-radius:9px;color:#cad5f2;
+      font-weight:650;background:none;border:0;cursor:pointer;font-size:clamp(13.5px,0.32vw+11.5px,15.5px);
+      text-align:left;text-decoration:none}
+    .ditem:hover{background:#141c33}
+    .ditem.locked{color:var(--muted);cursor:default}.ditem.locked:hover{background:none}
+    .lockhint{margin-left:auto;font-size:.78em;color:var(--muted);letter-spacing:.05em}
+    .drawer-foot{margin-top:auto;padding-top:16px;border-top:1px solid var(--line);color:var(--muted);
+      font-size:clamp(11.5px,0.25vw+10px,13px)}
+    .tier-tab:hover{color:var(--text);border-color:var(--blue)}
+    .tier-tab.active{color:var(--text);border-color:#1e5f5a;background:#11172acc;box-shadow:0 0 14px #58e6d922}
+    .tier-dot{width:8px;height:8px;border-radius:50%}
+    .tier-dot.public{background:var(--cyan);box-shadow:0 0 8px var(--cyan)}
+    .tier-dot.sky{background:var(--blue);box-shadow:0 0 8px var(--blue)}
+    .tier-dot.space{background:var(--purple);box-shadow:0 0 8px var(--purple)}
+    .planes{display:grid;grid-template-columns:repeat(auto-fit,minmax(235px,1fr));gap:10px;margin-top:14px}
+    .plane-row{display:flex;flex-direction:column;gap:8px;border:1px solid var(--line);border-radius:12px;padding:12px 15px;min-width:0}
+    .plane-head{display:flex;align-items:center;gap:10px}
+    .plane-name{font-weight:750;text-transform:uppercase;font-size:clamp(12px,0.26vw+10px,13.5px);letter-spacing:.08em}
+    .plane-state{font-size:clamp(12px,0.26vw+10px,13.5px);font-weight:750;border-radius:99px;padding:3px 12px;background:#141c33;color:var(--muted);margin-left:auto}
+    .plane-detail{color:var(--muted);font-size:clamp(12.5px,0.28vw+10.5px,14px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .tool-flag{font-size:10px;font-weight:800;letter-spacing:.08em;border-radius:99px;padding:2px 8px;
+      color:#ffc1ca;background:#2a1218;margin-left:8px}td.wrap{white-space:normal;min-width:260px;color:var(--muted)}
+    .scroll.bounded{max-height:min(48vh,430px)}
+    .scroll.bounded table thead th{position:sticky;top:0;background:#101a2e;z-index:1;box-shadow:0 1px 0 #202a44}
+    .scroll.bounded tbody tr:hover td{background:#141c3355}
+    .rc{font-size:11px;font-weight:750;border-radius:99px;padding:2px 9px}
+    .rc.pass{color:#baf7c7;background:#12291a}.rc.fail{color:#ffc1ca;background:#2a1218}.rc.unv{color:var(--muted);background:#141c33}
+    .bill{font-size:10px;font-weight:750;border-radius:99px;padding:2px 8px;letter-spacing:.03em}
+    .bill.metered{color:var(--amber);background:#2e2412}.bill.api_account{color:#bcd8ff;background:#152541}
+    .bill.conditional{color:var(--cyan);background:#123028}.bill.non_metered{color:var(--muted);background:#141c33}
+    /* Canvas level->color semantic palette (dark values). Light values from the
+       map, for a future light board: great #1F8A65 · good #4C7F8C ·
+       expected #3685BF · warning #C08532 · threat #D75C4E · critical #CF2D56. */
+    .lv-great{color:#3fa266}.lv-good{color:#81a1c1}.lv-expected{color:#7bafe9}
+    .lv-warning{color:#f1b467}.lv-threat{color:#dd7f76}.lv-critical{color:#fc6b83}
+    .pill.lv-great,.pill.lv-good,.pill.lv-expected,.pill.lv-warning,.pill.lv-threat,.pill.lv-critical{font-weight:700}
+    .more{margin-top:14px}
+    .more>summary{cursor:pointer;color:var(--cyan);font-size:12px;font-weight:750;letter-spacing:.04em;list-style:none;padding:4px 0}
+    .more>summary::-webkit-details-marker{display:none}
+    .more>summary::before{content:"▸  "}.more[open]>summary::before{content:"▾  "}
+    .flagcell span{margin-right:6px;font-weight:700;font-size:12px}
+    .legend{display:flex;flex-wrap:wrap;align-items:center;gap:16px;margin:0 0 16px;padding:8px 14px;
+      border:1px solid var(--line);border-radius:12px;background:#0d132466;font-size:12px;color:var(--muted)}
+    .lg-label{font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);font-size:11px}
+    .lg{display:inline-flex;align-items:center;gap:7px;font-weight:650;font-size:clamp(12px,0.26vw+10px,13.5px)}
+    .lg i{width:11px;height:11px;border-radius:3px;display:inline-block}
+    .snippet{background:#05070e;border:1px solid var(--line);border-radius:11px;padding:14px 16px;margin-top:14px;
+      overflow-x:auto;color:#cad5f2;font:clamp(12.5px,0.28vw+10.5px,14.5px)/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre}
+    .copybtn{border:1px solid var(--line);background:none;color:var(--cyan);border-radius:99px;padding:5px 12px;
+      font:650 12px Inter,sans-serif;cursor:pointer}.copybtn:hover{border-color:var(--cyan)}
+    .hint{color:var(--muted);font-size:clamp(12px,0.26vw+10px,13.5px);margin-top:10px}
+    .ctabs{display:flex;flex-wrap:wrap;gap:9px;margin-top:13px}
+    .ctab{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:99px;
+      padding:7px 15px;color:var(--muted);font-weight:650;font-size:clamp(13px,0.3vw+11px,15.5px);
+      background:none;cursor:pointer;transition:color .12s,border-color .12s}
+    .ctab:hover{color:var(--text);border-color:var(--blue)}
+    .ctab.active{color:var(--text);border-color:#1e5f5a;background:#11172acc;box-shadow:0 0 14px #58e6d922}
+    .ctab-n{font-size:.82em;color:#baf7c7;font-variant-numeric:tabular-nums}
+    .snip2{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:14px;margin-top:4px}
+    .sniplabel{display:flex;align-items:center;gap:10px;margin-top:14px;color:#a9b8dc;font-weight:750;
+      letter-spacing:.07em;text-transform:uppercase;font-size:clamp(10.5px,0.24vw+9px,12px)}
+    .sniplabel .copybtn{margin-left:auto}
+    .snip2 .snippet{margin-top:8px;white-space:pre-wrap;word-break:break-word}
+    .tier-section{margin-top:16px}
+    .tierhead{display:flex;align-items:center;gap:10px;font-weight:800;letter-spacing:.06em;
+      font-size:clamp(13px,0.3vw+11px,15.5px);color:var(--text)}
+    .sample{font-size:10px;font-weight:800;letter-spacing:.08em;border-radius:99px;padding:2px 9px;color:var(--amber);background:#2e2412}
+    .tiernote{color:var(--muted);font-weight:600;font-size:12.5px;margin-left:auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .lanes{display:grid;grid-template-columns:repeat(auto-fit,minmax(195px,1fr));gap:12px;margin-top:14px}
+    .lane{border:1px solid var(--line);border-radius:14px;padding:15px;display:flex;flex-direction:column;gap:8px;min-width:0}
+    .lane-tag{font-size:clamp(10px,0.22vw+8.5px,11.5px);font-weight:800;letter-spacing:.1em;color:var(--cyan)}
+    .lane-owner{font-weight:750;font-size:clamp(14px,0.32vw+12px,16.5px)}
+    .lane-state{font-size:clamp(11px,0.24vw+9.5px,12.5px);font-weight:750;border-radius:99px;padding:3px 11px;align-self:flex-start;background:#141c33;color:var(--muted)}
+    .lane-state.active{background:#12291a}.lane-state.probe{background:#152541}
+    .lane-detail{color:var(--muted);font-size:clamp(12px,0.26vw+10px,13.5px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .kv{display:grid;grid-template-columns:auto 1fr;gap:9px 18px;margin-top:14px;font-size:clamp(13px,0.3vw+11px,15.5px)}
+    .kv span{color:var(--muted)}.kv b{font-weight:650;font-variant-numeric:tabular-nums}
+    #sky-tier .card,#sky-tier .lane{border-color:#2b4a7799}
+    #space-tier .card{border-color:#54407a99}
+    .ring{display:inline-grid;place-items:center;position:relative;width:88px;height:88px;flex:none}
+    .ring b{position:absolute;font-size:20px;font-weight:850}
+    /* Fluid-first: internal grids auto-fit continuously; column drops come late
+       so wide desktop/IDE panes keep the two-up layout as long as it fits. */
+    @media(max-width:1150px){.card{grid-column:span 6}}
+    @media(max-width:760px){.card.wide{grid-column:1/-1}}
+    @media(max-width:540px){header{display:block}
       .status{justify-content:flex-start;margin-top:16px}.card,.card.wide{grid-column:1/-1}}
   </style>
 </head>
 <body><main>
-  <header><div><div class="eyebrow">UniGrok 1.1 · public core</div><h1>Control Center</h1>
+  <div id="backdrop" class="backdrop"></div>
+  <aside id="drawer" class="drawer" aria-label="command drawer">
+    <div class="drawer-head">Command Drawer<button class="dclose" id="dclose" aria-label="close">✕</button></div>
+    <nav id="ditems"></nav>
+    <div class="drawer-foot">Drawer is an index of this deck — items scroll to their panel. Contributor actions live on the control site.</div>
+  </aside>
+  <nav class="tier-nav" id="tiernav" aria-label="surface tier"><button id="dmenu" class="menu-btn" aria-label="open command drawer">☰</button><span class="tier-label">Surface</span><a class="signin" id="signin" href="https://control.grokmcp.org" title="sign-in happens on control.grokmcp.org — this deck never logs you in locally">Open contributor control</a><a class="signin-alt" id="deviceauth" href="#" title="Use GitHub's device-code flow on this Forge">Use device code</a></nav>
+  <div class="legend" aria-label="status color key"><span class="lg-label">Levels</span>
+    <span class="lg"><i style="background:#3fa266"></i>great</span>
+    <span class="lg"><i style="background:#81a1c1"></i>good</span>
+    <span class="lg"><i style="background:#7bafe9"></i>expected</span>
+    <span class="lg"><i style="background:#f1b467"></i>warning</span>
+    <span class="lg"><i style="background:#dd7f76"></i>threat</span>
+    <span class="lg"><i style="background:#fc6b83"></i>critical</span></div>
+  <header><div><div class="eyebrow" id="eyebrow">UniGrok 1.1 · public core</div><h1 id="pagetitle">GroundCommand</h1>
     <div class="sub">Live routing, reliability, cost, and benchmark truth—without prompt capture.</div></div>
     <div class="status"><span id="service" class="pill">Service …</span><span id="cli" class="pill">CLI …</span>
       <span id="api" class="pill">API …</span><span id="updated" class="pill">Loading …</span></div></header>
   <section class="grid">
-    <article class="card"><div class="label">Samples</div><div id="samples" class="metric">0</div></article>
-    <article class="card"><div class="label">Verified success</div><div id="success" class="metric">—</div></article>
-    <article class="card"><div class="label">P95 latency</div><div id="p95" class="metric">0 <small>ms</small></div></article>
-    <article class="card"><div class="label">Recorded API cost</div><div id="cost" class="metric">$0</div></article>
+    <article class="card gcard"><div class="label">Samples · outcome split</div><div id="samples" class="gwrap"></div></article>
+    <article class="card gcard"><div class="label">Verified success</div><div id="success" class="gwrap"></div></article>
+    <article class="card gcard"><div class="label">P95 latency · adaptive dial</div><div id="p95" class="gwrap"></div></article>
+    <article class="card gcard"><div class="label">Recorded API cost · by plane</div><div id="cost" class="gwrap"></div></article>
+    <article class="card full"><div class="label">Routing planes</div><div id="planepolicy"></div><div id="routing" class="planes"></div></article>
+    <article class="card wide"><div class="label">Plane mix</div><div id="planes" class="bars"></div></article>
+    <article class="card wide"><div class="label">Request kinds</div><div id="kinds" class="bars"></div></article>
     <article class="card wide"><div class="label">Route mix</div><div id="routes" class="bars"></div></article>
     <article class="card wide"><div class="label">Model mix</div><div id="models" class="bars"></div></article>
     <article class="card wide"><div class="label">Top callers</div><div id="callers" class="bars"></div></article>
     <article class="card wide"><div class="label">Fallback categories</div><div id="fallbacks" class="bars"></div></article>
+    <article class="card full"><div class="label">Runtime</div><div id="runtime" class="breakers"><div class="empty">Loading …</div></div></article>
+    <article class="card wide"><div class="label">Build &amp; durable work</div><div id="build" class="breakers"><div class="empty">Loading …</div></div></article>
+    <article class="card wide"><div class="label">Policy &amp; governance</div><div id="policy" class="kv"></div></article>
+    <article class="card wide"><div class="label" id="toolslabel">Tool surface · by billing</div><div id="toolbill" class="bars"></div></article>
+    <article class="card wide"><div class="label" id="risklabel">Destructive tools</div><div class="scroll"><table><thead><tr>
+      <th>Tool</th><th>Plane</th><th>Confirmation</th></tr></thead><tbody id="risktools"></tbody></table></div>
+      <details class="more"><summary>Show full registry (<span id="toolcount">—</span> tools)</summary><div class="scroll bounded"><table><thead><tr>
+        <th>Tool</th><th>Plane</th><th>Billing</th><th>Confirmation</th><th>Purpose</th></tr></thead><tbody id="tools"></tbody></table></div></details></article>
     <article class="card full"><div class="label">Circuit breakers</div><div id="breakers" class="breakers"></div></article>
-    <article class="card full"><div class="label">Recent receipts</div><div class="scroll"><table><thead><tr>
-      <th>ID</th><th>Caller</th><th>Route</th><th>Plane</th><th>Model</th><th>Latency</th><th>Cost</th>
-      <th>Fallback</th><th>Verified</th></tr></thead><tbody id="recent"></tbody></table></div></article>
-  </section><div class="footer">Refreshes every 10 seconds · telemetry stores receipts and explicit outcomes, never prompts.</div>
+    <article class="card wide"><div class="label">Receipt outcomes</div><div id="outcomes" class="bars"></div></article>
+    <article class="card wide"><div class="label" id="standoutlabel">Receipts needing attention</div><div class="scroll"><table><thead><tr>
+      <th>Time</th><th>Caller</th><th>Kind</th><th>Why</th><th>Latency</th><th>Cost</th><th>Status</th></tr></thead><tbody id="standouts"></tbody></table></div>
+      <details class="more"><summary>Show last <span id="recentcount">—</span> receipts</summary><div class="scroll bounded"><table><thead><tr>
+        <th>Time</th><th>ID</th><th>Caller</th><th>Kind</th><th>Route</th><th>Plane</th><th>Model</th><th>Latency</th><th>Cost</th>
+        <th>Fallback</th><th>Stop</th><th>Verified</th></tr></thead><tbody id="recent"></tbody></table></div></details></article>
+    <article class="card full" id="connectcard"><div class="label">Connect an IDE · endpoint <span id="mcpendpoint">/mcp</span></div>
+      <div id="clients" class="ctabs"></div>
+      <div class="snip2">
+        <div><div class="sniplabel">MCP config (JSON)<button class="copybtn" data-copy="mcpsnippet">Copy</button></div>
+          <pre id="mcpsnippet" class="snippet">…</pre></div>
+        <div><div class="sniplabel">Agent paste command<button class="copybtn" data-copy="agentcmd">Copy</button></div>
+          <pre id="agentcmd" class="snippet">…</pre></div>
+      </div>
+      <div class="hint" id="copyhint">Pick a client above, then copy either block — the JSON goes in MCP settings; the command pastes straight into your agent. Non-secret: the API key stays in the gateway, never in an editor. Say <code>@grok</code> to route work here.</div></article>
+  </section>
+
+  <section class="grid tier-section" id="sky-tier" style="display:none">
+    <article class="card full tierhead"><span class="tier-dot sky"></span>@skygrok Sky Observer · Tier 2
+      <span class="sample">SAMPLE</span><span class="tiernote">panels awaiting live wiring on :4768</span></article>
+    <article class="card full"><div class="label">4-lane swarm grid</div><div id="swarmgrid" class="lanes"></div></article>
+    <article class="card wide"><div class="label">Circuit breakers &amp; trip rates</div><div id="skybreakers" class="breakers"></div></article>
+    <article class="card wide"><div class="label">P95 latency by surface · ms</div><div id="latdist" class="bars"></div></article>
+    <article class="card full"><div class="label">GitHub reviews · Grok score <span class="sample">SAMPLE</span></div>
+      <div id="ghreviews" style="display:flex;gap:20px;align-items:center;margin-top:12px"></div></article>
+    <article class="card full"><div class="label">Live run · streaming <span class="sample">SAMPLE</span></div>
+      <div id="liverun"></div></article>
+  </section>
+
+  <section class="grid tier-section" id="space-tier" style="display:none">
+    <article class="card full tierhead"><span class="tier-dot space"></span>@spacegrok Space Awareness · Tier 3 · SPACE=DARK
+      <span class="sample">SAMPLE</span><span class="tiernote">read-only monitor · gate_id null · ABSTAIN OPEN preserved</span></article>
+    <article class="card full"><div class="label">Claim plane · by state</div>
+      <div id="claimstate" class="bars"></div>
+      <div class="scroll" style="margin-top:14px"><table><thead><tr>
+        <th>Tip</th><th>Claim</th><th>Predicate</th><th>Proof (sha256)</th><th>Verified</th></tr></thead><tbody id="claimmatrix"></tbody></table></div></article>
+    <article class="card wide"><div class="label">Memory &amp; RAG index telemetry</div><div id="ragstats" class="kv"></div></article>
+    <article class="card wide"><div class="label">Space awareness security monitor <span class="sample">SAMPLE</span></div><div id="spacesec" class="kv"></div></article>
+    <article class="card wide"><div class="label">Report card · sealed floor <span class="sample">SAMPLE</span></div><div id="reportcard"></div></article>
+    <article class="card wide"><div class="label">Linked devices <span class="sample">SAMPLE</span></div><div id="devices"></div></article>
+  </section>
+
+  <div class="footer">Refreshes every 10 seconds · telemetry stores receipts and explicit outcomes, never prompts.</div>
 </main><script>
+// SINGLE INLINE SCRIPT — the server's CSP nonce is injected into the FIRST
+// inline script tag only. A second inline script tag would ship without a nonce
+// and be silently blocked by CSP. Keep all JS in this one tag.
 const $=id=>document.getElementById(id), esc=s=>String(s??'—').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-function bars(id,items){const root=$(id),max=Math.max(1,...items.map(x=>x.calls||0));root.innerHTML=items.length?
-  items.slice(0,8).map(x=>`<div class="bar-row"><div class="bar-label" title="${esc(x.name)}">${esc(x.name)}</div>
-  <div class="track"><div class="fill" style="width:${100*(x.calls||0)/max}%"></div></div><div class="value">${x.calls||0}</div></div>`).join(''):
-  '<div class="empty">No samples yet.</div>'}
-async function refresh(){try{const [ready,b]=await Promise.all([fetch('/readyz').then(r=>r.json()),fetch('/benchmarkz').then(r=>r.json())]);
-  const t=b.telemetry||{};$('service').textContent='Service ready';$('service').className='pill ok';
-  for(const p of ['cli','api']){const on=!!ready.planes?.[p]?.ready;$(p).textContent=`${p.toUpperCase()} ${on?'ready':'offline'}`;$(p).className='pill '+(on?'ok':'')}
-  $('updated').textContent=new Date().toLocaleTimeString();$('samples').textContent=t.sample_size||0;
-  $('success').textContent=t.verified_success_rate==null?'—':`${Math.round(t.verified_success_rate*100)}%`;
-  $('p95').innerHTML=`${Math.round(t.latency_ms?.p95||0).toLocaleString('en-US')} <small>ms</small>`;$('cost').textContent=`$${Number(t.cost_usd||0).toFixed(4)}`;
-  bars('routes',t.routes||[]);bars('models',t.models||[]);bars('callers',t.callers||[]);bars('fallbacks',(t.fallbacks||[]).filter(x=>x.name!=='unknown'));
-  const bs=b.circuit_breakers||{};$('breakers').innerHTML=Object.keys(bs).length?Object.entries(bs).map(([k,v])=>
-    `<div class="breaker ${v.open?'open':''}"><b>${esc(k)}</b> · ${v.open?'OPEN':'closed'} · failures ${v.failures} · trips ${v.trips}</div>`).join(''):'<div class="empty">No provider calls recorded.</div>';
-  $('recent').innerHTML=(t.recent||[]).map(r=>`<tr><td>${r.id}</td><td>${esc(r.caller)}</td><td>${esc(r.route)}</td><td>${esc(r.resolved_plane)}</td>
+// Canvas level->color map: classify a status string to one of the six levels.
+function levelOf(s){s=String(s||'').toLowerCase();
+  if(/breach|secret|dirty/.test(s))return'critical';
+  if(/not[_ ]?ready|offline|ready false/.test(s))return'expected';
+  if(/blocked|busy|\bfail\b/.test(s))return'threat';
+  if(/warn|stale|drift/.test(s))return'warning';
+  if(/\blive\b|promote yes|heavy|failover|\bready\b|\bactive\b/.test(s))return'great';
+  if(/\bdone\b|sealed|accepted|claim[- ]plane/.test(s))return'good';
+  if(/\bopen\b|space=dark|diff_off|untouched|abstain|\bnull\b|zero[- ]write|read[- ]only|evidence[- ]only|\bidle\b|preserved/.test(s))return'expected';
+  return'';}
+function lv(s,label){const c=levelOf(s),txt=esc(label!=null?label:s);return c?`<span class="lv-${c}">${txt}</span>`:txt;}
+// Colored group-by bars: items are {name, val, color}. Ranked highest-first.
+function cbars(id,items){const root=$(id),max=Math.max(1,...items.map(x=>x.val||0));root.innerHTML=items.length?
+  items.map(x=>`<div class="bar-row"><div class="bar-label" title="${esc(x.name)}">${esc(x.name)}</div>
+  <div class="track"><div class="fill" style="width:${100*(x.val||0)/max}%;background:${x.color}"></div></div><div class="value">${x.val||0}</div></div>`).join(''):
+  '<div class="empty">No data.</div>'}
+// Per-panel color coding: each dimension gets its own meaningful hue.
+function pbars(id,items,colorFn){cbars(id,(items||[]).slice(0,8).map(x=>({name:x.name,val:x.calls||0,color:colorFn(x.name)})));}
+const GRADFILL='linear-gradient(90deg,var(--blue),var(--purple))';
+const lvHex={great:'#3fa266',good:'#81a1c1',expected:'#7bafe9',warning:'#f1b467',threat:'#dd7f76',critical:'#fc6b83'};
+// MCP connect: build a non-secret client config (url + X-Client-ID header only)
+// plus the remembered agent paste command for the selected client.
+let MCP_EP='/mcp',SEL_CLIENT='cursor';
+const mcpConfig=c=>JSON.stringify({mcpServers:{unigrok:{url:location.origin+MCP_EP,headers:{'X-Client-ID':c}}}},null,2);
+const agentCmd=c=>c==='claude-code'
+  ?`claude mcp add --transport http unigrok ${location.origin+MCP_EP} --header "X-Client-ID: claude-code"`
+  :`Add the MCP server "unigrok" (streamable HTTP) at ${location.origin+MCP_EP} with header X-Client-ID: ${c}, then call grok_mcp_discover_self and route Grok work with @grok.`;
+function updSnippets(){$('mcpsnippet').textContent=mcpConfig(SEL_CLIENT);$('agentcmd').textContent=agentCmd(SEL_CLIENT);}
+// Color encodes a level or a real cross-panel category; dimensions with no
+// inherent severity (models, callers) stay neutral rather than decorative.
+const PLANE_COL=n=>({api:'#58a6ff',cli:'#3fa266',local:'#7bafe9'}[n]||'#4a5675');   // matches routing-planes card
+const METERED_KINDS=new Set(['web_search','x_search','remote_code_execution','chat_with_vision','chat_with_files','generate_image','generate_video','extend_video']);
+const KIND_COL=n=>METERED_KINDS.has(n)?lvHex.warning:'#4a5675';   // metered (costs) vs free (neutral)
+const ROUTE_COL=n=>n==='error'?lvHex.threat:GRADFILL;             // only error carries a level
+const MODEL_COL=()=>GRADFILL;                                     // model choice has no severity
+const UI_BUILD='unigrok-ui-v1.1.0-r25';
+const CLOUD_AUTO_KEY='unigrok-cloud-auto-r25',CLOUD_RESUME_KEY='unigrok-cloud-resume-r25';
+const CONTROL_START_FAILED=new URLSearchParams(location.search).get('control')==='unavailable';
+// Unified 3-tier switcher: each tab links to its own surface on the same host.
+// The active tier is the current port; ?preview=sky|space lets one running
+// container show a higher tier's panels for review. Hierarchical scoping:
+// each tier renders its own panels plus every lower tier's. Higher tiers still
+// enforce their own auth on arrival — this is navigation, not access.
+const TIERS=[
+  {id:'public',label:'@grok Public Core',port:'4765',name:'GroundCommand',eyebrow:'public core'},
+  {id:'sky',label:'@skygrok Sky Observer',port:'4768',name:'SkyCommand',eyebrow:'sky observer'},
+  {id:'space',label:'@spacegrok Space Awareness',port:'4769',name:'SpaceCommand',eyebrow:'space awareness'},
+];
+const LEVEL={public:0,sky:1,space:2};
+const herePort=location.port||(location.protocol==='https:'?'443':'80');
+const preview=new URLSearchParams(location.search).get('preview');
+const portTier=(TIERS.find(t=>t.port===herePort)||{}).id||'public';
+let runtimeTier=portTier,sessionTier=null;
+let activeTier=(preview&&LEVEL[preview]!=null)?preview:runtimeTier;
+let tierLevel=LEVEL[activeTier];
+document.getElementById('tiernav').insertAdjacentHTML('beforeend',TIERS.map(t=>{
+  const href=`${location.protocol}//${location.hostname}:${t.port}/ui/`;
+  const tip=t.id==='public'?'the public core surface':`opens the ${t.id} surface — requires that stack to be running`;
+  return `<a class="tier-tab" data-tier="${t.id}" href="${href}" title="${tip}">`+
+    `<span class="tier-dot ${t.id}"></span>${t.label}</a>`;
+}).join(''));
+// Command Drawer: an index of this deck mirroring the control-site groups.
+// Items anchor-scroll to their panel; contributor items are hidden on the
+// public tier (veil) and render locked-with-hint one tier below their home.
+const DRAWER=[
+  {group:'This machine',items:[
+    {label:'Home',target:'pagetitle',min:0},
+    {label:'Grok connections',target:'routing',min:0},
+    {label:'Activity & receipts',target:'outcomes',min:0},
+    {label:'Connect your IDE',target:'clients',min:0},
+  ]},
+  {group:'Your project',items:[
+    {label:'GitHub & reviews',target:'ghreviews',min:1},
+    {label:'Report card',target:'reportcard',min:2},
+  ]},
+  {group:'Build',items:[{label:'Swarm',target:'swarmgrid',min:1}]},
+  {group:'Account',items:[
+    {label:'You & devices',target:'devices',min:2},
+    {label:'Sign out',href:'https://control.grokmcp.org',min:1},
+  ]},
+];
+function renderDrawer(){
+  $('ditems').innerHTML=DRAWER.map(g=>{
+    const items=g.items.filter(i=>tierLevel>0||i.min===0);
+    if(!items.length)return'';
+    return `<div class="dgroup">${esc(g.group)}</div>`+items.map(i=>{
+      const locked=i.min>tierLevel;
+      if(i.href&&!locked)return `<a class="ditem" href="${i.href}">${esc(i.label)}</a>`;
+      return `<button class="ditem${locked?' locked':''}"${locked?' disabled':''} data-target="${esc(i.target||'')}">${esc(i.label)}${
+        locked?`<span class="lockhint">${i.min===2?'space':'sky'} tier</span>`:''}</button>`;
+    }).join('');
+  }).join('');
+}
+// Tier identity: title, eyebrow, tab highlight, and hierarchical panel reveal.
+function applyTier(){const ti=TIERS.find(x=>x.id===activeTier)||TIERS[0];
+  tierLevel=LEVEL[activeTier];
+  $('pagetitle').textContent=ti.name;document.title=`${ti.name} · UniGrok`;
+  $('eyebrow').textContent=`UniGrok 1.1 · ${ti.eyebrow}`;
+  document.querySelectorAll('.tier-tab').forEach(a=>a.classList.toggle('active',a.dataset.tier===activeTier));
+  $('sky-tier').style.display=tierLevel>=1?'':'none';
+  $('space-tier').style.display=tierLevel>=2?'':'none';
+  renderDrawer();
+}
+function reconcileTier(){
+  if(preview&&LEVEL[preview]!=null)activeTier=preview;
+  else activeTier=sessionTier&&LEVEL[sessionTier]>LEVEL[runtimeTier]?sessionTier:runtimeTier;
+  applyTier();
+}
+applyTier();
+// Server truth wins over port-sniffing: /runtimez.layer names the tier this
+// instance actually serves, and tier_nav carries the Docker-configured host
+// ports (loopback-bound; the hosted runtime omits the block). ?preview= keeps
+// review priority; absent feeds change nothing.
+function applyRuntimeTier(rt){
+  if(!rt)return;
+  // Each tier may live on its own origin (factory URLs from the env); the
+  // port is only the same-host fallback when no URL is configured.
+  if(rt.tier_nav){TIERS.forEach(ti=>{const nav=rt.tier_nav[ti.id];if(!nav)return;
+    const a=document.querySelector(`.tier-tab[data-tier="${ti.id}"]`);if(!a)return;
+    if(nav.url){a.href=`${nav.url}/ui/`;}
+    else if(nav.port){ti.port=String(nav.port);a.href=`${location.protocol}//${location.hostname}:${ti.port}/ui/`;}});}
+  if(LEVEL[rt.layer]!=null)runtimeTier=rt.layer;
+  reconcileTier();
+}
+// One delegated click handler for the drawer (open/close/navigate) + Esc.
+document.addEventListener('click',e=>{
+  const gh=e.target.closest('#signin');
+  if(e.target.closest('#deviceauth')){e.preventDefault();ghStart();return;}
+  if(gh&&gh.dataset.ghout){e.preventDefault();ghOut();return;}
+  if(gh&&gh.getAttribute('href')==='/auth/control/start'){
+    localStorage.removeItem(CLOUD_AUTO_KEY);sessionStorage.setItem(CLOUD_RESUME_KEY,'1');}
+  if(e.target.closest('#dmenu')){document.body.classList.add('drawer-open');return;}
+  if(e.target.closest('#dclose')||e.target.id==='backdrop'){document.body.classList.remove('drawer-open');return;}
+  const it=e.target.closest('.ditem[data-target]');
+  if(it&&!it.disabled&&it.dataset.target){const el=$(it.dataset.target);
+    document.body.classList.remove('drawer-open');
+    if(el)(el.closest('.card')||el).scrollIntoView({behavior:'smooth',block:'start'});}
+});
+document.addEventListener('keydown',e=>{if(e.key==='Escape')document.body.classList.remove('drawer-open');});
+// Tier-scoped panels: sample structure from the plan, clearly marked; live data
+// wires on the real surfaces (private overlay), never on the public core.
+const SKY={
+  lanes:[
+    {tag:'L1 · TRAIN',owner:'Claude',state:'active',detail:'r2 ckpt100 · 120/120'},
+    {tag:'L2 · MEASURE',owner:'Codex',state:'idle',detail:'snapshot deploys · on GO'},
+    {tag:'L3 · PROBE',owner:'Antigravity Gemini',state:'probe',detail:'ui-surface probe · ro'},
+    {tag:'L4 · MONITOR',owner:'Cursor Ground Lead',state:'active',detail:'20s diff · manifests'},
+  ],
+  breakers:[
+    {name:'cli',open:false,failures:0,trips:0},
+    {name:'api',open:false,failures:0,trips:0},
+    {name:'local',open:false,failures:0,trips:0},
+  ],
+  latency:[
+    {port:'4765',surface:'public core',p95:8},
+    {port:'4768',surface:'sky observer',p95:11},
+    {port:'4775',surface:'public alt',p95:9},
+  ],
+  github:{score:93,prs:[
+    {pr:'#508',what:'Forge groundwork in the public gateway',checks:'18/18',state:'merged'},
+    {pr:'#1',what:'Private Forge console overlay',checks:'7/7',state:'merged'},
+    {pr:'#2',what:'small probe fix',checks:'3/3',state:'waiting'},
+  ]},
+  run:[
+    {t:'depth 1',d:'route → cli · grok-4'},
+    {t:'tool',d:'web_search · start'},
+    {t:'tool',d:'web_search · end 412 ms'},
+    {t:'cost',d:'$0.0000 so far'},
+    {t:'depth 2',d:'compose answer'},
+  ],
+};
+const SPACE={
+  claims:[
+    {tip:'b796776',claim:'READY · claim plane',pred:'bounded verifiable domain',proof:'sample — wires from receipts',ok:'claim'},
+    {tip:'d08210ca',claim:'r2 ckpt100 scorecard',pred:'Wilson L ≥ 0.969',proof:'sample — wires from SCORECARD.json',ok:'claim'},
+    {tip:'—',claim:'all-traffic ABSTAIN',pred:'floor OPEN',proof:'gate_id null',ok:'open'},
+  ],
+  report:{floor:87,rows:[
+    {test:'Answers verified correct',score:'41/44',range:'79–97%'},
+    {test:'Recovered after a failure',score:'9/11',range:'52–94%'},
+  ]},
+  devices:[{name:'MacBook Pro — this machine',linked:'Jul 19',status:'linked'}],
+};
+function renderSky(){
+  const laneLv={active:'great',idle:'expected',probe:'good'};
+  $('swarmgrid').innerHTML=SKY.lanes.map(l=>`<div class="lane"><span class="lane-tag">${esc(l.tag)}</span>
+    <span class="lane-owner">${esc(l.owner)}</span><span class="lane-state ${l.state} lv-${laneLv[l.state]||'expected'}">${esc(l.state)}</span>
+    <span class="lane-detail" title="${esc(l.detail)}">${esc(l.detail)}</span></div>`).join('');
+  $('skybreakers').innerHTML=SKY.breakers.map(b=>`<div class="breaker ${b.open?'open':''}"><b>${esc(b.name)}</b> · <span class="lv-${b.open?'threat':'expected'}">${b.open?'OPEN':'closed'}</span> · failures ${b.failures} · trips ${b.trips}</div>`).join('');
+  cbars('latdist',SKY.latency.map(r=>({name:`${r.port} · ${r.surface}`,val:r.p95,
+    color:r.p95<10?lvHex.great:r.p95<20?lvHex.warning:lvHex.threat})));
+  const g=SKY.github,C=2*Math.PI*38,off=C*(1-g.score/100),stCol={merged:'great',waiting:'warning',open:'expected',closed:'threat'};
+  $('ghreviews').innerHTML=`<div class="ring"><svg width="88" height="88" viewBox="0 0 88 88">
+    <circle cx="44" cy="44" r="38" fill="none" stroke="#202b47" stroke-width="8"/>
+    <circle cx="44" cy="44" r="38" fill="none" stroke="url(#rg)" stroke-width="8" stroke-linecap="round"
+      stroke-dasharray="${C.toFixed(0)}" stroke-dashoffset="${off.toFixed(0)}" transform="rotate(-90 44 44)"/>
+    <defs><linearGradient id="rg"><stop offset="0%" stop-color="#58a6ff"/><stop offset="100%" stop-color="#bc8cff"/></linearGradient></defs></svg>
+    <b>${g.score}%</b></div>
+    <div class="scroll" style="flex:1"><table><thead><tr><th>PR</th><th>What</th><th>Checks</th><th>State</th></tr></thead><tbody>${
+    g.prs.map(p=>`<tr><td>${esc(p.pr)}</td><td class="wrap">${esc(p.what)}</td><td>${esc(p.checks)}</td>
+      <td><span class="lv-${stCol[p.state]||'expected'}">${esc(p.state)}</span></td></tr>`).join('')}</tbody></table></div>`;
+  $('liverun').innerHTML=`<div class="breakers">${SKY.run.map(s=>`<div class="breaker"><b>${esc(s.t)}</b> · ${esc(s.d)}</div>`).join('')}</div>
+    <div class="hint">Live SSE run events (depth, tool start/end, cost-so-far). <button class="copybtn" disabled>Run — contributor</button></div>`;
+}
+function renderSpace(rt){
+  const cs={};SPACE.claims.forEach(c=>{const k=c.ok==='open'?'ABSTAIN':'claim-plane';cs[k]=(cs[k]||0)+1;});
+  cbars('claimstate',[['claim-plane','#81a1c1'],['ABSTAIN','#7bafe9']].filter(([k])=>cs[k]).map(([k,col])=>({name:k,val:cs[k],color:col})));
+  $('claimmatrix').innerHTML=SPACE.claims.map(c=>`<tr><td>${esc(c.tip)}</td><td>${lv(c.claim)}</td><td>${lv(c.pred)}</td>
+    <td class="wrap">${esc(c.proof)}</td><td>${lv(c.ok==='open'?'ABSTAIN':'claim-plane')}</td></tr>`).join('');
+  const backend=rt?.state_backend||'—',tools=rt?.tool_count??'—',tr=rt?.task_rag;
+  $('ragstats').innerHTML=`<span>State backend</span><b>${esc(backend)}</b>
+    <span>RAG mode</span><b>${tr?esc(tr.mode||'—'):'—'}</b>
+    <span>Stored facts</span><b>${tr&&tr.fact_count!=null?Number(tr.fact_count).toLocaleString('en-US'):'—'}</b>
+    <span>xAI collections</span><b>${tr?.collection_label_set?'label set':'no label'} · never named</b>
+    <span>Tools exposed</span><b>${esc(String(tools))}</b>`;
+  $('spacesec').innerHTML=`<span>Policy</span><b class="lv-expected">SPACE=DARK</b>
+    <span>Write access</span><b class="lv-expected">zero-write · read-only monitor</b>
+    <span>Claim plane</span><b class="lv-expected">evidence-only · no sealed READY</b>
+    <span>gate_id</span><b class="lv-expected">null (preserved)</b>
+    <span>Diff</span><b class="lv-expected">DIFF_OFF</b>`;
+  const rc=SPACE.report;
+  $('reportcard').innerHTML=`<div class="metric lv-${rc.floor>=85?'great':rc.floor>=70?'warning':'threat'}">${rc.floor}<small>% floor</small></div>
+    <div class="hint">The one headline-eligible number: even with bad luck, the true pass rate is at least this. Sealed — shown, never edited.</div>
+    <div class="scroll" style="margin-top:12px"><table><thead><tr><th>Test</th><th>Score</th><th>Fair range</th></tr></thead><tbody>${
+    rc.rows.map(r=>`<tr><td>${esc(r.test)}</td><td>${esc(r.score)}</td><td>${esc(r.range)}</td></tr>`).join('')}</tbody></table></div>`;
+  $('devices').innerHTML=`<div class="scroll"><table><thead><tr><th>Machine</th><th>Linked</th><th>Status</th></tr></thead><tbody>${
+    SPACE.devices.map(d=>`<tr><td>${esc(d.name)}</td><td>${esc(d.linked)}</td><td><span class="lv-great">${esc(d.status)}</span></td></tr>`).join('')}</tbody></table></div>
+    <div class="hint">Link another machine: mint a one-time code, paste into that machine's console. <button class="copybtn" disabled>Get link code</button></div>`;
+}
+// Arc gauge: value 0..1 sweeps a 240° dial; segs=[{v,color}] stack sub-arcs.
+function arcPt(cx,cy,r,deg){const a=(deg-90)*Math.PI/180;return[cx+r*Math.cos(a),cy+r*Math.sin(a)];}
+function arcPath(cx,cy,r,a0,a1){const [x0,y0]=arcPt(cx,cy,r,a0),[x1,y1]=arcPt(cx,cy,r,a1);
+  return `M ${x0.toFixed(1)} ${y0.toFixed(1)} A ${r} ${r} 0 ${a1-a0>180?1:0} 1 ${x1.toFixed(1)} ${y1.toFixed(1)}`;}
+function gauge(id,{segs,big,small,color}){const A0=-120,SWEEP=240,r=44,cx=60,cy=58;
+  let acc=0,paths='';
+  (segs||[]).forEach(s=>{const w=Math.max(0,Math.min(1-acc,s.v||0));if(w<=0)return;
+    paths+=`<path d="${arcPath(cx,cy,r,A0+acc*SWEEP,A0+(acc+w)*SWEEP)}" stroke="${s.color}" class="garc" style="filter:drop-shadow(0 0 4px ${s.color}77)"/>`;acc+=w;});
+  $(id).innerHTML=`<svg viewBox="0 0 120 96" class="gsvg" role="img" aria-label="${esc(small)} ${esc(big)}">
+    <path d="${arcPath(cx,cy,r,A0,A0+SWEEP)}" stroke="#202b47" class="garc gtrack"/>${paths}</svg>
+    <div class="gbig" style="color:${color||'var(--text)'}">${big}</div><div class="gsmall">${esc(small)}</div>`;}
+function planeTile(name,p,use){const on=!!p?.ready;
+  const detail=name==='local'
+    ? (p?.configured?`runtime ${p.runtime_up?'up':'down'} · fail-closed helper`:'not configured · fail-closed')
+    : on?`${(p.models||[]).length} models${p.default_model?` · default ${p.default_model}`:''}`
+      :name==='cli'?'unauthenticated':'no key configured';
+  const u=use||{},usage=`${u.calls||0} calls · $${Number(u.cost||0).toFixed(4)} recorded`;
+  return `<div class="plane-row"><div class="plane-head"><span class="plane-name">${esc(name)}</span>
+    <span class="plane-state lv-${on?'great':'expected'}">${on?'ready':'offline'}</span></div>
+    <div class="plane-detail" title="${esc(detail)}">${esc(detail)}</div>
+    <div class="plane-detail">${usage}</div></div>`}
+// One delegated handler on the card (survives the 10 s re-render; no leak):
+// client buttons select + update both snippets; data-copy buttons copy theirs.
+$('connectcard').addEventListener('click',e=>{const btn=e.target.closest('.ctab,.copybtn');if(!btn)return;
+  const c=btn.getAttribute('data-client');
+  if(c){SEL_CLIENT=c;updSnippets();$('copyhint').textContent=`Selected ${c} — copy either block below.`;
+    document.querySelectorAll('#clients .ctab').forEach(b=>b.classList.toggle('active',b.dataset.client===SEL_CLIENT));return;}
+  const src=btn.getAttribute('data-copy');if(!src)return;
+  const txt=$(src).textContent;
+  navigator.clipboard?.writeText(txt).then(()=>{$('copyhint').textContent=`Copied ${src==='agentcmd'?'agent command':'MCP config'} for ${SEL_CLIENT}.`;},()=>{});});
+// Identity via the gateway's own flow, never the browser's github.com session:
+// /api/me is 404 on the public surface (identity-free contract), 401 on the
+// forge until the GitHub OAuth slice answers, 200 {login,tier?} once gated.
+// The deck renders exactly that truth — signed-out is never dressed up.
+function applyIdentity(me){const el=$('signin'),fallback=$('deviceauth');if(!el)return;
+  if(me&&me.login){el.textContent=`Signed in · ${me.login}`;el.href='#';el.dataset.ghout='1';
+    el.title='contributor session active — click to sign out';
+    sessionTier=LEVEL[me.tier]!=null?me.tier:null;if(me.kind==='control')localStorage.removeItem(CLOUD_AUTO_KEY);
+    sessionStorage.removeItem(CLOUD_RESUME_KEY);if(fallback)fallback.style.display='none';}
+  else if(me&&me.unavailable){el.textContent='Cloud link reconnecting';el.href='#';delete el.dataset.ghout;
+    el.title='your remembered login is retained; use device code if Cloud is temporarily unavailable';sessionTier=null;
+    if(fallback)fallback.style.display='inline-flex';}
+  else if(me&&me.surface==='forge'){
+    if(!CONTROL_START_FAILED&&localStorage.getItem(CLOUD_AUTO_KEY)!=='off'&&sessionStorage.getItem(CLOUD_RESUME_KEY)!=='1'){
+      sessionStorage.setItem(CLOUD_RESUME_KEY,'1');location.replace('/auth/control/start');return;}
+    el.textContent=CONTROL_START_FAILED?'Cloud temporarily unavailable':'Continue with Cloud';el.href='/auth/control/start';delete el.dataset.ghout;
+    el.title='reuse your remembered control.grokmcp.org GitHub session';sessionTier=null;
+    if(fallback)fallback.style.display='inline-flex';}
+  else{el.textContent='Open contributor control';el.href='https://control.grokmcp.org';delete el.dataset.ghout;
+    el.title='sign-in happens on control.grokmcp.org';sessionTier=null;
+    if(fallback)fallback.style.display='none';}
+  reconcileTier();}
+// Device-flow driver: start -> show the one-time code + github link -> poll
+// until GitHub confirms -> session cookie set server-side -> pill flips.
+// Every failure renders its honest name; nothing ever pretends to be signed in.
+let GHFLOW=null;
+function ghChip(html){let c=$('ghflow');if(!c){c=document.createElement('span');c.id='ghflow';c.className='ghflow';
+  $('signin').after(c);}c.innerHTML=html;}
+async function ghStart(){if(GHFLOW)return;
+  localStorage.setItem(CLOUD_AUTO_KEY,'off');sessionStorage.setItem(CLOUD_RESUME_KEY,'1');
+  const r=await fetch('/auth/github/start',{method:'POST',headers:{'X-UniGrok-CSRF':'1'}}).catch(()=>null);
+  const d=r?await r.json().catch(()=>null):null;
+  if(!d||d.error){ghChip(`<span class="lv-warning">${d&&d.error==='github_oauth_not_configured'?'not configured — set UNIGROK_GITHUB_CLIENT_ID':'GitHub unreachable'}</span>`);return;}
+  GHFLOW=d.flow;
+  ghChip(`code <b>${esc(d.user_code)}</b> → <a href="${esc(d.verification_uri)}" target="_blank" rel="noopener">github.com/login/device</a>`);
+  const tick=async()=>{if(!GHFLOW)return;
+    const p=await fetch('/auth/github/poll',{method:'POST',headers:{'Content-Type':'application/json','X-UniGrok-CSRF':'1'},
+      body:JSON.stringify({flow:GHFLOW})}).catch(()=>null);
+    const j=p?await p.json().catch(()=>null):null;
+    if(j&&j.login){GHFLOW=null;document.getElementById('ghflow')?.remove();applyIdentity({login:j.login,tier:j.tier});return;}
+    if(!j||j.error){GHFLOW=null;ghChip(`<span class="lv-warning">${esc((j&&j.error)||'connection lost')} — click to retry</span>`);return;}
+    setTimeout(tick,(d.interval||5)*1000);};
+  setTimeout(tick,(d.interval||5)*1000);}
+async function ghOut(){localStorage.setItem(CLOUD_AUTO_KEY,'off');sessionStorage.setItem(CLOUD_RESUME_KEY,'1');
+  await fetch('/auth/logout',{method:'POST',headers:{'X-UniGrok-CSRF':'1'}}).catch(()=>null);
+  document.getElementById('ghflow')?.remove();applyIdentity({surface:'forge'});}
+async function refresh(){if(refresh.busy)return;refresh.busy=true;try{const [ready,b,rt,me]=await Promise.all([
+  fetch('/readyz').then(r=>r.json()).catch(()=>null),
+  fetch('/benchmarkz').then(r=>r.json()).catch(()=>null),
+  fetch('/runtimez').then(r=>r.json()).catch(()=>null),
+  fetch('/api/me').then(r=>r.status===200?r.json():(r.status===503?{surface:'forge',unavailable:true}:(r.status===401?{surface:'forge'}:null))).catch(()=>null)]);
+  applyIdentity(me);
+  // Each feed is guarded independently: a missing feed reads "unreachable"/"—",
+  // never a fabricated safe default. Absence of data is never shown as proof.
+  const t=(b&&b.telemetry)||{};
+  $('service').textContent=ready?`Service ${ready.status||'unknown'}`:'Service unreachable';
+  $('service').className='pill lv-'+(ready?(levelOf(ready.status)||'expected'):'threat');
+  for(const p of ['cli','api']){const on=!!ready?.planes?.[p]?.ready;
+    $(p).textContent=`${p.toUpperCase()} ${ready?(on?'ready':'offline'):'—'}`;$(p).className='pill lv-'+(ready?(on?'great':'expected'):'threat');}
+  $('updated').textContent=new Date().toLocaleTimeString();
+  // Gauge row. Samples: outcome-split donut arc. Success/P95: threshold dials.
+  // Cost: recorded spend split by plane (share arcs, honest zero when $0).
+  const total=t.sample_size||0,vs0=t.verified_samples||0,sr0=t.verified_success_rate;
+  const pass0=sr0==null?0:Math.round(sr0*vs0),fail0=Math.max(0,vs0-pass0),unv0=Math.max(0,total-vs0);
+  gauge('samples',{big:String(total),small:`${pass0} pass · ${fail0} fail · ${unv0} unverified`,
+    segs:total?[{v:pass0/total,color:lvHex.great},{v:fail0/total,color:lvHex.threat},{v:unv0/total,color:'#4a5675'}]:[]});
+  // A rate computed from a handful of verified receipts is not a verdict:
+  // below 10 verified the dial stays neutral instead of shouting a level.
+  const vrate=t.verified_success_rate,lowN=vs0<10;
+  const scol=vrate==null?null:lowN?'#4a5675':vrate>=0.85?lvHex.great:vrate>=0.65?lvHex.warning:lvHex.threat;
+  gauge('success',{big:vrate==null?'—':`${Math.round(vrate*100)}%`,
+    small:`${vs0} of ${total} verified${lowN&&total?' · low verification coverage':''}`,
+    color:scol,segs:vrate==null?[]:[{v:vrate,color:scol}]});
+  // Latency judged by workload: agent/code turns legitimately run tens of
+  // seconds, chat should not. The dial scale follows p95 so it never pegs.
+  const p95v=t.latency_ms?.p95||0;
+  const kmap={};(t.kinds||[]).forEach(x=>kmap[x.name]=x.calls||0);
+  const ktot=Object.values(kmap).reduce((a,b)=>a+b,0);
+  const agentish=ktot?((kmap.agent||0)+(kmap.remote_code_execution||0))/ktot:0;
+  const [gT,wT]=agentish>0.5?[30000,90000]:[1000,3000];
+  const dialMax=Math.max(5000,Math.ceil(p95v*1.25/5000)*5000);
+  const pcol=p95v===0?null:p95v<gT?lvHex.great:p95v<wT?lvHex.warning:lvHex.threat;
+  gauge('p95',{big:`${Math.round(p95v).toLocaleString('en-US')}<small> ms</small>`,
+    small:`p50 ${Math.round(t.latency_ms?.p50||0)} ms · avg ${Math.round(t.latency_ms?.average||0)} ms · dial 0–${Math.round(dialMax/1000)}s`,
+    color:pcol,segs:p95v?[{v:Math.min(1,p95v/dialMax),color:pcol}]:[]});
+  const costT=Number(t.cost_usd||0);
+  const costSegs=(t.planes||[]).filter(x=>x.cost_usd>0).map((x,i)=>({v:costT?x.cost_usd/costT:0,
+    color:{api:'#58a6ff',cli:lvHex.great,local:'#7bafe9'}[x.name]||'#4a5675'}));
+  gauge('cost',{big:`$${costT.toFixed(4)}`,small:costT?'share of recorded spend by plane':'no recorded spend',
+    segs:costT?costSegs:[]});
+  pbars('planes',(t.planes||[]).filter(x=>x.name!=='unknown'),PLANE_COL);
+  pbars('kinds',t.kinds||[],KIND_COL);
+  pbars('routes',t.routes||[],ROUTE_COL);
+  pbars('models',t.models||[],MODEL_COL);
+  pbars('callers',t.callers||[],()=>GRADFILL);   // identities carry no level
+  pbars('fallbacks',(t.fallbacks||[]).filter(x=>x.name!=='unknown'),()=>lvHex.warning);  // fallbacks are degraded events
+  $('runtime').innerHTML=rt?[`<b>${esc(rt.mode)}</b>`,esc(rt.state_backend),`${rt.tool_count??'—'} tools`,
+    `${rt.task_rag?.fact_count??'—'} durable facts`,
+    `${esc(rt.version)} · ${UI_BUILD}`].map(x=>`<div class="breaker">${x}</div>`).join(''):
+    `<div class="breaker">runtime unavailable · ${UI_BUILD}</div>`;
+  // Build & durable work — em-dash out when /runtimez is unreachable, never "0/idle".
+  if(!rt){$('build').innerHTML='<div class="breaker">runtime unavailable</div>';}
+  else{const gb=rt.grok_build||{},inflight=gb.in_flight||0;
+    $('build').innerHTML=[
+      `<b>${esc(gb.transport||'—')}</b>`,
+      `<span class="lv-${inflight?'great':'expected'}">in-flight ${inflight}</span>`,
+      `ready workers ${gb.ready_workers??'—'}`,
+      `completed turns ${gb.completed_turns??0}`,
+    ].map(x=>`<div class="breaker">${x}</div>`).join('');}
+  // Policy & governance: spend-enabling settings read warning; safe defaults expected.
+  // A missing feed shows "unavailable" — never collapses to "off/inactive/metered off".
+  if(!rt){$('policy').innerHTML='<div class="empty">runtime unavailable</div>';}
+  else{const ra=rt.routing_advisor||{},se=rt.semantic_evaluation||{},sp=rt.api_spend_enforcement||{},au=rt.autonomy||{};
+    $('policy').innerHTML=`<span>Routing</span><b class="lv-expected">${esc(ra.policy?'live discovery':'—')} · ${ra.automatic_model_experiments?'auto-experiments ON':'no auto-experiments'}</b>
+      <span>Semantic eval</span><b class="lv-${se.automatic_judge_spend?'warning':'expected'}">${esc(se.mode||'—')} · ${se.automatic_judge_spend?'auto-judge spend':'no auto spend'}</b>
+      <span>API spend</span><b class="lv-${sp.owner_enabled?'warning':'expected'}">${sp.owner_enabled?'metered enabled':'metered off'}${sp.per_request_confirmation_required?' · confirm each':''}</b>
+      <span>Autonomy</span><b class="lv-expected">${au.enabled?'on':'off'}${au.mission_v2?' · mission v2':''} · verify ${au.verify_literal?'literal':'off'}</b>
+      <span>Needle</span><b class="lv-${rt.needle_active?'warning':'expected'}">${rt.needle_active?'ACTIVE':'inactive'}</b>
+      <span>Recovery</span><b class="lv-expected">${esc(rt.completion_recovery||'—')}</b>`+
+      // Plane notices: static server templates (never embed key material).
+      (rt.credential_planes?.notices||[]).map(n=>`<span>Notice</span><b class="lv-${
+        n.severity==='warning'?'warning':'expected'}">${esc(n.summary||n.id||'')}</b>`).join('');}
+  applyRuntimeTier(rt);
+  const planeUse={};(t.planes||[]).forEach(x=>planeUse[x.name]={calls:x.calls,cost:x.cost_usd});
+  // Policy strip: routing posture from credential_planes (server truth, never
+  // inferred client-side). Degraded reads warning; no usable plane reads threat.
+  // The strip lives outside the tile grid: a spanning row would pin auto-fit
+  // tracks open and leave dead space to the right of the three tiles.
+  const cp=rt?.credential_planes;
+  $('planepolicy').innerHTML=!cp?'':`<div class="plane-row"><div class="plane-head">
+    <span class="plane-name">policy</span>
+    <span class="plane-state lv-${cp.effective_plane?(cp.degraded?'warning':'great'):'threat'}">${
+    esc(cp.policy||'—')} · effective ${esc(cp.effective_plane||'none')}${cp.degraded?' · degraded':''}</span></div></div>`;
+  $('routing').innerHTML=['cli','api','local'].map(p=>planeTile(p,ready?.planes?.[p],planeUse[p])).join('');
+  // Connect panel: known IDE clients cross-referenced with live caller telemetry.
+  MCP_EP=rt?.mcp_endpoint||'/mcp';$('mcpendpoint').textContent=MCP_EP;
+  const seen={};(t.callers||[]).forEach(x=>seen[x.name]=x.calls);
+  const KNOWN_CLIENTS=['claude-code','cursor','vscode','codex','gemini'];
+  // Segmented client tabs (mirrors the tier-tab language); live status inline:
+  // green dot + call count when the client is actually hitting the gateway.
+  $('clients').innerHTML=KNOWN_CLIENTS.map(c=>{const n=seen[c]||0;
+    return `<button class="ctab${c===SEL_CLIENT?' active':''}" data-client="${esc(c)}" title="${n?`${n} calls recorded`:'no calls recorded'}">
+      <span class="tier-dot" style="background:${n?'#3fa266':'#4a5675'};${n?'box-shadow:0 0 8px #3fa266':''}"></span>${esc(c)}${n?`<span class="ctab-n">${n}</span>`:''}</button>`}).join('');
+  if($('mcpsnippet').textContent==='…')updSnippets();
+  const tools=rt?.tools||[];$('toolslabel').textContent=`Tool surface · ${rt?tools.length:'—'} · by billing`;$('toolcount').textContent=rt?tools.length:'—';
+  // group-by billing class, ranked by exposure severity (metered/destructive first)
+  const billMeta={metered:{c:'#f0b95b',w:3},api_account:{c:'#58a6ff',w:2},conditional:{c:'#58e6d9',w:2},local_runtime:{c:'#7bafe9',w:1},non_metered:{c:'#4a5675',w:1}};
+  const byBill={};tools.forEach(t=>byBill[t.billing_class]=(byBill[t.billing_class]||0)+1);
+  cbars('toolbill',Object.entries(byBill).map(([k,v])=>({name:k,val:v,color:(billMeta[k]||{}).c||'#4a5675',w:(billMeta[k]||{}).w||0}))
+    .sort((a,b)=>(b.w-a.w)||(b.val-a.val)));
+  const risk=tools.filter(t=>t.destructive).sort((a,b)=>(b.billing_class==='metered')-(a.billing_class==='metered'));
+  $('risklabel').textContent=`Destructive tools · ${rt?risk.length:'—'}`;
+  // Registry-unavailable must not read as a "no destructive tools" safety claim.
+  $('risktools').innerHTML=!rt?'<tr><td colspan="3" class="empty">Registry unavailable.</td></tr>':
+    risk.length?risk.map(t=>`<tr><td>${esc(t.name)} <span class="tool-flag">DELETE</span></td>
+    <td>${esc(t.plane)}</td><td><span class="lv-threat">${esc(t.confirmation_policy)}</span></td></tr>`).join(''):'<tr><td colspan="3" class="empty">No destructive tools exposed.</td></tr>';
+  $('tools').innerHTML=tools.length?tools.map(t=>`<tr><td>${esc(t.name)}${t.destructive?'<span class="tool-flag">DESTRUCTIVE</span>':''}</td>
+    <td>${esc(t.plane)}</td><td><span class="bill ${esc(t.billing_class)}">${esc(t.billing_class)}</span></td><td>${esc(t.confirmation_policy)}</td>
+    <td class="wrap">${esc(t.purpose)}</td></tr>`).join(''):'<tr><td colspan="5" class="empty">Registry unavailable.</td></tr>';
+  if(tierLevel>=1)renderSky();
+  if(tierLevel>=2)renderSpace(rt);
+  const bs=(b&&b.circuit_breakers)||{};$('breakers').innerHTML=Object.keys(bs).length?Object.entries(bs).map(([k,v])=>
+    `<div class="breaker ${v.open?'open':''}"><b>${esc(k)}</b> · <span class="lv-${v.open?'threat':'expected'}">${v.open?'OPEN':'closed'}</span> · failures ${v.failures} · trips ${v.trips}</div>`).join(''):'<div class="empty">No breaker activity this session — breakers arm on live provider traffic.</div>';
+  const recent=t.recent||[];$('recentcount').textContent=recent.length;
+  // group-by outcome (from verified aggregate), colored by level
+  const vs=t.verified_samples||0,sr=t.verified_success_rate;
+  const pass=sr==null?0:Math.round(sr*vs),fail=Math.max(0,vs-pass),unver=Math.max(0,(t.sample_size||0)-vs);
+  cbars('outcomes',[{name:'pass',val:pass,color:'#3fa266'},{name:'fail',val:fail,color:'#dd7f76'},{name:'unverified',val:unver,color:'#4a5675'}]);
+  // severity score per receipt: fail 100, fallback 40, slow (vs p95) up to 40, cost up to 30
+  const p95=t.latency_ms?.p95||0;
+  // NB: success arrives as 0/1 ints from SQLite JSON — never compare ===false.
+  const rsev=r=>{let s=0;const f=[];if(r.verified&&!r.success){s+=100;f.push(['failed','threat']);}
+    if(r.fallback_reason){s+=40;f.push(['fallback','warning']);}
+    const lat=r.latency_ms||0;if(p95>0&&lat>p95){s+=Math.min(40,20*lat/p95);f.push(['slow','warning']);}
+    // Cost always weights the score, but only flags a receipt as a standout when
+    // notably expensive — otherwise every metered call would swamp the panel.
+    const c=Number(r.cost_usd||0);if(c>0){s+=Math.min(30,c*1000);if(c>=0.01)f.push(['$'+c.toFixed(4),'warning']);}
+    return{s,f};};
+  const flagged=recent.map(r=>({r,...rsev(r)})).filter(x=>x.f.length).sort((a,b)=>b.s-a.s).slice(0,8);
+  $('standoutlabel').textContent=`Receipts needing attention · ${flagged.length} of last ${recent.length}`;
+  $('standouts').innerHTML=flagged.length?flagged.map(({r,f})=>{const vc=r.verified?(r.success?'pass':'fail'):'unv',vl=r.verified?(r.success?'pass':'fail'):'unverified';
+    return `<tr><td>${esc((r.created_at||'').slice(11,19))}</td><td>${esc(r.caller)}</td><td>${esc(r.request_kind)}</td>
+    <td class="flagcell">${f.map(([t2,l])=>`<span class="lv-${l}">${esc(t2)}</span>`).join('')}</td>
+    <td>${r.latency_ms||0} ms</td><td>$${Number(r.cost_usd||0).toFixed(4)}</td><td><span class="rc ${vc}">${vl}</span></td></tr>`}).join(''):
+    '<tr><td colspan="7" class="empty">No standout receipts — all nominal.</td></tr>';
+  $('recent').innerHTML=recent.map(r=>{const vc=r.verified?(r.success?'pass':'fail'):'unv',vl=r.verified?(r.success?'pass':'fail'):'unverified';
+    return `<tr><td>${esc((r.created_at||'').slice(11,19))}</td><td>${r.id}</td><td>${esc(r.caller)}</td>
+    <td>${esc(r.request_kind)}</td><td>${esc(r.route)}</td><td>${esc(r.resolved_plane)}</td>
     <td>${esc(r.model)}</td><td>${r.latency_ms||0} ms</td><td>$${Number(r.cost_usd||0).toFixed(4)}</td><td>${esc(r.fallback_reason)}</td>
-    <td>${r.verified?(r.success?'pass':'fail'):'unverified'}</td></tr>`).join('');
-}catch(e){$('service').textContent='Service unavailable';$('service').className='pill';$('updated').textContent='Retrying …'}}
+    <td>${esc(r.stop_reason)}</td><td><span class="rc ${vc}">${vl}</span></td></tr>`}).join('');
+}catch(e){$('service').textContent='Service unavailable';$('service').className='pill lv-threat';$('updated').textContent='Retrying …';}
+  finally{refresh.busy=false;}}
 refresh();setInterval(refresh,10000);
 </script></body></html>
