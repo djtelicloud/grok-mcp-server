@@ -168,12 +168,15 @@ def test_tier_nav_renders_all_three_surfaces() -> None:
     html = DASHBOARD.read_text(encoding="utf-8")
     assert 'id="tiernav"' in html
     # Full tuples, not bare ports (a port can appear in unrelated sample data).
+    # Each tier carries its command name + eyebrow for the dynamic page title.
     for tup in (
-        "{id:'public',label:'@grok Public Core',port:'4765'}",
-        "{id:'sky',label:'@skygrok Sky Observer',port:'4768'}",
-        "{id:'space',label:'@spacegrok Space Awareness',port:'4769'}",
+        "{id:'public',label:'@grok Public Core',port:'4765',name:'GroundCommand'",
+        "{id:'sky',label:'@skygrok Sky Observer',port:'4768',name:'SkyCommand'",
+        "{id:'space',label:'@spacegrok Space Awareness',port:'4769',name:'SpaceCommand'",
     ):
         assert tup in html
+    # applyTier drives title/eyebrow/tab state from the active tier
+    assert "function applyTier(" in html and "$('pagetitle').textContent" in html
 
 
 def test_tier_scoped_panels_present_and_gated() -> None:

@@ -10,50 +10,68 @@
       --amber:#f0b95b;--red:#ff6b7a}*{box-sizing:border-box}body{margin:0;background:
       radial-gradient(circle at 15% 0,#192755 0,transparent 32%),
       radial-gradient(circle at 90% 10%,#30205b 0,transparent 28%),var(--bg);
-      color:var(--text);font:14px/1.45 Inter,ui-sans-serif,system-ui,sans-serif;min-height:100vh}
-    main{width:min(1380px,94vw);margin:auto;padding:34px 0 60px}header{display:flex;align-items:end;
-      justify-content:space-between;gap:24px;margin-bottom:25px}h1{font-size:clamp(30px,5vw,58px);
+      color:var(--text);font:clamp(14.5px,0.4vw+11px,17.5px)/1.5 Inter,ui-sans-serif,system-ui,sans-serif;min-height:100vh}
+    main{width:min(1560px,96vw);margin:auto;padding:clamp(20px,3vw,38px) 0 60px}header{display:flex;align-items:end;
+      justify-content:space-between;gap:24px;margin-bottom:25px}h1{font-size:clamp(34px,3.4vw+14px,60px);
       letter-spacing:-.055em;margin:0;background:linear-gradient(100deg,#fff 10%,var(--cyan),var(--purple));
       -webkit-background-clip:text;color:transparent}.eyebrow{color:var(--cyan);font-weight:800;
-      letter-spacing:.16em;text-transform:uppercase}.sub{color:var(--muted);font-size:16px;margin-top:7px}
+      letter-spacing:.16em;text-transform:uppercase;font-size:clamp(11.5px,0.3vw+9.5px,13.5px)}
+    .sub{color:var(--muted);font-size:clamp(15px,0.4vw+12px,18px);margin-top:7px}
     .status{display:flex;gap:9px;flex-wrap:wrap;justify-content:flex-end}.pill{border:1px solid var(--line);
-      background:#0d1324cc;border-radius:99px;padding:7px 12px;color:var(--muted)}
+      background:#0d1324cc;border-radius:99px;padding:7px 13px;color:var(--muted);
+      font-size:clamp(12.5px,0.3vw+10.5px,14.5px);font-weight:650}
+    .pill[class*="lv-"]{border-color:color-mix(in srgb,currentColor 45%,#263252)}
     .grid{display:grid;grid-template-columns:repeat(12,1fr);gap:14px}.card{grid-column:span 3;
       background:linear-gradient(145deg,#141c33e8,#0d1222e8);border:1px solid var(--line);border-radius:18px;
-      padding:18px;box-shadow:0 18px 50px #0005;min-width:0}.card.wide{grid-column:span 6}.card.full{grid-column:1/-1}
-    .label{color:var(--muted);font-size:12px;font-weight:750;letter-spacing:.09em;text-transform:uppercase}
-    .metric{font-size:34px;font-weight:850;letter-spacing:-.04em;margin-top:6px}.metric small{font-size:14px;
-      color:var(--muted);letter-spacing:0}.bars{display:grid;gap:10px;margin-top:15px}.bar-row{display:grid;
-      grid-template-columns:minmax(90px,1fr) 4fr 60px;gap:10px;align-items:center}.bar-label{overflow:hidden;
-      text-overflow:ellipsis;white-space:nowrap;color:#cad5f2}.track{height:10px;border-radius:9px;background:#202b47;
+      padding:clamp(14px,1.1vw,20px);box-shadow:0 18px 50px #0005;min-width:0;
+      transition:border-color .15s}.card:hover{border-color:#324067}
+    .card.wide{grid-column:span 6}.card.full{grid-column:1/-1}
+    .label{color:#a9b8dc;font-size:clamp(11.5px,0.28vw+9.8px,13.5px);font-weight:750;letter-spacing:.09em;text-transform:uppercase}
+    .metric{font-size:clamp(30px,1.5vw+22px,44px);font-weight:850;letter-spacing:-.04em;margin-top:6px}
+    .metric small{font-size:.42em;color:var(--muted);letter-spacing:0}
+    .gwrap{position:relative;display:flex;flex-direction:column;align-items:center;margin-top:4px}
+    .gsvg{width:min(100%,210px);display:block}
+    .garc{fill:none;stroke-width:10;stroke-linecap:round}
+    .gbig{position:absolute;top:37%;width:100%;text-align:center;font-weight:850;
+      font-size:clamp(24px,1.2vw+17px,36px);letter-spacing:-.03em;font-variant-numeric:tabular-nums}
+    .gbig small{font-size:.44em;color:var(--muted);font-weight:700}
+    .gsmall{color:var(--muted);font-size:clamp(11.5px,0.25vw+10px,13.5px);text-align:center;margin-top:-8px}
+    .bars{display:grid;gap:11px;margin-top:15px}.bar-row{display:grid;
+      grid-template-columns:minmax(90px,1fr) 4fr 64px;gap:10px;align-items:center}.bar-label{overflow:hidden;
+      text-overflow:ellipsis;white-space:nowrap;color:#cad5f2;font-size:clamp(13px,0.3vw+11px,15.5px)}
+    .track{height:12px;border-radius:9px;background:#202b47;
       overflow:hidden}.fill{height:100%;border-radius:9px;background:linear-gradient(90deg,var(--blue),var(--purple))}
-    .value{text-align:right;color:var(--muted);font-variant-numeric:tabular-nums}table{width:100%;border-collapse:collapse;
-      margin-top:12px}th,td{text-align:left;padding:10px;border-bottom:1px solid #202a44;white-space:nowrap}
-    th{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.07em}td{font-variant-numeric:tabular-nums}
+    .value{text-align:right;color:#cad5f2;font-variant-numeric:tabular-nums;font-size:clamp(12.5px,0.3vw+10.5px,15px)}
+    table{width:100%;border-collapse:collapse;margin-top:12px}
+    th,td{text-align:left;padding:clamp(9px,0.7vw,12px) clamp(9px,0.8vw,13px);border-bottom:1px solid #202a44;white-space:nowrap}
+    th{color:var(--muted);font-size:clamp(10.5px,0.24vw+9px,12px);text-transform:uppercase;letter-spacing:.07em}
+    td{font-variant-numeric:tabular-nums;font-size:clamp(13px,0.3vw+11px,15px)}
     .scroll{overflow:auto}.empty{color:var(--muted);padding:18px 0}.breakers{display:flex;gap:10px;flex-wrap:wrap;
-      margin-top:13px}.breaker{border:1px solid var(--line);border-radius:12px;padding:10px 12px;color:var(--muted)}
-    .breaker.open{border-color:#8a3042;color:#ffc1ca}.footer{color:var(--muted);margin-top:18px;font-size:12px}
+      margin-top:13px}.breaker{border:1px solid var(--line);border-radius:12px;padding:10px 14px;color:var(--muted);
+      font-size:clamp(13px,0.3vw+11px,15px)}
+    .breaker.open{border-color:#8a3042;color:#ffc1ca}
+    .footer{color:var(--muted);margin-top:18px;font-size:clamp(12px,0.26vw+10px,13.5px)}
     .tier-nav{display:flex;align-items:center;gap:10px;margin:0 0 18px;padding:9px 14px;border:1px solid var(--line);
       border-radius:14px;background:#0d132480;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);flex-wrap:wrap}
-    .tier-label{color:var(--muted);font-size:11px;font-weight:750;letter-spacing:.12em;text-transform:uppercase}
+    .tier-label{color:var(--muted);font-size:clamp(11px,0.24vw+9.5px,12.5px);font-weight:750;letter-spacing:.12em;text-transform:uppercase}
     .tier-tab{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:99px;
-      padding:6px 14px;color:var(--muted);font-weight:650;font-size:13px;text-decoration:none;transition:color .12s,border-color .12s}
+      padding:7px 15px;color:var(--muted);font-weight:650;font-size:clamp(13px,0.3vw+11px,15.5px);
+      text-decoration:none;transition:color .12s,border-color .12s}
     .tier-tab:hover{color:var(--text);border-color:var(--blue)}
     .tier-tab.active{color:var(--text);border-color:#1e5f5a;background:#11172acc;box-shadow:0 0 14px #58e6d922}
     .tier-dot{width:8px;height:8px;border-radius:50%}
     .tier-dot.public{background:var(--cyan);box-shadow:0 0 8px var(--cyan)}
     .tier-dot.sky{background:var(--blue);box-shadow:0 0 8px var(--blue)}
     .tier-dot.space{background:var(--purple);box-shadow:0 0 8px var(--purple)}
-    .planes{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:14px}
-    .plane-row{display:flex;flex-direction:column;gap:8px;border:1px solid var(--line);border-radius:12px;padding:12px 14px;min-width:0}
+    .planes{display:grid;grid-template-columns:repeat(auto-fit,minmax(235px,1fr));gap:10px;margin-top:14px}
+    .plane-row{display:flex;flex-direction:column;gap:8px;border:1px solid var(--line);border-radius:12px;padding:12px 15px;min-width:0}
     .plane-head{display:flex;align-items:center;gap:10px}
-    .plane-name{font-weight:750;text-transform:uppercase;font-size:12px;letter-spacing:.08em}
-    .plane-state{font-size:12px;font-weight:750;border-radius:99px;padding:3px 11px;background:#141c33;color:var(--muted);margin-left:auto}
-    .plane-detail{color:var(--muted);font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-    @media(max-width:950px){.planes{grid-template-columns:1fr}}
+    .plane-name{font-weight:750;text-transform:uppercase;font-size:clamp(12px,0.26vw+10px,13.5px);letter-spacing:.08em}
+    .plane-state{font-size:clamp(12px,0.26vw+10px,13.5px);font-weight:750;border-radius:99px;padding:3px 12px;background:#141c33;color:var(--muted);margin-left:auto}
+    .plane-detail{color:var(--muted);font-size:clamp(12.5px,0.28vw+10.5px,14px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     .tool-flag{font-size:10px;font-weight:800;letter-spacing:.08em;border-radius:99px;padding:2px 8px;
       color:#ffc1ca;background:#2a1218;margin-left:8px}td.wrap{white-space:normal;min-width:260px;color:var(--muted)}
-    .scroll.bounded{max-height:360px}
+    .scroll.bounded{max-height:min(48vh,430px)}
     .scroll.bounded table thead th{position:sticky;top:0;background:#101a2e;z-index:1;box-shadow:0 1px 0 #202a44}
     .scroll.bounded tbody tr:hover td{background:#141c3355}
     .rc{font-size:11px;font-weight:750;border-radius:99px;padding:2px 9px}
@@ -75,31 +93,37 @@
     .legend{display:flex;flex-wrap:wrap;align-items:center;gap:16px;margin:0 0 16px;padding:8px 14px;
       border:1px solid var(--line);border-radius:12px;background:#0d132466;font-size:12px;color:var(--muted)}
     .lg-label{font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);font-size:11px}
-    .lg{display:inline-flex;align-items:center;gap:7px;font-weight:650}
+    .lg{display:inline-flex;align-items:center;gap:7px;font-weight:650;font-size:clamp(12px,0.26vw+10px,13.5px)}
     .lg i{width:11px;height:11px;border-radius:3px;display:inline-block}
     .snippet{background:#05070e;border:1px solid var(--line);border-radius:11px;padding:14px 16px;margin-top:14px;
-      overflow-x:auto;color:#cad5f2;font:12.5px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre}
+      overflow-x:auto;color:#cad5f2;font:clamp(12.5px,0.28vw+10.5px,14.5px)/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre}
     .copybtn{border:1px solid var(--line);background:none;color:var(--cyan);border-radius:99px;padding:5px 12px;
       font:650 12px Inter,sans-serif;cursor:pointer}.copybtn:hover{border-color:var(--cyan)}
-    .hint{color:var(--muted);font-size:12px;margin-top:10px}
+    .hint{color:var(--muted);font-size:clamp(12px,0.26vw+10px,13.5px);margin-top:10px}
     .tier-section{margin-top:16px}
-    .tierhead{display:flex;align-items:center;gap:10px;font-weight:800;letter-spacing:.06em;font-size:13px;color:var(--text)}
+    .tierhead{display:flex;align-items:center;gap:10px;font-weight:800;letter-spacing:.06em;
+      font-size:clamp(13px,0.3vw+11px,15.5px);color:var(--text)}
     .sample{font-size:10px;font-weight:800;letter-spacing:.08em;border-radius:99px;padding:2px 9px;color:var(--amber);background:#2e2412}
     .tiernote{color:var(--muted);font-weight:600;font-size:12.5px;margin-left:auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-    .lanes{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:14px}
-    .lane{border:1px solid var(--line);border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:8px;min-width:0}
-    .lane-tag{font-size:10px;font-weight:800;letter-spacing:.1em;color:var(--cyan)}
-    .lane-owner{font-weight:750;font-size:14px}
-    .lane-state{font-size:11px;font-weight:750;border-radius:99px;padding:3px 10px;align-self:flex-start;background:#141c33;color:var(--muted)}
+    .lanes{display:grid;grid-template-columns:repeat(auto-fit,minmax(195px,1fr));gap:12px;margin-top:14px}
+    .lane{border:1px solid var(--line);border-radius:14px;padding:15px;display:flex;flex-direction:column;gap:8px;min-width:0}
+    .lane-tag{font-size:clamp(10px,0.22vw+8.5px,11.5px);font-weight:800;letter-spacing:.1em;color:var(--cyan)}
+    .lane-owner{font-weight:750;font-size:clamp(14px,0.32vw+12px,16.5px)}
+    .lane-state{font-size:clamp(11px,0.24vw+9.5px,12.5px);font-weight:750;border-radius:99px;padding:3px 11px;align-self:flex-start;background:#141c33;color:var(--muted)}
     .lane-state.active{background:#12291a}.lane-state.probe{background:#152541}
-    .lane-detail{color:var(--muted);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-    @media(max-width:950px){.lanes{grid-template-columns:1fr 1fr}}
-    .kv{display:grid;grid-template-columns:auto 1fr;gap:8px 18px;margin-top:14px;font-size:13.5px}
+    .lane-detail{color:var(--muted);font-size:clamp(12px,0.26vw+10px,13.5px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .kv{display:grid;grid-template-columns:auto 1fr;gap:9px 18px;margin-top:14px;font-size:clamp(13px,0.3vw+11px,15.5px)}
     .kv span{color:var(--muted)}.kv b{font-weight:650;font-variant-numeric:tabular-nums}
+    #sky-tier .card,#sky-tier .lane{border-color:#2b4a7799}
+    #space-tier .card{border-color:#54407a99}
     .ring{display:inline-grid;place-items:center;position:relative;width:88px;height:88px;flex:none}
     .ring b{position:absolute;font-size:20px;font-weight:850}
-    @media(max-width:950px){.card,.card.wide{grid-column:span 6}}@media(max-width:620px){header{display:block}
-      .status{justify-content:flex-start;margin-top:16px}.card,.card.wide{grid-column:1/-1}.lanes{grid-template-columns:1fr}}
+    /* Fluid-first: internal grids auto-fit continuously; column drops come late
+       so wide desktop/IDE panes keep the two-up layout as long as it fits. */
+    @media(max-width:1150px){.card{grid-column:span 6}}
+    @media(max-width:760px){.card.wide{grid-column:1/-1}}
+    @media(max-width:540px){header{display:block}
+      .status{justify-content:flex-start;margin-top:16px}.card,.card.wide{grid-column:1/-1}}
   </style>
 </head>
 <body><main>
@@ -111,15 +135,15 @@
     <span class="lg"><i style="background:#f1b467"></i>warning</span>
     <span class="lg"><i style="background:#dd7f76"></i>threat</span>
     <span class="lg"><i style="background:#fc6b83"></i>critical</span></div>
-  <header><div><div class="eyebrow">UniGrok 1.1 · public core</div><h1>Control Center</h1>
+  <header><div><div class="eyebrow" id="eyebrow">UniGrok 1.1 · public core</div><h1 id="pagetitle">GroundCommand</h1>
     <div class="sub">Live routing, reliability, cost, and benchmark truth—without prompt capture.</div></div>
     <div class="status"><span id="service" class="pill">Service …</span><span id="cli" class="pill">CLI …</span>
       <span id="api" class="pill">API …</span><span id="updated" class="pill">Loading …</span></div></header>
   <section class="grid">
-    <article class="card"><div class="label">Samples</div><div id="samples" class="metric">0</div></article>
-    <article class="card"><div class="label">Verified success</div><div id="success" class="metric">—</div></article>
-    <article class="card"><div class="label">P95 latency</div><div id="p95" class="metric">0 <small>ms</small></div></article>
-    <article class="card"><div class="label">Recorded API cost</div><div id="cost" class="metric">$0</div></article>
+    <article class="card gcard"><div class="label">Samples · outcome split</div><div id="samples" class="gwrap"></div></article>
+    <article class="card gcard"><div class="label">Verified success</div><div id="success" class="gwrap"></div></article>
+    <article class="card gcard"><div class="label">P95 latency · 5 s dial</div><div id="p95" class="gwrap"></div></article>
+    <article class="card gcard"><div class="label">Recorded API cost · by plane</div><div id="cost" class="gwrap"></div></article>
     <article class="card full"><div class="label">Routing planes</div><div id="routing" class="planes"></div></article>
     <article class="card wide"><div class="label">Plane mix</div><div id="planes" class="bars"></div></article>
     <article class="card wide"><div class="label">Request kinds</div><div id="kinds" class="bars"></div></article>
@@ -209,28 +233,38 @@ const METERED_KINDS=new Set(['web_search','x_search','remote_code_execution','ch
 const KIND_COL=n=>METERED_KINDS.has(n)?lvHex.warning:'#4a5675';   // metered (costs) vs free (neutral)
 const ROUTE_COL=n=>n==='error'?lvHex.threat:GRADFILL;             // only error carries a level
 const MODEL_COL=()=>GRADFILL;                                     // model choice has no severity
-const UI_BUILD='unigrok-ui-v1.1.0-r14';
+const UI_BUILD='unigrok-ui-v1.1.0-r15';
 // Unified 3-tier switcher: each tab links to its own surface on the same host.
 // The active tier is the current port; ?preview=sky|space lets one running
 // container show a higher tier's panels for review. Hierarchical scoping:
 // each tier renders its own panels plus every lower tier's. Higher tiers still
 // enforce their own auth on arrival — this is navigation, not access.
 const TIERS=[
-  {id:'public',label:'@grok Public Core',port:'4765'},
-  {id:'sky',label:'@skygrok Sky Observer',port:'4768'},
-  {id:'space',label:'@spacegrok Space Awareness',port:'4769'},
+  {id:'public',label:'@grok Public Core',port:'4765',name:'GroundCommand',eyebrow:'public core'},
+  {id:'sky',label:'@skygrok Sky Observer',port:'4768',name:'SkyCommand',eyebrow:'sky observer'},
+  {id:'space',label:'@spacegrok Space Awareness',port:'4769',name:'SpaceCommand',eyebrow:'space awareness'},
 ];
 const LEVEL={public:0,sky:1,space:2};
 const herePort=location.port||(location.protocol==='https:'?'443':'80');
 const preview=new URLSearchParams(location.search).get('preview');
 const portTier=(TIERS.find(t=>t.port===herePort)||{}).id||'public';
-const activeTier=(preview&&LEVEL[preview]!=null)?preview:portTier;
-const tierLevel=LEVEL[activeTier];
+let activeTier=(preview&&LEVEL[preview]!=null)?preview:portTier;
+let tierLevel=LEVEL[activeTier];
 document.getElementById('tiernav').insertAdjacentHTML('beforeend',TIERS.map(t=>{
   const href=`${location.protocol}//${location.hostname}:${t.port}/ui/`;
-  return `<a class="tier-tab${t.id===activeTier?' active':''}" href="${href}">`+
+  return `<a class="tier-tab" data-tier="${t.id}" href="${href}">`+
     `<span class="tier-dot ${t.id}"></span>${t.label}</a>`;
 }).join(''));
+// Tier identity: title, eyebrow, tab highlight, and hierarchical panel reveal.
+function applyTier(){const ti=TIERS.find(x=>x.id===activeTier)||TIERS[0];
+  tierLevel=LEVEL[activeTier];
+  $('pagetitle').textContent=ti.name;document.title=`${ti.name} · UniGrok`;
+  $('eyebrow').textContent=`UniGrok 1.1 · ${ti.eyebrow}`;
+  document.querySelectorAll('.tier-tab').forEach(a=>a.classList.toggle('active',a.dataset.tier===activeTier));
+  $('sky-tier').style.display=tierLevel>=1?'':'none';
+  $('space-tier').style.display=tierLevel>=2?'':'none';
+}
+applyTier();
 // Tier-scoped panels: sample structure from the plan, clearly marked; live data
 // wires on the real surfaces (private overlay), never on the public core.
 const SKY={
@@ -321,8 +355,17 @@ function renderSpace(rt){
     SPACE.devices.map(d=>`<tr><td>${esc(d.name)}</td><td>${esc(d.linked)}</td><td><span class="lv-great">${esc(d.status)}</span></td></tr>`).join('')}</tbody></table></div>
     <div class="hint">Link another machine: mint a one-time code, paste into that machine's console. <button class="copybtn" disabled>Get link code</button></div>`;
 }
-$('sky-tier').style.display=tierLevel>=1?'':'none';
-$('space-tier').style.display=tierLevel>=2?'':'none';
+// Arc gauge: value 0..1 sweeps a 240° dial; segs=[{v,color}] stack sub-arcs.
+function arcPt(cx,cy,r,deg){const a=(deg-90)*Math.PI/180;return[cx+r*Math.cos(a),cy+r*Math.sin(a)];}
+function arcPath(cx,cy,r,a0,a1){const [x0,y0]=arcPt(cx,cy,r,a0),[x1,y1]=arcPt(cx,cy,r,a1);
+  return `M ${x0.toFixed(1)} ${y0.toFixed(1)} A ${r} ${r} 0 ${a1-a0>180?1:0} 1 ${x1.toFixed(1)} ${y1.toFixed(1)}`;}
+function gauge(id,{segs,big,small,color}){const A0=-120,SWEEP=240,r=44,cx=60,cy=58;
+  let acc=0,paths='';
+  (segs||[]).forEach(s=>{const w=Math.max(0,Math.min(1-acc,s.v||0));if(w<=0)return;
+    paths+=`<path d="${arcPath(cx,cy,r,A0+acc*SWEEP,A0+(acc+w)*SWEEP)}" stroke="${s.color}" class="garc" style="filter:drop-shadow(0 0 4px ${s.color}77)"/>`;acc+=w;});
+  $(id).innerHTML=`<svg viewBox="0 0 120 96" class="gsvg" role="img" aria-label="${esc(small)} ${esc(big)}">
+    <path d="${arcPath(cx,cy,r,A0,A0+SWEEP)}" stroke="#202b47" class="garc gtrack"/>${paths}</svg>
+    <div class="gbig" style="color:${color||'var(--text)'}">${big}</div><div class="gsmall">${esc(small)}</div>`;}
 function planeTile(name,p,use){const on=!!p?.ready;
   const detail=name==='local'
     ? (p?.configured?`runtime ${p.runtime_up?'up':'down'} · fail-closed helper`:'not configured · fail-closed')
@@ -348,14 +391,27 @@ async function refresh(){if(refresh.busy)return;refresh.busy=true;try{const [rea
   $('service').className='pill lv-'+(ready?(levelOf(ready.status)||'expected'):'threat');
   for(const p of ['cli','api']){const on=!!ready?.planes?.[p]?.ready;
     $(p).textContent=`${p.toUpperCase()} ${ready?(on?'ready':'offline'):'—'}`;$(p).className='pill lv-'+(ready?(on?'great':'expected'):'threat');}
-  $('updated').textContent=new Date().toLocaleTimeString();$('samples').textContent=t.sample_size||0;
+  $('updated').textContent=new Date().toLocaleTimeString();
+  // Gauge row. Samples: outcome-split donut arc. Success/P95: threshold dials.
+  // Cost: recorded spend split by plane (share arcs, honest zero when $0).
+  const total=t.sample_size||0,vs0=t.verified_samples||0,sr0=t.verified_success_rate;
+  const pass0=sr0==null?0:Math.round(sr0*vs0),fail0=Math.max(0,vs0-pass0),unv0=Math.max(0,total-vs0);
+  gauge('samples',{big:String(total),small:`${pass0} pass · ${fail0} fail · ${unv0} unverified`,
+    segs:total?[{v:pass0/total,color:lvHex.great},{v:fail0/total,color:lvHex.threat},{v:unv0/total,color:'#4a5675'}]:[]});
   const vrate=t.verified_success_rate;
-  $('success').textContent=vrate==null?'—':`${Math.round(vrate*100)}%`;
-  $('success').className='metric'+(vrate==null?'':vrate>=0.85?' lv-great':vrate>=0.65?' lv-warning':' lv-threat');
+  const scol=vrate==null?null:vrate>=0.85?lvHex.great:vrate>=0.65?lvHex.warning:lvHex.threat;
+  gauge('success',{big:vrate==null?'—':`${Math.round(vrate*100)}%`,small:`${vs0} of ${total} verified`,
+    color:scol,segs:vrate==null?[]:[{v:vrate,color:scol}]});
   const p95v=t.latency_ms?.p95||0;
-  $('p95').innerHTML=`${Math.round(p95v).toLocaleString('en-US')} <small>ms</small>`;
-  $('p95').className='metric'+(p95v===0?'':p95v<1000?' lv-great':p95v<3000?' lv-warning':' lv-threat');
-  $('cost').textContent=`$${Number(t.cost_usd||0).toFixed(4)}`;
+  const pcol=p95v===0?null:p95v<1000?lvHex.great:p95v<3000?lvHex.warning:lvHex.threat;
+  gauge('p95',{big:`${Math.round(p95v).toLocaleString('en-US')}<small> ms</small>`,
+    small:`p50 ${Math.round(t.latency_ms?.p50||0)} ms · avg ${Math.round(t.latency_ms?.average||0)} ms`,
+    color:pcol,segs:p95v?[{v:Math.min(1,p95v/5000),color:pcol}]:[]});
+  const costT=Number(t.cost_usd||0);
+  const costSegs=(t.planes||[]).filter(x=>x.cost_usd>0).map((x,i)=>({v:costT?x.cost_usd/costT:0,
+    color:{api:'#58a6ff',cli:lvHex.great,local:'#7bafe9'}[x.name]||'#4a5675'}));
+  gauge('cost',{big:`$${costT.toFixed(4)}`,small:costT?'share of recorded spend by plane':'no recorded spend',
+    segs:costT?costSegs:[]});
   pbars('planes',(t.planes||[]).filter(x=>x.name!=='unknown'),PLANE_COL);
   pbars('kinds',t.kinds||[],KIND_COL);
   pbars('routes',t.routes||[],ROUTE_COL);
