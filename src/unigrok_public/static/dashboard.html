@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>UniGrok Control Center</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='13' fill='%23080b14' stroke='%2358e6d9' stroke-width='3'/%3E%3Ccircle cx='16' cy='16' r='5' fill='%2358a6ff'/%3E%3C/svg%3E">
   <style>
     :root{color-scheme:dark;--bg:#080b14;--panel:#11172a;--line:#263252;--text:#edf2ff;
       --muted:#95a4c8;--cyan:#58e6d9;--blue:#58a6ff;--purple:#bc8cff;--green:#3fb950;
@@ -32,8 +33,8 @@
     .gwrap{position:relative;display:flex;flex-direction:column;align-items:center;margin-top:4px}
     .gsvg{width:min(100%,210px);display:block}
     .garc{fill:none;stroke-width:10;stroke-linecap:round}
-    .gbig{position:absolute;top:37%;width:100%;text-align:center;font-weight:850;
-      font-size:clamp(24px,1.2vw+17px,36px);letter-spacing:-.03em;font-variant-numeric:tabular-nums}
+    .gbig{position:absolute;top:37%;width:100%;text-align:center;font-weight:850;white-space:nowrap;
+      font-size:clamp(22px,1.1vw+15px,32px);letter-spacing:-.03em;font-variant-numeric:tabular-nums}
     .gbig small{font-size:.44em;color:var(--muted);font-weight:700}
     .gsmall{color:var(--muted);font-size:clamp(11.5px,0.25vw+10px,13.5px);text-align:center;margin-top:-8px}
     .bars{display:grid;gap:11px;margin-top:15px}.bar-row{display:grid;
@@ -190,7 +191,7 @@
     <article class="card gcard"><div class="label">Verified success</div><div id="success" class="gwrap"></div></article>
     <article class="card gcard"><div class="label">P95 latency · 5 s dial</div><div id="p95" class="gwrap"></div></article>
     <article class="card gcard"><div class="label">Recorded API cost · by plane</div><div id="cost" class="gwrap"></div></article>
-    <article class="card full"><div class="label">Routing planes</div><div id="routing" class="planes"></div></article>
+    <article class="card full"><div class="label">Routing planes</div><div id="planepolicy"></div><div id="routing" class="planes"></div></article>
     <article class="card wide"><div class="label">Plane mix</div><div id="planes" class="bars"></div></article>
     <article class="card wide"><div class="label">Request kinds</div><div id="kinds" class="bars"></div></article>
     <article class="card wide"><div class="label">Route mix</div><div id="routes" class="bars"></div></article>
@@ -289,7 +290,7 @@ const METERED_KINDS=new Set(['web_search','x_search','remote_code_execution','ch
 const KIND_COL=n=>METERED_KINDS.has(n)?lvHex.warning:'#4a5675';   // metered (costs) vs free (neutral)
 const ROUTE_COL=n=>n==='error'?lvHex.threat:GRADFILL;             // only error carries a level
 const MODEL_COL=()=>GRADFILL;                                     // model choice has no severity
-const UI_BUILD='unigrok-ui-v1.1.0-r19';
+const UI_BUILD='unigrok-ui-v1.1.0-r20';
 // Unified 3-tier switcher: each tab links to its own surface on the same host.
 // The active tier is the current port; ?preview=sky|space lets one running
 // container show a higher tier's panels for review. Hierarchical scoping:
@@ -308,7 +309,8 @@ let activeTier=(preview&&LEVEL[preview]!=null)?preview:portTier;
 let tierLevel=LEVEL[activeTier];
 document.getElementById('tiernav').insertAdjacentHTML('beforeend',TIERS.map(t=>{
   const href=`${location.protocol}//${location.hostname}:${t.port}/ui/`;
-  return `<a class="tier-tab" data-tier="${t.id}" href="${href}">`+
+  const tip=t.id==='public'?'the public core surface':`opens the ${t.id} surface — requires that stack to be running`;
+  return `<a class="tier-tab" data-tier="${t.id}" href="${href}" title="${tip}">`+
     `<span class="tier-dot ${t.id}"></span>${t.label}</a>`;
 }).join(''));
 // Command Drawer: an index of this deck mirroring the control-site groups.
@@ -563,12 +565,14 @@ async function refresh(){if(refresh.busy)return;refresh.busy=true;try{const [rea
   const planeUse={};(t.planes||[]).forEach(x=>planeUse[x.name]={calls:x.calls,cost:x.cost_usd});
   // Policy strip: routing posture from credential_planes (server truth, never
   // inferred client-side). Degraded reads warning; no usable plane reads threat.
+  // The strip lives outside the tile grid: a spanning row would pin auto-fit
+  // tracks open and leave dead space to the right of the three tiles.
   const cp=rt?.credential_planes;
-  const cpStrip=!cp?'':`<div class="plane-row" style="grid-column:1/-1"><div class="plane-head">
+  $('planepolicy').innerHTML=!cp?'':`<div class="plane-row"><div class="plane-head">
     <span class="plane-name">policy</span>
     <span class="plane-state lv-${cp.effective_plane?(cp.degraded?'warning':'great'):'threat'}">${
     esc(cp.policy||'—')} · effective ${esc(cp.effective_plane||'none')}${cp.degraded?' · degraded':''}</span></div></div>`;
-  $('routing').innerHTML=cpStrip+['cli','api','local'].map(p=>planeTile(p,ready?.planes?.[p],planeUse[p])).join('');
+  $('routing').innerHTML=['cli','api','local'].map(p=>planeTile(p,ready?.planes?.[p],planeUse[p])).join('');
   // Connect panel: known IDE clients cross-referenced with live caller telemetry.
   MCP_EP=rt?.mcp_endpoint||'/mcp';$('mcpendpoint').textContent=MCP_EP;
   const seen={};(t.callers||[]).forEach(x=>seen[x.name]=x.calls);
@@ -597,7 +601,7 @@ async function refresh(){if(refresh.busy)return;refresh.busy=true;try{const [rea
   if(tierLevel>=1)renderSky();
   if(tierLevel>=2)renderSpace(rt);
   const bs=(b&&b.circuit_breakers)||{};$('breakers').innerHTML=Object.keys(bs).length?Object.entries(bs).map(([k,v])=>
-    `<div class="breaker ${v.open?'open':''}"><b>${esc(k)}</b> · <span class="lv-${v.open?'threat':'expected'}">${v.open?'OPEN':'closed'}</span> · failures ${v.failures} · trips ${v.trips}</div>`).join(''):'<div class="empty">No provider calls recorded.</div>';
+    `<div class="breaker ${v.open?'open':''}"><b>${esc(k)}</b> · <span class="lv-${v.open?'threat':'expected'}">${v.open?'OPEN':'closed'}</span> · failures ${v.failures} · trips ${v.trips}</div>`).join(''):'<div class="empty">No breaker activity this session — breakers arm on live provider traffic.</div>';
   const recent=t.recent||[];$('recentcount').textContent=recent.length;
   // group-by outcome (from verified aggregate), colored by level
   const vs=t.verified_samples||0,sr=t.verified_success_rate;
