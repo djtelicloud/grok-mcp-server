@@ -57,6 +57,34 @@
     .tier-tab{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:99px;
       padding:7px 15px;color:var(--muted);font-weight:650;font-size:clamp(13px,0.3vw+11px,15.5px);
       text-decoration:none;transition:color .12s,border-color .12s}
+    .menu-btn{border:1px solid var(--line);background:#0d1324cc;color:var(--text);border-radius:10px;
+      padding:6px 13px;font-size:clamp(15px,0.34vw+12px,18px);cursor:pointer;line-height:1;transition:border-color .12s}
+    .menu-btn:hover{border-color:var(--cyan)}
+    .signin{margin-left:auto;order:99;display:inline-flex;align-items:center;border:1px solid #1e5f5a;
+      background:linear-gradient(90deg,#12302880,#15254180);color:#baf7c7;border-radius:99px;padding:7px 16px;
+      font-weight:750;font-size:clamp(12.5px,0.3vw+10.5px,14.5px);text-decoration:none;transition:box-shadow .15s}
+    .signin:hover{box-shadow:0 0 14px #3fa26644}
+    .backdrop{position:fixed;inset:0;background:#04060cbb;opacity:0;pointer-events:none;transition:opacity .18s;z-index:40}
+    body.drawer-open .backdrop{opacity:1;pointer-events:auto}
+    .drawer{position:fixed;top:0;left:0;bottom:0;width:min(330px,88vw);background:#0d1324f5;
+      border-right:1px solid var(--line);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+      transform:translateX(-103%);transition:transform .2s ease;z-index:41;padding:20px 16px;overflow-y:auto;
+      display:flex;flex-direction:column}
+    body.drawer-open .drawer{transform:none}
+    .drawer-head{display:flex;align-items:center;gap:10px;font-weight:800;letter-spacing:.06em;
+      font-size:clamp(14px,0.32vw+12px,16.5px);margin-bottom:10px}
+    .dclose{margin-left:auto;border:1px solid var(--line);background:none;color:var(--muted);border-radius:9px;
+      padding:4px 10px;cursor:pointer;font-size:13px}.dclose:hover{color:var(--text);border-color:var(--red)}
+    .dgroup{margin:16px 0 5px;font-size:clamp(10.5px,0.24vw+9px,12px);letter-spacing:.14em;text-transform:uppercase;
+      color:var(--cyan);font-weight:800}
+    .ditem{display:flex;align-items:center;gap:9px;width:100%;padding:9px 12px;border-radius:9px;color:#cad5f2;
+      font-weight:650;background:none;border:0;cursor:pointer;font-size:clamp(13.5px,0.32vw+11.5px,15.5px);
+      text-align:left;text-decoration:none}
+    .ditem:hover{background:#141c33}
+    .ditem.locked{color:var(--muted);cursor:default}.ditem.locked:hover{background:none}
+    .lockhint{margin-left:auto;font-size:.78em;color:var(--muted);letter-spacing:.05em}
+    .drawer-foot{margin-top:auto;padding-top:16px;border-top:1px solid var(--line);color:var(--muted);
+      font-size:clamp(11.5px,0.25vw+10px,13px)}
     .tier-tab:hover{color:var(--text);border-color:var(--blue)}
     .tier-tab.active{color:var(--text);border-color:#1e5f5a;background:#11172acc;box-shadow:0 0 14px #58e6d922}
     .tier-dot{width:8px;height:8px;border-radius:50%}
@@ -127,7 +155,13 @@
   </style>
 </head>
 <body><main>
-  <nav class="tier-nav" id="tiernav" aria-label="surface tier"><span class="tier-label">Surface</span></nav>
+  <div id="backdrop" class="backdrop"></div>
+  <aside id="drawer" class="drawer" aria-label="command drawer">
+    <div class="drawer-head">Command Drawer<button class="dclose" id="dclose" aria-label="close">✕</button></div>
+    <nav id="ditems"></nav>
+    <div class="drawer-foot">Drawer is an index of this deck — items scroll to their panel. Contributor actions live on the control site.</div>
+  </aside>
+  <nav class="tier-nav" id="tiernav" aria-label="surface tier"><button id="dmenu" class="menu-btn" aria-label="open command drawer">☰</button><span class="tier-label">Surface</span><a class="signin" href="https://control.grokmcp.org">Contributor sign in</a></nav>
   <div class="legend" aria-label="status color key"><span class="lg-label">Levels</span>
     <span class="lg"><i style="background:#3fa266"></i>great</span>
     <span class="lg"><i style="background:#81a1c1"></i>good</span>
@@ -233,7 +267,7 @@ const METERED_KINDS=new Set(['web_search','x_search','remote_code_execution','ch
 const KIND_COL=n=>METERED_KINDS.has(n)?lvHex.warning:'#4a5675';   // metered (costs) vs free (neutral)
 const ROUTE_COL=n=>n==='error'?lvHex.threat:GRADFILL;             // only error carries a level
 const MODEL_COL=()=>GRADFILL;                                     // model choice has no severity
-const UI_BUILD='unigrok-ui-v1.1.0-r15';
+const UI_BUILD='unigrok-ui-v1.1.0-r16';
 // Unified 3-tier switcher: each tab links to its own surface on the same host.
 // The active tier is the current port; ?preview=sky|space lets one running
 // container show a higher tier's panels for review. Hierarchical scoping:
@@ -255,6 +289,38 @@ document.getElementById('tiernav').insertAdjacentHTML('beforeend',TIERS.map(t=>{
   return `<a class="tier-tab" data-tier="${t.id}" href="${href}">`+
     `<span class="tier-dot ${t.id}"></span>${t.label}</a>`;
 }).join(''));
+// Command Drawer: an index of this deck mirroring the control-site groups.
+// Items anchor-scroll to their panel; contributor items are hidden on the
+// public tier (veil) and render locked-with-hint one tier below their home.
+const DRAWER=[
+  {group:'This machine',items:[
+    {label:'Home',target:'pagetitle',min:0},
+    {label:'Grok connections',target:'routing',min:0},
+    {label:'Activity & receipts',target:'outcomes',min:0},
+    {label:'Connect your IDE',target:'clients',min:0},
+  ]},
+  {group:'Your project',items:[
+    {label:'GitHub & reviews',target:'ghreviews',min:1},
+    {label:'Report card',target:'reportcard',min:2},
+  ]},
+  {group:'Build',items:[{label:'Swarm',target:'swarmgrid',min:1}]},
+  {group:'Account',items:[
+    {label:'You & devices',target:'devices',min:2},
+    {label:'Sign out',href:'https://control.grokmcp.org',min:1},
+  ]},
+];
+function renderDrawer(){
+  $('ditems').innerHTML=DRAWER.map(g=>{
+    const items=g.items.filter(i=>tierLevel>0||i.min===0);
+    if(!items.length)return'';
+    return `<div class="dgroup">${esc(g.group)}</div>`+items.map(i=>{
+      const locked=i.min>tierLevel;
+      if(i.href&&!locked)return `<a class="ditem" href="${i.href}">${esc(i.label)}</a>`;
+      return `<button class="ditem${locked?' locked':''}"${locked?' disabled':''} data-target="${esc(i.target||'')}">${esc(i.label)}${
+        locked?`<span class="lockhint">${i.min===2?'space':'sky'} tier</span>`:''}</button>`;
+    }).join('');
+  }).join('');
+}
 // Tier identity: title, eyebrow, tab highlight, and hierarchical panel reveal.
 function applyTier(){const ti=TIERS.find(x=>x.id===activeTier)||TIERS[0];
   tierLevel=LEVEL[activeTier];
@@ -263,8 +329,19 @@ function applyTier(){const ti=TIERS.find(x=>x.id===activeTier)||TIERS[0];
   document.querySelectorAll('.tier-tab').forEach(a=>a.classList.toggle('active',a.dataset.tier===activeTier));
   $('sky-tier').style.display=tierLevel>=1?'':'none';
   $('space-tier').style.display=tierLevel>=2?'':'none';
+  renderDrawer();
 }
 applyTier();
+// One delegated click handler for the drawer (open/close/navigate) + Esc.
+document.addEventListener('click',e=>{
+  if(e.target.closest('#dmenu')){document.body.classList.add('drawer-open');return;}
+  if(e.target.closest('#dclose')||e.target.id==='backdrop'){document.body.classList.remove('drawer-open');return;}
+  const it=e.target.closest('.ditem[data-target]');
+  if(it&&!it.disabled&&it.dataset.target){const el=$(it.dataset.target);
+    document.body.classList.remove('drawer-open');
+    if(el)(el.closest('.card')||el).scrollIntoView({behavior:'smooth',block:'start'});}
+});
+document.addEventListener('keydown',e=>{if(e.key==='Escape')document.body.classList.remove('drawer-open');});
 // Tier-scoped panels: sample structure from the plan, clearly marked; live data
 // wires on the real surfaces (private overlay), never on the public core.
 const SKY={

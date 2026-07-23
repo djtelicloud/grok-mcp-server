@@ -77,13 +77,29 @@ def test_connect_panel_and_plane_usage() -> None:
         assert secret not in cfg
 
 
-def test_delegated_copy_listener_is_leak_free() -> None:
-    # Exactly one addEventListener, delegated on the persistent #clients
-    # container so the 10 s re-render can't stack listeners; no inline onclick.
+def test_delegated_listeners_are_leak_free() -> None:
+    # Exactly three listeners, all delegated on persistent roots (clients copy,
+    # document click for the drawer, document keydown for Esc) so the 10 s
+    # re-render can't stack listeners; no inline onclick anywhere.
     html = DASHBOARD.read_text(encoding="utf-8")
     assert "$('clients').addEventListener('click'" in html
-    assert html.count("addEventListener") == 1
+    assert "document.addEventListener('click'" in html
+    assert "document.addEventListener('keydown'" in html
+    assert html.count("addEventListener") == 3
     assert "data-client" in html and "onclick=" not in html
+
+
+def test_command_drawer_structure_and_veil() -> None:
+    # Drawer mirrors the control-site groups, anchor-scrolls to panels, and
+    # hides contributor items on the public tier; sign-in links the control
+    # origin and the deck never handles credentials.
+    html = DASHBOARD.read_text(encoding="utf-8")
+    assert 'id="drawer"' in html and 'id="dmenu"' in html and 'id="backdrop"' in html
+    for group in ("'This machine'", "'Your project'", "'Build'", "'Account'"):
+        assert group in html
+    assert "tierLevel>0||i.min===0" in html  # veil: public tier lists only public items
+    assert html.count("https://control.grokmcp.org") == 2  # sign-in nav + drawer sign-out
+    assert "scrollIntoView" in html
 
 
 def test_severity_ranking_weights_and_slice() -> None:
