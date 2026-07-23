@@ -112,7 +112,7 @@ def test_command_drawer_structure_and_veil() -> None:
     for group in ("'This machine'", "'Your project'", "'Build'", "'Account'"):
         assert group in html
     assert "tierLevel>0||i.min===0" in html  # veil: public tier lists only public items
-    assert html.count("https://control.grokmcp.org") == 2  # sign-in nav + drawer sign-out
+    assert html.count("https://control.grokmcp.org") == 3  # nav default + identity fallback + drawer sign-out
     assert "scrollIntoView" in html
 
 
@@ -333,3 +333,17 @@ def test_dashboard_consumes_server_tier_truth() -> None:
     assert "fact_count" in html
     # Local-runtime billing class carries the local plane blue.
     assert "local_runtime:{c:'#7bafe9'" in html
+
+
+def test_dashboard_identity_states_follow_gateway_truth() -> None:
+    # Identity comes from the gateway's /api/me, never the browser's own
+    # github.com session: 200 -> signed-in pill, 401 -> forge sign-in via the
+    # same-origin /auth/github flow, 404/absent -> public surface external link.
+    html = DASHBOARD.read_text(encoding="utf-8")
+    assert "function applyIdentity(me)" in html
+    assert "fetch('/api/me')" in html
+    assert "r.status===401?{surface:'forge'}" in html
+    assert "el.href='/auth/github'" in html
+    assert "Signed in · ${me.login}" in html
+    # Signed-out is never dressed up: the anonymous branch keeps the plain label.
+    assert html.count("Contributor sign in")>=2

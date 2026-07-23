@@ -174,7 +174,7 @@
     <nav id="ditems"></nav>
     <div class="drawer-foot">Drawer is an index of this deck — items scroll to their panel. Contributor actions live on the control site.</div>
   </aside>
-  <nav class="tier-nav" id="tiernav" aria-label="surface tier"><button id="dmenu" class="menu-btn" aria-label="open command drawer">☰</button><span class="tier-label">Surface</span><a class="signin" href="https://control.grokmcp.org">Contributor sign in</a></nav>
+  <nav class="tier-nav" id="tiernav" aria-label="surface tier"><button id="dmenu" class="menu-btn" aria-label="open command drawer">☰</button><span class="tier-label">Surface</span><a class="signin" id="signin" href="https://control.grokmcp.org">Contributor sign in</a></nav>
   <div class="legend" aria-label="status color key"><span class="lg-label">Levels</span>
     <span class="lg"><i style="background:#3fa266"></i>great</span>
     <span class="lg"><i style="background:#81a1c1"></i>good</span>
@@ -290,7 +290,7 @@ const METERED_KINDS=new Set(['web_search','x_search','remote_code_execution','ch
 const KIND_COL=n=>METERED_KINDS.has(n)?lvHex.warning:'#4a5675';   // metered (costs) vs free (neutral)
 const ROUTE_COL=n=>n==='error'?lvHex.threat:GRADFILL;             // only error carries a level
 const MODEL_COL=()=>GRADFILL;                                     // model choice has no severity
-const UI_BUILD='unigrok-ui-v1.1.0-r21';
+const UI_BUILD='unigrok-ui-v1.1.0-r22';
 // Unified 3-tier switcher: each tab links to its own surface on the same host.
 // The active tier is the current port; ?preview=sky|space lets one running
 // container show a higher tier's panels for review. Hierarchical scoping:
@@ -497,10 +497,23 @@ $('connectcard').addEventListener('click',e=>{const btn=e.target.closest('.ctab,
   const src=btn.getAttribute('data-copy');if(!src)return;
   const txt=$(src).textContent;
   navigator.clipboard?.writeText(txt).then(()=>{$('copyhint').textContent=`Copied ${src==='agentcmd'?'agent command':'MCP config'} for ${SEL_CLIENT}.`;},()=>{});});
-async function refresh(){if(refresh.busy)return;refresh.busy=true;try{const [ready,b,rt]=await Promise.all([
+// Identity via the gateway's own flow, never the browser's github.com session:
+// /api/me is 404 on the public surface (identity-free contract), 401 on the
+// forge until the GitHub OAuth slice answers, 200 {login,tier?} once gated.
+// The deck renders exactly that truth — signed-out is never dressed up.
+function applyIdentity(me){const el=$('signin');if(!el)return;
+  if(me&&me.login){el.textContent=`Signed in · ${me.login}`;el.href='/control';el.title='contributor session active';
+    const t=LEVEL[me.tier];if(t!=null&&t>tierLevel&&!preview){activeTier=me.tier;applyTier();}}
+  else if(me&&me.surface==='forge'){el.textContent='Contributor sign in';el.href='/auth/github';
+    el.title='GitHub-gated sign in on this gateway';}
+  else{el.textContent='Contributor sign in';el.href='https://control.grokmcp.org';
+    el.title='about contributor access (public surface has no identity)';}}
+async function refresh(){if(refresh.busy)return;refresh.busy=true;try{const [ready,b,rt,me]=await Promise.all([
   fetch('/readyz').then(r=>r.json()).catch(()=>null),
   fetch('/benchmarkz').then(r=>r.json()).catch(()=>null),
-  fetch('/runtimez').then(r=>r.json()).catch(()=>null)]);
+  fetch('/runtimez').then(r=>r.json()).catch(()=>null),
+  fetch('/api/me').then(r=>r.status===200?r.json():(r.status===401?{surface:'forge'}:null)).catch(()=>null)]);
+  applyIdentity(me);
   // Each feed is guarded independently: a missing feed reads "unreachable"/"—",
   // never a fabricated safe default. Absence of data is never shown as proof.
   const t=(b&&b.telemetry)||{};

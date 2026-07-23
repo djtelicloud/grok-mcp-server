@@ -228,6 +228,24 @@ Mechanics (already supported, no code needed):
 Forge staging inherits as Ground: the checkout `.env` (Ground home) is the
 one file `--live` carries.
 
+### Identity flow — GitHub-gated, gateway-owned
+
+The deck never reads the browser's github.com session; identity exists only as
+the gateway's own principal (GitHub is the IdP behind `/auth/github`). The
+contributor endpoints (`/control`, `/auth/github`, `/api/me`, #508 forge-surface
+hooks) are 404 on the public surface (identity-free contract) and 401 on the
+forge until the OAuth slice answers. The deck polls `/api/me` and renders
+exactly that truth:
+
+| `/api/me` | Meaning | Deck state |
+| --- | --- | --- |
+| 404 / absent | public surface, no identity exists | sign-in links out to the control site (marketing) |
+| 401 | forge surface, signed out | sign-in links same-origin `/auth/github` |
+| 200 `{login, tier?}` | gated session | "Signed in · login" pill; server-granted `tier` may raise the visible tier (never lower, never below the surface floor) |
+
+Signed-out is never dressed up; the granted tier is server truth, so the
+GitHub gate — not the client — controls what data shows.
+
 ### Verified downward-leak audit (against `origin/main` 664c55c)
 
 | # | Vector | Verdict | Evidence / guard |
