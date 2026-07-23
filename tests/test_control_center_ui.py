@@ -319,9 +319,11 @@ def test_tier_nav_ports_are_bounded_env_values() -> None:
 
 def test_dashboard_consumes_server_tier_truth() -> None:
     html = DASHBOARD.read_text(encoding="utf-8")
-    # Server layer wins over port sniffing; nav ports come from tier_nav.
+    # Server layer wins over port sniffing; nav targets come from tier_nav —
+    # per-tier URLs first, same-host port fallback second.
     assert "function applyRuntimeTier(rt)" in html
     assert "rt.tier_nav" in html
+    assert "nav.url" in html and "nav.port" in html
     assert "LEVEL[rt.layer]" in html
     assert "applyRuntimeTier(rt);" in html
     # Credential-planes posture renders server truth, threat when no plane.
@@ -338,14 +340,19 @@ def test_dashboard_consumes_server_tier_truth() -> None:
 
 def test_dashboard_identity_states_follow_gateway_truth() -> None:
     # Identity comes from the gateway's /api/me, never the browser's own
-    # github.com session: 200 -> signed-in pill; anything else -> the button
-    # navigates to the control site and says so, never implying local login.
+    # github.com session: 200 -> signed-in pill; forge signed-out -> the real
+    # GitHub device flow on this gateway; public -> external control site.
     html = DASHBOARD.read_text(encoding="utf-8")
     assert "function applyIdentity(me)" in html
     assert "fetch('/api/me')" in html
     assert "Signed in · ${me.login}" in html
-    # Navigation/label contract: signed-out label + external target + honest hint.
+    # Real-auth contract: device flow start/poll + one-time code chip, no
+    # password fields, and honest failure states (never fake signed-in).
+    assert "fetch('/auth/github/start',{method:'POST'})" in html
+    assert "fetch('/auth/github/poll',{method:'POST'" in html
+    assert "github.com/login/device" in html
+    assert "github_oauth_not_configured" in html
+    assert "type=\"password\"" not in html and "type='password'" not in html
+    # Public surface keeps the external control-site navigation.
     assert html.count("Open contributor control") == 2  # static anchor + JS branch
-    assert "sign-in happens on control.grokmcp.org" in html
     assert "el.href='https://control.grokmcp.org'" in html
-    assert "/auth/github" not in html  # never imply a local login flow

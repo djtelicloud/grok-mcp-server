@@ -28,7 +28,7 @@ from pydantic import BaseModel, Field
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
 
-from . import __version__, local_plane_loader, xai_api
+from . import __version__, github_auth, local_plane_loader, xai_api
 from .autonomy import (
     JOB_COMPLETE,
     JOB_ERROR,
@@ -384,11 +384,31 @@ def _resolve_local_runtime_url() -> str:
 
 LOCAL_RUNTIME_URL = _resolve_local_runtime_url()
 
-# Tier-nav host ports for the Control Center switcher. Loopback-bound by
-# compose; the hosted runtime omits the block entirely (no local ports exist).
+# Tier-nav targets for the Control Center switcher. Each tier may carry its
+# own full URL (factory surfaces live on distinct origins); the port is the
+# same-host fallback when no URL is configured. The hosted runtime omits the
+# block entirely.
 PUBLIC_TIER_PORT = _bounded_int("UNIGROK_PUBLIC_PORT", 4765, 1, 65535)
 SKY_TIER_PORT = _bounded_int("UNIGROK_SKY_PORT", 4768, 1, 65535)
 SPACE_TIER_PORT = _bounded_int("UNIGROK_SPACE_PORT", 4769, 1, 65535)
+
+
+def _tier_url(name: str) -> str | None:
+    """Validated per-tier origin from env; never credentials, never long."""
+    raw = os.environ.get(name, "").strip()
+    if not raw or len(raw) > 200 or "@" in raw:
+        return None
+    if not raw.startswith(("http://", "https://")):
+        return None
+    return raw.rstrip("/")
+
+
+def _tier_nav() -> dict[str, dict[str, Any]]:
+    return {
+        "public": {"port": PUBLIC_TIER_PORT, "url": _tier_url("UNIGROK_PUBLIC_URL")},
+        "sky": {"port": SKY_TIER_PORT, "url": _tier_url("UNIGROK_SKY_URL")},
+        "space": {"port": SPACE_TIER_PORT, "url": _tier_url("UNIGROK_SPACE_URL")},
+    }
 LOCAL_PROBE_TIMEOUT_SECONDS = _bounded_int("UNIGROK_LOCAL_PROBE_TIMEOUT", 5, 1, 60)
 _LOCAL_PROBE_BACKENDS = None
 LOCAL_DIRECT_TALK_MODE = os.environ.get("UNIGROK_LOCAL_DIRECT_TALK_MODE", "").strip().lower()
@@ -6819,21 +6839,81 @@ async def ui_asset(request: Request) -> Response:
     return _resolve_ui_asset(request.path_params.get("asset_path", ""))
 
 
-@mcp.custom_route("/control", methods=["GET"], include_in_schema=False)
-@mcp.custom_route("/auth/github", methods=["GET"], include_in_schema=False)
-@mcp.custom_route("/api/me", methods=["GET"], include_in_schema=False)
-async def forge_control_plane_stub(request: Request) -> Response:
-    """Contributor control-plane skeleton.
+def _forge_session(request: Request) -> dict[str, Any] | None:
+    return github_auth.session_info(request.cookies.get(github_auth.SESSION_COOKIE))
 
-    On the public surface these paths stay indistinguishable from unregistered
-    routes (identity-free 4765 contract). On the forge surface they exist but
-    answer 401 until the GitHub OAuth slice lands — no cookie, no bearer, no
-    body detail. The loopback helper is intentionally not consulted here: the
-    operator exemption applies to /ui, never to identity endpoints.
+
+@mcp.custom_route("/control", methods=["GET"], include_in_schema=False)
+@mcp.custom_route("/api/me", methods=["GET"], include_in_schema=False)
+async def forge_identity(request: Request) -> Response:
+    """GitHub-gated identity on the forge surface.
+
+    Public surface: indistinguishable from unregistered routes (identity-free
+    4765 contract). Forge: 401 signed out, 200 {login, tier} once the device
+    flow completes. The loopback /ui operator exemption never applies here.
     """
     if SURFACE != "forge":
         return PlainTextResponse("Not Found", status_code=404)
-    return JSONResponse({"error": "authentication_required"}, status_code=401)
+    session = _forge_session(request)
+    if not session:
+        return JSONResponse({"error": "authentication_required"}, status_code=401)
+    return JSONResponse(session)
+
+
+@mcp.custom_route("/auth/github", methods=["GET"], include_in_schema=False)
+@mcp.custom_route("/auth/github/start", methods=["POST"], include_in_schema=False)
+async def forge_github_start(request: Request) -> Response:
+    """Kick the GitHub device flow (real auth; no secret, no stored token)."""
+    if SURFACE != "forge":
+        return PlainTextResponse("Not Found", status_code=404)
+    if not github_auth.client_id():
+        return JSONResponse(
+            {
+                "error": "github_oauth_not_configured",
+                "hint": "set UNIGROK_GITHUB_CLIENT_ID in the forge environment",
+            },
+            status_code=501,
+        )
+    result = await github_auth.start_flow()
+    return JSONResponse(result, status_code=502 if "error" in result else 200)
+
+
+@mcp.custom_route("/auth/github/poll", methods=["POST"], include_in_schema=False)
+async def forge_github_poll(request: Request) -> Response:
+    if SURFACE != "forge":
+        return PlainTextResponse("Not Found", status_code=404)
+    try:
+        body = await request.json()
+    except ValueError:
+        body = {}
+    result = await github_auth.poll_flow(str((body or {}).get("flow") or ""))
+    sid = result.pop("session", None)
+    status = 200
+    if "error" in result:
+        status = {"github_unreachable": 502}.get(result["error"], 400)
+    response = JSONResponse(result, status_code=status)
+    if sid:
+        # Loopback http: HttpOnly + SameSite keep the session out of scripts
+        # and cross-site posts; Secure is meaningless without TLS here.
+        response.set_cookie(
+            github_auth.SESSION_COOKIE,
+            sid,
+            max_age=12 * 3600,
+            httponly=True,
+            samesite="lax",
+            path="/",
+        )
+    return response
+
+
+@mcp.custom_route("/auth/logout", methods=["POST"], include_in_schema=False)
+async def forge_logout(request: Request) -> Response:
+    if SURFACE != "forge":
+        return PlainTextResponse("Not Found", status_code=404)
+    github_auth.end_session(request.cookies.get(github_auth.SESSION_COOKIE))
+    response = JSONResponse({"status": "signed_out"})
+    response.delete_cookie(github_auth.SESSION_COOKIE, path="/")
+    return response
 
 
 @mcp.custom_route("/.well-known/webmcp", methods=["GET"], include_in_schema=False)
@@ -7061,11 +7141,7 @@ async def runtimez(_: Request) -> JSONResponse:
             "credential_planes": description["credential_planes"],
     }
     if not is_cloudrun_runtime():
-        payload["tier_nav"] = {
-            "public": PUBLIC_TIER_PORT,
-            "sky": SKY_TIER_PORT,
-            "space": SPACE_TIER_PORT,
-        }
+        payload["tier_nav"] = _tier_nav()
     return JSONResponse(payload)
 
 

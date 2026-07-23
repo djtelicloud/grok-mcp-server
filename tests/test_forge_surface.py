@@ -117,7 +117,7 @@ def test_ui_asset_404_without_override() -> None:
 
 
 def test_control_plane_404_on_public_surface() -> None:
-    response = asyncio.run(server.forge_control_plane_stub(_request("/api/me")))
+    response = asyncio.run(server.forge_identity(_request("/api/me")))
     assert response.status_code == 404
 
 
@@ -156,7 +156,7 @@ def test_ui_asset_blocks_symlink_escape(
 
 def test_control_plane_401_on_forge_surface(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(server, "SURFACE", "forge")
-    response = asyncio.run(server.forge_control_plane_stub(_request("/api/me")))
+    response = asyncio.run(server.forge_identity(_request("/api/me")))
     assert response.status_code == 401
     assert "www-authenticate" not in {k.lower() for k in response.headers}
 

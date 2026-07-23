@@ -239,9 +239,19 @@ exactly that truth:
 
 | `/api/me` | Meaning | Deck state |
 | --- | --- | --- |
-| 404 / absent | public surface, no identity exists | sign-in links out to the control site (marketing) |
-| 401 | forge surface, signed out | sign-in links same-origin `/auth/github` |
-| 200 `{login, tier?}` | gated session | "Signed in · login" pill; server-granted `tier` may raise the visible tier (never lower, never below the surface floor) |
+| 404 / absent | public surface, no identity exists | button links out to the control site (marketing) |
+| 401 | forge surface, signed out | "Sign in with GitHub" starts the real device flow |
+| 200 `{login, tier}` | gated session | "Signed in · login" pill (click = sign out); server-granted `tier` may raise the visible tier (never lower, never below the surface floor) |
+
+**Device flow** (`github_auth.py`, forge only): `/auth/github/start` asks
+GitHub for a one-time code (public `UNIGROK_GITHUB_CLIENT_ID`, no secret);
+the deck shows the code linking github.com/login/device; `/auth/github/poll`
+exchanges on GitHub's confirmation, reads the identity once, **discards the
+GitHub token**, and sets an HttpOnly SameSite session cookie (12 h, in-memory).
+`UNIGROK_CONTRIBUTOR_LOGINS` allowlists who gains `UNIGROK_CONTRIBUTOR_TIER`
+(default sky); everyone else signs in at tier public. No password ever touches
+the deck; every failure keeps its honest name (`github_oauth_not_configured`,
+`github_unreachable`, `denied`, `flow_expired`).
 
 Signed-out is never dressed up; the granted tier is server truth, so the
 GitHub gate — not the client — controls what data shows.
