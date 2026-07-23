@@ -1,0 +1,9 @@
+reflection.receipt
+provider: codex
+target: 57abac93510eb37d4e88e46be573dff76d40ce88
+input: 0157e77c15302ee891c34c6c2dcf8101f7e99e7a
+change: preserve authenticated tier across runtime refresh; relock on logout
+verification: focused 49 passed; full 556 passed, 7 skipped; ruff, release contract, docs contract, and diff check passed
+receipt_sha256: 457e92b7bcec274fa6fb24c6c5d5a8567c8a256b40ac9f67659e6444439d2660
+deploy_state: public production unchanged; forge r24 deployment follows CI and local OAuth configuration
+status: READY_FOR_CI_AND_FORGE
