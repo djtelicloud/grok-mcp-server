@@ -112,7 +112,8 @@ def test_command_drawer_structure_and_veil() -> None:
     for group in ("'This machine'", "'Your project'", "'Build'", "'Account'"):
         assert group in html
     assert "tierLevel>0||i.min===0" in html  # veil: public tier lists only public items
-    assert html.count("https://control.grokmcp.org") == 3  # nav default + identity fallback + drawer sign-out
+    # nav default + identity fallback + drawer sign-out
+    assert html.count("https://control.grokmcp.org") == 3
     assert "scrollIntoView" in html
 
 
@@ -337,13 +338,14 @@ def test_dashboard_consumes_server_tier_truth() -> None:
 
 def test_dashboard_identity_states_follow_gateway_truth() -> None:
     # Identity comes from the gateway's /api/me, never the browser's own
-    # github.com session: 200 -> signed-in pill, 401 -> forge sign-in via the
-    # same-origin /auth/github flow, 404/absent -> public surface external link.
+    # github.com session: 200 -> signed-in pill; anything else -> the button
+    # navigates to the control site and says so, never implying local login.
     html = DASHBOARD.read_text(encoding="utf-8")
     assert "function applyIdentity(me)" in html
     assert "fetch('/api/me')" in html
-    assert "r.status===401?{surface:'forge'}" in html
-    assert "el.href='/auth/github'" in html
     assert "Signed in · ${me.login}" in html
-    # Signed-out is never dressed up: the anonymous branch keeps the plain label.
-    assert html.count("Contributor sign in")>=2
+    # Navigation/label contract: signed-out label + external target + honest hint.
+    assert html.count("Open contributor control") == 2  # static anchor + JS branch
+    assert "sign-in happens on control.grokmcp.org" in html
+    assert "el.href='https://control.grokmcp.org'" in html
+    assert "/auth/github" not in html  # never imply a local login flow
