@@ -308,7 +308,8 @@ const LEVEL={public:0,sky:1,space:2};
 const herePort=location.port||(location.protocol==='https:'?'443':'80');
 const preview=new URLSearchParams(location.search).get('preview');
 const portTier=(TIERS.find(t=>t.port===herePort)||{}).id||'public';
-let activeTier=(preview&&LEVEL[preview]!=null)?preview:portTier;
+let runtimeTier=portTier,sessionTier=null;
+let activeTier=(preview&&LEVEL[preview]!=null)?preview:runtimeTier;
 let tierLevel=LEVEL[activeTier];
 document.getElementById('tiernav').insertAdjacentHTML('beforeend',TIERS.map(t=>{
   const href=`${location.protocol}//${location.hostname}:${t.port}/ui/`;
@@ -358,6 +359,11 @@ function applyTier(){const ti=TIERS.find(x=>x.id===activeTier)||TIERS[0];
   $('space-tier').style.display=tierLevel>=2?'':'none';
   renderDrawer();
 }
+function reconcileTier(){
+  if(preview&&LEVEL[preview]!=null)activeTier=preview;
+  else activeTier=sessionTier&&LEVEL[sessionTier]>LEVEL[runtimeTier]?sessionTier:runtimeTier;
+  applyTier();
+}
 applyTier();
 // Server truth wins over port-sniffing: /runtimez.layer names the tier this
 // instance actually serves, and tier_nav carries the Docker-configured host
@@ -371,7 +377,8 @@ function applyRuntimeTier(rt){
     const a=document.querySelector(`.tier-tab[data-tier="${ti.id}"]`);if(!a)return;
     if(nav.url){a.href=`${nav.url}/ui/`;}
     else if(nav.port){ti.port=String(nav.port);a.href=`${location.protocol}//${location.hostname}:${ti.port}/ui/`;}});}
-  if(!preview&&LEVEL[rt.layer]!=null&&rt.layer!==activeTier){activeTier=rt.layer;applyTier();}
+  if(LEVEL[rt.layer]!=null)runtimeTier=rt.layer;
+  reconcileTier();
 }
 // One delegated click handler for the drawer (open/close/navigate) + Esc.
 document.addEventListener('click',e=>{
@@ -513,11 +520,12 @@ $('connectcard').addEventListener('click',e=>{const btn=e.target.closest('.ctab,
 function applyIdentity(me){const el=$('signin');if(!el)return;
   if(me&&me.login){el.textContent=`Signed in · ${me.login}`;el.href='#';el.dataset.ghout='1';delete el.dataset.ghauth;
     el.title='contributor session active — click to sign out';
-    const t=LEVEL[me.tier];if(t!=null&&t>tierLevel&&!preview){activeTier=me.tier;applyTier();}}
+    sessionTier=LEVEL[me.tier]!=null?me.tier:null;}
   else if(me&&me.surface==='forge'){el.textContent='Sign in with GitHub';el.href='#';el.dataset.ghauth='1';delete el.dataset.ghout;
-    el.title='real GitHub device-flow auth on this gateway — no password touches this deck';}
+    el.title='real GitHub device-flow auth on this gateway — no password touches this deck';sessionTier=null;}
   else{el.textContent='Open contributor control';el.href='https://control.grokmcp.org';delete el.dataset.ghauth;delete el.dataset.ghout;
-    el.title='sign-in happens on control.grokmcp.org — this deck never logs you in locally';}}
+    el.title='sign-in happens on control.grokmcp.org — this deck never logs you in locally';sessionTier=null;}
+  reconcileTier();}
 // Device-flow driver: start -> show the one-time code + github link -> poll
 // until GitHub confirms -> session cookie set server-side -> pill flips.
 // Every failure renders its honest name; nothing ever pretends to be signed in.

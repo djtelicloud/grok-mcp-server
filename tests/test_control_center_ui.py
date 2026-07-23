@@ -356,3 +356,20 @@ def test_dashboard_identity_states_follow_gateway_truth() -> None:
     # Public surface keeps the external control-site navigation.
     assert html.count("Open contributor control") == 2  # static anchor + JS branch
     assert "el.href='https://control.grokmcp.org'" in html
+
+
+def test_authenticated_tier_survives_runtime_refresh_and_logout_relocks() -> None:
+    html = DASHBOARD.read_text(encoding="utf-8")
+    runtime = html[html.index("function applyRuntimeTier(rt)") :]
+    runtime = runtime[: runtime.index("// One delegated click handler")]
+    identity = html[html.index("function applyIdentity(me)") :]
+    identity = identity[: identity.index("// Device-flow driver")]
+
+    assert "let runtimeTier=portTier,sessionTier=null;" in html
+    assert "function reconcileTier()" in html
+    assert "runtimeTier=rt.layer" in runtime
+    assert "activeTier=rt.layer" not in runtime
+    assert "sessionTier=LEVEL[me.tier]!=null?me.tier:null" in identity
+    assert identity.count("sessionTier=null") == 2
+    assert "reconcileTier();" in runtime
+    assert "reconcileTier();" in identity
