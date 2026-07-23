@@ -189,7 +189,7 @@
   <section class="grid">
     <article class="card gcard"><div class="label">Samples · outcome split</div><div id="samples" class="gwrap"></div></article>
     <article class="card gcard"><div class="label">Verified success</div><div id="success" class="gwrap"></div></article>
-    <article class="card gcard"><div class="label">P95 latency · 5 s dial</div><div id="p95" class="gwrap"></div></article>
+    <article class="card gcard"><div class="label">P95 latency · adaptive dial</div><div id="p95" class="gwrap"></div></article>
     <article class="card gcard"><div class="label">Recorded API cost · by plane</div><div id="cost" class="gwrap"></div></article>
     <article class="card full"><div class="label">Routing planes</div><div id="planepolicy"></div><div id="routing" class="planes"></div></article>
     <article class="card wide"><div class="label">Plane mix</div><div id="planes" class="bars"></div></article>
@@ -290,7 +290,7 @@ const METERED_KINDS=new Set(['web_search','x_search','remote_code_execution','ch
 const KIND_COL=n=>METERED_KINDS.has(n)?lvHex.warning:'#4a5675';   // metered (costs) vs free (neutral)
 const ROUTE_COL=n=>n==='error'?lvHex.threat:GRADFILL;             // only error carries a level
 const MODEL_COL=()=>GRADFILL;                                     // model choice has no severity
-const UI_BUILD='unigrok-ui-v1.1.0-r20';
+const UI_BUILD='unigrok-ui-v1.1.0-r21';
 // Unified 3-tier switcher: each tab links to its own surface on the same host.
 // The active tier is the current port; ?preview=sky|space lets one running
 // container show a higher tier's panels for review. Hierarchical scoping:
@@ -515,15 +515,25 @@ async function refresh(){if(refresh.busy)return;refresh.busy=true;try{const [rea
   const pass0=sr0==null?0:Math.round(sr0*vs0),fail0=Math.max(0,vs0-pass0),unv0=Math.max(0,total-vs0);
   gauge('samples',{big:String(total),small:`${pass0} pass · ${fail0} fail · ${unv0} unverified`,
     segs:total?[{v:pass0/total,color:lvHex.great},{v:fail0/total,color:lvHex.threat},{v:unv0/total,color:'#4a5675'}]:[]});
-  const vrate=t.verified_success_rate;
-  const scol=vrate==null?null:vrate>=0.85?lvHex.great:vrate>=0.65?lvHex.warning:lvHex.threat;
-  gauge('success',{big:vrate==null?'—':`${Math.round(vrate*100)}%`,small:`${vs0} of ${total} verified`,
+  // A rate computed from a handful of verified receipts is not a verdict:
+  // below 10 verified the dial stays neutral instead of shouting a level.
+  const vrate=t.verified_success_rate,lowN=vs0<10;
+  const scol=vrate==null?null:lowN?'#4a5675':vrate>=0.85?lvHex.great:vrate>=0.65?lvHex.warning:lvHex.threat;
+  gauge('success',{big:vrate==null?'—':`${Math.round(vrate*100)}%`,
+    small:`${vs0} of ${total} verified${lowN&&total?' · low verification coverage':''}`,
     color:scol,segs:vrate==null?[]:[{v:vrate,color:scol}]});
+  // Latency judged by workload: agent/code turns legitimately run tens of
+  // seconds, chat should not. The dial scale follows p95 so it never pegs.
   const p95v=t.latency_ms?.p95||0;
-  const pcol=p95v===0?null:p95v<1000?lvHex.great:p95v<3000?lvHex.warning:lvHex.threat;
+  const kmap={};(t.kinds||[]).forEach(x=>kmap[x.name]=x.calls||0);
+  const ktot=Object.values(kmap).reduce((a,b)=>a+b,0);
+  const agentish=ktot?((kmap.agent||0)+(kmap.remote_code_execution||0))/ktot:0;
+  const [gT,wT]=agentish>0.5?[30000,90000]:[1000,3000];
+  const dialMax=Math.max(5000,Math.ceil(p95v*1.25/5000)*5000);
+  const pcol=p95v===0?null:p95v<gT?lvHex.great:p95v<wT?lvHex.warning:lvHex.threat;
   gauge('p95',{big:`${Math.round(p95v).toLocaleString('en-US')}<small> ms</small>`,
-    small:`p50 ${Math.round(t.latency_ms?.p50||0)} ms · avg ${Math.round(t.latency_ms?.average||0)} ms`,
-    color:pcol,segs:p95v?[{v:Math.min(1,p95v/5000),color:pcol}]:[]});
+    small:`p50 ${Math.round(t.latency_ms?.p50||0)} ms · avg ${Math.round(t.latency_ms?.average||0)} ms · dial 0–${Math.round(dialMax/1000)}s`,
+    color:pcol,segs:p95v?[{v:Math.min(1,p95v/dialMax),color:pcol}]:[]});
   const costT=Number(t.cost_usd||0);
   const costSegs=(t.planes||[]).filter(x=>x.cost_usd>0).map((x,i)=>({v:costT?x.cost_usd/costT:0,
     color:{api:'#58a6ff',cli:lvHex.great,local:'#7bafe9'}[x.name]||'#4a5675'}));
@@ -618,7 +628,7 @@ async function refresh(){if(refresh.busy)return;refresh.busy=true;try{const [rea
     const c=Number(r.cost_usd||0);if(c>0){s+=Math.min(30,c*1000);if(c>=0.01)f.push(['$'+c.toFixed(4),'warning']);}
     return{s,f};};
   const flagged=recent.map(r=>({r,...rsev(r)})).filter(x=>x.f.length).sort((a,b)=>b.s-a.s).slice(0,8);
-  $('standoutlabel').textContent=`Receipts needing attention · ${flagged.length} of ${recent.length}`;
+  $('standoutlabel').textContent=`Receipts needing attention · ${flagged.length} of last ${recent.length}`;
   $('standouts').innerHTML=flagged.length?flagged.map(({r,f})=>{const vc=r.verified?(r.success?'pass':'fail'):'unv',vl=r.verified?(r.success?'pass':'fail'):'unverified';
     return `<tr><td>${esc((r.created_at||'').slice(11,19))}</td><td>${esc(r.caller)}</td><td>${esc(r.request_kind)}</td>
     <td class="flagcell">${f.map(([t2,l])=>`<span class="lv-${l}">${esc(t2)}</span>`).join('')}</td>

@@ -1409,7 +1409,7 @@ class PublicStateStore:
                         "stop_reason",
                     )
                 }
-                for item in items[:25]
+                for item in items[:50]
             ],
         }
 
