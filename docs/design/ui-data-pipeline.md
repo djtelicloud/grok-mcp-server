@@ -201,6 +201,33 @@ control.grokmcp.org, never local), review ops, run trigger, team assignment.
 **Access features added at L2:** device enrollment (one-time codes),
 sealed-report publication.
 
+### Credential inheritance — upward trickle
+
+Auths and keys follow the same lattice as data: **inherited upward, never
+downward.** Ground's credentials are the floor every higher tier receives;
+each tier may add or override with its own; nothing defined at a higher tier
+ever reaches a lower tier's env, volumes, or wire.
+
+Mechanics (already supported, no code needed):
+
+- **Env layering** — compose `--env-file` stacks left-to-right, later wins:
+  Ground `--env-file ground.env`; Sky adds `--env-file sky.env`; Space adds
+  `--env-file space.env`. A tier's launch command names only its own file and
+  its ancestors' — never a descendant's.
+- **Key resolution** — the inference allowlist order (`XAI_API_KEY`,
+  `_SKY_INFERENCE`, `_GROUND`, `_UNIGROK_GROUND`) already encodes the trickle:
+  an explicit key wins, then the most tier-specific available, with Ground as
+  the floor. Management/Cursor tokens stay in the forbidden set at every tier.
+- **CLI auth** — the `grok login` volume is Ground-owned and may be mounted
+  upward by Sky/Space stacks; higher tiers may instead hold their own login,
+  but a higher tier's auth volume is never mounted by a lower stack.
+- **Wire guard unchanged** — whatever a tier inherits, only
+  `configured`/`ready` booleans cross to its UI; inheritance changes what a
+  tier *can use*, never what it *reveals*.
+
+Forge staging inherits as Ground: the checkout `.env` (Ground home) is the
+one file `--live` carries.
+
 ### Verified downward-leak audit (against `origin/main` 664c55c)
 
 | # | Vector | Verdict | Evidence / guard |
