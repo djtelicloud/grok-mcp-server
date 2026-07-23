@@ -82,11 +82,25 @@ def test_delegated_listeners_are_leak_free() -> None:
     # document click for the drawer, document keydown for Esc) so the 10 s
     # re-render can't stack listeners; no inline onclick anywhere.
     html = DASHBOARD.read_text(encoding="utf-8")
-    assert "$('clients').addEventListener('click'" in html
+    assert "$('connectcard').addEventListener('click'" in html
     assert "document.addEventListener('click'" in html
     assert "document.addEventListener('keydown'" in html
     assert html.count("addEventListener") == 3
     assert "data-client" in html and "onclick=" not in html
+
+
+def test_agent_paste_command_present_and_non_secret() -> None:
+    # The connect panel carries both blocks: MCP JSON config and the remembered
+    # agent paste command (claude mcp add for claude-code, an agent-readable
+    # instruction otherwise). Neither may carry a credential.
+    html = DASHBOARD.read_text(encoding="utf-8")
+    assert 'id="agentcmd"' in html and 'data-copy="agentcmd"' in html
+    assert "claude mcp add --transport http unigrok" in html
+    assert "grok_mcp_discover_self" in html
+    m = re.search(r"const agentCmd=.*?;", html, re.S)
+    assert m, "agentCmd definition not found"
+    for secret in ("Authorization", "Bearer", "apiKey", "api_key", "XAI_API_KEY", "token"):
+        assert secret not in m.group(0)
 
 
 def test_command_drawer_structure_and_veil() -> None:

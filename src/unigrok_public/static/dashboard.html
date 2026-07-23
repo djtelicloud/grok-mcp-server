@@ -128,6 +128,11 @@
     .copybtn{border:1px solid var(--line);background:none;color:var(--cyan);border-radius:99px;padding:5px 12px;
       font:650 12px Inter,sans-serif;cursor:pointer}.copybtn:hover{border-color:var(--cyan)}
     .hint{color:var(--muted);font-size:clamp(12px,0.26vw+10px,13.5px);margin-top:10px}
+    .snip2{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:14px;margin-top:4px}
+    .sniplabel{display:flex;align-items:center;gap:10px;margin-top:14px;color:#a9b8dc;font-weight:750;
+      letter-spacing:.07em;text-transform:uppercase;font-size:clamp(10.5px,0.24vw+9px,12px)}
+    .sniplabel .copybtn{margin-left:auto}
+    .snip2 .snippet{margin-top:8px;white-space:pre-wrap;word-break:break-word}
     .tier-section{margin-top:16px}
     .tierhead{display:flex;align-items:center;gap:10px;font-weight:800;letter-spacing:.06em;
       font-size:clamp(13px,0.3vw+11px,15.5px);color:var(--text)}
@@ -188,10 +193,6 @@
     <article class="card full"><div class="label">Runtime</div><div id="runtime" class="breakers"><div class="empty">Loading …</div></div></article>
     <article class="card wide"><div class="label">Build &amp; durable work</div><div id="build" class="breakers"><div class="empty">Loading …</div></div></article>
     <article class="card wide"><div class="label">Policy &amp; governance</div><div id="policy" class="kv"></div></article>
-    <article class="card full"><div class="label">Connect an IDE · endpoint <span id="mcpendpoint">/mcp</span></div>
-      <div id="clients" class="planes"></div>
-      <pre id="mcpsnippet" class="snippet">…</pre>
-      <div class="hint" id="copyhint">Non-secret config · the API key stays in the gateway, never in an editor. Add <code>@grok</code> in your IDE to route work here.</div></article>
     <article class="card wide"><div class="label" id="toolslabel">Tool surface · by billing</div><div id="toolbill" class="bars"></div></article>
     <article class="card wide"><div class="label" id="risklabel">Destructive tools</div><div class="scroll"><table><thead><tr>
       <th>Tool</th><th>Plane</th><th>Confirmation</th></tr></thead><tbody id="risktools"></tbody></table></div>
@@ -204,6 +205,15 @@
       <details class="more"><summary>Show last <span id="recentcount">—</span> receipts</summary><div class="scroll bounded"><table><thead><tr>
         <th>Time</th><th>ID</th><th>Caller</th><th>Kind</th><th>Route</th><th>Plane</th><th>Model</th><th>Latency</th><th>Cost</th>
         <th>Fallback</th><th>Stop</th><th>Verified</th></tr></thead><tbody id="recent"></tbody></table></div></details></article>
+    <article class="card full" id="connectcard"><div class="label">Connect an IDE · endpoint <span id="mcpendpoint">/mcp</span></div>
+      <div id="clients" class="planes"></div>
+      <div class="snip2">
+        <div><div class="sniplabel">MCP config (JSON)<button class="copybtn" data-copy="mcpsnippet">Copy</button></div>
+          <pre id="mcpsnippet" class="snippet">…</pre></div>
+        <div><div class="sniplabel">Agent paste command<button class="copybtn" data-copy="agentcmd">Copy</button></div>
+          <pre id="agentcmd" class="snippet">…</pre></div>
+      </div>
+      <div class="hint" id="copyhint">Pick a client above, then copy either block — the JSON goes in MCP settings; the command pastes straight into your agent. Non-secret: the API key stays in the gateway, never in an editor. Say <code>@grok</code> to route work here.</div></article>
   </section>
 
   <section class="grid tier-section" id="sky-tier" style="display:none">
@@ -257,9 +267,14 @@ function cbars(id,items){const root=$(id),max=Math.max(1,...items.map(x=>x.val||
 function pbars(id,items,colorFn){cbars(id,(items||[]).slice(0,8).map(x=>({name:x.name,val:x.calls||0,color:colorFn(x.name)})));}
 const GRADFILL='linear-gradient(90deg,var(--blue),var(--purple))';
 const lvHex={great:'#3fa266',good:'#81a1c1',expected:'#7bafe9',warning:'#f1b467',threat:'#dd7f76',critical:'#fc6b83'};
-// MCP connect: build a non-secret client config (url + X-Client-ID header only).
-let MCP_EP='/mcp';
+// MCP connect: build a non-secret client config (url + X-Client-ID header only)
+// plus the remembered agent paste command for the selected client.
+let MCP_EP='/mcp',SEL_CLIENT='cursor';
 const mcpConfig=c=>JSON.stringify({mcpServers:{unigrok:{url:location.origin+MCP_EP,headers:{'X-Client-ID':c}}}},null,2);
+const agentCmd=c=>c==='claude-code'
+  ?`claude mcp add --transport http unigrok ${location.origin+MCP_EP} --header "X-Client-ID: claude-code"`
+  :`Add the MCP server "unigrok" (streamable HTTP) at ${location.origin+MCP_EP} with header X-Client-ID: ${c}, then call grok_mcp_discover_self and route Grok work with @grok.`;
+function updSnippets(){$('mcpsnippet').textContent=mcpConfig(SEL_CLIENT);$('agentcmd').textContent=agentCmd(SEL_CLIENT);}
 // Color encodes a level or a real cross-panel category; dimensions with no
 // inherent severity (models, callers) stay neutral rather than decorative.
 const PLANE_COL=n=>({api:'#58a6ff',cli:'#3fa266',local:'#7bafe9'}[n]||'#4a5675');   // matches routing-planes card
@@ -267,7 +282,7 @@ const METERED_KINDS=new Set(['web_search','x_search','remote_code_execution','ch
 const KIND_COL=n=>METERED_KINDS.has(n)?lvHex.warning:'#4a5675';   // metered (costs) vs free (neutral)
 const ROUTE_COL=n=>n==='error'?lvHex.threat:GRADFILL;             // only error carries a level
 const MODEL_COL=()=>GRADFILL;                                     // model choice has no severity
-const UI_BUILD='unigrok-ui-v1.1.0-r16';
+const UI_BUILD='unigrok-ui-v1.1.0-r17';
 // Unified 3-tier switcher: each tab links to its own surface on the same host.
 // The active tier is the current port; ?preview=sky|space lets one running
 // container show a higher tier's panels for review. Hierarchical scoping:
@@ -453,10 +468,15 @@ function planeTile(name,p,use){const on=!!p?.ready;
     <span class="plane-state lv-${on?'great':'expected'}">${on?'ready':'offline'}</span></div>
     <div class="plane-detail" title="${esc(detail)}">${esc(detail)}</div>
     <div class="plane-detail">${usage}</div></div>`}
-// One delegated copy handler (survives the 10 s re-render; no listener leak).
-$('clients').addEventListener('click',e=>{const btn=e.target.closest('.copybtn');if(!btn)return;
-  const c=btn.getAttribute('data-client'),cfg=mcpConfig(c);$('mcpsnippet').textContent=cfg;
-  navigator.clipboard?.writeText(cfg).then(()=>{$('copyhint').textContent=`Copied ${c} config to clipboard.`;},()=>{});});
+// One delegated handler on the card (survives the 10 s re-render; no leak):
+// client buttons select + update both snippets; data-copy buttons copy theirs.
+$('connectcard').addEventListener('click',e=>{const btn=e.target.closest('.copybtn');if(!btn)return;
+  const c=btn.getAttribute('data-client');
+  if(c){SEL_CLIENT=c;updSnippets();$('copyhint').textContent=`Selected ${c} — copy either block below.`;
+    document.querySelectorAll('#clients .copybtn[data-client]').forEach(b=>{b.textContent=b.dataset.client===SEL_CLIENT?'Selected':'Select';});return;}
+  const src=btn.getAttribute('data-copy');if(!src)return;
+  const txt=$(src).textContent;
+  navigator.clipboard?.writeText(txt).then(()=>{$('copyhint').textContent=`Copied ${src==='agentcmd'?'agent command':'MCP config'} for ${SEL_CLIENT}.`;},()=>{});});
 async function refresh(){if(refresh.busy)return;refresh.busy=true;try{const [ready,b,rt]=await Promise.all([
   fetch('/readyz').then(r=>r.json()).catch(()=>null),
   fetch('/benchmarkz').then(r=>r.json()).catch(()=>null),
@@ -526,8 +546,8 @@ async function refresh(){if(refresh.busy)return;refresh.busy=true;try{const [rea
   $('clients').innerHTML=KNOWN_CLIENTS.map(c=>{const n=seen[c]||0;
     return `<div class="plane-row"><div class="plane-head"><span class="plane-name">${esc(c)}</span>
       <span class="plane-state lv-${n?'great':'expected'}">${n?`${n} calls`:'no calls recorded'}</span></div>
-      <button class="copybtn" data-client="${esc(c)}">Copy MCP config</button></div>`}).join('');
-  if($('mcpsnippet').textContent==='…')$('mcpsnippet').textContent=mcpConfig('cursor');
+      <button class="copybtn" data-client="${esc(c)}">${c===SEL_CLIENT?'Selected':'Select'}</button></div>`}).join('');
+  if($('mcpsnippet').textContent==='…')updSnippets();
   const tools=rt?.tools||[];$('toolslabel').textContent=`Tool surface · ${rt?tools.length:'—'} · by billing`;$('toolcount').textContent=rt?tools.length:'—';
   // group-by billing class, ranked by exposure severity (metered/destructive first)
   const billMeta={metered:{c:'#f0b95b',w:3},api_account:{c:'#58a6ff',w:2},conditional:{c:'#58e6d9',w:2},non_metered:{c:'#4a5675',w:1}};
