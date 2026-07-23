@@ -23,7 +23,10 @@ from unigrok_public.state import PublicStateStore
 
 
 @pytest.fixture
-def store(tmp_path: Path) -> PublicStateStore:
+def store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> PublicStateStore:
+    # These legacy acceptance tests deliberately construct empty/manual seed
+    # states. Keep that contract isolated from the production auto-seed path.
+    monkeypatch.setattr(lpl, "ensure_dogfood_min_roles", lambda _connection: False)
     s = PublicStateStore(tmp_path / "state.db")
     asyncio.run(s.initialize())
     return s
@@ -123,6 +126,44 @@ def test_fresh_db_applies_ddl_and_knobs(store: PublicStateStore) -> None:
 
     cont = asyncio.run(store.local_knob("continue_max_per_job_on_shed", 3))
     assert int(cont) == 3
+
+
+def test_default_initialization_auto_seeds_offline_min_roles(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(
+        "UNIGROK_LOCAL_SEED_DIR", str(tmp_path / "missing-seed-assets")
+    )
+    dbpath = tmp_path / "auto-seeded-state.db"
+    store = PublicStateStore(dbpath)
+    asyncio.run(store.initialize())
+
+    conn = _open_fk(dbpath)
+    try:
+        roles = {
+            str(row[0])
+            for row in conn.execute(
+                "SELECT role FROM role_floors "
+                "WHERE filled = 1 AND is_scaffold = 0 "
+                "AND metric_id LIKE '%:offline-min'"
+            ).fetchall()
+        }
+        manifest = conn.execute(
+            "SELECT sha256 FROM gate_manifest WHERE asset_key = 'promote_gates'"
+        ).fetchone()
+        certified_roles = {
+            str(row[0])
+            for row in conn.execute(
+                "SELECT role FROM promote_gates "
+                "WHERE status = 'certified' AND cert_id LIKE 'cert-offline-%'"
+            ).fetchall()
+        }
+    finally:
+        conn.close()
+
+    assert roles == {"router", "text_generator"}
+    assert manifest == ("offline-dogfood-seed-v1",)
+    assert certified_roles == {"router", "text_generator"}
 
 
 # ---------------------------------------------------------------------------

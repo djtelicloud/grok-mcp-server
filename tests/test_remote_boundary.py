@@ -473,7 +473,7 @@ def test_principal_key_selection_never_crosses_oauth_tenants(
     assert resolve_xai_api_key(principal=bob) == ("bob-test-key", "principal")
     assert resolve_xai_api_key(principal=_canonical_principal("carol")) == (
         "owner-test-key",
-        "owner_default",
+        "owner_default:XAI_API_KEY",
     )
 
 

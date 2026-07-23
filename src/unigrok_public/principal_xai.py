@@ -199,7 +199,8 @@ def _generation(slot: str, key: str) -> str:
 def resolve_inference_credential() -> tuple[str, str, str]:
     active = get_active_principal()
     key, source = resolve_xai_api_key(principal=active)
-    slot = "owner_default" if source == "owner_default" else f"principal:{active}"
+    owner_default = source == "owner_default" or source.startswith("owner_default:")
+    slot = "owner_default" if owner_default else f"principal:{active}"
     return key, source, _generation(slot, key)
 
 

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import pytest
+
+from unigrok_public import principal_xai
 from unigrok_public.principal_xai import resolve_xai_api_key
 
 
@@ -36,3 +39,36 @@ def test_skips_cursor_tokens() -> None:
     key, source = resolve_xai_api_key(principal=None, environ=env)
     assert key == "xai-ground-ok"
     assert source == "owner_default:XAI_API_KEY_GROUND"
+
+
+@pytest.mark.parametrize(
+    "source",
+    (
+        "owner_default",
+        "owner_default:XAI_API_KEY",
+        "owner_default:XAI_API_KEY_SKY_INFERENCE",
+    ),
+)
+def test_owner_sources_use_shared_generation_slot(
+    monkeypatch: pytest.MonkeyPatch, source: str
+) -> None:
+    active = "oauth:issuer:alice"
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(principal_xai, "get_active_principal", lambda: active)
+    monkeypatch.setattr(
+        principal_xai,
+        "resolve_xai_api_key",
+        lambda **_kwargs: ("owner-test-key", source),
+    )
+    monkeypatch.setattr(
+        principal_xai,
+        "_generation",
+        lambda slot, key: calls.append((slot, key)) or "test-generation",
+    )
+
+    assert principal_xai.resolve_inference_credential() == (
+        "owner-test-key",
+        source,
+        "test-generation",
+    )
+    assert calls == [("owner_default", "owner-test-key")]
