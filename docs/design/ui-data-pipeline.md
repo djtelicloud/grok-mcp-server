@@ -240,18 +240,42 @@ exactly that truth:
 | `/api/me` | Meaning | Deck state |
 | --- | --- | --- |
 | 404 / absent | public surface, no identity exists | button links out to the control site (marketing) |
-| 401 | forge surface, signed out | "Sign in with GitHub" starts the real device flow |
+| 401 | forge surface, signed out | "Continue with Cloud" reuses the existing Control OAuth registration; "Use device code" remains the explicit fallback |
 | 200 `{login, tier}` | gated session | "Signed in · login" pill (click = sign out); server-granted `tier` may raise the visible tier (never lower, never below the surface floor) |
 
-**Device flow** (`github_auth.py`, forge only): `/auth/github/start` asks
-GitHub for a one-time code (public `UNIGROK_GITHUB_CLIENT_ID`, no secret);
-the deck shows the code linking github.com/login/device; `/auth/github/poll`
-exchanges on GitHub's confirmation, reads the identity once, **discards the
-GitHub token**, and sets an HttpOnly SameSite session cookie (12 h, in-memory).
-`UNIGROK_CONTRIBUTOR_LOGINS` allowlists who gains `UNIGROK_CONTRIBUTOR_TIER`
-(default sky); everyone else signs in at tier public. No password ever touches
-the deck; every failure keeps its honest name (`github_oauth_not_configured`,
-`github_unreachable`, `denied`, `flow_expired`).
+**Preferred Cloud link** (`github_auth.py`, Forge only):
+`/auth/control/start` dynamically registers a loopback PKCE client with the
+existing `control.grokmcp.org` OAuth server, then performs a top-level
+navigation. Control reuses its signed GitHub App cookie when present, otherwise
+it runs the established GitHub login, rechecks write/maintain/admin repository
+access, and redirects to `/auth/control/callback`. Forge exchanges the code
+server-side and stores only the scoped **UniGrok** `unigrok:connect` token in a
+Forge-owned `0600` file beside its persistent state database. No GitHub token
+or Control cookie crosses into localhost. `/api/me` introspects the token at
+most once per 60 seconds; role loss clears the local link. The link therefore
+survives page, browser, process, and container restarts until explicit logout
+or access revocation. On a signed-out Forge load, the deck makes one top-level
+Control round trip automatically; an existing Control/GitHub session returns
+straight to the deck without another click or credential prompt. A failed
+Control start returns to the deck with the device-code fallback visible.
+Explicit logout disables that automatic relink in the browser until the user
+chooses **Continue with Cloud** again.
+
+**Device-code fallback** (`github_auth.py`, Forge only):
+`/auth/github/start` asks GitHub for a one-time code (public
+`UNIGROK_GITHUB_CLIENT_ID`, no secret); the deck shows the code linking
+github.com/login/device; `/auth/github/poll` exchanges on GitHub's
+confirmation, reads the identity once, **discards the GitHub token**, and sets
+an HttpOnly SameSite signed session cookie. Its signing key is created once in
+the Forge state volume, so the 12-hour session survives process/container
+restart. `UNIGROK_CONTRIBUTOR_LOGINS` allowlists who gains
+`UNIGROK_CONTRIBUTOR_TIER` (default sky); everyone else signs in at tier
+public. No password ever touches the deck; every failure keeps its honest name
+(`github_oauth_not_configured`, `github_unreachable`, `denied`,
+`flow_expired`). If Control introspection is temporarily unavailable, a valid
+device session remains usable and the remembered Control token is retained.
+Forge auth mutations require a non-simple same-loopback request, preventing a
+foreign page from silently unlinking the machine.
 
 Signed-out is never dressed up; the granted tier is server truth, so the
 GitHub gate — not the client — controls what data shows.

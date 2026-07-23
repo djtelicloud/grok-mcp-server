@@ -22,12 +22,15 @@ def _request(
     headers: list[tuple[bytes, bytes]] | None = None,
     path_params: dict[str, str] | None = None,
 ) -> Request:
+    request_headers = list(headers or [])
+    if not any(name.lower() == b"host" for name, _ in request_headers):
+        request_headers.insert(0, (b"host", b"127.0.0.1:4765"))
     scope = {
         "type": "http",
         "method": "GET",
         "path": path,
         "query_string": b"",
-        "headers": headers or [],
+        "headers": request_headers,
         "client": client,
         "path_params": path_params or {},
     }
@@ -129,7 +132,14 @@ def test_public_404_is_byte_identical_to_unregistered_routes() -> None:
 
     client = TestClient(server.mcp.streamable_http_app())
     baseline = client.get("/definitely-not-registered")
-    for path in ("/api/me", "/control", "/auth/github", "/ui/app.js"):
+    for path in (
+        "/api/me",
+        "/control",
+        "/auth/github",
+        "/auth/control/start",
+        "/auth/control/callback",
+        "/ui/app.js",
+    ):
         probe = client.get(path)
         assert probe.status_code == baseline.status_code == 404
         assert probe.headers.get("content-type") == baseline.headers.get("content-type")
@@ -159,6 +169,16 @@ def test_control_plane_401_on_forge_surface(monkeypatch: pytest.MonkeyPatch) -> 
     response = asyncio.run(server.forge_identity(_request("/api/me")))
     assert response.status_code == 401
     assert "www-authenticate" not in {k.lower() for k in response.headers}
+
+
+def test_forge_auth_rejects_non_loopback_host(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(server, "SURFACE", "forge")
+    response = asyncio.run(
+        server.forge_identity(
+            _request("/api/me", headers=[(b"host", b"attacker.example:4765")])
+        )
+    )
+    assert response.status_code == 403
 
 
 def test_loopback_check_ignores_forwarded_for() -> None:

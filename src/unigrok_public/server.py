@@ -6839,8 +6839,83 @@ async def ui_asset(request: Request) -> Response:
     return _resolve_ui_asset(request.path_params.get("asset_path", ""))
 
 
-def _forge_session(request: Request) -> dict[str, Any] | None:
-    return github_auth.session_info(request.cookies.get(github_auth.SESSION_COOKIE))
+def _forge_control_callback_url() -> str:
+    """Canonical loopback callback; never trust a request Host header."""
+    configured = _tier_url("UNIGROK_PUBLIC_URL")
+    if configured:
+        try:
+            parsed = urlsplit(configured)
+            if (
+                parsed.scheme == "http"
+                and parsed.hostname in {"127.0.0.1", "localhost", "::1"}
+                and parsed.port
+                and parsed.path in {"", "/"}
+                and not parsed.query
+                and not parsed.fragment
+                and not parsed.username
+                and not parsed.password
+            ):
+                return f"{configured.rstrip('/')}/auth/control/callback"
+        except ValueError:
+            pass
+    return f"http://127.0.0.1:{PUBLIC_TIER_PORT}/auth/control/callback"
+
+
+def _forge_request_is_canonical(request: Request) -> bool:
+    """Accept Forge auth only through the loopback-published canonical Host."""
+    raw_host = request.headers.get("host", "").strip()
+    if not raw_host or len(raw_host) > 255:
+        return False
+    try:
+        supplied = urlsplit(f"http://{raw_host}")
+        expected = urlsplit(_forge_control_callback_url())
+        return (
+            supplied.hostname in {"127.0.0.1", "localhost", "::1"}
+            and supplied.port == expected.port
+            and supplied.username is None
+            and supplied.password is None
+            and supplied.path == ""
+            and not supplied.query
+            and not supplied.fragment
+        )
+    except ValueError:
+        return False
+
+
+def _forge_auth_guard(request: Request) -> Response | None:
+    if SURFACE != "forge":
+        return PlainTextResponse("Not Found", status_code=404)
+    if not _forge_request_is_canonical(request):
+        return PlainTextResponse(
+            "Forbidden",
+            status_code=403,
+            headers={"cache-control": "no-store"},
+        )
+    return None
+
+
+def _forge_csrf_is_valid(request: Request) -> bool:
+    """Require a non-simple same-loopback request for Forge auth mutations."""
+    if request.headers.get("x-unigrok-csrf") != "1":
+        return False
+    origin = request.headers.get("origin")
+    if not origin:
+        return True
+    try:
+        supplied = urlsplit(origin)
+        expected = urlsplit(_forge_control_callback_url())
+        return (
+            supplied.scheme == "http"
+            and supplied.hostname in {"127.0.0.1", "localhost", "::1"}
+            and supplied.port == expected.port
+            and supplied.username is None
+            and supplied.password is None
+            and supplied.path in {"", "/"}
+            and not supplied.query
+            and not supplied.fragment
+        )
+    except ValueError:
+        return False
 
 
 @mcp.custom_route("/control", methods=["GET"], include_in_schema=False)
@@ -6852,20 +6927,112 @@ async def forge_identity(request: Request) -> Response:
     4765 contract). Forge: 401 signed out, 200 {login, tier} once the device
     flow completes. The loopback /ui operator exemption never applies here.
     """
-    if SURFACE != "forge":
-        return PlainTextResponse("Not Found", status_code=404)
-    session = _forge_session(request)
-    if not session:
-        return JSONResponse({"error": "authentication_required"}, status_code=401)
-    return JSONResponse(session)
+    guard = _forge_auth_guard(request)
+    if guard is not None:
+        return guard
+    device_session = github_auth.session_info(
+        request.cookies.get(github_auth.SESSION_COOKIE)
+    )
+    control_session = await github_auth.control_session_info(None)
+    if control_session and control_session.get("error") == "authorization_unavailable":
+        if device_session:
+            return JSONResponse(
+                device_session,
+                headers={"cache-control": "no-store"},
+            )
+        return JSONResponse(
+            {"error": "authorization_unavailable"},
+            status_code=503,
+            headers={"cache-control": "no-store"},
+        )
+    if control_session:
+        return JSONResponse(control_session, headers={"cache-control": "no-store"})
+    if not device_session:
+        return JSONResponse(
+            {"error": "authentication_required"},
+            status_code=401,
+            headers={"cache-control": "no-store"},
+        )
+    return JSONResponse(device_session, headers={"cache-control": "no-store"})
+
+
+@mcp.custom_route("/auth/control/start", methods=["GET"], include_in_schema=False)
+async def forge_control_start(request: Request) -> Response:
+    """Prefer the existing Cloud OAuth/PKCE registration and GitHub session."""
+    guard = _forge_auth_guard(request)
+    if guard is not None:
+        return guard
+    result = await github_auth.start_control_flow(_forge_control_callback_url())
+    authorization_url = str(result.get("authorization_url") or "")
+    if not authorization_url:
+        return Response(
+            status_code=302,
+            headers={
+                "cache-control": "no-store",
+                "location": "/ui/?control=unavailable",
+                "referrer-policy": "no-referrer",
+            },
+        )
+    return Response(
+        status_code=302,
+        headers={
+            "cache-control": "no-store",
+            "location": authorization_url,
+            "referrer-policy": "no-referrer",
+        },
+    )
+
+
+@mcp.custom_route(
+    "/auth/control/callback",
+    methods=["GET"],
+    include_in_schema=False,
+)
+async def forge_control_callback(request: Request) -> Response:
+    """Finish the loopback PKCE exchange without exposing tokens to page scripts."""
+    guard = _forge_auth_guard(request)
+    if guard is not None:
+        return guard
+    query = request.query_params
+    states = query.getlist("state")
+    codes = query.getlist("code")
+    if len(states) != 1 or len(codes) != 1:
+        return PlainTextResponse(
+            "Cloud sign-in could not be completed.",
+            status_code=400,
+            headers={"cache-control": "no-store"},
+        )
+    result = await github_auth.finish_control_flow(states[0], codes[0])
+    if not result.get("login"):
+        return PlainTextResponse(
+            "Cloud sign-in could not be completed.",
+            status_code=400,
+            headers={"cache-control": "no-store"},
+        )
+    response = Response(
+        status_code=302,
+        headers={
+            "cache-control": "no-store",
+            "location": "/ui/",
+            "referrer-policy": "no-referrer",
+        },
+    )
+    return response
 
 
 @mcp.custom_route("/auth/github", methods=["GET"], include_in_schema=False)
 @mcp.custom_route("/auth/github/start", methods=["POST"], include_in_schema=False)
 async def forge_github_start(request: Request) -> Response:
     """Kick the GitHub device flow (real auth; no secret, no stored token)."""
-    if SURFACE != "forge":
-        return PlainTextResponse("Not Found", status_code=404)
+    guard = _forge_auth_guard(request)
+    if guard is not None:
+        return guard
+    if not _forge_csrf_is_valid(request):
+        return JSONResponse(
+            {"error": "csrf_required"},
+            status_code=403,
+            headers={"cache-control": "no-store"},
+        )
     if not github_auth.client_id():
         return JSONResponse(
             {
@@ -6880,8 +7047,15 @@ async def forge_github_start(request: Request) -> Response:
 
 @mcp.custom_route("/auth/github/poll", methods=["POST"], include_in_schema=False)
 async def forge_github_poll(request: Request) -> Response:
-    if SURFACE != "forge":
-        return PlainTextResponse("Not Found", status_code=404)
+    guard = _forge_auth_guard(request)
+    if guard is not None:
+        return guard
+    if not _forge_csrf_is_valid(request):
+        return JSONResponse(
+            {"error": "csrf_required"},
+            status_code=403,
+            headers={"cache-control": "no-store"},
+        )
     try:
         body = await request.json()
     except ValueError:
@@ -6890,7 +7064,10 @@ async def forge_github_poll(request: Request) -> Response:
     sid = result.pop("session", None)
     status = 200
     if "error" in result:
-        status = {"github_unreachable": 502}.get(result["error"], 400)
+        status = {
+            "github_unreachable": 502,
+            "session_unavailable": 503,
+        }.get(result["error"], 400)
     response = JSONResponse(result, status_code=status)
     if sid:
         # Loopback http: HttpOnly + SameSite keep the session out of scripts
@@ -6908,10 +7085,21 @@ async def forge_github_poll(request: Request) -> Response:
 
 @mcp.custom_route("/auth/logout", methods=["POST"], include_in_schema=False)
 async def forge_logout(request: Request) -> Response:
-    if SURFACE != "forge":
-        return PlainTextResponse("Not Found", status_code=404)
+    guard = _forge_auth_guard(request)
+    if guard is not None:
+        return guard
+    if not _forge_csrf_is_valid(request):
+        return JSONResponse(
+            {"error": "csrf_required"},
+            status_code=403,
+            headers={"cache-control": "no-store"},
+        )
     github_auth.end_session(request.cookies.get(github_auth.SESSION_COOKIE))
-    response = JSONResponse({"status": "signed_out"})
+    github_auth.end_control_session(None)
+    response = JSONResponse(
+        {"status": "signed_out"},
+        headers={"cache-control": "no-store"},
+    )
     response.delete_cookie(github_auth.SESSION_COOKIE, path="/")
     return response
 

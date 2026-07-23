@@ -65,6 +65,8 @@
       background:linear-gradient(90deg,#12302880,#15254180);color:#baf7c7;border-radius:99px;padding:7px 16px;
       font-weight:750;font-size:clamp(12.5px,0.3vw+10.5px,14.5px);text-decoration:none;transition:box-shadow .15s}
     .signin:hover{box-shadow:0 0 14px #3fa26644}
+    .signin-alt{order:100;display:none;color:#9bb6d8;font-size:clamp(10.5px,0.22vw+9.5px,12px);
+      text-decoration:underline;text-underline-offset:2px;white-space:nowrap}
     .ghflow{order:100;margin-left:8px;font-size:clamp(11px,0.25vw+10px,12.5px);color:var(--muted);
       display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
     .ghflow b{color:#58e6d9;letter-spacing:.08em}.ghflow a{color:#58a6ff}
@@ -177,7 +179,7 @@
     <nav id="ditems"></nav>
     <div class="drawer-foot">Drawer is an index of this deck — items scroll to their panel. Contributor actions live on the control site.</div>
   </aside>
-  <nav class="tier-nav" id="tiernav" aria-label="surface tier"><button id="dmenu" class="menu-btn" aria-label="open command drawer">☰</button><span class="tier-label">Surface</span><a class="signin" id="signin" href="https://control.grokmcp.org" title="sign-in happens on control.grokmcp.org — this deck never logs you in locally">Open contributor control</a></nav>
+  <nav class="tier-nav" id="tiernav" aria-label="surface tier"><button id="dmenu" class="menu-btn" aria-label="open command drawer">☰</button><span class="tier-label">Surface</span><a class="signin" id="signin" href="https://control.grokmcp.org" title="sign-in happens on control.grokmcp.org — this deck never logs you in locally">Open contributor control</a><a class="signin-alt" id="deviceauth" href="#" title="Use GitHub's device-code flow on this Forge">Use device code</a></nav>
   <div class="legend" aria-label="status color key"><span class="lg-label">Levels</span>
     <span class="lg"><i style="background:#3fa266"></i>great</span>
     <span class="lg"><i style="background:#81a1c1"></i>good</span>
@@ -293,7 +295,9 @@ const METERED_KINDS=new Set(['web_search','x_search','remote_code_execution','ch
 const KIND_COL=n=>METERED_KINDS.has(n)?lvHex.warning:'#4a5675';   // metered (costs) vs free (neutral)
 const ROUTE_COL=n=>n==='error'?lvHex.threat:GRADFILL;             // only error carries a level
 const MODEL_COL=()=>GRADFILL;                                     // model choice has no severity
-const UI_BUILD='unigrok-ui-v1.1.0-r24';
+const UI_BUILD='unigrok-ui-v1.1.0-r25';
+const CLOUD_AUTO_KEY='unigrok-cloud-auto-r25',CLOUD_RESUME_KEY='unigrok-cloud-resume-r25';
+const CONTROL_START_FAILED=new URLSearchParams(location.search).get('control')==='unavailable';
 // Unified 3-tier switcher: each tab links to its own surface on the same host.
 // The active tier is the current port; ?preview=sky|space lets one running
 // container show a higher tier's panels for review. Hierarchical scoping:
@@ -383,8 +387,10 @@ function applyRuntimeTier(rt){
 // One delegated click handler for the drawer (open/close/navigate) + Esc.
 document.addEventListener('click',e=>{
   const gh=e.target.closest('#signin');
-  if(gh&&gh.dataset.ghauth){e.preventDefault();ghStart();return;}
+  if(e.target.closest('#deviceauth')){e.preventDefault();ghStart();return;}
   if(gh&&gh.dataset.ghout){e.preventDefault();ghOut();return;}
+  if(gh&&gh.getAttribute('href')==='/auth/control/start'){
+    localStorage.removeItem(CLOUD_AUTO_KEY);sessionStorage.setItem(CLOUD_RESUME_KEY,'1');}
   if(e.target.closest('#dmenu')){document.body.classList.add('drawer-open');return;}
   if(e.target.closest('#dclose')||e.target.id==='backdrop'){document.body.classList.remove('drawer-open');return;}
   const it=e.target.closest('.ditem[data-target]');
@@ -517,14 +523,23 @@ $('connectcard').addEventListener('click',e=>{const btn=e.target.closest('.ctab,
 // /api/me is 404 on the public surface (identity-free contract), 401 on the
 // forge until the GitHub OAuth slice answers, 200 {login,tier?} once gated.
 // The deck renders exactly that truth — signed-out is never dressed up.
-function applyIdentity(me){const el=$('signin');if(!el)return;
-  if(me&&me.login){el.textContent=`Signed in · ${me.login}`;el.href='#';el.dataset.ghout='1';delete el.dataset.ghauth;
+function applyIdentity(me){const el=$('signin'),fallback=$('deviceauth');if(!el)return;
+  if(me&&me.login){el.textContent=`Signed in · ${me.login}`;el.href='#';el.dataset.ghout='1';
     el.title='contributor session active — click to sign out';
-    sessionTier=LEVEL[me.tier]!=null?me.tier:null;}
-  else if(me&&me.surface==='forge'){el.textContent='Sign in with GitHub';el.href='#';el.dataset.ghauth='1';delete el.dataset.ghout;
-    el.title='real GitHub device-flow auth on this gateway — no password touches this deck';sessionTier=null;}
-  else{el.textContent='Open contributor control';el.href='https://control.grokmcp.org';delete el.dataset.ghauth;delete el.dataset.ghout;
-    el.title='sign-in happens on control.grokmcp.org — this deck never logs you in locally';sessionTier=null;}
+    sessionTier=LEVEL[me.tier]!=null?me.tier:null;if(me.kind==='control')localStorage.removeItem(CLOUD_AUTO_KEY);
+    sessionStorage.removeItem(CLOUD_RESUME_KEY);if(fallback)fallback.style.display='none';}
+  else if(me&&me.unavailable){el.textContent='Cloud link reconnecting';el.href='#';delete el.dataset.ghout;
+    el.title='your remembered login is retained; use device code if Cloud is temporarily unavailable';sessionTier=null;
+    if(fallback)fallback.style.display='inline-flex';}
+  else if(me&&me.surface==='forge'){
+    if(!CONTROL_START_FAILED&&localStorage.getItem(CLOUD_AUTO_KEY)!=='off'&&sessionStorage.getItem(CLOUD_RESUME_KEY)!=='1'){
+      sessionStorage.setItem(CLOUD_RESUME_KEY,'1');location.replace('/auth/control/start');return;}
+    el.textContent=CONTROL_START_FAILED?'Cloud temporarily unavailable':'Continue with Cloud';el.href='/auth/control/start';delete el.dataset.ghout;
+    el.title='reuse your remembered control.grokmcp.org GitHub session';sessionTier=null;
+    if(fallback)fallback.style.display='inline-flex';}
+  else{el.textContent='Open contributor control';el.href='https://control.grokmcp.org';delete el.dataset.ghout;
+    el.title='sign-in happens on control.grokmcp.org';sessionTier=null;
+    if(fallback)fallback.style.display='none';}
   reconcileTier();}
 // Device-flow driver: start -> show the one-time code + github link -> poll
 // until GitHub confirms -> session cookie set server-side -> pill flips.
@@ -533,26 +548,28 @@ let GHFLOW=null;
 function ghChip(html){let c=$('ghflow');if(!c){c=document.createElement('span');c.id='ghflow';c.className='ghflow';
   $('signin').after(c);}c.innerHTML=html;}
 async function ghStart(){if(GHFLOW)return;
-  const r=await fetch('/auth/github/start',{method:'POST'}).catch(()=>null);
+  localStorage.setItem(CLOUD_AUTO_KEY,'off');sessionStorage.setItem(CLOUD_RESUME_KEY,'1');
+  const r=await fetch('/auth/github/start',{method:'POST',headers:{'X-UniGrok-CSRF':'1'}}).catch(()=>null);
   const d=r?await r.json().catch(()=>null):null;
   if(!d||d.error){ghChip(`<span class="lv-warning">${d&&d.error==='github_oauth_not_configured'?'not configured — set UNIGROK_GITHUB_CLIENT_ID':'GitHub unreachable'}</span>`);return;}
   GHFLOW=d.flow;
   ghChip(`code <b>${esc(d.user_code)}</b> → <a href="${esc(d.verification_uri)}" target="_blank" rel="noopener">github.com/login/device</a>`);
   const tick=async()=>{if(!GHFLOW)return;
-    const p=await fetch('/auth/github/poll',{method:'POST',headers:{'Content-Type':'application/json'},
+    const p=await fetch('/auth/github/poll',{method:'POST',headers:{'Content-Type':'application/json','X-UniGrok-CSRF':'1'},
       body:JSON.stringify({flow:GHFLOW})}).catch(()=>null);
     const j=p?await p.json().catch(()=>null):null;
     if(j&&j.login){GHFLOW=null;document.getElementById('ghflow')?.remove();applyIdentity({login:j.login,tier:j.tier});return;}
     if(!j||j.error){GHFLOW=null;ghChip(`<span class="lv-warning">${esc((j&&j.error)||'connection lost')} — click to retry</span>`);return;}
     setTimeout(tick,(d.interval||5)*1000);};
   setTimeout(tick,(d.interval||5)*1000);}
-async function ghOut(){await fetch('/auth/logout',{method:'POST'}).catch(()=>null);
+async function ghOut(){localStorage.setItem(CLOUD_AUTO_KEY,'off');sessionStorage.setItem(CLOUD_RESUME_KEY,'1');
+  await fetch('/auth/logout',{method:'POST',headers:{'X-UniGrok-CSRF':'1'}}).catch(()=>null);
   document.getElementById('ghflow')?.remove();applyIdentity({surface:'forge'});}
 async function refresh(){if(refresh.busy)return;refresh.busy=true;try{const [ready,b,rt,me]=await Promise.all([
   fetch('/readyz').then(r=>r.json()).catch(()=>null),
   fetch('/benchmarkz').then(r=>r.json()).catch(()=>null),
   fetch('/runtimez').then(r=>r.json()).catch(()=>null),
-  fetch('/api/me').then(r=>r.status===200?r.json():(r.status===401?{surface:'forge'}:null)).catch(()=>null)]);
+  fetch('/api/me').then(r=>r.status===200?r.json():(r.status===503?{surface:'forge',unavailable:true}:(r.status===401?{surface:'forge'}:null))).catch(()=>null)]);
   applyIdentity(me);
   // Each feed is guarded independently: a missing feed reads "unreachable"/"—",
   // never a fabricated safe default. Absence of data is never shown as proof.

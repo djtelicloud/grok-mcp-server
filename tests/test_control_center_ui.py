@@ -340,16 +340,26 @@ def test_dashboard_consumes_server_tier_truth() -> None:
 
 def test_dashboard_identity_states_follow_gateway_truth() -> None:
     # Identity comes from the gateway's /api/me, never the browser's own
-    # github.com session: 200 -> signed-in pill; forge signed-out -> the real
-    # GitHub device flow on this gateway; public -> external control site.
+    # github.com session: 200 -> signed-in pill; Forge signed-out -> existing
+    # Control OAuth first with the device-code path retained as fallback.
     html = DASHBOARD.read_text(encoding="utf-8")
     assert "function applyIdentity(me)" in html
     assert "fetch('/api/me')" in html
     assert "Signed in · ${me.login}" in html
-    # Real-auth contract: device flow start/poll + one-time code chip, no
-    # password fields, and honest failure states (never fake signed-in).
-    assert "fetch('/auth/github/start',{method:'POST'})" in html
+    assert "Continue with Cloud" in html
+    assert "el.href='/auth/control/start'" in html
+    assert "location.replace('/auth/control/start')" in html
+    assert "CLOUD_RESUME_KEY" in html
+    assert "CLOUD_AUTO_KEY" in html
+    assert "Cloud link reconnecting" in html
+    assert "Cloud temporarily unavailable" in html
+    assert "unavailable:true" in html
+    assert "Use device code" in html
+    # Fallback contract: device flow start/poll + one-time code chip, no
+    # password fields, and honest failure states.
+    assert "fetch('/auth/github/start',{method:'POST',headers:{'X-UniGrok-CSRF':'1'}})" in html
     assert "fetch('/auth/github/poll',{method:'POST'" in html
+    assert "'X-UniGrok-CSRF':'1'" in html
     assert "github.com/login/device" in html
     assert "github_oauth_not_configured" in html
     assert "type=\"password\"" not in html and "type='password'" not in html
@@ -370,6 +380,6 @@ def test_authenticated_tier_survives_runtime_refresh_and_logout_relocks() -> Non
     assert "runtimeTier=rt.layer" in runtime
     assert "activeTier=rt.layer" not in runtime
     assert "sessionTier=LEVEL[me.tier]!=null?me.tier:null" in identity
-    assert identity.count("sessionTier=null") == 2
+    assert identity.count("sessionTier=null") == 3
     assert "reconcileTier();" in runtime
     assert "reconcileTier();" in identity
