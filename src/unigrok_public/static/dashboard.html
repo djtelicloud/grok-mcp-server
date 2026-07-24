@@ -325,6 +325,11 @@ document.getElementById('tiernav').insertAdjacentHTML('beforeend',TIERS.map(t=>{
   return `<a class="tier-tab" data-tier="${t.id}" href="${href}" title="${tip}">`+
     `<span class="tier-dot ${t.id}"></span>${t.label}</a>`;
 }).join(''));
+function syncPreviewUrl(){
+  const u=new URL(location.href);
+  if(preview)u.searchParams.set('preview',preview);else u.searchParams.delete('preview');
+  history.replaceState(history.state,'',u.pathname+u.search+u.hash);
+}
 function selectTier(id){
   if(LEVEL[id]==null)return;
   if(forgeSurface&&id==='space')return;
@@ -333,9 +338,7 @@ function selectTier(id){
   // silently wins reconcileTier() and flips the page back after the click.
   preview=forgeSurface?id:(id===runtimeTier)?null:id;
   activeTier=id;
-  const u=new URL(location.href);
-  if(preview)u.searchParams.set('preview',preview);else u.searchParams.delete('preview');
-  history.replaceState(null,'',u.pathname+u.search+u.hash);
+  syncPreviewUrl();
   applyTier();
   if(tierLevel>=1)renderSky();
   if(tierLevel>=2)renderSpace(LAST_RT);
@@ -344,7 +347,8 @@ function isForgeSurface(rt){
   // Prefer server truth (/runtimez.surface). Factory fallback: public tier_nav
   // remapped onto this origin (forge :4766 / r25 :4776) — never treat :4765 core
   // or hosted (no tier_nav) as forge.
-  if(rt&&rt.surface==='forge')return true;
+  const surface=String(rt?.surface||'').trim().toLowerCase();
+  if(surface)return surface==='forge';
   const pub=rt&&rt.tier_nav&&rt.tier_nav.public;if(!pub)return false;
   if(['4765','80','443',''].includes(String(herePort)))return false;
   const self=location.origin.replace(/\/$/,'');
@@ -355,7 +359,7 @@ function bindForgeOmniaware(rt){
   if(!isForgeSurface(rt))return;
   forgeSurface=true;
   document.body.dataset.surface='forge';
-  if(preview==='space'){preview='sky';activeTier='sky';}
+  if(preview==='space'){preview='sky';activeTier='sky';syncPreviewUrl();}
   document.querySelectorAll('.tier-tab').forEach(a=>{
     const id=a.dataset.tier;
     if(id==='space'){a.hidden=true;a.style.display='none';a.setAttribute('aria-hidden','true');return;}
@@ -364,9 +368,10 @@ function bindForgeOmniaware(rt){
     a.title=`switch to ${id} Surface in-shell — stay on forge`;
   });
   const note=document.querySelector('#sky-tier .tiernote');
-  if(note)note.textContent='live same-origin feeds on forge · CSP-safe · no cross-port fetch';
+  if(note)note.textContent='same-origin feeds pending on forge · panels remain sample';
   const badge=document.querySelector('#sky-tier .tierhead .sample');
-  if(badge){badge.textContent='LIVE';badge.title='same-origin /runtimez + /benchmarkz';}
+  if(badge){badge.textContent='SAMPLE';badge.dataset.skyState='sample';
+    badge.title='same-origin feeds not hydrated';}
 }
 // Command Drawer: an index of this deck mirroring the control-site groups.
 // Items anchor-scroll to their panel; contributor items are hidden on the
@@ -441,9 +446,13 @@ function applyRuntimeTier(rt){
   reconcileTier();
 }
 // One delegated click handler for the drawer (open/close/navigate) + Esc.
+function isPrimaryUnmodifiedClick(e){
+  return !e.defaultPrevented&&e.button===0&&!e.metaKey&&!e.ctrlKey&&!e.shiftKey&&!e.altKey;
+}
 document.addEventListener('click',e=>{
   const tab=e.target.closest('.tier-tab');
-  if(tab&&forgeSurface&&tab.dataset.inshell){e.preventDefault();selectTier(tab.dataset.tier);return;}
+  if(tab&&forgeSurface&&tab.dataset.inshell&&isPrimaryUnmodifiedClick(e)){
+    e.preventDefault();selectTier(tab.dataset.tier);return;}
   const gh=e.target.closest('#signin');
   if(e.target.closest('#deviceauth')){e.preventDefault();ghStart();return;}
   if(gh&&gh.dataset.ghout){e.preventDefault();ghOut();return;}
@@ -459,6 +468,16 @@ document.addEventListener('click',e=>{
 document.addEventListener('keydown',e=>{if(e.key==='Escape')document.body.classList.remove('drawer-open');});
 // Tier-scoped panels: sample structure from the plan, clearly marked; live data
 // wires on the real surfaces (private overlay), never on the public core.
+const SKY_SAMPLE_BREAKERS=[
+  {name:'cli',open:false,failures:0,trips:0},
+  {name:'api',open:false,failures:0,trips:0},
+  {name:'local',open:false,failures:0,trips:0},
+];
+const SKY_SAMPLE_LATENCY=[
+  {port:'4765',surface:'public core',p95:8},
+  {port:'4768',surface:'sky observer',p95:11},
+  {port:'4775',surface:'public alt',p95:9},
+];
 const SKY={
   lanes:[
     {tag:'L1 · TRAIN',owner:'Claude',state:'active',detail:'r2 ckpt100 · 120/120'},
@@ -466,16 +485,8 @@ const SKY={
     {tag:'L3 · PROBE',owner:'Antigravity Gemini',state:'probe',detail:'ui-surface probe · ro'},
     {tag:'L4 · MONITOR',owner:'Cursor Ground Lead',state:'active',detail:'20s diff · manifests'},
   ],
-  breakers:[
-    {name:'cli',open:false,failures:0,trips:0},
-    {name:'api',open:false,failures:0,trips:0},
-    {name:'local',open:false,failures:0,trips:0},
-  ],
-  latency:[
-    {port:'4765',surface:'public core',p95:8},
-    {port:'4768',surface:'sky observer',p95:11},
-    {port:'4775',surface:'public alt',p95:9},
-  ],
+  breakers:SKY_SAMPLE_BREAKERS.map(x=>({...x})),
+  latency:SKY_SAMPLE_LATENCY.map(x=>({...x})),
   github:{score:93,prs:[
     {pr:'#508',what:'Forge groundwork in the public gateway',checks:'18/18',state:'merged'},
     {pr:'#1',what:'Private Forge console overlay',checks:'7/7',state:'merged'},
@@ -501,19 +512,43 @@ const SPACE={
   ]},
   devices:[{name:'MacBook Pro — this machine',linked:'Jul 19',status:'linked'}],
 };
+function setSkyHydrationState(hasBreakers,hasLatency){
+  if(!forgeSurface)return;
+  const live=[];if(hasBreakers)live.push('breakers');if(hasLatency)live.push('latency');
+  const sample=['lanes','reviews','run'];
+  if(!hasBreakers)sample.unshift('breakers');
+  if(!hasLatency)sample.unshift('latency');
+  const badge=document.querySelector('#sky-tier .tierhead .sample');
+  const note=document.querySelector('#sky-tier .tiernote');
+  if(badge){badge.textContent=live.length?'MIXED':'SAMPLE';
+    badge.dataset.skyState=live.length?'mixed':'sample';
+    badge.title=live.length?`live ${live.join(' + ')} · sample ${sample.join(' + ')}`:
+      'same-origin feeds empty; panels remain sample';}
+  if(note)note.textContent=live.length?
+    `live ${live.join(' + ')} from same origin · ${sample.join('/')} sample`:
+    'same-origin feeds empty · panels remain sample';
+}
 function hydrateSkyLive(rt,b){
   // CSP-safe: only same-origin /runtimez + /benchmarkz. No cross-port pull.
-  const bs=(b&&b.circuit_breakers)||(rt&&rt.circuit_breakers)||{};
-  if(Object.keys(bs).length){
-    SKY.breakers=Object.entries(bs).map(([name,v])=>({
+  let hasBreakers=false,hasLatency=false;
+  try{
+    const bs=(b&&b.circuit_breakers)||(rt&&rt.circuit_breakers)||{};
+    if(Object.keys(bs).length){SKY.breakers=Object.entries(bs).map(([name,v])=>({
       name,open:!!v.open,failures:Number(v.failures||0),trips:Number(v.trips||0)}));
-  }
-  const p95=Number(rt?.benchmark_summary?.latency_ms?.p95
-    ||b?.latency_ms?.p95||0);
-  if(p95>0){
-    const port=herePort||TIERS.find(t=>t.id==='public')?.port||'4766';
-    SKY.latency=[{port:String(port),surface:forgeSurface?'forge console':'this origin',p95}];
-  }
+      hasBreakers=true;}
+  }catch(_){}
+  if(!hasBreakers)SKY.breakers=SKY_SAMPLE_BREAKERS.map(x=>({...x}));
+  try{
+    const rawP95=rt?.benchmark_summary?.latency_ms?.p95??b?.latency_ms?.p95;
+    const p95=Number(rawP95);
+    if(rawP95!==null&&rawP95!==undefined&&rawP95!==''&&Number.isFinite(p95)&&p95>=0){
+      const port=herePort||TIERS.find(t=>t.id==='public')?.port||'4766';
+      SKY.latency=[{port:String(port),surface:forgeSurface?'forge console':'this origin',p95}];
+      hasLatency=true;}
+  }catch(_){}
+  if(!hasLatency)SKY.latency=SKY_SAMPLE_LATENCY.map(x=>({...x}));
+  setSkyHydrationState(hasBreakers,hasLatency);
+  return {breakers:hasBreakers,latency:hasLatency};
 }
 function renderSky(){
   const laneLv={active:'great',idle:'expected',probe:'good'};

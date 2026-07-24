@@ -220,13 +220,89 @@ def test_forge_omniaware_inshell_surface() -> None:
     assert "function isForgeSurface(rt)" in html
     assert "preview=forgeSurface?id:(id===runtimeTier)?null:id" in html
     assert "a.href=`/ui/?preview=${id}`" in html
-    assert "rt.surface==='forge'" in html
+    assert "if(surface)return surface==='forge'" in html
     assert "dataset.inshell" in html
     assert "if(forgeSurface)$('space-tier').style.display='none'" in html
     assert "history.replaceState" in html
     assert "function hydrateSkyLive(rt,b)" in html
     assert "No cross-port" in html or "no cross-port" in html
     assert "UI_BUILD" in html and "r26" in html
+
+
+def test_explicit_non_forge_surface_bypasses_legacy_port_fallback() -> None:
+    html = DASHBOARD.read_text(encoding="utf-8")
+    detect = html[
+        html.index("function isForgeSurface(rt)")
+        : html.index("function bindForgeOmniaware(rt)")
+    ]
+    surface_truth = detect.index("if(surface)return surface==='forge'")
+    legacy_fallback = detect.index("const pub=rt&&rt.tier_nav&&rt.tier_nav.public")
+    assert surface_truth < legacy_fallback
+    assert "String(rt?.surface||'').trim().toLowerCase()" in detect
+
+
+def test_forge_tier_links_preserve_modified_clicks() -> None:
+    html = DASHBOARD.read_text(encoding="utf-8")
+    click = html[
+        html.index("function isPrimaryUnmodifiedClick(e)")
+        : html.index("document.addEventListener('keydown'")
+    ]
+    for guard in (
+        "!e.defaultPrevented",
+        "e.button===0",
+        "!e.metaKey",
+        "!e.ctrlKey",
+        "!e.shiftKey",
+        "!e.altKey",
+    ):
+        assert guard in click
+    assert "tab.dataset.inshell&&isPrimaryUnmodifiedClick(e)" in click
+    assert "e.preventDefault();selectTier(tab.dataset.tier)" in click
+    assert "if(tab&&forgeSurface&&tab.dataset.inshell){e.preventDefault()" not in click
+    assert "a.href=`/ui/?preview=${id}`" in html
+
+
+def test_forge_space_preview_normalizes_the_address_bar() -> None:
+    html = DASHBOARD.read_text(encoding="utf-8")
+    sync = html[html.index("function syncPreviewUrl()") : html.index("function selectTier(id)")]
+    select = html[html.index("function selectTier(id)") : html.index("function isForgeSurface(rt)")]
+    bind = html[
+        html.index("function bindForgeOmniaware(rt)")
+        : html.index("// Command Drawer:")
+    ]
+    assert "u.searchParams.set('preview',preview)" in sync
+    assert "u.searchParams.delete('preview')" in sync
+    assert "history.replaceState(history.state,'',u.pathname+u.search+u.hash)" in sync
+    assert "syncPreviewUrl();" in select
+    assert "preview='space'" not in bind
+    assert "if(preview==='space'){preview='sky';activeTier='sky';syncPreviewUrl();}" in bind
+    assert "if(preview==='space'){preview='sky';activeTier='sky';}" not in bind
+
+
+def test_sky_badge_tracks_live_payloads_without_hiding_samples() -> None:
+    html = DASHBOARD.read_text(encoding="utf-8")
+    bind = html[
+        html.index("function bindForgeOmniaware(rt)")
+        : html.index("// Command Drawer:")
+    ]
+    state = html[
+        html.index("function setSkyHydrationState(")
+        : html.index("function hydrateSkyLive(")
+    ]
+    hydrate = html[
+        html.index("function hydrateSkyLive(")
+        : html.index("function renderSky(")
+    ]
+    assert "badge.textContent='LIVE'" not in bind
+    assert "badge.textContent='SAMPLE'" in bind
+    assert "live.length?'MIXED':'SAMPLE'" in state
+    assert "lanes','reviews','run" in state
+    assert "hasBreakers=false,hasLatency=false" in hydrate
+    assert "SKY_SAMPLE_BREAKERS.map" in hydrate
+    assert "SKY_SAMPLE_LATENCY.map" in hydrate
+    assert "Number.isFinite(p95)&&p95>=0" in hydrate
+    assert "setSkyHydrationState(hasBreakers,hasLatency)" in hydrate
+    assert "return {breakers:hasBreakers,latency:hasLatency}" in hydrate
 
 
 def test_tier_scoped_panels_present_and_gated() -> None:
