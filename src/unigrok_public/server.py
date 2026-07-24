@@ -458,6 +458,8 @@ def _layer_service_label() -> str:
 MCP_SERVER_NAME = _layer_service_label()
 _CATALOG_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 _SESSION_LOCKS: dict[str, asyncio.Lock] = {}
+_LOCAL_SLOTS: asyncio.Semaphore | None = None
+_LOCAL_SLOTS_BUDGET: int | None = None
 # In-memory durable jobs for agent turns and slow xAI file/media calls. Completed
 # payloads are also persisted via STATE.save_agent_job so polls survive restarts.
 # Value: (created_monotonic, task, kind)
