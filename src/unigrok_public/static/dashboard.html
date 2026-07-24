@@ -541,7 +541,7 @@ function hydrateSkyLive(rt,b){
   try{
     const rawP95=rt?.benchmark_summary?.latency_ms?.p95??b?.latency_ms?.p95;
     const p95=Number(rawP95);
-    if(rawP95!==null&&rawP95!==undefined&&rawP95!==''&&Number.isFinite(p95)&&p95>=0){
+    if(rawP95!==null&&rawP95!==undefined&&rawP95!==''&&Number.isFinite(p95)&&p95>0){
       const port=herePort||TIERS.find(t=>t.id==='public')?.port||'4766';
       SKY.latency=[{port:String(port),surface:forgeSurface?'forge console':'this origin',p95}];
       hasLatency=true;}

@@ -300,7 +300,7 @@ def test_sky_badge_tracks_live_payloads_without_hiding_samples() -> None:
     assert "hasBreakers=false,hasLatency=false" in hydrate
     assert "SKY_SAMPLE_BREAKERS.map" in hydrate
     assert "SKY_SAMPLE_LATENCY.map" in hydrate
-    assert "Number.isFinite(p95)&&p95>=0" in hydrate
+    assert "Number.isFinite(p95)&&p95>0" in hydrate
     assert "setSkyHydrationState(hasBreakers,hasLatency)" in hydrate
     assert "return {breakers:hasBreakers,latency:hasLatency}" in hydrate
 
