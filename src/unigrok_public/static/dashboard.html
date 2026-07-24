@@ -178,6 +178,9 @@
       .tier-tab[data-tier="public"]{grid-column:2;grid-row:1}
       .tier-tab[data-tier="sky"]{grid-column:3;grid-row:1}
       .tier-tab[data-tier="space"]{grid-column:4;grid-row:1}
+      .tier-nav[data-surface="forge"]{grid-template-columns:44px repeat(2,minmax(0,1fr))}
+      .tier-nav[data-surface="forge"] .tier-tab[data-tier="public"]{grid-column:2}
+      .tier-nav[data-surface="forge"] .tier-tab[data-tier="sky"]{grid-column:3}
       .signin{grid-column:1/-1;grid-row:2;width:100%;min-width:0;min-height:44px;margin-left:0;
         justify-content:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
       .signin-alt{grid-column:1/-1;grid-row:3;min-height:44px;align-items:center;justify-content:center;
@@ -294,12 +297,16 @@ function levelOf(s){s=String(s||'').toLowerCase();
   return'';}
 function lv(s,label){const c=levelOf(s),txt=esc(label!=null?label:s);return c?`<span class="lv-${c}">${txt}</span>`:txt;}
 // Colored group-by bars: items are {name, val, color}. Ranked highest-first.
-function cbars(id,items){const root=$(id),max=Math.max(1,...items.map(x=>x.val||0));root.innerHTML=items.length?
+// A valid zero remains visible as a measured 0; an unavailable feed renders
+// an explicit em dash. Neither state is mislabeled as missing "data".
+function cbars(id,items,emptyState={label:'events recorded',value:'0'}){const root=$(id),max=Math.max(1,...items.map(x=>x.val||0));root.innerHTML=items.length?
   items.map(x=>`<div class="bar-row"><div class="bar-label" title="${esc(x.name)}">${esc(x.name)}</div>
   <div class="track"><div class="fill" style="width:${100*(x.val||0)/max}%;background:${x.color}"></div></div><div class="value">${x.val||0}</div></div>`).join(''):
-  '<div class="empty">No data.</div>'}
+  `<div class="bar-row zero-row"><div class="bar-label" title="${esc(emptyState.label)}">${esc(emptyState.label)}</div>
+  <div class="track" aria-hidden="true"></div><div class="value">${esc(emptyState.value)}</div></div>`}
 // Per-panel color coding: each dimension gets its own meaningful hue.
-function pbars(id,items,colorFn){cbars(id,(items||[]).slice(0,8).map(x=>({name:x.name,val:x.calls||0,color:colorFn(x.name)})));}
+function pbars(id,items,colorFn,emptyState){cbars(id,(items||[]).slice(0,8).map(x=>(
+  {name:x.name,val:x.calls||0,color:colorFn(x.name)})),emptyState);}
 const GRADFILL='linear-gradient(90deg,var(--blue),var(--purple))';
 const lvHex={great:'#3fa266',good:'#81a1c1',expected:'#7bafe9',warning:'#f1b467',threat:'#dd7f76',critical:'#fc6b83'};
 // MCP connect: build a non-secret client config (url + X-Client-ID header only)
@@ -317,7 +324,7 @@ const METERED_KINDS=new Set(['web_search','x_search','remote_code_execution','ch
 const KIND_COL=n=>METERED_KINDS.has(n)?lvHex.warning:'#4a5675';   // metered (costs) vs free (neutral)
 const ROUTE_COL=n=>n==='error'?lvHex.threat:GRADFILL;             // only error carries a level
 const MODEL_COL=()=>GRADFILL;                                     // model choice has no severity
-const UI_BUILD='unigrok-ui-v1.1.0-r29';
+const UI_BUILD='unigrok-ui-v1.1.0-r31';
 const CLOUD_AUTO_KEY='unigrok-cloud-auto-r25',CLOUD_RESUME_KEY='unigrok-cloud-resume-r25';
 const CONTROL_START_FAILED=new URLSearchParams(location.search).get('control')==='unavailable';
 // Unified 3-tier switcher: every tab is native navigation to that tier's own
@@ -325,7 +332,8 @@ const CONTROL_START_FAILED=new URLSearchParams(location.search).get('control')==
 // displayed data can never drift apart. Hierarchical scoping: each tier
 // renders its own panels plus every lower tier's. Higher tiers enforce their
 // own reachability/auth on arrival — navigation advertises access, never
-// grants it. Space remains visible as an access-dependent upgrade.
+// grants it. Contributor Forge is the exception: SPACE=DARK removes its Space
+// destination entirely while retaining the sanctioned Sky coach route.
 const TIERS=[
   {id:'public',label:'@grok',port:'4765',name:'GroundCommand',eyebrow:'public core'},
   {id:'sky',label:'@skygrok',port:'4768',name:'SkyCommand',eyebrow:'sky observer'},
@@ -334,14 +342,21 @@ const TIERS=[
 const LEVEL={public:0,sky:1,space:2};
 const herePort=location.port||(location.protocol==='https:'?'443':'80');
 const portTier=(TIERS.find(t=>t.port===herePort)||{}).id||'public';
+// Replaced server-side from the trusted process environment. The port check
+// preserves the zero-config 4766 developer path, while the injected surface
+// makes SPACE=DARK hold on alternate Forge ports and before /runtimez loads.
+const configuredSurface=__UNIGROK_SURFACE_JSON__;
+const initialForgeSurface=configuredSurface==='forge'||herePort==='4766';
 let runtimeTier=portTier;
 let forgeSurface=false;
 let activeTier=runtimeTier;
 let tierLevel=LEVEL[activeTier];
-document.getElementById('tiernav').insertAdjacentHTML('beforeend',TIERS.map(t=>{
+const tierNav=document.getElementById('tiernav');
+if(initialForgeSurface)tierNav.dataset.surface='forge';
+const navigationTiers=initialForgeSurface?TIERS.filter(t=>t.id!=='space'):TIERS;
+tierNav.insertAdjacentHTML('beforeend',navigationTiers.map(t=>{
   const href=`${location.protocol}//${location.hostname}:${t.port}/ui/`;
   const tip=t.id==='public'?'opens the public core and its live data':
-    t.id==='space'?'upgrade: opens SpaceCommand and its live data when that port is available':
     `opens the ${t.id} surface and its live data — requires that stack to be running`;
   return `<a class="tier-tab" data-tier="${t.id}" href="${href}" title="${tip}">`+
     `<span class="tier-dot ${t.id}"></span>${t.label}</a>`;
@@ -362,6 +377,9 @@ function bindForgeSurface(rt){
   if(!isForgeSurface(rt))return;
   forgeSurface=true;
   document.body.dataset.surface='forge';
+  tierNav.dataset.surface='forge';
+  const spaceTab=tierNav.querySelector('.tier-tab[data-tier="space"]');
+  if(spaceTab)spaceTab.remove();
 }
 // Command Drawer: an index of this deck mirroring the control-site groups.
 // Items anchor-scroll to their panel; contributor items are hidden on the
@@ -446,16 +464,6 @@ document.addEventListener('click',e=>{
 document.addEventListener('keydown',e=>{if(e.key==='Escape')document.body.classList.remove('drawer-open');});
 // Tier-scoped panels: sample structure from the plan, clearly marked; live data
 // wires on the real surfaces (private overlay), never on the public core.
-const SKY_SAMPLE_BREAKERS=[
-  {name:'cli',open:false,failures:0,trips:0},
-  {name:'api',open:false,failures:0,trips:0},
-  {name:'local',open:false,failures:0,trips:0},
-];
-const SKY_SAMPLE_LATENCY=[
-  {port:'4765',surface:'public core',p95:8},
-  {port:'4768',surface:'sky observer',p95:11},
-  {port:'4775',surface:'public alt',p95:9},
-];
 const SKY={
   lanes:[
     {tag:'L1 · TRAIN',owner:'Claude',state:'active',detail:'r2 ckpt100 · 120/120'},
@@ -463,8 +471,9 @@ const SKY={
     {tag:'L3 · PROBE',owner:'Antigravity Gemini',state:'probe',detail:'ui-surface probe · ro'},
     {tag:'L4 · MONITOR',owner:'Cursor Ground Lead',state:'active',detail:'20s diff · manifests'},
   ],
-  breakers:SKY_SAMPLE_BREAKERS.map(x=>({...x})),
-  latency:SKY_SAMPLE_LATENCY.map(x=>({...x})),
+  breakers:null,
+  latency:null,
+  latencySamples:null,
   github:{score:93,prs:[
     {pr:'#508',what:'Forge groundwork in the public gateway',checks:'18/18',state:'merged'},
     {pr:'#1',what:'Private Forge console overlay',checks:'7/7',state:'merged'},
@@ -494,37 +503,46 @@ function setSkyHydrationState(hasBreakers,hasLatency){
   if(tierLevel<1)return;
   const live=[];if(hasBreakers)live.push('breakers');if(hasLatency)live.push('latency');
   const sample=['lanes','reviews','run'];
-  if(!hasBreakers)sample.unshift('breakers');
-  if(!hasLatency)sample.unshift('latency');
+  const unavailable=[];if(!hasBreakers)unavailable.push('breakers');if(!hasLatency)unavailable.push('latency');
   const badge=document.querySelector('#sky-tier .tierhead .sample');
   const note=document.querySelector('#sky-tier .tiernote');
   if(badge){badge.textContent=live.length?'MIXED':'SAMPLE';
     badge.dataset.skyState=live.length?'mixed':'sample';
     badge.title=live.length?`live ${live.join(' + ')} · sample ${sample.join(' + ')}`:
-      'same-origin feeds empty; panels remain sample';}
+      `sample ${sample.join(' + ')} · unavailable ${unavailable.join(' + ')}`;}
   if(note)note.textContent=live.length?
-    `live ${live.join(' + ')} from same origin · ${sample.join('/')} sample`:
-    'same-origin feeds empty · panels remain sample';
+    `live ${live.join(' + ')} from same origin · ${sample.join('/')} sample${
+      unavailable.length?' · '+unavailable.join('/')+' unavailable':''}`:
+    `${sample.join('/')} sample · ${unavailable.join('/')} unavailable`;
 }
 function hydrateSkyLive(rt,b){
   // CSP-safe: only same-origin /runtimez + /benchmarkz. No cross-port pull.
   let hasBreakers=false,hasLatency=false;
   try{
-    const bs=(b&&b.circuit_breakers)||(rt&&rt.circuit_breakers)||{};
-    if(Object.keys(bs).length){SKY.breakers=Object.entries(bs).map(([name,v])=>({
+    const bHas=!!b&&hasOwn(b,'circuit_breakers')&&b.circuit_breakers!=null&&typeof b.circuit_breakers==='object';
+    const rtHas=!!rt&&hasOwn(rt,'circuit_breakers')&&rt.circuit_breakers!=null&&typeof rt.circuit_breakers==='object';
+    const bs=bHas?b.circuit_breakers:rtHas?rt.circuit_breakers:null;
+    if(bs){SKY.breakers=Object.entries(bs).map(([name,v])=>({
       name,open:!!v.open,failures:Number(v.failures||0),trips:Number(v.trips||0)}));
       hasBreakers=true;}
   }catch(_){}
-  if(!hasBreakers)SKY.breakers=SKY_SAMPLE_BREAKERS.map(x=>({...x}));
+  if(!hasBreakers)SKY.breakers=null;
   try{
-    const rawP95=rt?.benchmark_summary?.latency_ms?.p95??b?.latency_ms?.p95;
-    const p95=Number(rawP95);
-    if(rawP95!==null&&rawP95!==undefined&&rawP95!==''&&Number.isFinite(p95)&&p95>0){
-      const port=herePort||TIERS.find(t=>t.id==='public')?.port||'4766';
-      SKY.latency=[{port:String(port),surface:forgeSurface?'forge console':'this origin',p95}];
-      hasLatency=true;}
+    const aggregate=b?.telemetry&&typeof b.telemetry==='object'?b.telemetry:rt?.benchmark_summary;
+    const sampleCount=aggregate?.sample_size;
+    const rawP95=aggregate?.latency_ms?.p95;
+    if(sampleCount!==null&&sampleCount!==undefined&&Number.isFinite(Number(sampleCount))&&
+      aggregate?.latency_ms&&typeof aggregate.latency_ms==='object'){
+      SKY.latencySamples=Number(sampleCount);
+      if(SKY.latencySamples===0){SKY.latency=[];hasLatency=true;}
+      else if(rawP95!==null&&rawP95!==undefined&&rawP95!==''&&Number.isFinite(Number(rawP95))){
+        const port=herePort||TIERS.find(t=>t.id==='public')?.port||'4766';
+        SKY.latency=[{port:String(port),surface:forgeSurface?'forge console':'this origin',p95:Number(rawP95)}];
+        hasLatency=true;
+      }else SKY.latency=null;
+    }
   }catch(_){}
-  if(!hasLatency)SKY.latency=SKY_SAMPLE_LATENCY.map(x=>({...x}));
+  if(!hasLatency){SKY.latency=null;SKY.latencySamples=null;}
   setSkyHydrationState(hasBreakers,hasLatency);
   return {breakers:hasBreakers,latency:hasLatency};
 }
@@ -533,8 +551,13 @@ function renderSky(){
   $('swarmgrid').innerHTML=SKY.lanes.map(l=>`<div class="lane"><span class="lane-tag">${esc(l.tag)}</span>
     <span class="lane-owner">${esc(l.owner)}</span><span class="lane-state ${l.state} lv-${laneLv[l.state]||'expected'}">${esc(l.state)}</span>
     <span class="lane-detail" title="${esc(l.detail)}">${esc(l.detail)}</span></div>`).join('');
-  $('skybreakers').innerHTML=SKY.breakers.map(b=>`<div class="breaker ${b.open?'open':''}"><b>${esc(b.name)}</b> · <span class="lv-${b.open?'threat':'expected'}">${b.open?'OPEN':'closed'}</span> · failures ${b.failures} · trips ${b.trips}</div>`).join('');
-  cbars('latdist',SKY.latency.map(r=>({name:`${r.port} · ${r.surface}`,val:r.p95,
+  $('skybreakers').innerHTML=SKY.breakers==null?
+    '<div class="breaker"><b>Breaker telemetry unavailable</b> · —</div>':
+    SKY.breakers.length?SKY.breakers.map(b=>`<div class="breaker ${b.open?'open':''}"><b>${esc(b.name)}</b> · <span class="lv-${b.open?'threat':'expected'}">${b.open?'OPEN':'closed'}</span> · failures ${b.failures} · trips ${b.trips}</div>`).join(''):
+      '<div class="breaker"><b>0 breaker events</b> · no failures or trips recorded this session</div>';
+  if(SKY.latency==null)cbars('latdist',[],{label:'latency telemetry unavailable',value:'—'});
+  else if(!SKY.latency.length)cbars('latdist',[],{label:'p95 not measured · latency samples',value:String(SKY.latencySamples||0)});
+  else cbars('latdist',SKY.latency.map(r=>({name:`${r.port} · ${r.surface}`,val:r.p95,
     color:r.p95<10?lvHex.great:r.p95<20?lvHex.warning:lvHex.threat})));
   const g=SKY.github,C=2*Math.PI*38,off=C*(1-g.score/100),stCol={merged:'great',waiting:'warning',open:'expected',closed:'threat'};
   $('ghreviews').innerHTML=`<div class="ring"><svg width="88" height="88" viewBox="0 0 88 88">
@@ -558,7 +581,8 @@ function renderSpace(rt){
   $('ragstats').innerHTML=`<span>State backend</span><b>${esc(backend)}</b>
     <span>RAG mode</span><b>${tr?esc(tr.mode||'—'):'—'}</b>
     <span>Stored facts</span><b>${tr&&tr.fact_count!=null?Number(tr.fact_count).toLocaleString('en-US'):'—'}</b>
-    <span>xAI collections</span><b>${tr?.collection_label_set?'label set':'no label'} · never named</b>
+    <span>xAI collections</span><b>${tr&&hasOwn(tr,'collection_label_set')?
+      `${tr.collection_label_set?'label set':'no label'} · never named`:'unavailable · —'}</b>
     <span>Tools exposed</span><b>${esc(String(tools))}</b>`;
   $('spacesec').innerHTML=`<span>Policy</span><b class="lv-expected">SPACE=DARK</b>
     <span>Write access</span><b class="lv-expected">zero-write · read-only monitor</b>
@@ -585,14 +609,22 @@ function gauge(id,{segs,big,small,color}){const A0=-120,SWEEP=240,r=44,cx=60,cy=
   $(id).innerHTML=`<svg viewBox="0 0 120 96" class="gsvg" role="img" aria-label="${esc(small)} ${esc(big)}">
     <path d="${arcPath(cx,cy,r,A0,A0+SWEEP)}" stroke="#202b47" class="garc gtrack"/>${paths}</svg>
     <div class="gbig" style="color:${color||'var(--text)'}">${big}</div><div class="gsmall">${esc(small)}</div>`;}
-function planeTile(name,p,use){const on=!!p?.ready;
-  const detail=name==='local'
-    ? (p?.configured?`runtime ${p.runtime_up?'up':'down'} · fail-closed helper`:'not configured · fail-closed')
-    : on?`${(p.models||[]).length} models${p.default_model?` · default ${p.default_model}`:''}`
-      :name==='cli'?'unauthenticated':'no key configured';
-  const u=use||{},usage=`${u.calls||0} calls · $${Number(u.cost||0).toFixed(4)} recorded`;
+function planeTile(name,p,use,usageAvailable){const planeAvailable=!!(p&&typeof p==='object'),on=!!p?.ready;
+  const detail=!planeAvailable?'plane telemetry unavailable':
+    name==='local'
+    ? (!hasOwn(p,'configured')?'local configuration unavailable':
+      p.configured?`runtime ${hasOwn(p,'runtime_up')?(p.runtime_up?'up':'down'):'status unavailable'} · fail-closed helper`:
+        'not configured · fail-closed')
+    : on?`${Array.isArray(p.models)?p.models.length+' models':'models unavailable'}${
+      p.default_model?` · default ${p.default_model}`:''}`
+      :hasOwn(p,'configured')?(p.configured?'configured · not ready':'not configured'):
+        name==='cli'?'authentication state unavailable':'configuration state unavailable';
+  const u=use||{},usage=usageAvailable
+    ?`${Number(u.calls||0)} calls · $${Number(u.cost||0).toFixed(4)} recorded`
+    :'usage telemetry unavailable · —';
   return `<div class="plane-row"><div class="plane-head"><span class="plane-name">${esc(name)}</span>
-    <span class="plane-state lv-${on?'great':'expected'}">${on?'ready':'offline'}</span></div>
+    <span class="plane-state lv-${planeAvailable?(on?'great':'expected'):'warning'}">${
+      planeAvailable?(on?'ready':'offline'):'unavailable · —'}</span></div>
     <div class="plane-detail" title="${esc(detail)}">${esc(detail)}</div>
     <div class="plane-detail">${usage}</div></div>`}
 // One delegated handler on the card (survives the 10 s re-render; no leak):
@@ -650,153 +682,264 @@ async function ghStart(){if(GHFLOW)return;
 async function ghOut(){localStorage.setItem(CLOUD_AUTO_KEY,'off');sessionStorage.setItem(CLOUD_RESUME_KEY,'1');
   await fetch('/auth/logout',{method:'POST',headers:{'X-UniGrok-CSRF':'1'}}).catch(()=>null);
   document.getElementById('ghflow')?.remove();applyIdentity({surface:'forge'});}
-const feedJson=r=>r.ok?r.json():Promise.reject(new Error(`feed HTTP ${r.status}`));
+const hasOwn=(o,k)=>o!=null&&Object.prototype.hasOwnProperty.call(o,k);
+const feedJson=async(r,allow503=false)=>{const data=await r.json().catch(()=>null);
+  if(data&&(r.ok||(allow503&&r.status===503)))return data;
+  throw new Error(`feed HTTP ${r.status}`);}
+const fetchFeed=(url,allow503=false)=>fetch(url,{signal:AbortSignal.timeout(5000)})
+  .then(r=>feedJson(r,allow503)).catch(()=>null);
+function primeDataContainers(){
+  const rows={risktools:3,tools:5,standouts:7,recent:12};
+  Object.entries(rows).forEach(([id,n])=>{if(!$(id).textContent.trim())$(id).innerHTML=
+    `<tr><td colspan="${n}" class="empty">Loading live data …</td></tr>`;});
+  for(const id of ['samples','success','p95','cost','planes','kinds','routes','models','callers','fallbacks',
+    'runtime','build','policy','planepolicy','routing','clients','toolbill','breakers','outcomes']){
+    if(!$(id).textContent.trim())$(id).innerHTML='<div class="empty">Loading live data …</div>';}
+}
+function markStillLoadingUnavailable(){
+  const rows={risktools:3,tools:5,standouts:7,recent:12};
+  Object.entries(rows).forEach(([id,n])=>{if($(id).textContent.includes('Loading live data'))$(id).innerHTML=
+    `<tr><td colspan="${n}" class="empty">Live data unavailable · — · retrying.</td></tr>`;});
+  for(const id of ['samples','success','p95','cost','planes','kinds','routes','models','callers','fallbacks',
+    'runtime','build','policy','planepolicy','routing','clients','toolbill','breakers','outcomes']){
+    if($(id).textContent.includes('Loading live data'))$(id).innerHTML='<div class="empty">Live data unavailable · — · retrying.</div>';}
+}
+primeDataContainers();
 async function refresh(){if(refresh.busy)return;refresh.busy=true;try{const [ready,b,rt,me]=await Promise.all([
-  fetch('/readyz').then(feedJson).catch(()=>null),
-  fetch('/benchmarkz').then(feedJson).catch(()=>null),
-  fetch('/runtimez').then(feedJson).catch(()=>null),
-  fetch('/api/me').then(r=>r.status===200?r.json():(r.status===503?{surface:'forge',unavailable:true}:(r.status===401?{surface:'forge'}:null))).catch(()=>null)]);
+  fetchFeed('/readyz',true),
+  fetchFeed('/benchmarkz'),
+  fetchFeed('/runtimez'),
+  fetch('/api/me',{signal:AbortSignal.timeout(5000)}).then(r=>r.status===200?r.json():(r.status===503?{surface:'forge',unavailable:true}:(r.status===401?{surface:'forge'}:null))).catch(()=>null)]);
   applyIdentity(me);
   // Each feed is guarded independently: a missing feed reads "unreachable"/"—",
   // never a fabricated safe default. Absence of data is never shown as proof.
-  const t=(b&&b.telemetry)||{};
+  const benchmarkTelemetry=b&&b.telemetry&&typeof b.telemetry==='object'?b.telemetry:null;
+  const runtimeTelemetry=rt&&rt.benchmark_summary&&typeof rt.benchmark_summary==='object'?rt.benchmark_summary:null;
+  const t=benchmarkTelemetry||runtimeTelemetry||{},telemetryAvailable=!!(benchmarkTelemetry||runtimeTelemetry);
+  const receiptTelemetryAvailable=!!benchmarkTelemetry&&Array.isArray(benchmarkTelemetry.recent);
+  const numberAvailable=k=>telemetryAvailable&&hasOwn(t,k)&&t[k]!=null&&Number.isFinite(Number(t[k]));
+  const bucketAvailable=k=>telemetryAvailable&&Array.isArray(t[k]);
+  const barEmpty=(label,available)=>available?{label,value:'0'}:{label:`${label} unavailable`,value:'—'};
   $('service').textContent=ready?`Service ${ready.status||'unknown'}`:'Service unreachable';
   $('service').className='pill lv-'+(ready?(levelOf(ready.status)||'expected'):'threat');
-  for(const p of ['cli','api']){const on=!!ready?.planes?.[p]?.ready;
-    $(p).textContent=`${p.toUpperCase()} ${ready?(on?'ready':'offline'):'—'}`;$(p).className='pill lv-'+(ready?(on?'great':'expected'):'threat');}
+  for(const p of ['cli','api']){const plane=ready?.planes?.[p],available=!!(plane&&typeof plane==='object'),on=!!plane?.ready;
+    $(p).textContent=`${p.toUpperCase()} ${ready?(available?(on?'ready':'offline'):'—'):'—'}`;
+    $(p).className='pill lv-'+(ready?(available?(on?'great':'expected'):'warning'):'threat');}
   $('updated').textContent=new Date().toLocaleTimeString();
   // Gauge row. Samples: outcome-split donut arc. Success/P95: threshold dials.
   // Cost: recorded spend split by plane (share arcs, honest zero when $0).
-  const total=t.sample_size||0,vs0=t.verified_samples||0,sr0=t.verified_success_rate;
-  const pass0=sr0==null?0:Math.round(sr0*vs0),fail0=Math.max(0,vs0-pass0),unv0=Math.max(0,total-vs0);
-  gauge('samples',{big:String(total),small:`${pass0} pass · ${fail0} fail · ${unv0} unverified`,
-    segs:total?[{v:pass0/total,color:lvHex.great},{v:fail0/total,color:lvHex.threat},{v:unv0/total,color:'#4a5675'}]:[]});
-  // A rate computed from a handful of verified receipts is not a verdict:
-  // below 10 verified the dial stays neutral instead of shouting a level.
-  const vrate=t.verified_success_rate,lowN=vs0<10;
-  const scol=vrate==null?null:lowN?'#4a5675':vrate>=0.85?lvHex.great:vrate>=0.65?lvHex.warning:lvHex.threat;
-  gauge('success',{big:vrate==null?'—':`${Math.round(vrate*100)}%`,
-    small:`${vs0} of ${total} verified${lowN&&total?' · low verification coverage':''}`,
-    color:scol,segs:vrate==null?[]:[{v:vrate,color:scol}]});
+  const totalAvailable=numberAvailable('sample_size');
+  const verifiedAvailable=numberAvailable('verified_samples');
+  const total=totalAvailable?Number(t.sample_size):0,vs0=verifiedAvailable?Number(t.verified_samples):0;
+  if(!totalAvailable||!verifiedAvailable){
+    gauge('samples',{big:'—',small:'sample telemetry unavailable · retrying',segs:[]});
+    gauge('success',{big:'—',small:'verification telemetry unavailable · retrying',segs:[]});
+  }else{
+    const sr0=numberAvailable('verified_success_rate')?Number(t.verified_success_rate):null;
+    const pass0=sr0==null?0:Math.round(sr0*vs0),fail0=Math.max(0,vs0-pass0),unv0=Math.max(0,total-vs0);
+    gauge('samples',{big:String(total),small:`${pass0} pass · ${fail0} fail · ${unv0} unverified`,
+      segs:total?[{v:pass0/total,color:lvHex.great},{v:fail0/total,color:lvHex.threat},{v:unv0/total,color:'#4a5675'}]:[]});
+    // A rate computed from a handful of verified receipts is not a verdict:
+    // below 10 verified the dial stays neutral instead of shouting a level.
+    const lowN=vs0<10;
+    const scol=sr0==null?null:lowN?'#4a5675':sr0>=0.85?lvHex.great:sr0>=0.65?lvHex.warning:lvHex.threat;
+    gauge('success',{big:sr0==null?'—':`${Math.round(sr0*100)}%`,
+      small:sr0==null?`${vs0} of ${total} verified · success rate not measured`:
+        `${vs0} of ${total} verified${lowN&&total?' · low verification coverage':''}`,
+      color:scol,segs:sr0==null?[]:[{v:sr0,color:scol}]});
+  }
   // Latency judged by workload: agent/code turns legitimately run tens of
   // seconds, chat should not. The dial scale follows p95 so it never pegs.
-  const p95v=t.latency_ms?.p95||0;
-  const kmap={};(t.kinds||[]).forEach(x=>kmap[x.name]=x.calls||0);
-  const ktot=Object.values(kmap).reduce((a,b)=>a+b,0);
-  const agentish=ktot?((kmap.agent||0)+(kmap.remote_code_execution||0))/ktot:0;
-  const [gT,wT]=agentish>0.5?[30000,90000]:[1000,3000];
-  const dialMax=Math.max(5000,Math.ceil(p95v*1.25/5000)*5000);
-  const pcol=p95v===0?null:p95v<gT?lvHex.great:p95v<wT?lvHex.warning:lvHex.threat;
-  gauge('p95',{big:`${Math.round(p95v).toLocaleString('en-US')}<small> ms</small>`,
-    small:`p50 ${Math.round(t.latency_ms?.p50||0)} ms · avg ${Math.round(t.latency_ms?.average||0)} ms · dial 0–${Math.round(dialMax/1000)}s`,
-    color:pcol,segs:p95v?[{v:Math.min(1,p95v/dialMax),color:pcol}]:[]});
-  const costT=Number(t.cost_usd||0);
-  const costSegs=(t.planes||[]).filter(x=>x.cost_usd>0).map((x,i)=>({v:costT?x.cost_usd/costT:0,
-    color:{api:'#58a6ff',cli:lvHex.great,local:'#7bafe9'}[x.name]||'#4a5675'}));
-  gauge('cost',{big:`$${costT.toFixed(4)}`,small:costT?'share of recorded spend by plane':'no recorded spend',
-    segs:costT?costSegs:[]});
-  pbars('planes',(t.planes||[]).filter(x=>x.name!=='unknown'),PLANE_COL);
-  pbars('kinds',t.kinds||[],KIND_COL);
-  pbars('routes',t.routes||[],ROUTE_COL);
-  pbars('models',t.models||[],MODEL_COL);
-  pbars('callers',t.callers||[],()=>GRADFILL);   // identities carry no level
-  pbars('fallbacks',(t.fallbacks||[]).filter(x=>x.name!=='unknown'),()=>lvHex.warning);  // fallbacks are degraded events
+  const latencyAvailable=telemetryAvailable&&t.latency_ms&&typeof t.latency_ms==='object';
+  const latencySamples=totalAvailable?total:null;
+  const p95Available=latencyAvailable&&t.latency_ms.p95!=null&&Number.isFinite(Number(t.latency_ms.p95));
+  if(!latencyAvailable||latencySamples==null){
+    gauge('p95',{big:'—',small:'latency telemetry unavailable · retrying',segs:[]});
+  }else if(latencySamples===0){
+    gauge('p95',{big:'—',small:'0 latency samples · p95 not measured',segs:[]});
+  }else if(!p95Available){
+    gauge('p95',{big:'—',small:`${latencySamples} latency samples · p95 unavailable`,segs:[]});
+  }else{
+    const p95v=Number(t.latency_ms.p95),kindsAvailable=bucketAvailable('kinds');
+    const kmap={};(kindsAvailable?t.kinds:[]).forEach(x=>kmap[x.name]=x.calls||0);
+    const ktot=Object.values(kmap).reduce((a,b)=>a+b,0);
+    const agentish=ktot?((kmap.agent||0)+(kmap.remote_code_execution||0))/ktot:0;
+    const [gT,wT]=agentish>0.5?[30000,90000]:[1000,3000];
+    const dialMax=Math.max(5000,Math.ceil(p95v*1.25/5000)*5000);
+    const pcol=p95v===0||!kindsAvailable?'#4a5675':p95v<gT?lvHex.great:p95v<wT?lvHex.warning:lvHex.threat;
+    const p50=t.latency_ms.p50!=null&&Number.isFinite(Number(t.latency_ms.p50))?Math.round(Number(t.latency_ms.p50)):'—';
+    const avg=t.latency_ms.average!=null&&Number.isFinite(Number(t.latency_ms.average))?Math.round(Number(t.latency_ms.average)):'—';
+    gauge('p95',{big:`${Math.round(p95v).toLocaleString('en-US')}<small> ms</small>`,
+      small:`p50 ${p50} ms · avg ${avg} ms · dial 0–${Math.round(dialMax/1000)}s${
+        kindsAvailable?'':' · workload mix unavailable'}`,
+      color:pcol,segs:p95v?[{v:Math.min(1,p95v/dialMax),color:pcol}]:[]});
+  }
+  if(!numberAvailable('cost_usd')){
+    gauge('cost',{big:'—',small:'cost telemetry unavailable · retrying',segs:[]});
+  }else{
+    const costT=Number(t.cost_usd);
+    const costSegs=(bucketAvailable('planes')?t.planes:[]).filter(x=>Number(x.cost_usd)>0).map(x=>({
+      v:costT?Number(x.cost_usd)/costT:0,
+      color:{api:'#58a6ff',cli:lvHex.great,local:'#7bafe9'}[x.name]||'#4a5675'}));
+    gauge('cost',{big:`$${costT.toFixed(4)}`,small:costT?
+      (bucketAvailable('planes')?'share of recorded spend by plane':'recorded spend · plane split unavailable'):
+      'recorded spend',
+      segs:costT?costSegs:[]});
+  }
+  const renderBuckets=(id,key,colorFn,label,filterFn=x=>x)=>{
+    const available=bucketAvailable(key),items=available?filterFn(t[key]):[];
+    pbars(id,items,colorFn,barEmpty(label,available));
+  };
+  renderBuckets('planes','planes',PLANE_COL,'plane calls');
+  renderBuckets('kinds','kinds',KIND_COL,'request kinds');
+  renderBuckets('routes','routes',ROUTE_COL,'routes');
+  renderBuckets('models','models',MODEL_COL,'models');
+  renderBuckets('callers','callers',()=>GRADFILL,'callers');   // identities carry no level
+  renderBuckets('fallbacks','fallbacks',()=>lvHex.warning,'fallback events',
+    xs=>xs.filter(x=>x.name!=='unknown'));  // unknown means no recorded fallback reason
   $('runtime').innerHTML=rt?[`<b>${esc(rt.mode)}</b>`,esc(rt.state_backend),`${rt.tool_count??'—'} tools`,
     `${rt.task_rag?.fact_count??'—'} durable facts`,
     `${esc(rt.version)} · ${UI_BUILD}`].map(x=>`<div class="breaker">${x}</div>`).join(''):
     `<div class="breaker">runtime unavailable · ${UI_BUILD}</div>`;
   // Build & durable work — em-dash out when /runtimez is unreachable, never "0/idle".
   if(!rt){$('build').innerHTML='<div class="breaker">runtime unavailable</div>';}
-  else{const gb=rt.grok_build||{},inflight=gb.in_flight||0;
+  else if(!rt.grok_build||typeof rt.grok_build!=='object'){
+    $('build').innerHTML='<div class="breaker">build telemetry unavailable · —</div>';
+  }else{const gb=rt.grok_build;
+    const inflight=hasOwn(gb,'in_flight')&&gb.in_flight!=null?Number(gb.in_flight):null;
     $('build').innerHTML=[
       `<b>${esc(gb.transport||'—')}</b>`,
-      `<span class="lv-${inflight?'great':'expected'}">in-flight ${inflight}</span>`,
+      `<span class="lv-${inflight==null?'warning':inflight?'great':'expected'}">in-flight ${inflight==null?'—':inflight}</span>`,
       `ready workers ${gb.ready_workers??'—'}`,
-      `completed turns ${gb.completed_turns??0}`,
+      `completed turns ${gb.completed_turns??'—'}`,
     ].map(x=>`<div class="breaker">${x}</div>`).join('');}
   // Policy & governance: spend-enabling settings read warning; safe defaults expected.
   // A missing feed shows "unavailable" — never collapses to "off/inactive/metered off".
   if(!rt){$('policy').innerHTML='<div class="empty">runtime unavailable</div>';}
-  else{const ra=rt.routing_advisor||{},se=rt.semantic_evaluation||{},sp=rt.api_spend_enforcement||{},au=rt.autonomy||{};
-    $('policy').innerHTML=`<span>Routing</span><b class="lv-expected">${esc(ra.policy?'live discovery':'—')} · ${ra.automatic_model_experiments?'auto-experiments ON':'no auto-experiments'}</b>
-      <span>Semantic eval</span><b class="lv-${se.automatic_judge_spend?'warning':'expected'}">${esc(se.mode||'—')} · ${se.automatic_judge_spend?'auto-judge spend':'no auto spend'}</b>
-      <span>API spend</span><b class="lv-${sp.owner_enabled?'warning':'expected'}">${sp.owner_enabled?'metered enabled':'metered off'}${sp.per_request_confirmation_required?' · confirm each':''}</b>
-      <span>Autonomy</span><b class="lv-expected">${au.enabled?'on':'off'}${au.mission_v2?' · mission v2':''} · verify ${au.verify_literal?'literal':'off'}</b>
-      <span>Needle</span><b class="lv-${rt.needle_active?'warning':'expected'}">${rt.needle_active?'ACTIVE':'inactive'}</b>
-      <span>Recovery</span><b class="lv-expected">${esc(rt.completion_recovery||'—')}</b>`+
+  else{const ra=rt.routing_advisor,se=rt.semantic_evaluation,sp=rt.api_spend_enforcement,au=rt.autonomy;
+    const boolText=(o,k,on,off)=>o&&hasOwn(o,k)?(o[k]?on:off):'unavailable · —';
+    $('policy').innerHTML=`<span>Routing</span><b class="lv-expected">${ra&&typeof ra==='object'?
+      `${esc(ra.policy||'—')} · ${boolText(ra,'automatic_model_experiments','auto-experiments ON','no auto-experiments')}`:
+      'unavailable · —'}</b>
+      <span>Semantic eval</span><b class="lv-${se&&se.automatic_judge_spend?'warning':'expected'}">${se&&typeof se==='object'?
+      `${esc(se.mode||'—')} · ${boolText(se,'automatic_judge_spend','auto-judge spend','no auto spend')}`:'unavailable · —'}</b>
+      <span>API spend</span><b class="lv-${sp&&sp.owner_enabled?'warning':'expected'}">${sp&&typeof sp==='object'?
+      `${boolText(sp,'owner_enabled','metered enabled','metered off')}${
+        hasOwn(sp,'per_request_confirmation_required')?(sp.per_request_confirmation_required?' · confirm each':''):''}`:'unavailable · —'}</b>
+      <span>Autonomy</span><b class="lv-expected">${au&&typeof au==='object'?
+      `${boolText(au,'enabled','on','off')}${hasOwn(au,'mission_v2')?(au.mission_v2?' · mission v2':''):''} · verify ${
+        boolText(au,'verify_literal','literal','off')}`:'unavailable · —'}</b>
+      <span>Needle</span><b class="lv-${hasOwn(rt,'needle_active')?(rt.needle_active?'warning':'expected'):'warning'}">${
+        hasOwn(rt,'needle_active')?(rt.needle_active?'ACTIVE':'inactive'):'unavailable · —'}</b>
+      <span>Recovery</span><b class="lv-expected">${hasOwn(rt,'completion_recovery')?esc(rt.completion_recovery||'—'):'unavailable · —'}</b>`+
       // Plane notices: static server templates (never embed key material).
       (rt.credential_planes?.notices||[]).map(n=>`<span>Notice</span><b class="lv-${
         n.severity==='warning'?'warning':'expected'}">${esc(n.summary||n.id||'')}</b>`).join('');}
   applyRuntimeTier(rt);
-  const planeUse={};(t.planes||[]).forEach(x=>planeUse[x.name]={calls:x.calls,cost:x.cost_usd});
+  const planeUsageAvailable=bucketAvailable('planes');
+  const planeUse={};(planeUsageAvailable?t.planes:[]).forEach(x=>planeUse[x.name]={calls:x.calls,cost:x.cost_usd});
   // Policy strip: routing posture from credential_planes (server truth, never
   // inferred client-side). Degraded reads warning; no usable plane reads threat.
   // The strip lives outside the tile grid: a spanning row would pin auto-fit
   // tracks open and leave dead space to the right of the three tiles.
   const cp=rt?.credential_planes;
-  $('planepolicy').innerHTML=!cp?'':`<div class="plane-row"><div class="plane-head">
+  $('planepolicy').innerHTML=!cp?'<div class="plane-row"><div class="plane-head"><span class="plane-name">policy</span><span class="plane-state lv-warning">credential policy unavailable · —</span></div></div>':`<div class="plane-row"><div class="plane-head">
     <span class="plane-name">policy</span>
     <span class="plane-state lv-${cp.effective_plane?(cp.degraded?'warning':'great'):'threat'}">${
     esc(cp.policy||'—')} · effective ${esc(cp.effective_plane||'none')}${cp.degraded?' · degraded':''}</span></div></div>`;
-  $('routing').innerHTML=['cli','api','local'].map(p=>planeTile(p,ready?.planes?.[p],planeUse[p])).join('');
+  $('routing').innerHTML=['cli','api','local'].map(p=>planeTile(
+    p,ready?.planes?.[p],planeUse[p],planeUsageAvailable)).join('');
   // Connect panel: known IDE clients cross-referenced with live caller telemetry.
   MCP_EP=rt?.mcp_endpoint||'/mcp';$('mcpendpoint').textContent=MCP_EP;
-  const seen={};(t.callers||[]).forEach(x=>seen[x.name]=x.calls);
+  const callerUsageAvailable=bucketAvailable('callers');
+  const seen={};(callerUsageAvailable?t.callers:[]).forEach(x=>seen[x.name]=x.calls);
   const KNOWN_CLIENTS=['claude-code','cursor','vscode','codex','gemini'];
   // Segmented client tabs (mirrors the tier-tab language); live status inline:
   // green dot + call count when the client is actually hitting the gateway.
-  $('clients').innerHTML=KNOWN_CLIENTS.map(c=>{const n=seen[c]||0;
-    return `<button class="ctab${c===SEL_CLIENT?' active':''}" data-client="${esc(c)}" title="${n?`${n} calls recorded`:'no calls recorded'}">
-      <span class="tier-dot" style="background:${n?'#3fa266':'#4a5675'};${n?'box-shadow:0 0 8px #3fa266':''}"></span>${esc(c)}${n?`<span class="ctab-n">${n}</span>`:''}</button>`}).join('');
+  $('clients').innerHTML=KNOWN_CLIENTS.map(c=>{const n=callerUsageAvailable?Number(seen[c]||0):null;
+    const activity=n==null?'usage telemetry unavailable':`${n} calls recorded`;
+    return `<button class="ctab${c===SEL_CLIENT?' active':''}" data-client="${esc(c)}" title="${activity}">
+      <span class="tier-dot" style="background:${n>0?'#3fa266':'#4a5675'};${n>0?'box-shadow:0 0 8px #3fa266':''}"></span>${
+      esc(c)}<span class="ctab-n">${n==null?'—':n}</span></button>`}).join('');
   if($('mcpsnippet').textContent==='…')updSnippets();
-  const tools=rt?.tools||[];$('toolslabel').textContent=`Tool surface · ${rt?tools.length:'—'} · by billing`;$('toolcount').textContent=rt?tools.length:'—';
+  const registryAvailable=!!rt&&Array.isArray(rt.tools),tools=registryAvailable?rt.tools:[];
+  $('toolslabel').textContent=registryAvailable?`Tool surface · ${tools.length} · by billing`:'Tool surface · registry unavailable · —';
+  $('toolcount').textContent=registryAvailable?tools.length:'—';
   // group-by billing class, ranked by exposure severity (metered/destructive first)
   const billMeta={metered:{c:'#f0b95b',w:3},api_account:{c:'#58a6ff',w:2},conditional:{c:'#58e6d9',w:2},local_runtime:{c:'#7bafe9',w:1},non_metered:{c:'#4a5675',w:1}};
   const byBill={};tools.forEach(t=>byBill[t.billing_class]=(byBill[t.billing_class]||0)+1);
   cbars('toolbill',Object.entries(byBill).map(([k,v])=>({name:k,val:v,color:(billMeta[k]||{}).c||'#4a5675',w:(billMeta[k]||{}).w||0}))
-    .sort((a,b)=>(b.w-a.w)||(b.val-a.val)));
+    .sort((a,b)=>(b.w-a.w)||(b.val-a.val)),registryAvailable?{label:'tools exposed',value:'0'}:{label:'registry unavailable',value:'—'});
   const risk=tools.filter(t=>t.destructive).sort((a,b)=>(b.billing_class==='metered')-(a.billing_class==='metered'));
-  $('risklabel').textContent=`Destructive tools · ${rt?risk.length:'—'}`;
+  $('risklabel').textContent=`Destructive tools · ${registryAvailable?risk.length:'—'}`;
   // Registry-unavailable must not read as a "no destructive tools" safety claim.
-  $('risktools').innerHTML=!rt?'<tr><td colspan="3" class="empty">Registry unavailable.</td></tr>':
+  $('risktools').innerHTML=!registryAvailable?'<tr><td colspan="3" class="empty">Registry unavailable · —</td></tr>':
     risk.length?risk.map(t=>`<tr><td>${esc(t.name)} <span class="tool-flag">DELETE</span></td>
-    <td>${esc(t.plane)}</td><td><span class="lv-threat">${esc(t.confirmation_policy)}</span></td></tr>`).join(''):'<tr><td colspan="3" class="empty">No destructive tools exposed.</td></tr>';
-  $('tools').innerHTML=tools.length?tools.map(t=>`<tr><td>${esc(t.name)}${t.destructive?'<span class="tool-flag">DESTRUCTIVE</span>':''}</td>
+    <td>${esc(t.plane)}</td><td><span class="lv-threat">${esc(t.confirmation_policy)}</span></td></tr>`).join(''):
+      `<tr><td colspan="3" class="empty">${tools.length?'0 destructive tools among '+tools.length+' exposed tools.':'0 tools exposed by this runtime.'}</td></tr>`;
+  $('tools').innerHTML=!registryAvailable?'<tr><td colspan="5" class="empty">Registry unavailable · —</td></tr>':
+    tools.length?tools.map(t=>`<tr><td>${esc(t.name)}${t.destructive?'<span class="tool-flag">DESTRUCTIVE</span>':''}</td>
     <td>${esc(t.plane)}</td><td><span class="bill ${esc(t.billing_class)}">${esc(t.billing_class)}</span></td><td>${esc(t.confirmation_policy)}</td>
-    <td class="wrap">${esc(t.purpose)}</td></tr>`).join(''):'<tr><td colspan="5" class="empty">Registry unavailable.</td></tr>';
+    <td class="wrap">${esc(t.purpose)}</td></tr>`).join(''):'<tr><td colspan="5" class="empty">0 tools exposed by this runtime.</td></tr>';
   hydrateSkyLive(rt,b);
   if(tierLevel>=1)renderSky();
   if(tierLevel>=2)renderSpace(rt);
-  const bs=(b&&b.circuit_breakers)||{};$('breakers').innerHTML=Object.keys(bs).length?Object.entries(bs).map(([k,v])=>
-    `<div class="breaker ${v.open?'open':''}"><b>${esc(k)}</b> · <span class="lv-${v.open?'threat':'expected'}">${v.open?'OPEN':'closed'}</span> · failures ${v.failures} · trips ${v.trips}</div>`).join(''):'<div class="empty">No breaker activity this session — breakers arm on live provider traffic.</div>';
-  const recent=t.recent||[];$('recentcount').textContent=recent.length;
+  const benchmarkBreakersAvailable=!!b&&hasOwn(b,'circuit_breakers')&&b.circuit_breakers!=null&&typeof b.circuit_breakers==='object';
+  const runtimeBreakersAvailable=!!rt&&hasOwn(rt,'circuit_breakers')&&rt.circuit_breakers!=null&&typeof rt.circuit_breakers==='object';
+  const breakerTelemetryAvailable=benchmarkBreakersAvailable||runtimeBreakersAvailable;
+  const bs=benchmarkBreakersAvailable?b.circuit_breakers:runtimeBreakersAvailable?rt.circuit_breakers:{};
+  $('breakers').innerHTML=Object.keys(bs).length?Object.entries(bs).map(([k,v])=>
+    `<div class="breaker ${v.open?'open':''}"><b>${esc(k)}</b> · <span class="lv-${v.open?'threat':'expected'}">${v.open?'OPEN':'closed'}</span> · failures ${v.failures} · trips ${v.trips}</div>`).join(''):
+    breakerTelemetryAvailable?'<div class="breaker"><b>0 breaker events</b> · no failures or trips recorded this session</div>':
+      '<div class="breaker"><b>Breaker telemetry unavailable</b> · retrying the benchmark feed</div>';
+  const recent=receiptTelemetryAvailable?benchmarkTelemetry.recent:[];
+  $('recentcount').textContent=receiptTelemetryAvailable?recent.length:'—';
   // group-by outcome (from verified aggregate), colored by level
-  const vs=t.verified_samples||0,sr=t.verified_success_rate;
-  const pass=sr==null?0:Math.round(sr*vs),fail=Math.max(0,vs-pass),unver=Math.max(0,(t.sample_size||0)-vs);
-  cbars('outcomes',[{name:'pass',val:pass,color:'#3fa266'},{name:'fail',val:fail,color:'#dd7f76'},{name:'unverified',val:unver,color:'#4a5675'}]);
+  const outcomeAvailable=numberAvailable('sample_size')&&numberAvailable('verified_samples')&&
+    (Number(t.verified_samples)===0||numberAvailable('verified_success_rate'));
+  const vs=outcomeAvailable?Number(t.verified_samples):0;
+  const sr=outcomeAvailable&&numberAvailable('verified_success_rate')?Number(t.verified_success_rate):null;
+  const pass=sr==null?0:Math.round(sr*vs),fail=Math.max(0,vs-pass);
+  const unver=outcomeAvailable?Math.max(0,Number(t.sample_size)-vs):0;
+  cbars('outcomes',outcomeAvailable?[
+    {name:'pass',val:pass,color:'#3fa266'},
+    {name:'fail',val:fail,color:'#dd7f76'},
+    {name:'unverified',val:unver,color:'#4a5675'},
+  ]:[],outcomeAvailable?{label:'receipt outcomes',value:'0'}:{label:'outcome telemetry unavailable',value:'—'});
   // severity score per receipt: fail 100, fallback 40, slow (vs p95) up to 40, cost up to 30
-  const p95=t.latency_ms?.p95||0;
+  const p95=latencyAvailable&&p95Available?Number(t.latency_ms.p95):null;
   // NB: success arrives as 0/1 ints from SQLite JSON — never compare ===false.
   const rsev=r=>{let s=0;const f=[];if(r.verified&&!r.success){s+=100;f.push(['failed','threat']);}
     if(r.fallback_reason){s+=40;f.push(['fallback','warning']);}
-    const lat=r.latency_ms||0;if(p95>0&&lat>p95){s+=Math.min(40,20*lat/p95);f.push(['slow','warning']);}
+    const lat=r.latency_ms==null?null:Number(r.latency_ms);if(p95>0&&lat!=null&&lat>p95){s+=Math.min(40,20*lat/p95);f.push(['slow','warning']);}
     // Cost always weights the score, but only flags a receipt as a standout when
     // notably expensive — otherwise every metered call would swamp the panel.
     const c=Number(r.cost_usd||0);if(c>0){s+=Math.min(30,c*1000);if(c>=0.01)f.push(['$'+c.toFixed(4),'warning']);}
     return{s,f};};
   const flagged=recent.map(r=>({r,...rsev(r)})).filter(x=>x.f.length).sort((a,b)=>b.s-a.s).slice(0,8);
-  $('standoutlabel').textContent=`Receipts needing attention · ${flagged.length} of last ${recent.length}`;
-  $('standouts').innerHTML=flagged.length?flagged.map(({r,f})=>{const vc=r.verified?(r.success?'pass':'fail'):'unv',vl=r.verified?(r.success?'pass':'fail'):'unverified';
+  $('standoutlabel').textContent=receiptTelemetryAvailable?
+    `Receipts needing attention · ${flagged.length} of last ${recent.length}`:'Receipts needing attention · —';
+  $('standouts').innerHTML=!receiptTelemetryAvailable?
+    '<tr><td colspan="7" class="empty">Receipt telemetry unavailable · — · retrying.</td></tr>':
+    flagged.length?flagged.map(({r,f})=>{const vc=r.verified?(r.success?'pass':'fail'):'unv',vl=r.verified?(r.success?'pass':'fail'):'unverified';
     return `<tr><td>${esc((r.created_at||'').slice(11,19))}</td><td>${esc(r.caller)}</td><td>${esc(r.request_kind)}</td>
     <td class="flagcell">${f.map(([t2,l])=>`<span class="lv-${l}">${esc(t2)}</span>`).join('')}</td>
-    <td>${r.latency_ms||0} ms</td><td>$${Number(r.cost_usd||0).toFixed(4)}</td><td><span class="rc ${vc}">${vl}</span></td></tr>`}).join(''):
-    '<tr><td colspan="7" class="empty">No standout receipts — all nominal.</td></tr>';
-  $('recent').innerHTML=recent.map(r=>{const vc=r.verified?(r.success?'pass':'fail'):'unv',vl=r.verified?(r.success?'pass':'fail'):'unverified';
+    <td>${r.latency_ms==null?'—':Number(r.latency_ms).toLocaleString('en-US')+' ms'}</td>
+    <td>${r.cost_usd==null?'—':'$'+Number(r.cost_usd).toFixed(4)}</td><td><span class="rc ${vc}">${vl}</span></td></tr>`}).join(''):
+    `<tr><td colspan="7" class="empty">${recent.length?
+      `0 standouts across ${recent.length} receipts · no failure, fallback, or high-cost triggers.`:
+      '0 receipts recorded — nothing to evaluate yet.'}</td></tr>`;
+  $('recent').innerHTML=!receiptTelemetryAvailable?
+    '<tr><td colspan="12" class="empty">Receipt telemetry unavailable · — · retrying.</td></tr>':
+    recent.length?recent.map(r=>{const vc=r.verified?(r.success?'pass':'fail'):'unv',vl=r.verified?(r.success?'pass':'fail'):'unverified';
     return `<tr><td>${esc((r.created_at||'').slice(11,19))}</td><td>${r.id}</td><td>${esc(r.caller)}</td>
     <td>${esc(r.request_kind)}</td><td>${esc(r.route)}</td><td>${esc(r.resolved_plane)}</td>
-    <td>${esc(r.model)}</td><td>${r.latency_ms||0} ms</td><td>$${Number(r.cost_usd||0).toFixed(4)}</td><td>${esc(r.fallback_reason)}</td>
-    <td>${esc(r.stop_reason)}</td><td><span class="rc ${vc}">${vl}</span></td></tr>`}).join('');
-}catch(e){$('service').textContent='Service unavailable';$('service').className='pill lv-threat';$('updated').textContent='Retrying …';}
+    <td>${esc(r.model)}</td><td>${r.latency_ms==null?'—':Number(r.latency_ms).toLocaleString('en-US')+' ms'}</td>
+    <td>${r.cost_usd==null?'—':'$'+Number(r.cost_usd).toFixed(4)}</td><td>${esc(r.fallback_reason)}</td>
+    <td>${esc(r.stop_reason)}</td><td><span class="rc ${vc}">${vl}</span></td></tr>`}).join(''):
+      '<tr><td colspan="12" class="empty">0 receipts recorded — activity appears after the first request.</td></tr>';
+}catch(e){$('service').textContent='Service unavailable';$('service').className='pill lv-threat';$('updated').textContent='Retrying …';
+  markStillLoadingUnavailable();}
   finally{refresh.busy=false;}}
 refresh();setInterval(refresh,10000);
 </script></body></html>
