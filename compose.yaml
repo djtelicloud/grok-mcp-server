@@ -49,7 +49,9 @@ services:
       UNIGROK_ENABLE_METERED_API: ${UNIGROK_ENABLE_METERED_API:-true}
       UNIGROK_API_MODEL: ${UNIGROK_API_MODEL:-}
       # Control Center tier nav: per-tier URLs win, host ports are the fallback.
-      UNIGROK_PUBLIC_PORT: ${UNIGROK_PORT:-4765}
+      # Public navigation stays bound to canonical core even when this
+      # container itself is a Forge rehearsal on another host port.
+      UNIGROK_PUBLIC_PORT: ${UNIGROK_PUBLIC_PORT:-4765}
       UNIGROK_SKY_PORT: ${UNIGROK_SKY_PORT:-4768}
       UNIGROK_SPACE_PORT: ${UNIGROK_SPACE_PORT:-4769}
       UNIGROK_PUBLIC_URL: ${UNIGROK_PUBLIC_URL:-}

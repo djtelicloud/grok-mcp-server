@@ -51,7 +51,11 @@ def test_ui_serves_baked_dashboard_by_default() -> None:
     response = asyncio.run(server.control_center(_request()))
     assert response.status_code == 200
     assert b"<script nonce=" in response.body
-    assert "script-src 'self' 'nonce-" in response.headers["content-security-policy"]
+    csp = response.headers["content-security-policy"]
+    assert "script-src 'self' 'nonce-" in csp
+    assert "connect-src 'self'" in csp
+    assert "127.0.0.1:4768" not in csp
+    assert "127.0.0.1:4769" not in csp
 
 
 def test_ui_ignores_authorization_header() -> None:
@@ -165,7 +169,11 @@ def test_ui_asset_blocks_symlink_escape(
 
 
 def test_control_plane_401_on_forge_surface(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def no_control_session(_: object) -> None:
+        return None
+
     monkeypatch.setattr(server, "SURFACE", "forge")
+    monkeypatch.setattr(server.github_auth, "control_session_info", no_control_session)
     response = asyncio.run(server.forge_identity(_request("/api/me")))
     assert response.status_code == 401
     assert "www-authenticate" not in {k.lower() for k in response.headers}
