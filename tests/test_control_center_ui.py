@@ -210,6 +210,23 @@ def test_tier_nav_renders_all_three_surfaces() -> None:
     assert "function applyTier(" in html and "$('pagetitle').textContent" in html
 
 
+def test_forge_omniaware_inshell_surface() -> None:
+    # Forge leftover: Surface tabs switch in-shell (no full-nav to deprecated
+    # per-port /ui/), Space stays hidden, sky panels hydrate from same-origin
+    # feeds only (CSP connect-src 'self').
+    html = DASHBOARD.read_text(encoding="utf-8")
+    assert "function bindForgeOmniaware(rt)" in html
+    assert "function selectTier(id)" in html
+    assert "function isForgeSurface(rt)" in html
+    assert "rt.surface==='forge'" in html
+    assert "dataset.inshell" in html
+    assert "if(forgeSurface)$('space-tier').style.display='none'" in html
+    assert "history.replaceState" in html
+    assert "function hydrateSkyLive(rt,b)" in html
+    assert "No cross-port" in html or "no cross-port" in html
+    assert "UI_BUILD" in html and "r26" in html
+
+
 def test_tier_scoped_panels_present_and_gated() -> None:
     # Sky/Space panels exist but are display:none by default; JS reveals them
     # only when the active tier warrants (hierarchical scoping). Sample data is
@@ -313,7 +330,7 @@ def test_tier_nav_ports_are_bounded_env_values() -> None:
     assert 'if not is_cloudrun_runtime():' in gate
     assert '"tier_nav"' in gate
     # /runtimez surfaces the tier feeds the deck consumes.
-    for key in ('"layer"', '"task_rag"', '"credential_planes"', '"fact_count"'):
+    for key in ('"layer"', '"surface"', '"task_rag"', '"credential_planes"', '"fact_count"'):
         assert key in gate
 
 
@@ -325,6 +342,7 @@ def test_dashboard_consumes_server_tier_truth() -> None:
     assert "rt.tier_nav" in html
     assert "nav.url" in html and "nav.port" in html
     assert "LEVEL[rt.layer]" in html
+    assert "bindForgeOmniaware(rt)" in html
     assert "applyRuntimeTier(rt);" in html
     # Credential-planes posture renders server truth, threat when no plane.
     assert "rt?.credential_planes" in html

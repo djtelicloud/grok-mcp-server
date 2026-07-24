@@ -7245,6 +7245,9 @@ async def runtimez(_: Request) -> JSONResponse:
             "version": __version__,
             "mode": "public_core",
             "layer": UNIGROK_LAYER or "public",
+            # Surface is orthogonal to layer: forge is the contributor console
+            # seat (UNIGROK_SURFACE=forge) even when layer stays "public".
+            "surface": SURFACE,
             "workspace_attached": False,
             "requires_project_files": False,
             "state_persistence": runtime_contract["state_persistence"],

@@ -295,7 +295,7 @@ const METERED_KINDS=new Set(['web_search','x_search','remote_code_execution','ch
 const KIND_COL=n=>METERED_KINDS.has(n)?lvHex.warning:'#4a5675';   // metered (costs) vs free (neutral)
 const ROUTE_COL=n=>n==='error'?lvHex.threat:GRADFILL;             // only error carries a level
 const MODEL_COL=()=>GRADFILL;                                     // model choice has no severity
-const UI_BUILD='unigrok-ui-v1.1.0-r25';
+const UI_BUILD='unigrok-ui-v1.1.0-r26';
 const CLOUD_AUTO_KEY='unigrok-cloud-auto-r25',CLOUD_RESUME_KEY='unigrok-cloud-resume-r25';
 const CONTROL_START_FAILED=new URLSearchParams(location.search).get('control')==='unavailable';
 // Unified 3-tier switcher: each tab links to its own surface on the same host.
@@ -303,6 +303,9 @@ const CONTROL_START_FAILED=new URLSearchParams(location.search).get('control')==
 // container show a higher tier's panels for review. Hierarchical scoping:
 // each tier renders its own panels plus every lower tier's. Higher tiers still
 // enforce their own auth on arrival — this is navigation, not access.
+// Forge omniaware (r26): when /runtimez.surface==='forge', tabs switch
+// in-shell (activeTier + ?preview=) instead of full-nav to deprecated
+// per-port /ui/; Space tab stays hidden (SPACE=DARK).
 const TIERS=[
   {id:'public',label:'@grok Public Core',port:'4765',name:'GroundCommand',eyebrow:'public core'},
   {id:'sky',label:'@skygrok Sky Observer',port:'4768',name:'SkyCommand',eyebrow:'sky observer'},
@@ -310,9 +313,10 @@ const TIERS=[
 ];
 const LEVEL={public:0,sky:1,space:2};
 const herePort=location.port||(location.protocol==='https:'?'443':'80');
-const preview=new URLSearchParams(location.search).get('preview');
+let preview=new URLSearchParams(location.search).get('preview');
 const portTier=(TIERS.find(t=>t.port===herePort)||{}).id||'public';
 let runtimeTier=portTier,sessionTier=null;
+let forgeSurface=false;
 let activeTier=(preview&&LEVEL[preview]!=null)?preview:runtimeTier;
 let tierLevel=LEVEL[activeTier];
 document.getElementById('tiernav').insertAdjacentHTML('beforeend',TIERS.map(t=>{
@@ -321,6 +325,46 @@ document.getElementById('tiernav').insertAdjacentHTML('beforeend',TIERS.map(t=>{
   return `<a class="tier-tab" data-tier="${t.id}" href="${href}" title="${tip}">`+
     `<span class="tier-dot ${t.id}"></span>${t.label}</a>`;
 }).join(''));
+function selectTier(id){
+  if(LEVEL[id]==null)return;
+  if(forgeSurface&&id==='space')return;
+  preview=(id===runtimeTier)?null:id;
+  activeTier=id;
+  const u=new URL(location.href);
+  if(preview)u.searchParams.set('preview',preview);else u.searchParams.delete('preview');
+  history.replaceState(null,'',u.pathname+u.search+u.hash);
+  applyTier();
+  if(tierLevel>=1)renderSky();
+  if(tierLevel>=2)renderSpace(LAST_RT);
+}
+function isForgeSurface(rt){
+  // Prefer server truth (/runtimez.surface). Factory fallback: public tier_nav
+  // remapped onto this origin (forge :4766 / r25 :4776) — never treat :4765 core
+  // or hosted (no tier_nav) as forge.
+  if(rt&&rt.surface==='forge')return true;
+  const pub=rt&&rt.tier_nav&&rt.tier_nav.public;if(!pub)return false;
+  if(['4765','80','443',''].includes(String(herePort)))return false;
+  const self=location.origin.replace(/\/$/,'');
+  if(pub.url&&String(pub.url).replace(/\/$/,'')===self)return true;
+  return String(pub.port||'')===String(herePort);
+}
+function bindForgeOmniaware(rt){
+  if(!isForgeSurface(rt))return;
+  forgeSurface=true;
+  document.body.dataset.surface='forge';
+  if(preview==='space'){preview='sky';activeTier='sky';}
+  document.querySelectorAll('.tier-tab').forEach(a=>{
+    const id=a.dataset.tier;
+    if(id==='space'){a.hidden=true;a.style.display='none';a.setAttribute('aria-hidden','true');return;}
+    a.dataset.inshell='1';
+    a.href=id==='public'||id===runtimeTier?'/ui/':`/ui/?preview=${id}`;
+    a.title=`switch to ${id} Surface in-shell — stay on forge`;
+  });
+  const note=document.querySelector('#sky-tier .tiernote');
+  if(note)note.textContent='live same-origin feeds on forge · CSP-safe · no cross-port fetch';
+  const badge=document.querySelector('#sky-tier .tierhead .sample');
+  if(badge){badge.textContent='LIVE';badge.title='same-origin /runtimez + /benchmarkz';}
+}
 // Command Drawer: an index of this deck mirroring the control-site groups.
 // Items anchor-scroll to their panel; contributor items are hidden on the
 // public tier (veil) and render locked-with-hint one tier below their home.
@@ -354,16 +398,21 @@ function renderDrawer(){
   }).join('');
 }
 // Tier identity: title, eyebrow, tab highlight, and hierarchical panel reveal.
-function applyTier(){const ti=TIERS.find(x=>x.id===activeTier)||TIERS[0];
+function applyTier(){
+  if(forgeSurface&&activeTier==='space')activeTier='sky';
+  const ti=TIERS.find(x=>x.id===activeTier)||TIERS[0];
   tierLevel=LEVEL[activeTier];
+  if(forgeSurface)tierLevel=Math.min(tierLevel,1);
   $('pagetitle').textContent=ti.name;document.title=`${ti.name} · UniGrok`;
-  $('eyebrow').textContent=`UniGrok 1.1 · ${ti.eyebrow}`;
+  $('eyebrow').textContent=`UniGrok 1.1 · ${ti.eyebrow}${forgeSurface?' · forge':''}`;
   document.querySelectorAll('.tier-tab').forEach(a=>a.classList.toggle('active',a.dataset.tier===activeTier));
   $('sky-tier').style.display=tierLevel>=1?'':'none';
   $('space-tier').style.display=tierLevel>=2?'':'none';
+  if(forgeSurface)$('space-tier').style.display='none';
   renderDrawer();
 }
 function reconcileTier(){
+  if(forgeSurface&&preview==='space')preview='sky';
   if(preview&&LEVEL[preview]!=null)activeTier=preview;
   else activeTier=sessionTier&&LEVEL[sessionTier]>LEVEL[runtimeTier]?sessionTier:runtimeTier;
   applyTier();
@@ -373,11 +422,15 @@ applyTier();
 // instance actually serves, and tier_nav carries the Docker-configured host
 // ports (loopback-bound; the hosted runtime omits the block). ?preview= keeps
 // review priority; absent feeds change nothing.
+let LAST_RT=null;
 function applyRuntimeTier(rt){
   if(!rt)return;
+  LAST_RT=rt;
+  bindForgeOmniaware(rt);
   // Each tier may live on its own origin (factory URLs from the env); the
   // port is only the same-host fallback when no URL is configured.
-  if(rt.tier_nav){TIERS.forEach(ti=>{const nav=rt.tier_nav[ti.id];if(!nav)return;
+  // On forge, keep in-shell hrefs — do not rewrite tabs back to foreign ports.
+  if(rt.tier_nav&&!forgeSurface){TIERS.forEach(ti=>{const nav=rt.tier_nav[ti.id];if(!nav)return;
     const a=document.querySelector(`.tier-tab[data-tier="${ti.id}"]`);if(!a)return;
     if(nav.url){a.href=`${nav.url}/ui/`;}
     else if(nav.port){ti.port=String(nav.port);a.href=`${location.protocol}//${location.hostname}:${ti.port}/ui/`;}});}
@@ -386,6 +439,8 @@ function applyRuntimeTier(rt){
 }
 // One delegated click handler for the drawer (open/close/navigate) + Esc.
 document.addEventListener('click',e=>{
+  const tab=e.target.closest('.tier-tab');
+  if(tab&&forgeSurface&&tab.dataset.inshell){e.preventDefault();selectTier(tab.dataset.tier);return;}
   const gh=e.target.closest('#signin');
   if(e.target.closest('#deviceauth')){e.preventDefault();ghStart();return;}
   if(gh&&gh.dataset.ghout){e.preventDefault();ghOut();return;}
@@ -443,6 +498,20 @@ const SPACE={
   ]},
   devices:[{name:'MacBook Pro — this machine',linked:'Jul 19',status:'linked'}],
 };
+function hydrateSkyLive(rt,b){
+  // CSP-safe: only same-origin /runtimez + /benchmarkz. No cross-port pull.
+  const bs=(b&&b.circuit_breakers)||(rt&&rt.circuit_breakers)||{};
+  if(Object.keys(bs).length){
+    SKY.breakers=Object.entries(bs).map(([name,v])=>({
+      name,open:!!v.open,failures:Number(v.failures||0),trips:Number(v.trips||0)}));
+  }
+  const p95=Number(rt?.benchmark_summary?.latency_ms?.p95
+    ||b?.latency_ms?.p95||0);
+  if(p95>0){
+    const port=herePort||TIERS.find(t=>t.id==='public')?.port||'4766';
+    SKY.latency=[{port:String(port),surface:forgeSurface?'forge console':'this origin',p95}];
+  }
+}
 function renderSky(){
   const laneLv={active:'great',idle:'expected',probe:'good'};
   $('swarmgrid').innerHTML=SKY.lanes.map(l=>`<div class="lane"><span class="lane-tag">${esc(l.tag)}</span>
@@ -678,6 +747,7 @@ async function refresh(){if(refresh.busy)return;refresh.busy=true;try{const [rea
   $('tools').innerHTML=tools.length?tools.map(t=>`<tr><td>${esc(t.name)}${t.destructive?'<span class="tool-flag">DESTRUCTIVE</span>':''}</td>
     <td>${esc(t.plane)}</td><td><span class="bill ${esc(t.billing_class)}">${esc(t.billing_class)}</span></td><td>${esc(t.confirmation_policy)}</td>
     <td class="wrap">${esc(t.purpose)}</td></tr>`).join(''):'<tr><td colspan="5" class="empty">Registry unavailable.</td></tr>';
+  hydrateSkyLive(rt,b);
   if(tierLevel>=1)renderSky();
   if(tierLevel>=2)renderSpace(rt);
   const bs=(b&&b.circuit_breakers)||{};$('breakers').innerHTML=Object.keys(bs).length?Object.entries(bs).map(([k,v])=>
