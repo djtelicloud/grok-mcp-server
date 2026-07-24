@@ -75,6 +75,11 @@ from a lower tier (`AGENTS.md` boundary).
 group-by), like the top of the board. Only genuine **standouts** drop to a
 compact table; the full list is tucked behind a `<details>`:
 
+**Measured zero, never “no data.”** A healthy feed with no matching events
+renders an explicit zero row (for example, `fallback events · 0`). A failed
+feed renders `unavailable · —`. Valid zeros and transport failures are never
+collapsed into the same empty placeholder.
+
 - Tool surface → billing-class bar chart → destructive-tools standout table →
   full 29-tool registry collapsed.
 - Receipts → outcome bar chart (pass/fail/unverified) → severity-ranked

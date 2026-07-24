@@ -141,7 +141,10 @@ def test_null_feed_never_fabricates_safe_state() -> None:
     build_guard = "if(!rt){$('build').innerHTML="
     assert build_guard in html and "runtime unavailable" in html
     assert "if(!rt){$('policy').innerHTML=" in html
-    assert "!rt?'<tr><td colspan=\"3\" class=\"empty\">Registry unavailable.</td></tr>'" in html
+    assert (
+        "!registryAvailable?'<tr><td colspan=\"3\" class=\"empty\">"
+        "Registry unavailable · —</td></tr>'"
+    ) in html
     assert "rt?.state_backend||'sqlite'" not in html
     assert "Service unreachable" in html
     # independent per-feed catches so one failure can't sink the others
@@ -233,7 +236,7 @@ def test_forge_nav_is_port_bound_and_space_is_advertised() -> None:
     assert "activeTier='sky'" not in html
     assert "function hydrateSkyLive(rt,b)" in html
     assert "No cross-port" in html or "no cross-port" in html
-    assert "UI_BUILD" in html and "r29" in html
+    assert "UI_BUILD" in html and "r30" in html
 
 
 def test_mobile_tier_nav_is_compact_and_overflow_safe() -> None:
@@ -249,6 +252,19 @@ def test_mobile_tier_nav_is_compact_and_overflow_safe() -> None:
     assert ".kv{grid-template-columns:minmax(68px,auto) minmax(0,1fr)" in html
     assert ".kv b{min-width:0;overflow-wrap:anywhere}" in html
     assert "@media(max-width:360px){.tier-dot{display:none}" in html
+
+
+def test_valid_zero_counts_never_render_as_missing_data() -> None:
+    html = DASHBOARD.read_text(encoding="utf-8")
+    assert "No data." not in html
+    assert "emptyState={label:'events recorded',value:'0'}" in html
+    assert "renderBuckets('fallbacks','fallbacks',()=>lvHex.warning,'fallback events'," in html
+    assert "xs=>xs.filter(x=>x.name!=='unknown')" in html
+    assert "<b>0 breaker events</b>" in html
+    assert "Breaker telemetry unavailable" in html
+    assert "telemetry unavailable" in html
+    assert "0 receipts recorded — nothing to evaluate yet." in html
+    assert "0 receipts recorded — activity appears after the first request." in html
 
 
 def test_explicit_non_forge_surface_bypasses_legacy_port_fallback() -> None:
@@ -282,7 +298,10 @@ def test_space_unavailable_never_falls_back_to_same_origin_preview() -> None:
     assert ".get('preview')" not in html
     assert "?preview=" not in html
     assert "id==='space'?'upgrade: opens SpaceCommand" in html
-    assert "feedJson=r=>r.ok?r.json():Promise.reject" in html
+    assert "const feedJson=async(r,allow503=false)" in html
+    assert "fetchFeed('/readyz',true)" in html
+    assert "fetchFeed('/benchmarkz')" in html
+    assert "fetchFeed('/runtimez')" in html
     assert "connect-src 'self'" not in html  # CSP is server-owned, never widened here.
 
 
@@ -300,9 +319,11 @@ def test_sky_badge_tracks_live_payloads_without_hiding_samples() -> None:
     assert "live.length?'MIXED':'SAMPLE'" in state
     assert "lanes','reviews','run" in state
     assert "hasBreakers=false,hasLatency=false" in hydrate
-    assert "SKY_SAMPLE_BREAKERS.map" in hydrate
-    assert "SKY_SAMPLE_LATENCY.map" in hydrate
-    assert "Number.isFinite(p95)&&p95>0" in hydrate
+    assert "b?.telemetry&&typeof b.telemetry==='object'" in hydrate
+    assert "SKY.breakers=null" in hydrate
+    assert "SKY.latency=null" in hydrate
+    assert "SKY.latencySamples===0" in hydrate
+    assert "Number.isFinite(Number(rawP95))" in hydrate
     assert "setSkyHydrationState(hasBreakers,hasLatency)" in hydrate
     assert "return {breakers:hasBreakers,latency:hasLatency}" in hydrate
 
@@ -447,7 +468,7 @@ def test_dashboard_identity_states_follow_gateway_truth() -> None:
     # Control OAuth first with the device-code path retained as fallback.
     html = DASHBOARD.read_text(encoding="utf-8")
     assert "function applyIdentity(me)" in html
-    assert "fetch('/api/me')" in html
+    assert "fetch('/api/me',{signal:AbortSignal.timeout(5000)})" in html
     assert "el.textContent=me.login" in html
     assert "Signed in · ${me.login}" not in html
     assert "Continue with Cloud" in html
@@ -491,6 +512,28 @@ def test_identity_never_relabels_same_origin_data_as_another_tier() -> None:
 
 def test_non_2xx_live_feeds_degrade_honestly() -> None:
     html = DASHBOARD.read_text(encoding="utf-8")
-    assert "const feedJson=r=>r.ok?r.json():Promise.reject" in html
-    for endpoint in ("readyz", "benchmarkz", "runtimez"):
-        assert f"fetch('/{endpoint}').then(feedJson).catch(()=>null)" in html
+    assert "const feedJson=async(r,allow503=false)" in html
+    assert "r.ok||(allow503&&r.status===503)" in html
+    assert "fetchFeed('/readyz',true)" in html
+    for endpoint in ("benchmarkz", "runtimez"):
+        assert f"fetchFeed('/{endpoint}')" in html
+    assert "AbortSignal.timeout(5000)" in html
+
+
+def test_every_live_container_starts_non_blank_and_telemetry_is_field_scoped() -> None:
+    html = DASHBOARD.read_text(encoding="utf-8")
+    assert "function primeDataContainers()" in html
+    assert "Loading live data …" in html
+    assert "const numberAvailable=k=>" in html
+    assert "const bucketAvailable=k=>" in html
+    assert "receiptTelemetryAvailable" in html
+    assert "outcomeAvailable" in html
+    assert "breakerTelemetryAvailable" in html
+
+
+def test_empty_tool_registry_is_distinct_from_missing_registry() -> None:
+    html = DASHBOARD.read_text(encoding="utf-8")
+    assert "const registryAvailable=!!rt&&Array.isArray(rt.tools)" in html
+    assert "0 tools exposed by this runtime." in html
+    assert "Registry unavailable · —" in html
+    assert "0 destructive tools among " in html
