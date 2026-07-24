@@ -24,7 +24,7 @@ def _request(
 ) -> Request:
     request_headers = list(headers or [])
     if not any(name.lower() == b"host" for name, _ in request_headers):
-        request_headers.insert(0, (b"host", b"127.0.0.1:4765"))
+        request_headers.insert(0, (b"host", b"127.0.0.1:4766"))
     scope = {
         "type": "http",
         "method": "GET",
@@ -183,10 +183,29 @@ def test_forge_auth_rejects_non_loopback_host(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr(server, "SURFACE", "forge")
     response = asyncio.run(
         server.forge_identity(
-            _request("/api/me", headers=[(b"host", b"attacker.example:4765")])
+            _request("/api/me", headers=[(b"host", b"attacker.example:4766")])
         )
     )
     assert response.status_code == 403
+
+
+def test_forge_auth_origin_is_independent_from_public_nav(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(server, "SURFACE", "forge")
+    monkeypatch.setenv("UNIGROK_PUBLIC_URL", "http://127.0.0.1:4765")
+    monkeypatch.setenv("UNIGROK_FORGE_URL", "http://127.0.0.1:4766")
+
+    assert (
+        server._forge_control_callback_url()
+        == "http://127.0.0.1:4766/auth/control/callback"
+    )
+    assert server._forge_auth_guard(_request("/api/me")) is None
+    rejected = server._forge_auth_guard(
+        _request("/api/me", headers=[(b"host", b"127.0.0.1:4765")])
+    )
+    assert rejected is not None
+    assert rejected.status_code == 403
 
 
 def test_loopback_check_ignores_forwarded_for() -> None:

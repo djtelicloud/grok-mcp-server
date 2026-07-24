@@ -48,6 +48,10 @@ native full navigation; the destination page reads only its own same-origin
 feeds. Forge is not a data proxy and never relabels its own feeds as Sky or
 Space.
 
+The top-tab labels stay deliberately terse: `@grok`, `@skygrok`, and
+`@spacegrok`. The destination page title and eyebrow carry the longer
+GroundCommand/SkyCommand/SpaceCommand description.
+
 **Hierarchical scoping:** each tier renders its own panels plus every lower
 tier's; panels above the active tier are `display:none`. Public visitors see only
 public panels. Higher tiers still enforce their own auth on arrival — the nav is
@@ -286,6 +290,10 @@ public. No password ever touches the deck; every failure keeps its honest name
 device session remains usable and the remembered Control token is retained.
 Forge auth mutations require a non-simple same-loopback request, preventing a
 foreign page from silently unlinking the machine.
+Forge's canonical auth/cookie origin comes from `UNIGROK_FORGE_URL` (or the
+`UNIGROK_FORGE_PORT` fallback) and is intentionally independent from
+`UNIGROK_PUBLIC_URL`/`UNIGROK_PUBLIC_PORT`. The switchboard can therefore send
+`@grok` to public core `:4765` without breaking Forge login on `:4766`.
 
 Signed-out is never dressed up; the granted tier is server truth, so the
 GitHub gate — not the client — controls what data shows.

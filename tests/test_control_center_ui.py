@@ -201,33 +201,39 @@ def test_tier_nav_renders_all_three_surfaces() -> None:
     # Full tuples, not bare ports (a port can appear in unrelated sample data).
     # Each tier carries its command name + eyebrow for the dynamic page title.
     for tup in (
-        "{id:'public',label:'@grok Public Core',port:'4765',name:'GroundCommand'",
-        "{id:'sky',label:'@skygrok Sky Observer',port:'4768',name:'SkyCommand'",
-        "{id:'space',label:'@spacegrok Space Awareness',port:'4769',name:'SpaceCommand'",
+        "{id:'public',label:'@grok',port:'4765',name:'GroundCommand'",
+        "{id:'sky',label:'@skygrok',port:'4768',name:'SkyCommand'",
+        "{id:'space',label:'@spacegrok',port:'4769',name:'SpaceCommand'",
     ):
         assert tup in html
+    for verbose_label in (
+        "@grok Public Core",
+        "@skygrok Sky Observer",
+        "@spacegrok Space Awareness",
+    ):
+        assert f"label:'{verbose_label}'" not in html
     # applyTier drives title/eyebrow/tab state from the active tier
     assert "function applyTier(" in html and "$('pagetitle').textContent" in html
 
 
 def test_forge_nav_is_port_bound_and_space_is_advertised() -> None:
     # Forge uses the same native, per-origin navigation as every other surface.
-    # Space stays visible as an access-dependent upgrade; it is never replaced
-    # by a same-origin sample shell.
+    # Space stays visible as an access-dependent destination; the tab itself
+    # keeps the exact terse label and is never replaced by a sample shell.
     html = DASHBOARD.read_text(encoding="utf-8")
     assert "function bindForgeSurface(rt)" in html
     assert "function isForgeSurface(rt)" in html
     assert "if(surface)return surface==='forge'" in html
     assert "if(rt.tier_nav)" in html
     assert "if(rt.tier_nav&&!forgeSurface)" not in html
-    assert '<span class="tier-access">upgrade</span>' in html
+    assert "tier-access" not in html
     assert "upgrade: opens SpaceCommand and its live data" in html
     assert "dataset.inshell" not in html
     assert "a.hidden=true" not in html
     assert "activeTier='sky'" not in html
     assert "function hydrateSkyLive(rt,b)" in html
     assert "No cross-port" in html or "no cross-port" in html
-    assert "UI_BUILD" in html and "r27" in html
+    assert "UI_BUILD" in html and "r28" in html
 
 
 def test_explicit_non_forge_surface_bypasses_legacy_port_fallback() -> None:
@@ -394,6 +400,8 @@ def test_tier_nav_ports_are_bounded_env_values() -> None:
     compose = Path("compose.yaml").read_text(encoding="utf-8")
     assert "UNIGROK_PUBLIC_PORT: ${UNIGROK_PUBLIC_PORT:-4765}" in compose
     assert "UNIGROK_PUBLIC_PORT: ${UNIGROK_PORT:-4765}" not in compose
+    assert "UNIGROK_FORGE_PORT: ${UNIGROK_FORGE_PORT:-4766}" in compose
+    assert "UNIGROK_FORGE_URL: ${UNIGROK_FORGE_URL:-}" in compose
 
 
 def test_dashboard_consumes_server_tier_truth() -> None:
