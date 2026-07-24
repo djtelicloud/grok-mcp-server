@@ -85,6 +85,11 @@ def _reset_local_slots() -> None:
     server._LOCAL_SLOTS_BUDGET = None
 
 
+def test_local_concurrency_globals_exist_before_first_failover() -> None:
+    assert hasattr(server, "_LOCAL_SLOTS")
+    assert hasattr(server, "_LOCAL_SLOTS_BUDGET")
+
+
 def _local_catalog(ready: bool = True, model_id: str = "synth-model-1") -> dict:
     return {
         "cli": {
