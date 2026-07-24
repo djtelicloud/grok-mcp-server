@@ -41,23 +41,25 @@ exactly one inline script.
 
 ## Three trust tiers, one page
 
-The same baked page serves all three surfaces. A unified switcher (`#tiernav`)
-links each tier to its own port on the current host — public `4765`, sky `4768`,
-space `4769` — and the active tier is derived from the port. Every tier click is
-native full navigation; the destination page reads only its own same-origin
-feeds. Forge is not a data proxy and never relabels its own feeds as Sky or
-Space.
+The same baked page serves all three tier surfaces. A unified switcher
+(`#tiernav`) links each available tier to its own port on the current host —
+public `4765`, sky `4768`, space `4769` — and the active tier is derived from
+the port. Every tier click is native full navigation; the destination page
+reads only its own same-origin feeds. Forge is not a data proxy and never
+relabels its own feeds as Sky or Space.
 
-The top-tab labels stay deliberately terse: `@grok`, `@skygrok`, and
-`@spacegrok`. The destination page title and eyebrow carry the longer
-GroundCommand/SkyCommand/SpaceCommand description.
+The top-tab labels stay deliberately terse: `@grok`, `@skygrok`, and, where
+allowed, `@spacegrok`. The contributor Forge on `4766` is deliberately limited
+to `@grok` and `@skygrok`: `SPACE=DARK` removes the Space tab and all Space
+upgrade chrome without removing the sanctioned Sky coach route. The
+destination page title and eyebrow carry the longer command description.
 
 **Hierarchical scoping:** each tier renders its own panels plus every lower
 tier's; panels above the active tier are `display:none`. Public visitors see only
 public panels. Higher tiers still enforce their own auth on arrival — the nav is
-navigation, not access. The Space tab stays visible as an access-dependent
-upgrade advertisement. If its loopback port is absent, navigation fails
-honestly; there is no Sky fallback or sample-as-live replacement.
+navigation, not access. Non-Forge tier shells may expose the Space destination;
+the contributor Forge never does. If an exposed loopback destination is absent,
+navigation fails honestly; there is no fallback or sample-as-live replacement.
 
 | Tier | Port | Panels |
 | --- | --- | --- |
@@ -216,9 +218,10 @@ control.grokmcp.org, never local), review ops, run trigger, team assignment.
 sealed-report publication.
 
 `SPACE=DARK` still means zero-write awareness, no Ground-to-Space MCP wiring,
-and no public model promotion. The visible Space navigation tab is the narrow
-exception: it advertises the higher tier and relies on port reachability plus
-the destination's own controls; it does not grant Space authority.
+and no public model promotion. The contributor Forge therefore removes the
+Space destination entirely. A Space link may exist only on an appropriate
+higher-tier shell, relying on port reachability plus that destination's own
+controls; it never grants Space authority.
 
 ### Credential inheritance — upward trickle
 

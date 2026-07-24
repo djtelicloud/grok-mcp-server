@@ -6788,6 +6788,8 @@ def _ui_index_response(index_path: Path) -> HTMLResponse:
     # console uses only same-origin external files, which 'self' covers).
     nonce = secrets.token_urlsafe(16)
     html = index_path.read_text(encoding="utf-8")
+    ui_surface = SURFACE if SURFACE in {"public", "forge", "sky", "space"} else "public"
+    html = html.replace("__UNIGROK_SURFACE_JSON__", json.dumps(ui_surface), 1)
     html = html.replace("<script>", f'<script nonce="{nonce}">', 1)
     csp = (
         "default-src 'self'; "

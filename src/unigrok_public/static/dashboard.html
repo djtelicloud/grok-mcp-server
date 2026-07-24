@@ -178,6 +178,9 @@
       .tier-tab[data-tier="public"]{grid-column:2;grid-row:1}
       .tier-tab[data-tier="sky"]{grid-column:3;grid-row:1}
       .tier-tab[data-tier="space"]{grid-column:4;grid-row:1}
+      .tier-nav[data-surface="forge"]{grid-template-columns:44px repeat(2,minmax(0,1fr))}
+      .tier-nav[data-surface="forge"] .tier-tab[data-tier="public"]{grid-column:2}
+      .tier-nav[data-surface="forge"] .tier-tab[data-tier="sky"]{grid-column:3}
       .signin{grid-column:1/-1;grid-row:2;width:100%;min-width:0;min-height:44px;margin-left:0;
         justify-content:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
       .signin-alt{grid-column:1/-1;grid-row:3;min-height:44px;align-items:center;justify-content:center;
@@ -321,7 +324,7 @@ const METERED_KINDS=new Set(['web_search','x_search','remote_code_execution','ch
 const KIND_COL=n=>METERED_KINDS.has(n)?lvHex.warning:'#4a5675';   // metered (costs) vs free (neutral)
 const ROUTE_COL=n=>n==='error'?lvHex.threat:GRADFILL;             // only error carries a level
 const MODEL_COL=()=>GRADFILL;                                     // model choice has no severity
-const UI_BUILD='unigrok-ui-v1.1.0-r30';
+const UI_BUILD='unigrok-ui-v1.1.0-r31';
 const CLOUD_AUTO_KEY='unigrok-cloud-auto-r25',CLOUD_RESUME_KEY='unigrok-cloud-resume-r25';
 const CONTROL_START_FAILED=new URLSearchParams(location.search).get('control')==='unavailable';
 // Unified 3-tier switcher: every tab is native navigation to that tier's own
@@ -329,7 +332,8 @@ const CONTROL_START_FAILED=new URLSearchParams(location.search).get('control')==
 // displayed data can never drift apart. Hierarchical scoping: each tier
 // renders its own panels plus every lower tier's. Higher tiers enforce their
 // own reachability/auth on arrival — navigation advertises access, never
-// grants it. Space remains visible as an access-dependent upgrade.
+// grants it. Contributor Forge is the exception: SPACE=DARK removes its Space
+// destination entirely while retaining the sanctioned Sky coach route.
 const TIERS=[
   {id:'public',label:'@grok',port:'4765',name:'GroundCommand',eyebrow:'public core'},
   {id:'sky',label:'@skygrok',port:'4768',name:'SkyCommand',eyebrow:'sky observer'},
@@ -338,14 +342,21 @@ const TIERS=[
 const LEVEL={public:0,sky:1,space:2};
 const herePort=location.port||(location.protocol==='https:'?'443':'80');
 const portTier=(TIERS.find(t=>t.port===herePort)||{}).id||'public';
+// Replaced server-side from the trusted process environment. The port check
+// preserves the zero-config 4766 developer path, while the injected surface
+// makes SPACE=DARK hold on alternate Forge ports and before /runtimez loads.
+const configuredSurface=__UNIGROK_SURFACE_JSON__;
+const initialForgeSurface=configuredSurface==='forge'||herePort==='4766';
 let runtimeTier=portTier;
 let forgeSurface=false;
 let activeTier=runtimeTier;
 let tierLevel=LEVEL[activeTier];
-document.getElementById('tiernav').insertAdjacentHTML('beforeend',TIERS.map(t=>{
+const tierNav=document.getElementById('tiernav');
+if(initialForgeSurface)tierNav.dataset.surface='forge';
+const navigationTiers=initialForgeSurface?TIERS.filter(t=>t.id!=='space'):TIERS;
+tierNav.insertAdjacentHTML('beforeend',navigationTiers.map(t=>{
   const href=`${location.protocol}//${location.hostname}:${t.port}/ui/`;
   const tip=t.id==='public'?'opens the public core and its live data':
-    t.id==='space'?'upgrade: opens SpaceCommand and its live data when that port is available':
     `opens the ${t.id} surface and its live data — requires that stack to be running`;
   return `<a class="tier-tab" data-tier="${t.id}" href="${href}" title="${tip}">`+
     `<span class="tier-dot ${t.id}"></span>${t.label}</a>`;
@@ -366,6 +377,9 @@ function bindForgeSurface(rt){
   if(!isForgeSurface(rt))return;
   forgeSurface=true;
   document.body.dataset.surface='forge';
+  tierNav.dataset.surface='forge';
+  const spaceTab=tierNav.querySelector('.tier-tab[data-tier="space"]');
+  if(spaceTab)spaceTab.remove();
 }
 // Command Drawer: an index of this deck mirroring the control-site groups.
 // Items anchor-scroll to their panel; contributor items are hidden on the

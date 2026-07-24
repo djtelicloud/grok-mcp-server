@@ -219,10 +219,10 @@ def test_tier_nav_renders_all_three_surfaces() -> None:
     assert "function applyTier(" in html and "$('pagetitle').textContent" in html
 
 
-def test_forge_nav_is_port_bound_and_space_is_advertised() -> None:
+def test_forge_nav_is_port_bound_and_space_is_hidden() -> None:
     # Forge uses the same native, per-origin navigation as every other surface.
-    # Space stays visible as an access-dependent destination; the tab itself
-    # keeps the exact terse label and is never replaced by a sample shell.
+    # Cursor's SPACE=DARK decision removes Space chrome on contributor Forge
+    # while retaining the sanctioned native Sky destination.
     html = DASHBOARD.read_text(encoding="utf-8")
     assert "function bindForgeSurface(rt)" in html
     assert "function isForgeSurface(rt)" in html
@@ -230,13 +230,18 @@ def test_forge_nav_is_port_bound_and_space_is_advertised() -> None:
     assert "if(rt.tier_nav)" in html
     assert "if(rt.tier_nav&&!forgeSurface)" not in html
     assert "tier-access" not in html
-    assert "upgrade: opens SpaceCommand and its live data" in html
+    assert "const configuredSurface=__UNIGROK_SURFACE_JSON__" in html
+    assert "configuredSurface==='forge'||herePort==='4766'" in html
+    assert "TIERS.filter(t=>t.id!=='space')" in html
+    assert "tierNav.dataset.surface='forge'" in html
+    assert "tierNav.querySelector('.tier-tab[data-tier=\"space\"]')" in html
+    assert "if(spaceTab)spaceTab.remove()" in html
+    assert "upgrade: opens SpaceCommand" not in html
     assert "dataset.inshell" not in html
-    assert "a.hidden=true" not in html
     assert "activeTier='sky'" not in html
     assert "function hydrateSkyLive(rt,b)" in html
     assert "No cross-port" in html or "no cross-port" in html
-    assert "UI_BUILD" in html and "r30" in html
+    assert "UI_BUILD" in html and "r31" in html
 
 
 def test_mobile_tier_nav_is_compact_and_overflow_safe() -> None:
@@ -248,6 +253,10 @@ def test_mobile_tier_nav_is_compact_and_overflow_safe() -> None:
     assert '.tier-tab[data-tier="public"]{grid-column:2;grid-row:1}' in html
     assert '.tier-tab[data-tier="sky"]{grid-column:3;grid-row:1}' in html
     assert '.tier-tab[data-tier="space"]{grid-column:4;grid-row:1}' in html
+    assert (
+        '.tier-nav[data-surface="forge"]{'
+        "grid-template-columns:44px repeat(2,minmax(0,1fr))}"
+    ) in html
     assert ".snip2{grid-template-columns:minmax(0,1fr)}" in html
     assert ".kv{grid-template-columns:minmax(68px,auto) minmax(0,1fr)" in html
     assert ".kv b{min-width:0;overflow-wrap:anywhere}" in html
@@ -297,7 +306,8 @@ def test_space_unavailable_never_falls_back_to_same_origin_preview() -> None:
     html = DASHBOARD.read_text(encoding="utf-8")
     assert ".get('preview')" not in html
     assert "?preview=" not in html
-    assert "id==='space'?'upgrade: opens SpaceCommand" in html
+    assert "upgrade: opens SpaceCommand" not in html
+    assert "if(spaceTab)spaceTab.remove()" in html
     assert "const feedJson=async(r,allow503=false)" in html
     assert "fetchFeed('/readyz',true)" in html
     assert "fetchFeed('/benchmarkz')" in html

@@ -51,11 +51,23 @@ def test_ui_serves_baked_dashboard_by_default() -> None:
     response = asyncio.run(server.control_center(_request()))
     assert response.status_code == 200
     assert b"<script nonce=" in response.body
+    assert b'const configuredSurface="public"' in response.body
+    assert b"__UNIGROK_SURFACE_JSON__" not in response.body
     csp = response.headers["content-security-policy"]
     assert "script-src 'self' 'nonce-" in csp
     assert "connect-src 'self'" in csp
     assert "127.0.0.1:4768" not in csp
     assert "127.0.0.1:4769" not in csp
+
+
+def test_ui_injects_trusted_forge_surface_before_runtime_fetch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(server, "SURFACE", "forge")
+    response = asyncio.run(server.control_center(_request()))
+    assert response.status_code == 200
+    assert b'const configuredSurface="forge"' in response.body
+    assert b"__UNIGROK_SURFACE_JSON__" not in response.body
 
 
 def test_ui_ignores_authorization_header() -> None:
