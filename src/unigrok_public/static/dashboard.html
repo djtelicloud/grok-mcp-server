@@ -328,7 +328,10 @@ document.getElementById('tiernav').insertAdjacentHTML('beforeend',TIERS.map(t=>{
 function selectTier(id){
   if(LEVEL[id]==null)return;
   if(forgeSurface&&id==='space')return;
-  preview=(id===runtimeTier)?null:id;
+  // An explicit forge selection must survive the 10-second runtime refresh.
+  // Keep even the public tier in the URL; otherwise a remembered Sky login
+  // silently wins reconcileTier() and flips the page back after the click.
+  preview=forgeSurface?id:(id===runtimeTier)?null:id;
   activeTier=id;
   const u=new URL(location.href);
   if(preview)u.searchParams.set('preview',preview);else u.searchParams.delete('preview');
@@ -357,7 +360,7 @@ function bindForgeOmniaware(rt){
     const id=a.dataset.tier;
     if(id==='space'){a.hidden=true;a.style.display='none';a.setAttribute('aria-hidden','true');return;}
     a.dataset.inshell='1';
-    a.href=id==='public'||id===runtimeTier?'/ui/':`/ui/?preview=${id}`;
+    a.href=`/ui/?preview=${id}`;
     a.title=`switch to ${id} Surface in-shell — stay on forge`;
   });
   const note=document.querySelector('#sky-tier .tiernote');
