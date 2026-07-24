@@ -59,6 +59,9 @@ services:
       UNIGROK_SPACE_URL: ${UNIGROK_SPACE_URL:-}
       # Forge-surface GitHub sign-in (device flow): public client id, never a secret.
       UNIGROK_SURFACE: ${UNIGROK_SURFACE:-public}
+      # Forge's own loopback auth origin is independent from Public tier nav.
+      UNIGROK_FORGE_PORT: ${UNIGROK_FORGE_PORT:-4766}
+      UNIGROK_FORGE_URL: ${UNIGROK_FORGE_URL:-}
       UNIGROK_GITHUB_CLIENT_ID: ${UNIGROK_GITHUB_CLIENT_ID:-}
       UNIGROK_CONTRIBUTOR_LOGINS: ${UNIGROK_CONTRIBUTOR_LOGINS:-}
       UNIGROK_CONTRIBUTOR_TIER: ${UNIGROK_CONTRIBUTOR_TIER:-sky}

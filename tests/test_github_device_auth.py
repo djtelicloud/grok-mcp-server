@@ -183,7 +183,7 @@ def test_device_cookie_round_trip_survives_server_cache_reset(
     monkeypatch.setattr(server, "_client_is_loopback", lambda _request: True)
     with TestClient(
         server.mcp.streamable_http_app(),
-        base_url="http://127.0.0.1:4765",
+        base_url="http://127.0.0.1:4766",
     ) as client:
         response = client.post(
             "/auth/github/poll",

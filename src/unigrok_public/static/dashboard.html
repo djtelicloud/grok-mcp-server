@@ -58,8 +58,6 @@
     .tier-tab{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:99px;
       padding:7px 15px;color:var(--muted);font-weight:650;font-size:clamp(13px,0.3vw+11px,15.5px);
       text-decoration:none;transition:color .12s,border-color .12s}
-    .tier-access{font-size:.72em;letter-spacing:.05em;text-transform:uppercase;color:var(--purple);
-      border:1px solid #6e55a866;border-radius:99px;padding:1px 7px}
     .menu-btn{border:1px solid var(--line);background:#0d1324cc;color:var(--text);border-radius:10px;
       padding:6px 13px;font-size:clamp(15px,0.34vw+12px,18px);cursor:pointer;line-height:1;transition:border-color .12s}
     .menu-btn:hover{border-color:var(--cyan)}
@@ -297,7 +295,7 @@ const METERED_KINDS=new Set(['web_search','x_search','remote_code_execution','ch
 const KIND_COL=n=>METERED_KINDS.has(n)?lvHex.warning:'#4a5675';   // metered (costs) vs free (neutral)
 const ROUTE_COL=n=>n==='error'?lvHex.threat:GRADFILL;             // only error carries a level
 const MODEL_COL=()=>GRADFILL;                                     // model choice has no severity
-const UI_BUILD='unigrok-ui-v1.1.0-r27';
+const UI_BUILD='unigrok-ui-v1.1.0-r28';
 const CLOUD_AUTO_KEY='unigrok-cloud-auto-r25',CLOUD_RESUME_KEY='unigrok-cloud-resume-r25';
 const CONTROL_START_FAILED=new URLSearchParams(location.search).get('control')==='unavailable';
 // Unified 3-tier switcher: every tab is native navigation to that tier's own
@@ -307,9 +305,9 @@ const CONTROL_START_FAILED=new URLSearchParams(location.search).get('control')==
 // own reachability/auth on arrival — navigation advertises access, never
 // grants it. Space remains visible as an access-dependent upgrade.
 const TIERS=[
-  {id:'public',label:'@grok Public Core',port:'4765',name:'GroundCommand',eyebrow:'public core'},
-  {id:'sky',label:'@skygrok Sky Observer',port:'4768',name:'SkyCommand',eyebrow:'sky observer'},
-  {id:'space',label:'@spacegrok Space Awareness',port:'4769',name:'SpaceCommand',eyebrow:'space awareness'},
+  {id:'public',label:'@grok',port:'4765',name:'GroundCommand',eyebrow:'public core'},
+  {id:'sky',label:'@skygrok',port:'4768',name:'SkyCommand',eyebrow:'sky observer'},
+  {id:'space',label:'@spacegrok',port:'4769',name:'SpaceCommand',eyebrow:'space awareness'},
 ];
 const LEVEL={public:0,sky:1,space:2};
 const herePort=location.port||(location.protocol==='https:'?'443':'80');
@@ -323,9 +321,8 @@ document.getElementById('tiernav').insertAdjacentHTML('beforeend',TIERS.map(t=>{
   const tip=t.id==='public'?'opens the public core and its live data':
     t.id==='space'?'upgrade: opens SpaceCommand and its live data when that port is available':
     `opens the ${t.id} surface and its live data — requires that stack to be running`;
-  const access=t.id==='space'?'<span class="tier-access">upgrade</span>':'';
   return `<a class="tier-tab" data-tier="${t.id}" href="${href}" title="${tip}">`+
-    `<span class="tier-dot ${t.id}"></span>${t.label}${access}</a>`;
+    `<span class="tier-dot ${t.id}"></span>${t.label}</a>`;
 }).join(''));
 function isForgeSurface(rt){
   // Prefer server truth (/runtimez.surface). Factory fallback: public tier_nav
