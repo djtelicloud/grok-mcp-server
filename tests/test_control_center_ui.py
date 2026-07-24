@@ -218,6 +218,8 @@ def test_forge_omniaware_inshell_surface() -> None:
     assert "function bindForgeOmniaware(rt)" in html
     assert "function selectTier(id)" in html
     assert "function isForgeSurface(rt)" in html
+    assert "preview=forgeSurface?id:(id===runtimeTier)?null:id" in html
+    assert "a.href=`/ui/?preview=${id}`" in html
     assert "rt.surface==='forge'" in html
     assert "dataset.inshell" in html
     assert "if(forgeSurface)$('space-tier').style.display='none'" in html
