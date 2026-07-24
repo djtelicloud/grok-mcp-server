@@ -255,7 +255,7 @@ exactly that truth:
 | --- | --- | --- |
 | 404 / absent | public surface, no identity exists | button links out to the control site (marketing) |
 | 401 | forge surface, signed out | "Continue with Cloud" reuses the existing Control OAuth registration; "Use device code" remains the explicit fallback |
-| 200 `{login, tier}` | gated session | "Signed in · login" pill (click = sign out); server-granted `tier` may raise the visible tier (never lower, never below the surface floor) |
+| 200 `{login, tier}` | gated session | username-only pill (click = sign out); server-granted `tier` may raise the visible tier (never lower, never below the surface floor) |
 
 **Preferred Cloud link** (`github_auth.py`, Forge only):
 `/auth/control/start` dynamically registers a loopback PKCE client with the
