@@ -172,12 +172,18 @@ def test_device_cookie_round_trip_survives_server_cache_reset(
     async def completed(_flow: str) -> dict:
         return {"session": sid, "login": "djtelicloud", "tier": "sky"}
 
+    async def no_control_session(_: object) -> None:
+        return None
+
     monkeypatch.setattr(server, "SURFACE", "forge")
     monkeypatch.setattr(github_auth, "poll_flow", completed)
+    # Keep the device-cookie round trip hermetic on developer machines that
+    # already have a valid Control OAuth token in their Forge state volume.
+    monkeypatch.setattr(github_auth, "control_session_info", no_control_session)
     monkeypatch.setattr(server, "_client_is_loopback", lambda _request: True)
     with TestClient(
         server.mcp.streamable_http_app(),
-        base_url="http://127.0.0.1:4765",
+        base_url="http://127.0.0.1:4766",
     ) as client:
         response = client.post(
             "/auth/github/poll",

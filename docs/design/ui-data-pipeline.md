@@ -43,13 +43,21 @@ exactly one inline script.
 
 The same baked page serves all three surfaces. A unified switcher (`#tiernav`)
 links each tier to its own port on the current host — public `4765`, sky `4768`,
-space `4769` — and the active tier is derived from the port. `?preview=sky|space`
-lets one running container show a higher tier's panels for review.
+space `4769` — and the active tier is derived from the port. Every tier click is
+native full navigation; the destination page reads only its own same-origin
+feeds. Forge is not a data proxy and never relabels its own feeds as Sky or
+Space.
+
+The top-tab labels stay deliberately terse: `@grok`, `@skygrok`, and
+`@spacegrok`. The destination page title and eyebrow carry the longer
+GroundCommand/SkyCommand/SpaceCommand description.
 
 **Hierarchical scoping:** each tier renders its own panels plus every lower
 tier's; panels above the active tier are `display:none`. Public visitors see only
 public panels. Higher tiers still enforce their own auth on arrival — the nav is
-navigation, not access.
+navigation, not access. The Space tab stays visible as an access-dependent
+upgrade advertisement. If its loopback port is absent, navigation fails
+honestly; there is no Sky fallback or sample-as-live replacement.
 
 | Tier | Port | Panels |
 | --- | --- | --- |
@@ -57,8 +65,9 @@ navigation, not access.
 | `@skygrok` Sky Observer | 4768 | 4-lane swarm grid, breakers + trip rates, P95 latency, GitHub reviews (Grok-score ring + PR standouts), live-run streaming |
 | `@spacegrok` Space Awareness | 4769 | claim-plane by-state + proof matrix, memory/RAG, SPACE=DARK security monitor, sealed report card, linked devices |
 
-Tier data on sky/space is **sample**, badged, and wires to live data only on the
-private-overlay surfaces — never on the public core (`AGENTS.md` boundary).
+Shared runtime fields on sky/space come from that selected origin. Unfinished
+private-overlay panels remain **sample** and badged; they are never hydrated
+from a lower tier (`AGENTS.md` boundary).
 
 ## Visual system
 
@@ -175,13 +184,13 @@ Downward-leak classes: **S** secret · **N** name/identity · **T** topology ·
 | Tool registry | code | `runtimez.tools[]`, `tool_count` | — | tool surface chart | — |
 | Memory / RAG | task-rag env + facts table | `task_rag.{configured,mode,chat_memory,collection_label_set}` + r19 `fact_count` | existence-only for collection label | memory panel (r19) | N → label presence bool, never name |
 | Connect config | `_configured_mcp_url()` | url + `X-Client-ID` | deliberate publication | connect card | non-secret by design |
-| Tier nav | `UNIGROK_PORT` + r19 `UNIGROK_SKY_PORT` / `UNIGROK_SPACE_PORT` (names-only) | r19 `runtimez.tier_nav` | **suppressed in cloud mode** | top nav | T → loopback-bound ports; hosted surface omits the block |
+| Tier nav | `UNIGROK_PUBLIC_PORT` / `UNIGROK_SKY_PORT` / `UNIGROK_SPACE_PORT` plus optional per-tier URLs (names-only) | r19 `runtimez.tier_nav` | **suppressed in cloud mode** | top nav | T → loopback-bound ports; hosted surface omits the block |
 
 ### Floor L1 — Sky (`@skygrok`, 4768) adds
 
 | Data feature | Source | Floor guard on lower tiers | UI panel |
 | --- | --- | --- | --- |
-| Swarm 4-lane grid, trip rates | private overlay | not rendered on L0; `?preview=sky` shows **sample-badged** shell, zero live fetch | swarm grid |
+| Swarm 4-lane grid, trip rates | private overlay | not rendered on L0; the visible Sky tab navigates to the Sky origin | swarm grid |
 | GitHub review ring + PR standouts | private overlay | same | reviews |
 | Live-run SSE stream | private overlay | same; Run trigger stays disabled until contributor surface (spend-capable POST is an operate feature, never faked) | live run |
 | Team assignment board | private overlay (Sky env home) | same | team board |
@@ -200,6 +209,11 @@ control.grokmcp.org, never local), review ops, run trigger, team assignment.
 
 **Access features added at L2:** device enrollment (one-time codes),
 sealed-report publication.
+
+`SPACE=DARK` still means zero-write awareness, no Ground-to-Space MCP wiring,
+and no public model promotion. The visible Space navigation tab is the narrow
+exception: it advertises the higher tier and relies on port reachability plus
+the destination's own controls; it does not grant Space authority.
 
 ### Credential inheritance — upward trickle
 
@@ -241,7 +255,7 @@ exactly that truth:
 | --- | --- | --- |
 | 404 / absent | public surface, no identity exists | button links out to the control site (marketing) |
 | 401 | forge surface, signed out | "Continue with Cloud" reuses the existing Control OAuth registration; "Use device code" remains the explicit fallback |
-| 200 `{login, tier}` | gated session | "Signed in · login" pill (click = sign out); server-granted `tier` may raise the visible tier (never lower, never below the surface floor) |
+| 200 `{login, tier}` | gated session | username-only pill (click = sign out); server-granted `tier` may raise the visible tier (never lower, never below the surface floor) |
 
 **Preferred Cloud link** (`github_auth.py`, Forge only):
 `/auth/control/start` dynamically registers a loopback PKCE client with the
@@ -276,6 +290,10 @@ public. No password ever touches the deck; every failure keeps its honest name
 device session remains usable and the remembered Control token is retained.
 Forge auth mutations require a non-simple same-loopback request, preventing a
 foreign page from silently unlinking the machine.
+Forge's canonical auth/cookie origin comes from `UNIGROK_FORGE_URL` (or the
+`UNIGROK_FORGE_PORT` fallback) and is intentionally independent from
+`UNIGROK_PUBLIC_URL`/`UNIGROK_PUBLIC_PORT`. The switchboard can therefore send
+`@grok` to public core `:4765` without breaking Forge login on `:4766`.
 
 Signed-out is never dressed up; the granted tier is server truth, so the
 GitHub gate — not the client — controls what data shows.
@@ -295,13 +313,17 @@ GitHub gate — not the client — controls what data shows.
 
 Residual risks (accepted, watched): local anonymous aggregate shows all
 callers on a shared box (by design, own store); r19 `tier_nav` advertises
-higher-tier loopback ports (names-only env, hosted-suppressed); `?preview=`
-must never gain live fetches.
+higher-tier loopback ports (names-only env, hosted-suppressed). Sky and Space
+must remain loopback-bound until those destinations enforce remote-user auth.
 
 ## Forge console fold
 
 The legacy 4766 console's features are absorbed into this design:
 
+- **Port-bound tier navigation**: Forge defaults its Public target to canonical
+  core `4765`; Sky and Space use the authoritative `runtimez.tier_nav` targets.
+  Native navigation rebinds every relative feed and MCP snippet to the selected
+  origin while preserving CSP `connect-src 'self'`.
 - **Live on public**: per-plane usage (calls + recorded cost on the routing
   card), connect-an-IDE (known clients cross-referenced with live caller
   telemetry, copy-to-clipboard **non-secret** MCP config — url + `X-Client-ID`

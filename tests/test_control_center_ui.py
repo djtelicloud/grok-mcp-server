@@ -153,7 +153,7 @@ def test_tier_gating_reveal_is_pinned() -> None:
     # verbatim so deleting or inverting it fails.
     html = DASHBOARD.read_text(encoding="utf-8")
     assert "{public:0,sky:1,space:2}" in html
-    assert ".get('preview')" in html
+    assert "activeTier=runtimeTier" in html
     assert "$('sky-tier').style.display=tierLevel>=1?'':'none'" in html
     assert "$('space-tier').style.display=tierLevel>=2?'':'none'" in html
     assert "if(tierLevel>=1)renderSky()" in html
@@ -201,13 +201,110 @@ def test_tier_nav_renders_all_three_surfaces() -> None:
     # Full tuples, not bare ports (a port can appear in unrelated sample data).
     # Each tier carries its command name + eyebrow for the dynamic page title.
     for tup in (
-        "{id:'public',label:'@grok Public Core',port:'4765',name:'GroundCommand'",
-        "{id:'sky',label:'@skygrok Sky Observer',port:'4768',name:'SkyCommand'",
-        "{id:'space',label:'@spacegrok Space Awareness',port:'4769',name:'SpaceCommand'",
+        "{id:'public',label:'@grok',port:'4765',name:'GroundCommand'",
+        "{id:'sky',label:'@skygrok',port:'4768',name:'SkyCommand'",
+        "{id:'space',label:'@spacegrok',port:'4769',name:'SpaceCommand'",
     ):
         assert tup in html
+    for verbose_label in (
+        "@grok Public Core",
+        "@skygrok Sky Observer",
+        "@spacegrok Space Awareness",
+    ):
+        assert f"label:'{verbose_label}'" not in html
     # applyTier drives title/eyebrow/tab state from the active tier
     assert "function applyTier(" in html and "$('pagetitle').textContent" in html
+
+
+def test_forge_nav_is_port_bound_and_space_is_advertised() -> None:
+    # Forge uses the same native, per-origin navigation as every other surface.
+    # Space stays visible as an access-dependent destination; the tab itself
+    # keeps the exact terse label and is never replaced by a sample shell.
+    html = DASHBOARD.read_text(encoding="utf-8")
+    assert "function bindForgeSurface(rt)" in html
+    assert "function isForgeSurface(rt)" in html
+    assert "if(surface)return surface==='forge'" in html
+    assert "if(rt.tier_nav)" in html
+    assert "if(rt.tier_nav&&!forgeSurface)" not in html
+    assert "tier-access" not in html
+    assert "upgrade: opens SpaceCommand and its live data" in html
+    assert "dataset.inshell" not in html
+    assert "a.hidden=true" not in html
+    assert "activeTier='sky'" not in html
+    assert "function hydrateSkyLive(rt,b)" in html
+    assert "No cross-port" in html or "no cross-port" in html
+    assert "UI_BUILD" in html and "r29" in html
+
+
+def test_mobile_tier_nav_is_compact_and_overflow_safe() -> None:
+    html = DASHBOARD.read_text(encoding="utf-8")
+    assert '<nav class="tier-nav" id="tiernav" aria-label="UniGrok destinations">' in html
+    assert '<span class="tier-label">Surface</span>' not in html
+    assert ".tier-label{" not in html
+    assert "grid-template-columns:44px repeat(3,minmax(0,1fr))" in html
+    assert '.tier-tab[data-tier="public"]{grid-column:2;grid-row:1}' in html
+    assert '.tier-tab[data-tier="sky"]{grid-column:3;grid-row:1}' in html
+    assert '.tier-tab[data-tier="space"]{grid-column:4;grid-row:1}' in html
+    assert ".snip2{grid-template-columns:minmax(0,1fr)}" in html
+    assert ".kv{grid-template-columns:minmax(68px,auto) minmax(0,1fr)" in html
+    assert ".kv b{min-width:0;overflow-wrap:anywhere}" in html
+    assert "@media(max-width:360px){.tier-dot{display:none}" in html
+
+
+def test_explicit_non_forge_surface_bypasses_legacy_port_fallback() -> None:
+    html = DASHBOARD.read_text(encoding="utf-8")
+    detect = html[
+        html.index("function isForgeSurface(rt)")
+        : html.index("function bindForgeSurface(rt)")
+    ]
+    surface_truth = detect.index("if(surface)return surface==='forge'")
+    legacy_fallback = detect.index("const pub=rt&&rt.tier_nav&&rt.tier_nav.public")
+    assert surface_truth < legacy_fallback
+    assert "String(rt?.surface||'').trim().toLowerCase()" in detect
+
+
+def test_tier_tabs_use_native_navigation() -> None:
+    html = DASHBOARD.read_text(encoding="utf-8")
+    click = html[
+        html.index("document.addEventListener('click'")
+        : html.index("document.addEventListener('keydown'")
+    ]
+    assert "tier-tab" not in click
+    assert "selectTier(" not in html
+    assert "syncPreviewUrl(" not in html
+    assert "history.replaceState" not in html
+    assert "if(nav.url){a.href=`${nav.url}/ui/`;}" in html
+    assert "else if(nav.port)" in html
+
+
+def test_space_unavailable_never_falls_back_to_same_origin_preview() -> None:
+    html = DASHBOARD.read_text(encoding="utf-8")
+    assert ".get('preview')" not in html
+    assert "?preview=" not in html
+    assert "id==='space'?'upgrade: opens SpaceCommand" in html
+    assert "feedJson=r=>r.ok?r.json():Promise.reject" in html
+    assert "connect-src 'self'" not in html  # CSP is server-owned, never widened here.
+
+
+def test_sky_badge_tracks_live_payloads_without_hiding_samples() -> None:
+    html = DASHBOARD.read_text(encoding="utf-8")
+    state = html[
+        html.index("function setSkyHydrationState(")
+        : html.index("function hydrateSkyLive(")
+    ]
+    hydrate = html[
+        html.index("function hydrateSkyLive(")
+        : html.index("function renderSky(")
+    ]
+    assert "if(tierLevel<1)return" in state
+    assert "live.length?'MIXED':'SAMPLE'" in state
+    assert "lanes','reviews','run" in state
+    assert "hasBreakers=false,hasLatency=false" in hydrate
+    assert "SKY_SAMPLE_BREAKERS.map" in hydrate
+    assert "SKY_SAMPLE_LATENCY.map" in hydrate
+    assert "Number.isFinite(p95)&&p95>0" in hydrate
+    assert "setSkyHydrationState(hasBreakers,hasLatency)" in hydrate
+    assert "return {breakers:hasBreakers,latency:hasLatency}" in hydrate
 
 
 def test_tier_scoped_panels_present_and_gated() -> None:
@@ -313,8 +410,13 @@ def test_tier_nav_ports_are_bounded_env_values() -> None:
     assert 'if not is_cloudrun_runtime():' in gate
     assert '"tier_nav"' in gate
     # /runtimez surfaces the tier feeds the deck consumes.
-    for key in ('"layer"', '"task_rag"', '"credential_planes"', '"fact_count"'):
+    for key in ('"layer"', '"surface"', '"task_rag"', '"credential_planes"', '"fact_count"'):
         assert key in gate
+    compose = Path("compose.yaml").read_text(encoding="utf-8")
+    assert "UNIGROK_PUBLIC_PORT: ${UNIGROK_PUBLIC_PORT:-4765}" in compose
+    assert "UNIGROK_PUBLIC_PORT: ${UNIGROK_PORT:-4765}" not in compose
+    assert "UNIGROK_FORGE_PORT: ${UNIGROK_FORGE_PORT:-4766}" in compose
+    assert "UNIGROK_FORGE_URL: ${UNIGROK_FORGE_URL:-}" in compose
 
 
 def test_dashboard_consumes_server_tier_truth() -> None:
@@ -325,6 +427,7 @@ def test_dashboard_consumes_server_tier_truth() -> None:
     assert "rt.tier_nav" in html
     assert "nav.url" in html and "nav.port" in html
     assert "LEVEL[rt.layer]" in html
+    assert "bindForgeSurface(rt)" in html
     assert "applyRuntimeTier(rt);" in html
     # Credential-planes posture renders server truth, threat when no plane.
     assert "rt?.credential_planes" in html
@@ -345,7 +448,8 @@ def test_dashboard_identity_states_follow_gateway_truth() -> None:
     html = DASHBOARD.read_text(encoding="utf-8")
     assert "function applyIdentity(me)" in html
     assert "fetch('/api/me')" in html
-    assert "Signed in · ${me.login}" in html
+    assert "el.textContent=me.login" in html
+    assert "Signed in · ${me.login}" not in html
     assert "Continue with Cloud" in html
     assert "el.href='/auth/control/start'" in html
     assert "location.replace('/auth/control/start')" in html
@@ -368,18 +472,25 @@ def test_dashboard_identity_states_follow_gateway_truth() -> None:
     assert "el.href='https://control.grokmcp.org'" in html
 
 
-def test_authenticated_tier_survives_runtime_refresh_and_logout_relocks() -> None:
+def test_identity_never_relabels_same_origin_data_as_another_tier() -> None:
     html = DASHBOARD.read_text(encoding="utf-8")
     runtime = html[html.index("function applyRuntimeTier(rt)") :]
     runtime = runtime[: runtime.index("// One delegated click handler")]
     identity = html[html.index("function applyIdentity(me)") :]
     identity = identity[: identity.index("// Device-flow driver")]
 
-    assert "let runtimeTier=portTier,sessionTier=null;" in html
+    assert "let runtimeTier=portTier;" in html
     assert "function reconcileTier()" in html
     assert "runtimeTier=rt.layer" in runtime
-    assert "activeTier=rt.layer" not in runtime
-    assert "sessionTier=LEVEL[me.tier]!=null?me.tier:null" in identity
-    assert identity.count("sessionTier=null") == 3
+    assert "activeTier=runtimeTier" in html
+    assert "sessionTier" not in html
+    assert "me.tier" not in identity
     assert "reconcileTier();" in runtime
     assert "reconcileTier();" in identity
+
+
+def test_non_2xx_live_feeds_degrade_honestly() -> None:
+    html = DASHBOARD.read_text(encoding="utf-8")
+    assert "const feedJson=r=>r.ok?r.json():Promise.reject" in html
+    for endpoint in ("readyz", "benchmarkz", "runtimez"):
+        assert f"fetch('/{endpoint}').then(feedJson).catch(()=>null)" in html

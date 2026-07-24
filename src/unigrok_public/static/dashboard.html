@@ -54,12 +54,12 @@
     .footer{color:var(--muted);margin-top:18px;font-size:clamp(12px,0.26vw+10px,13.5px)}
     .tier-nav{display:flex;align-items:center;gap:10px;margin:0 0 18px;padding:9px 14px;border:1px solid var(--line);
       border-radius:14px;background:#0d132480;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);flex-wrap:wrap}
-    .tier-label{color:var(--muted);font-size:clamp(11px,0.24vw+9.5px,12.5px);font-weight:750;letter-spacing:.12em;text-transform:uppercase}
     .tier-tab{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:99px;
-      padding:7px 15px;color:var(--muted);font-weight:650;font-size:clamp(13px,0.3vw+11px,15.5px);
-      text-decoration:none;transition:color .12s,border-color .12s}
+      min-height:42px;padding:7px 15px;color:var(--muted);font-weight:650;font-size:clamp(13px,0.3vw+11px,15.5px);
+      text-decoration:none;transition:color .12s,border-color .12s;white-space:nowrap}
     .menu-btn{border:1px solid var(--line);background:#0d1324cc;color:var(--text);border-radius:10px;
-      padding:6px 13px;font-size:clamp(15px,0.34vw+12px,18px);cursor:pointer;line-height:1;transition:border-color .12s}
+      min-width:42px;min-height:42px;padding:6px 13px;font-size:clamp(15px,0.34vw+12px,18px);cursor:pointer;
+      line-height:1;transition:border-color .12s}
     .menu-btn:hover{border-color:var(--cyan)}
     .signin{margin-left:auto;order:99;display:inline-flex;align-items:center;border:1px solid #1e5f5a;
       background:linear-gradient(90deg,#12302880,#15254180);color:#baf7c7;border-radius:99px;padding:7px 16px;
@@ -168,8 +168,30 @@
        so wide desktop/IDE panes keep the two-up layout as long as it fits. */
     @media(max-width:1150px){.card{grid-column:span 6}}
     @media(max-width:760px){.card.wide{grid-column:1/-1}}
+    @media(max-width:680px){
+      main{width:calc(100% - 16px);padding-top:12px}
+      .tier-nav{display:grid;grid-template-columns:44px repeat(3,minmax(0,1fr));align-items:stretch;gap:6px;
+        padding:8px;margin-bottom:14px}
+      .menu-btn{grid-column:1;grid-row:1;min-width:44px;min-height:44px;padding:6px}
+      .tier-tab{justify-content:center;min-width:0;min-height:44px;padding:7px 4px;
+        font-size:clamp(11.5px,3.4vw,13px)}
+      .tier-tab[data-tier="public"]{grid-column:2;grid-row:1}
+      .tier-tab[data-tier="sky"]{grid-column:3;grid-row:1}
+      .tier-tab[data-tier="space"]{grid-column:4;grid-row:1}
+      .signin{grid-column:1/-1;grid-row:2;width:100%;min-width:0;min-height:44px;margin-left:0;
+        justify-content:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      .signin-alt{grid-column:1/-1;grid-row:3;min-height:44px;align-items:center;justify-content:center;
+        white-space:normal;text-align:center}
+      .ghflow{grid-column:1/-1;grid-row:4;min-width:0;margin-left:0;justify-content:center;
+        white-space:normal;text-align:center;overflow-wrap:anywhere}
+      .snip2{grid-template-columns:minmax(0,1fr)}
+    }
     @media(max-width:540px){header{display:block}
-      .status{justify-content:flex-start;margin-top:16px}.card,.card.wide{grid-column:1/-1}}
+      .status{justify-content:flex-start;margin-top:16px}.card,.card.wide{grid-column:1/-1}
+      .tiernote{min-width:0}.bar-row{grid-template-columns:minmax(68px,1fr) minmax(76px,3fr) 52px;gap:7px}
+      .kv{grid-template-columns:minmax(68px,auto) minmax(0,1fr);gap:9px 12px}
+      .kv b{min-width:0;overflow-wrap:anywhere}}
+    @media(max-width:360px){.tier-dot{display:none}.tier-tab{gap:0;padding-inline:3px}}
   </style>
 </head>
 <body><main>
@@ -179,7 +201,7 @@
     <nav id="ditems"></nav>
     <div class="drawer-foot">Drawer is an index of this deck — items scroll to their panel. Contributor actions live on the control site.</div>
   </aside>
-  <nav class="tier-nav" id="tiernav" aria-label="surface tier"><button id="dmenu" class="menu-btn" aria-label="open command drawer">☰</button><span class="tier-label">Surface</span><a class="signin" id="signin" href="https://control.grokmcp.org" title="sign-in happens on control.grokmcp.org — this deck never logs you in locally">Open contributor control</a><a class="signin-alt" id="deviceauth" href="#" title="Use GitHub's device-code flow on this Forge">Use device code</a></nav>
+  <nav class="tier-nav" id="tiernav" aria-label="UniGrok destinations"><button id="dmenu" class="menu-btn" aria-label="open command drawer">☰</button><a class="signin" id="signin" href="https://control.grokmcp.org" title="sign-in happens on control.grokmcp.org — this deck never logs you in locally">Open contributor control</a><a class="signin-alt" id="deviceauth" href="#" title="Use GitHub's device-code flow on this Forge">Use device code</a></nav>
   <div class="legend" aria-label="status color key"><span class="lg-label">Levels</span>
     <span class="lg"><i style="background:#3fa266"></i>great</span>
     <span class="lg"><i style="background:#81a1c1"></i>good</span>
@@ -295,32 +317,52 @@ const METERED_KINDS=new Set(['web_search','x_search','remote_code_execution','ch
 const KIND_COL=n=>METERED_KINDS.has(n)?lvHex.warning:'#4a5675';   // metered (costs) vs free (neutral)
 const ROUTE_COL=n=>n==='error'?lvHex.threat:GRADFILL;             // only error carries a level
 const MODEL_COL=()=>GRADFILL;                                     // model choice has no severity
-const UI_BUILD='unigrok-ui-v1.1.0-r25';
+const UI_BUILD='unigrok-ui-v1.1.0-r29';
 const CLOUD_AUTO_KEY='unigrok-cloud-auto-r25',CLOUD_RESUME_KEY='unigrok-cloud-resume-r25';
 const CONTROL_START_FAILED=new URLSearchParams(location.search).get('control')==='unavailable';
-// Unified 3-tier switcher: each tab links to its own surface on the same host.
-// The active tier is the current port; ?preview=sky|space lets one running
-// container show a higher tier's panels for review. Hierarchical scoping:
-// each tier renders its own panels plus every lower tier's. Higher tiers still
-// enforce their own auth on arrival — this is navigation, not access.
+// Unified 3-tier switcher: every tab is native navigation to that tier's own
+// origin. The page then reads only same-origin feeds, so the active tier and
+// displayed data can never drift apart. Hierarchical scoping: each tier
+// renders its own panels plus every lower tier's. Higher tiers enforce their
+// own reachability/auth on arrival — navigation advertises access, never
+// grants it. Space remains visible as an access-dependent upgrade.
 const TIERS=[
-  {id:'public',label:'@grok Public Core',port:'4765',name:'GroundCommand',eyebrow:'public core'},
-  {id:'sky',label:'@skygrok Sky Observer',port:'4768',name:'SkyCommand',eyebrow:'sky observer'},
-  {id:'space',label:'@spacegrok Space Awareness',port:'4769',name:'SpaceCommand',eyebrow:'space awareness'},
+  {id:'public',label:'@grok',port:'4765',name:'GroundCommand',eyebrow:'public core'},
+  {id:'sky',label:'@skygrok',port:'4768',name:'SkyCommand',eyebrow:'sky observer'},
+  {id:'space',label:'@spacegrok',port:'4769',name:'SpaceCommand',eyebrow:'space awareness'},
 ];
 const LEVEL={public:0,sky:1,space:2};
 const herePort=location.port||(location.protocol==='https:'?'443':'80');
-const preview=new URLSearchParams(location.search).get('preview');
 const portTier=(TIERS.find(t=>t.port===herePort)||{}).id||'public';
-let runtimeTier=portTier,sessionTier=null;
-let activeTier=(preview&&LEVEL[preview]!=null)?preview:runtimeTier;
+let runtimeTier=portTier;
+let forgeSurface=false;
+let activeTier=runtimeTier;
 let tierLevel=LEVEL[activeTier];
 document.getElementById('tiernav').insertAdjacentHTML('beforeend',TIERS.map(t=>{
   const href=`${location.protocol}//${location.hostname}:${t.port}/ui/`;
-  const tip=t.id==='public'?'the public core surface':`opens the ${t.id} surface — requires that stack to be running`;
+  const tip=t.id==='public'?'opens the public core and its live data':
+    t.id==='space'?'upgrade: opens SpaceCommand and its live data when that port is available':
+    `opens the ${t.id} surface and its live data — requires that stack to be running`;
   return `<a class="tier-tab" data-tier="${t.id}" href="${href}" title="${tip}">`+
     `<span class="tier-dot ${t.id}"></span>${t.label}</a>`;
 }).join(''));
+function isForgeSurface(rt){
+  // Prefer server truth (/runtimez.surface). Factory fallback: public tier_nav
+  // remapped onto this origin (forge :4766 / r25 :4776) — never treat :4765 core
+  // or hosted (no tier_nav) as forge.
+  const surface=String(rt?.surface||'').trim().toLowerCase();
+  if(surface)return surface==='forge';
+  const pub=rt&&rt.tier_nav&&rt.tier_nav.public;if(!pub)return false;
+  if(['4765','80','443',''].includes(String(herePort)))return false;
+  const self=location.origin.replace(/\/$/,'');
+  if(pub.url&&String(pub.url).replace(/\/$/,'')===self)return true;
+  return String(pub.port||'')===String(herePort);
+}
+function bindForgeSurface(rt){
+  if(!isForgeSurface(rt))return;
+  forgeSurface=true;
+  document.body.dataset.surface='forge';
+}
 // Command Drawer: an index of this deck mirroring the control-site groups.
 // Items anchor-scroll to their panel; contributor items are hidden on the
 // public tier (veil) and render locked-with-hint one tier below their home.
@@ -354,27 +396,28 @@ function renderDrawer(){
   }).join('');
 }
 // Tier identity: title, eyebrow, tab highlight, and hierarchical panel reveal.
-function applyTier(){const ti=TIERS.find(x=>x.id===activeTier)||TIERS[0];
+function applyTier(){
+  const ti=TIERS.find(x=>x.id===activeTier)||TIERS[0];
   tierLevel=LEVEL[activeTier];
   $('pagetitle').textContent=ti.name;document.title=`${ti.name} · UniGrok`;
-  $('eyebrow').textContent=`UniGrok 1.1 · ${ti.eyebrow}`;
+  $('eyebrow').textContent=`UniGrok 1.1 · ${ti.eyebrow}${forgeSurface?' · forge':''}`;
   document.querySelectorAll('.tier-tab').forEach(a=>a.classList.toggle('active',a.dataset.tier===activeTier));
   $('sky-tier').style.display=tierLevel>=1?'':'none';
   $('space-tier').style.display=tierLevel>=2?'':'none';
   renderDrawer();
 }
 function reconcileTier(){
-  if(preview&&LEVEL[preview]!=null)activeTier=preview;
-  else activeTier=sessionTier&&LEVEL[sessionTier]>LEVEL[runtimeTier]?sessionTier:runtimeTier;
+  activeTier=runtimeTier;
   applyTier();
 }
 applyTier();
 // Server truth wins over port-sniffing: /runtimez.layer names the tier this
 // instance actually serves, and tier_nav carries the Docker-configured host
-// ports (loopback-bound; the hosted runtime omits the block). ?preview= keeps
-// review priority; absent feeds change nothing.
+// ports (loopback-bound; the hosted runtime omits the block). Every surface,
+// including Forge, uses those targets for native navigation.
 function applyRuntimeTier(rt){
   if(!rt)return;
+  bindForgeSurface(rt);
   // Each tier may live on its own origin (factory URLs from the env); the
   // port is only the same-host fallback when no URL is configured.
   if(rt.tier_nav){TIERS.forEach(ti=>{const nav=rt.tier_nav[ti.id];if(!nav)return;
@@ -384,7 +427,9 @@ function applyRuntimeTier(rt){
   if(LEVEL[rt.layer]!=null)runtimeTier=rt.layer;
   reconcileTier();
 }
-// One delegated click handler for the drawer (open/close/navigate) + Esc.
+// One delegated click handler for the drawer + auth controls. Tier anchors
+// deliberately stay browser-native so primary and modified clicks both open
+// the real target origin.
 document.addEventListener('click',e=>{
   const gh=e.target.closest('#signin');
   if(e.target.closest('#deviceauth')){e.preventDefault();ghStart();return;}
@@ -401,6 +446,16 @@ document.addEventListener('click',e=>{
 document.addEventListener('keydown',e=>{if(e.key==='Escape')document.body.classList.remove('drawer-open');});
 // Tier-scoped panels: sample structure from the plan, clearly marked; live data
 // wires on the real surfaces (private overlay), never on the public core.
+const SKY_SAMPLE_BREAKERS=[
+  {name:'cli',open:false,failures:0,trips:0},
+  {name:'api',open:false,failures:0,trips:0},
+  {name:'local',open:false,failures:0,trips:0},
+];
+const SKY_SAMPLE_LATENCY=[
+  {port:'4765',surface:'public core',p95:8},
+  {port:'4768',surface:'sky observer',p95:11},
+  {port:'4775',surface:'public alt',p95:9},
+];
 const SKY={
   lanes:[
     {tag:'L1 · TRAIN',owner:'Claude',state:'active',detail:'r2 ckpt100 · 120/120'},
@@ -408,16 +463,8 @@ const SKY={
     {tag:'L3 · PROBE',owner:'Antigravity Gemini',state:'probe',detail:'ui-surface probe · ro'},
     {tag:'L4 · MONITOR',owner:'Cursor Ground Lead',state:'active',detail:'20s diff · manifests'},
   ],
-  breakers:[
-    {name:'cli',open:false,failures:0,trips:0},
-    {name:'api',open:false,failures:0,trips:0},
-    {name:'local',open:false,failures:0,trips:0},
-  ],
-  latency:[
-    {port:'4765',surface:'public core',p95:8},
-    {port:'4768',surface:'sky observer',p95:11},
-    {port:'4775',surface:'public alt',p95:9},
-  ],
+  breakers:SKY_SAMPLE_BREAKERS.map(x=>({...x})),
+  latency:SKY_SAMPLE_LATENCY.map(x=>({...x})),
   github:{score:93,prs:[
     {pr:'#508',what:'Forge groundwork in the public gateway',checks:'18/18',state:'merged'},
     {pr:'#1',what:'Private Forge console overlay',checks:'7/7',state:'merged'},
@@ -443,6 +490,44 @@ const SPACE={
   ]},
   devices:[{name:'MacBook Pro — this machine',linked:'Jul 19',status:'linked'}],
 };
+function setSkyHydrationState(hasBreakers,hasLatency){
+  if(tierLevel<1)return;
+  const live=[];if(hasBreakers)live.push('breakers');if(hasLatency)live.push('latency');
+  const sample=['lanes','reviews','run'];
+  if(!hasBreakers)sample.unshift('breakers');
+  if(!hasLatency)sample.unshift('latency');
+  const badge=document.querySelector('#sky-tier .tierhead .sample');
+  const note=document.querySelector('#sky-tier .tiernote');
+  if(badge){badge.textContent=live.length?'MIXED':'SAMPLE';
+    badge.dataset.skyState=live.length?'mixed':'sample';
+    badge.title=live.length?`live ${live.join(' + ')} · sample ${sample.join(' + ')}`:
+      'same-origin feeds empty; panels remain sample';}
+  if(note)note.textContent=live.length?
+    `live ${live.join(' + ')} from same origin · ${sample.join('/')} sample`:
+    'same-origin feeds empty · panels remain sample';
+}
+function hydrateSkyLive(rt,b){
+  // CSP-safe: only same-origin /runtimez + /benchmarkz. No cross-port pull.
+  let hasBreakers=false,hasLatency=false;
+  try{
+    const bs=(b&&b.circuit_breakers)||(rt&&rt.circuit_breakers)||{};
+    if(Object.keys(bs).length){SKY.breakers=Object.entries(bs).map(([name,v])=>({
+      name,open:!!v.open,failures:Number(v.failures||0),trips:Number(v.trips||0)}));
+      hasBreakers=true;}
+  }catch(_){}
+  if(!hasBreakers)SKY.breakers=SKY_SAMPLE_BREAKERS.map(x=>({...x}));
+  try{
+    const rawP95=rt?.benchmark_summary?.latency_ms?.p95??b?.latency_ms?.p95;
+    const p95=Number(rawP95);
+    if(rawP95!==null&&rawP95!==undefined&&rawP95!==''&&Number.isFinite(p95)&&p95>0){
+      const port=herePort||TIERS.find(t=>t.id==='public')?.port||'4766';
+      SKY.latency=[{port:String(port),surface:forgeSurface?'forge console':'this origin',p95}];
+      hasLatency=true;}
+  }catch(_){}
+  if(!hasLatency)SKY.latency=SKY_SAMPLE_LATENCY.map(x=>({...x}));
+  setSkyHydrationState(hasBreakers,hasLatency);
+  return {breakers:hasBreakers,latency:hasLatency};
+}
 function renderSky(){
   const laneLv={active:'great',idle:'expected',probe:'good'};
   $('swarmgrid').innerHTML=SKY.lanes.map(l=>`<div class="lane"><span class="lane-tag">${esc(l.tag)}</span>
@@ -524,21 +609,21 @@ $('connectcard').addEventListener('click',e=>{const btn=e.target.closest('.ctab,
 // forge until the GitHub OAuth slice answers, 200 {login,tier?} once gated.
 // The deck renders exactly that truth — signed-out is never dressed up.
 function applyIdentity(me){const el=$('signin'),fallback=$('deviceauth');if(!el)return;
-  if(me&&me.login){el.textContent=`Signed in · ${me.login}`;el.href='#';el.dataset.ghout='1';
+  if(me&&me.login){el.textContent=me.login;el.href='#';el.dataset.ghout='1';
     el.title='contributor session active — click to sign out';
-    sessionTier=LEVEL[me.tier]!=null?me.tier:null;if(me.kind==='control')localStorage.removeItem(CLOUD_AUTO_KEY);
+    if(me.kind==='control')localStorage.removeItem(CLOUD_AUTO_KEY);
     sessionStorage.removeItem(CLOUD_RESUME_KEY);if(fallback)fallback.style.display='none';}
   else if(me&&me.unavailable){el.textContent='Cloud link reconnecting';el.href='#';delete el.dataset.ghout;
-    el.title='your remembered login is retained; use device code if Cloud is temporarily unavailable';sessionTier=null;
+    el.title='your remembered login is retained; use device code if Cloud is temporarily unavailable';
     if(fallback)fallback.style.display='inline-flex';}
   else if(me&&me.surface==='forge'){
     if(!CONTROL_START_FAILED&&localStorage.getItem(CLOUD_AUTO_KEY)!=='off'&&sessionStorage.getItem(CLOUD_RESUME_KEY)!=='1'){
       sessionStorage.setItem(CLOUD_RESUME_KEY,'1');location.replace('/auth/control/start');return;}
     el.textContent=CONTROL_START_FAILED?'Cloud temporarily unavailable':'Continue with Cloud';el.href='/auth/control/start';delete el.dataset.ghout;
-    el.title='reuse your remembered control.grokmcp.org GitHub session';sessionTier=null;
+    el.title='reuse your remembered control.grokmcp.org GitHub session';
     if(fallback)fallback.style.display='inline-flex';}
   else{el.textContent='Open contributor control';el.href='https://control.grokmcp.org';delete el.dataset.ghout;
-    el.title='sign-in happens on control.grokmcp.org';sessionTier=null;
+    el.title='sign-in happens on control.grokmcp.org';
     if(fallback)fallback.style.display='none';}
   reconcileTier();}
 // Device-flow driver: start -> show the one-time code + github link -> poll
@@ -565,10 +650,11 @@ async function ghStart(){if(GHFLOW)return;
 async function ghOut(){localStorage.setItem(CLOUD_AUTO_KEY,'off');sessionStorage.setItem(CLOUD_RESUME_KEY,'1');
   await fetch('/auth/logout',{method:'POST',headers:{'X-UniGrok-CSRF':'1'}}).catch(()=>null);
   document.getElementById('ghflow')?.remove();applyIdentity({surface:'forge'});}
+const feedJson=r=>r.ok?r.json():Promise.reject(new Error(`feed HTTP ${r.status}`));
 async function refresh(){if(refresh.busy)return;refresh.busy=true;try{const [ready,b,rt,me]=await Promise.all([
-  fetch('/readyz').then(r=>r.json()).catch(()=>null),
-  fetch('/benchmarkz').then(r=>r.json()).catch(()=>null),
-  fetch('/runtimez').then(r=>r.json()).catch(()=>null),
+  fetch('/readyz').then(feedJson).catch(()=>null),
+  fetch('/benchmarkz').then(feedJson).catch(()=>null),
+  fetch('/runtimez').then(feedJson).catch(()=>null),
   fetch('/api/me').then(r=>r.status===200?r.json():(r.status===503?{surface:'forge',unavailable:true}:(r.status===401?{surface:'forge'}:null))).catch(()=>null)]);
   applyIdentity(me);
   // Each feed is guarded independently: a missing feed reads "unreachable"/"—",
@@ -678,6 +764,7 @@ async function refresh(){if(refresh.busy)return;refresh.busy=true;try{const [rea
   $('tools').innerHTML=tools.length?tools.map(t=>`<tr><td>${esc(t.name)}${t.destructive?'<span class="tool-flag">DESTRUCTIVE</span>':''}</td>
     <td>${esc(t.plane)}</td><td><span class="bill ${esc(t.billing_class)}">${esc(t.billing_class)}</span></td><td>${esc(t.confirmation_policy)}</td>
     <td class="wrap">${esc(t.purpose)}</td></tr>`).join(''):'<tr><td colspan="5" class="empty">Registry unavailable.</td></tr>';
+  hydrateSkyLive(rt,b);
   if(tierLevel>=1)renderSky();
   if(tierLevel>=2)renderSpace(rt);
   const bs=(b&&b.circuit_breakers)||{};$('breakers').innerHTML=Object.keys(bs).length?Object.entries(bs).map(([k,v])=>

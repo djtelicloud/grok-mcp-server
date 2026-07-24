@@ -42,7 +42,7 @@ def _request(
 ) -> server.Request:
     request_headers = list(headers or [])
     if not any(name.lower() == b"host" for name, _ in request_headers):
-        request_headers.insert(0, (b"host", b"127.0.0.1:4765"))
+        request_headers.insert(0, (b"host", b"127.0.0.1:4766"))
     return server.Request(
         {
             "type": "http",
@@ -51,7 +51,7 @@ def _request(
             "headers": request_headers,
             "query_string": query_string,
             "client": ("127.0.0.1", 40000),
-            "server": ("127.0.0.1", 4765),
+            "server": ("127.0.0.1", 4766),
             "scheme": "http",
         }
     )
@@ -297,7 +297,7 @@ def test_logout_requires_non_simple_same_loopback_request(
                 method="POST",
                 headers=[
                     (b"x-unigrok-csrf", b"1"),
-                    (b"origin", b"http://127.0.0.1:4765"),
+                    (b"origin", b"http://127.0.0.1:4766"),
                 ],
             )
         )

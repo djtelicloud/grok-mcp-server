@@ -391,6 +391,9 @@ LOCAL_RUNTIME_URL = _resolve_local_runtime_url()
 PUBLIC_TIER_PORT = _bounded_int("UNIGROK_PUBLIC_PORT", 4765, 1, 65535)
 SKY_TIER_PORT = _bounded_int("UNIGROK_SKY_PORT", 4768, 1, 65535)
 SPACE_TIER_PORT = _bounded_int("UNIGROK_SPACE_PORT", 4769, 1, 65535)
+# Forge auth is intentionally separate from tier navigation. A Forge switchboard
+# may navigate Public to :4765 while its own cookie/PKCE origin remains :4766.
+FORGE_CONTROL_PORT = _bounded_int("UNIGROK_FORGE_PORT", 4766, 1, 65535)
 
 
 def _tier_url(name: str) -> str | None:
@@ -6843,7 +6846,7 @@ async def ui_asset(request: Request) -> Response:
 
 def _forge_control_callback_url() -> str:
     """Canonical loopback callback; never trust a request Host header."""
-    configured = _tier_url("UNIGROK_PUBLIC_URL")
+    configured = _tier_url("UNIGROK_FORGE_URL")
     if configured:
         try:
             parsed = urlsplit(configured)
@@ -6860,7 +6863,7 @@ def _forge_control_callback_url() -> str:
                 return f"{configured.rstrip('/')}/auth/control/callback"
         except ValueError:
             pass
-    return f"http://127.0.0.1:{PUBLIC_TIER_PORT}/auth/control/callback"
+    return f"http://127.0.0.1:{FORGE_CONTROL_PORT}/auth/control/callback"
 
 
 def _forge_request_is_canonical(request: Request) -> bool:
@@ -7247,6 +7250,9 @@ async def runtimez(_: Request) -> JSONResponse:
             "version": __version__,
             "mode": "public_core",
             "layer": UNIGROK_LAYER or "public",
+            # Surface is orthogonal to layer: forge is the contributor console
+            # seat (UNIGROK_SURFACE=forge) even when layer stays "public".
+            "surface": SURFACE,
             "workspace_attached": False,
             "requires_project_files": False,
             "state_persistence": runtime_contract["state_persistence"],

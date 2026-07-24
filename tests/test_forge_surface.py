@@ -24,7 +24,7 @@ def _request(
 ) -> Request:
     request_headers = list(headers or [])
     if not any(name.lower() == b"host" for name, _ in request_headers):
-        request_headers.insert(0, (b"host", b"127.0.0.1:4765"))
+        request_headers.insert(0, (b"host", b"127.0.0.1:4766"))
     scope = {
         "type": "http",
         "method": "GET",
@@ -51,7 +51,11 @@ def test_ui_serves_baked_dashboard_by_default() -> None:
     response = asyncio.run(server.control_center(_request()))
     assert response.status_code == 200
     assert b"<script nonce=" in response.body
-    assert "script-src 'self' 'nonce-" in response.headers["content-security-policy"]
+    csp = response.headers["content-security-policy"]
+    assert "script-src 'self' 'nonce-" in csp
+    assert "connect-src 'self'" in csp
+    assert "127.0.0.1:4768" not in csp
+    assert "127.0.0.1:4769" not in csp
 
 
 def test_ui_ignores_authorization_header() -> None:
@@ -165,7 +169,11 @@ def test_ui_asset_blocks_symlink_escape(
 
 
 def test_control_plane_401_on_forge_surface(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def no_control_session(_: object) -> None:
+        return None
+
     monkeypatch.setattr(server, "SURFACE", "forge")
+    monkeypatch.setattr(server.github_auth, "control_session_info", no_control_session)
     response = asyncio.run(server.forge_identity(_request("/api/me")))
     assert response.status_code == 401
     assert "www-authenticate" not in {k.lower() for k in response.headers}
@@ -175,10 +183,29 @@ def test_forge_auth_rejects_non_loopback_host(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr(server, "SURFACE", "forge")
     response = asyncio.run(
         server.forge_identity(
-            _request("/api/me", headers=[(b"host", b"attacker.example:4765")])
+            _request("/api/me", headers=[(b"host", b"attacker.example:4766")])
         )
     )
     assert response.status_code == 403
+
+
+def test_forge_auth_origin_is_independent_from_public_nav(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(server, "SURFACE", "forge")
+    monkeypatch.setenv("UNIGROK_PUBLIC_URL", "http://127.0.0.1:4765")
+    monkeypatch.setenv("UNIGROK_FORGE_URL", "http://127.0.0.1:4766")
+
+    assert (
+        server._forge_control_callback_url()
+        == "http://127.0.0.1:4766/auth/control/callback"
+    )
+    assert server._forge_auth_guard(_request("/api/me")) is None
+    rejected = server._forge_auth_guard(
+        _request("/api/me", headers=[(b"host", b"127.0.0.1:4765")])
+    )
+    assert rejected is not None
+    assert rejected.status_code == 403
 
 
 def test_loopback_check_ignores_forwarded_for() -> None:
