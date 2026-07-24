@@ -3,6 +3,9 @@
 This guide is for contributors and release verification. Ordinary users only need the
 README. See also [CONTRIBUTING.md](../CONTRIBUTING.md).
 
+For multi-writer I/O rules and fair dual-plane bench protocol, see
+[ENGINEERING-IO-SAFETY.md](./ENGINEERING-IO-SAFETY.md).
+
 The authenticated Cloud Run service has a separate digest-pinned release and rollback
 gate. Do not infer a public deployment from a local Compose rebuild; operators must use
 the [remote deployment runbook](remote-mcp-deployment.md).
