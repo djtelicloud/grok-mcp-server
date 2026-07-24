@@ -233,7 +233,22 @@ def test_forge_nav_is_port_bound_and_space_is_advertised() -> None:
     assert "activeTier='sky'" not in html
     assert "function hydrateSkyLive(rt,b)" in html
     assert "No cross-port" in html or "no cross-port" in html
-    assert "UI_BUILD" in html and "r28" in html
+    assert "UI_BUILD" in html and "r29" in html
+
+
+def test_mobile_tier_nav_is_compact_and_overflow_safe() -> None:
+    html = DASHBOARD.read_text(encoding="utf-8")
+    assert '<nav class="tier-nav" id="tiernav" aria-label="UniGrok destinations">' in html
+    assert '<span class="tier-label">Surface</span>' not in html
+    assert ".tier-label{" not in html
+    assert "grid-template-columns:44px repeat(3,minmax(0,1fr))" in html
+    assert '.tier-tab[data-tier="public"]{grid-column:2;grid-row:1}' in html
+    assert '.tier-tab[data-tier="sky"]{grid-column:3;grid-row:1}' in html
+    assert '.tier-tab[data-tier="space"]{grid-column:4;grid-row:1}' in html
+    assert ".snip2{grid-template-columns:minmax(0,1fr)}" in html
+    assert ".kv{grid-template-columns:minmax(68px,auto) minmax(0,1fr)" in html
+    assert ".kv b{min-width:0;overflow-wrap:anywhere}" in html
+    assert "@media(max-width:360px){.tier-dot{display:none}" in html
 
 
 def test_explicit_non_forge_surface_bypasses_legacy_port_fallback() -> None:
@@ -433,7 +448,8 @@ def test_dashboard_identity_states_follow_gateway_truth() -> None:
     html = DASHBOARD.read_text(encoding="utf-8")
     assert "function applyIdentity(me)" in html
     assert "fetch('/api/me')" in html
-    assert "Signed in · ${me.login}" in html
+    assert "el.textContent=me.login" in html
+    assert "Signed in · ${me.login}" not in html
     assert "Continue with Cloud" in html
     assert "el.href='/auth/control/start'" in html
     assert "location.replace('/auth/control/start')" in html
