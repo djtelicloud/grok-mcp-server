@@ -5424,6 +5424,7 @@ async def agent(
                     await STATE.save_telemetry(
                         {
                         "caller": caller,
+                        "session_name": session_name,
                         "request_kind": "agent",
                         "route": "error",
                         "requested_plane": "auto",
@@ -5616,15 +5617,29 @@ async def agent(
                 result["shadow_done_vote"] = shadow_done
         telemetry_id: int | None = None
         with contextlib.suppress(Exception):
+            turn_success: bool | None
+            try:
+                normalized_stop = re.sub(
+                    r"[^a-z0-9]+",
+                    "",
+                    str(result.get("stop_reason") or "").casefold(),
+                )
+                turn_success = bool(
+                    normalized_stop in {"", "endturn", "stop"}
+                    and not is_nonanswer_completion(result.get("text"), prompt=prompt)
+                )
+            except Exception:
+                turn_success = None
             telemetry_id = await STATE.save_telemetry(
                 {
                 "caller": caller,
+                "session_name": session_name,
                 "request_kind": "agent",
                 "route": result.get("orchestration", {}).get("route") or result.get("route"),
                 "requested_plane": result.get("requested_plane") or "auto",
                 "resolved_plane": result.get("resolved_plane") or result.get("plane"),
                 "model": result.get("model"),
-                "success": None,
+                "success": turn_success,
                 "verified": False,
                 "latency_ms": round((time.monotonic() - operation_started) * 1000),
                 "cost_usd": result.get("cost_usd"),
