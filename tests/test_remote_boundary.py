@@ -642,17 +642,10 @@ async def test_agent_job_owner_column_migrates_existing_state(tmp_path: Path) ->
 # --- Service tokens (GitHub Copilot / non-OAuth automation) ---
 
 
-SERVICE_TOKEN = "copilot-test-token-aaaaaaaaaaaaaaaaaaaaaaaa"
-SERVICE_TOKEN_SHA256 = (
-    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"  # placeholder replaced
-)
-
-
 @pytest.fixture
 def service_token_env(monkeypatch: pytest.MonkeyPatch) -> str:
-    import hashlib
-
-    token = "copilot-test-token-bbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    # Synthetic fixture secret (not a production credential).
+    token = "copilot-test-token-bbbbbbbbbbbbbbbbbbbbbbbbbbbb"  # noqa: S105
     monkeypatch.setenv("UNIGROK_SERVICE_TOKENS", token)
     monkeypatch.setenv("UNIGROK_SERVICE_TOKEN_LABEL", "github-copilot")
     monkeypatch.setenv(
@@ -683,7 +676,7 @@ def test_service_token_sha256_env_matches_without_plaintext(
 ) -> None:
     import hashlib
 
-    token = "copilot-hash-token-cccccccccccccccccccccccccccc"
+    token = "copilot-hash-token-cccccccccccccccccccccccccccc"  # noqa: S105
     digest = hashlib.sha256(token.encode("utf-8")).hexdigest()
     monkeypatch.delenv("UNIGROK_SERVICE_TOKENS", raising=False)
     monkeypatch.setenv("UNIGROK_SERVICE_TOKEN_SHA256", digest)
@@ -756,7 +749,7 @@ async def test_service_token_middleware_denies_anonymous(
 async def test_service_token_works_alongside_oauth(
     remote_oauth_env: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    token = "copilot-dual-token-dddddddddddddddddddddddddddd"
+    token = "copilot-dual-token-dddddddddddddddddddddddddddd"  # noqa: S105
     monkeypatch.setenv("UNIGROK_SERVICE_TOKENS", token)
     monkeypatch.setenv("UNIGROK_SERVICE_TOKEN_LABEL", "github-copilot")
 
