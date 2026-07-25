@@ -1,18 +1,27 @@
-"""Fail-closed OAuth edge for the owner-operated remote MCP deployment.
+"""Fail-closed auth edge for the owner-operated remote MCP deployment.
 
 Local Docker remains loopback-first and credential-free at the gateway layer.
-When ``UNIGROK_RUNTIME=cloudrun``, every protected request is authenticated by
-the existing Control service through token introspection.  Provider keys stay
-server-side and are never accepted as gateway bearer credentials.
+When ``UNIGROK_RUNTIME=cloudrun``, protected requests require either:
+
+1. Control OAuth bearer tokens validated by remote introspection, or
+2. Operator-minted **service tokens** (``UNIGROK_SERVICE_TOKENS`` /
+   ``UNIGROK_SERVICE_TOKEN_SHA256``) for non-OAuth automation such as
+   GitHub Copilot cloud agent / code review.
+
+Provider keys stay server-side and are never accepted as gateway bearer
+credentials. Service tokens are not OAuth and never unlock private Sky/Space
+seats — this module only gates the public MCP resource.
 """
 
 from __future__ import annotations
 
+import hashlib
 import ipaddress
 import json
 import logging
 import os
 import re
+import secrets
 from collections.abc import Mapping
 from typing import Any
 from urllib.parse import quote, urlsplit
@@ -123,6 +132,105 @@ def oauth_scopes() -> list[str]:
     return list(dict.fromkeys(values))
 
 
+
+_DEFAULT_SERVICE_SCOPES = (
+    "unigrok:connect",
+    "unigrok:invoke",
+    "unigrok:review",
+    "unigrok:status",
+    "unigrok:chat",
+)
+_SERVICE_TOKEN_MIN = 32
+_SERVICE_TOKEN_MAX = 256
+_SERVICE_TOKEN_RE = re.compile(r"^[A-Za-z0-9._~+/=\-]{32,256}$")
+
+
+def service_token_scopes() -> list[str]:
+    """Scopes granted to every valid service token (default = full MCP capability)."""
+    values = [
+        item.strip()
+        for item in os.environ.get(
+            "UNIGROK_SERVICE_TOKEN_SCOPES", " ".join(_DEFAULT_SERVICE_SCOPES)
+        ).replace(",", " ").split()
+        if item.strip()
+    ]
+    if not values or any(_OAUTH_SCOPE_RE.fullmatch(item) is None for item in values):
+        return list(_DEFAULT_SERVICE_SCOPES)
+    return list(dict.fromkeys(values))
+
+
+def service_token_label() -> str:
+    raw = os.environ.get("UNIGROK_SERVICE_TOKEN_LABEL", "automation").strip() or "automation"
+    # Stable principal segment: keep it URL-safe and short.
+    cleaned = re.sub(r"[^A-Za-z0-9._-]{1,64}", "-", raw)[:64].strip("-._")
+    return cleaned or "automation"
+
+
+def _digest_token(token: str) -> bytes:
+    return hashlib.sha256(token.encode("utf-8")).digest()
+
+
+def _configured_service_digests() -> frozenset[bytes]:
+    digests: set[bytes] = set()
+    for raw in os.environ.get("UNIGROK_SERVICE_TOKENS", "").split(","):
+        token = raw.strip()
+        if not token:
+            continue
+        if _SERVICE_TOKEN_RE.fullmatch(token) is None:
+            logger.warning("ignoring malformed UNIGROK_SERVICE_TOKENS entry")
+            continue
+        digests.add(_digest_token(token))
+    for raw in os.environ.get("UNIGROK_SERVICE_TOKEN_SHA256", "").split(","):
+        digest_hex = raw.strip().lower()
+        if not digest_hex:
+            continue
+        if re.fullmatch(r"[0-9a-f]{64}", digest_hex) is None:
+            logger.warning("ignoring malformed UNIGROK_SERVICE_TOKEN_SHA256 entry")
+            continue
+        digests.add(bytes.fromhex(digest_hex))
+    return frozenset(digests)
+
+
+def service_tokens_configured() -> bool:
+    return bool(_configured_service_digests())
+
+
+def auth_enforcement_active() -> bool:
+    """True when the remote edge must reject anonymous protected traffic."""
+    return bool(introspection_url()) or service_tokens_configured()
+
+
+def match_service_token(token: str | None) -> dict[str, Any] | None:
+    """Return synthetic auth claims for a valid service token, else None."""
+    if not token or len(token) > _SERVICE_TOKEN_MAX:
+        return None
+    allowed = _configured_service_digests()
+    if not allowed:
+        return None
+    candidate = _digest_token(token)
+    matched = False
+    for digest in allowed:
+        if secrets.compare_digest(candidate, digest):
+            matched = True
+            break
+    if not matched:
+        return None
+    scopes = " ".join(service_token_scopes())
+    label = service_token_label()
+    resource = public_mcp_resource() or "service-token"
+    principal = f"service:{label}"
+    return {
+        "active": True,
+        "token_type": "service",
+        "scope": scopes,
+        "iss": "unigrok:service-token",
+        "sub": label,
+        "aud": resource,
+        "unigrok_principal": principal,
+        "unigrok_auth": "service_token",
+    }
+
+
 def canonical_oauth_principal(issuer: Any, subject: Any) -> str | None:
     if not isinstance(issuer, str) or issuer not in authorization_servers():
         return None
@@ -178,15 +286,22 @@ def oauth_metadata() -> tuple[dict[str, Any], int, dict[str, str]]:
             503,
             {"Cache-Control": "no-store"},
         )
+    validation = "remote-introspection"
+    if service_tokens_configured():
+        validation = "remote-introspection-or-service-token"
+    payload: dict[str, Any] = {
+        "resource": resource,
+        "authorization_servers": servers,
+        "scopes_supported": scopes,
+        "bearer_methods_supported": ["header"],
+        "x_unigrok_authorization_status": "active",
+        "x_unigrok_access_token_validation": validation,
+    }
+    if service_tokens_configured():
+        payload["x_unigrok_service_token"] = True
+        payload["x_unigrok_service_token_scopes"] = service_token_scopes()
     return (
-        {
-            "resource": resource,
-            "authorization_servers": servers,
-            "scopes_supported": scopes,
-            "bearer_methods_supported": ["header"],
-            "x_unigrok_authorization_status": "active",
-            "x_unigrok_access_token_validation": "remote-introspection",
-        },
+        payload,
         200,
         {"Cache-Control": "public, max-age=300"},
     )
@@ -319,19 +434,20 @@ class RemoteOAuthMiddleware:
             await self.app(scope, receive, send)
             return
         path = str(scope.get("path") or "")
-        active = bool(introspection_url())
+        active = auth_enforcement_active()
         if path in _PUBLIC_PATHS or not active:
             await self.app(scope, receive, send)
             return
 
         token = _extract_bearer(_scope_header(scope, b"authorization"))
-        claims: dict[str, Any] | None = None
+        claims: dict[str, Any] | None = match_service_token(token)
         body = b""
         if path == "/mcp" and scope.get("method") == "POST":
             # Authenticate the connection before buffering a potentially large
-            # base64 file request. The returned token scope is then checked
-            # locally once the exact tools/call capability is known.
-            claims = await introspect_oauth_token(token or "", "unigrok:connect")
+            # base64 file request. Service tokens resolve locally; OAuth uses
+            # Control introspection. Scope is re-checked once tools/call is known.
+            if claims is None:
+                claims = await introspect_oauth_token(token or "", "unigrok:connect")
             if claims is None:
                 required = "unigrok:connect"
                 logger.warning("oauth access_denied path=%s scope=%s", path, required)
@@ -377,13 +493,23 @@ class RemoteOAuthMiddleware:
             granted = claims.get("scope")
             granted_scopes = set(granted.split()) if isinstance(granted, str) else set()
             if not set(required.split()).issubset(granted_scopes):
+                # Token already authenticated (connect phase or service match) but
+                # lacks the tool scope — hard deny, do not re-introspect.
                 claims = None
         else:
-            claims = await introspect_oauth_token(token or "", required)
+            claims = match_service_token(token)
+            if claims is not None:
+                granted_scopes = set(str(claims.get("scope") or "").split())
+                if not set(required.split()).issubset(granted_scopes):
+                    claims = None
+            else:
+                claims = await introspect_oauth_token(token or "", required)
         if claims is not None:
             scope["unigrok.oauth"] = claims
+            auth_kind = str(claims.get("unigrok_auth") or "oauth")
             logger.info(
-                "oauth access_allowed path=%s scope=%s principal=%s",
+                "%s access_allowed path=%s scope=%s principal=%s",
+                auth_kind,
                 path,
                 required,
                 principal_label(str(claims.get("unigrok_principal") or "")),
