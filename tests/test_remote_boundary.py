@@ -637,3 +637,140 @@ async def test_agent_job_owner_column_migrates_existing_state(tmp_path: Path) ->
     assert "owner" in columns
     assert "agent_jobs_owner" in indexes
     assert await store.load_agent_job("b" * 32, owner="some-owner") is None
+
+
+# --- Service tokens (GitHub Copilot / non-OAuth automation) ---
+
+
+@pytest.fixture
+def service_token_env(monkeypatch: pytest.MonkeyPatch) -> str:
+    # Synthetic fixture secret (not a production credential).
+    token = "copilot-test-token-bbbbbbbbbbbbbbbbbbbbbbbbbbbb"  # noqa: S105
+    monkeypatch.setenv("UNIGROK_SERVICE_TOKENS", token)
+    monkeypatch.setenv("UNIGROK_SERVICE_TOKEN_LABEL", "github-copilot")
+    monkeypatch.setenv(
+        "UNIGROK_SERVICE_TOKEN_SCOPES",
+        "unigrok:connect,unigrok:invoke,unigrok:review,unigrok:status,unigrok:chat",
+    )
+    # Local-style enforcement without OAuth introspection.
+    monkeypatch.delenv("UNIGROK_OAUTH_INTROSPECTION_URL", raising=False)
+    monkeypatch.delenv("UNIGROK_RUNTIME", raising=False)
+    return token
+
+
+def test_service_token_match_is_constant_time_and_labeled(
+    service_token_env: str,
+) -> None:
+    claims = remote_auth.match_service_token(service_token_env)
+    assert claims is not None
+    assert claims["unigrok_auth"] == "service_token"
+    assert claims["unigrok_principal"] == "service:github-copilot"
+    assert "unigrok:connect" in claims["scope"]
+    assert "unigrok:invoke" in claims["scope"]
+    assert remote_auth.match_service_token("wrong-token-xxxxxxxxxxxxxxxxxxxxxxxx") is None
+    assert remote_auth.match_service_token(None) is None
+
+
+def test_service_token_sha256_env_matches_without_plaintext(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import hashlib
+
+    token = "copilot-hash-token-cccccccccccccccccccccccccccc"  # noqa: S105
+    digest = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    monkeypatch.delenv("UNIGROK_SERVICE_TOKENS", raising=False)
+    monkeypatch.setenv("UNIGROK_SERVICE_TOKEN_SHA256", digest)
+    monkeypatch.setenv("UNIGROK_SERVICE_TOKEN_LABEL", "ci")
+    claims = remote_auth.match_service_token(token)
+    assert claims is not None
+    assert claims["unigrok_principal"] == "service:ci"
+    assert remote_auth.match_service_token(token + "x") is None
+
+
+def test_auth_enforcement_active_with_service_tokens_only(
+    service_token_env: str,
+) -> None:
+    assert remote_auth.service_tokens_configured() is True
+    assert remote_auth.auth_enforcement_active() is True
+    assert remote_auth.introspection_url() is None
+
+
+@pytest.mark.asyncio
+async def test_service_token_middleware_allows_tools_call(
+    service_token_env: str,
+) -> None:
+    seen: dict[str, Any] = {}
+
+    async def app(scope: dict[str, Any], receive: Any, send: Any) -> None:
+        seen["claims"] = scope.get("unigrok.oauth")
+        response = JSONResponse({"ok": True})
+        await response(scope, receive, send)
+
+    body = json.dumps(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {"name": "chat", "arguments": {"prompt": "hi"}},
+        }
+    ).encode()
+    status, headers, response_body = await _asgi_exchange(
+        remote_auth.RemoteOAuthMiddleware(app),
+        path="/mcp",
+        method="POST",
+        body_chunks=(body,),
+        headers=((b"authorization", f"Bearer {service_token_env}".encode()),),
+    )
+    assert status == 200
+    assert seen["claims"]["unigrok_auth"] == "service_token"
+    assert json.loads(response_body)["ok"] is True
+
+
+@pytest.mark.asyncio
+async def test_service_token_middleware_denies_anonymous(
+    service_token_env: str,
+) -> None:
+    async def app(scope: dict[str, Any], receive: Any, send: Any) -> None:
+        response = JSONResponse({"ok": True})
+        await response(scope, receive, send)
+
+    status, headers, response_body = await _asgi_exchange(
+        remote_auth.RemoteOAuthMiddleware(app),
+        path="/mcp",
+        method="POST",
+        body_chunks=(b'{"jsonrpc":"2.0","id":1,"method":"tools/list"}',),
+        headers=(),
+    )
+    assert status == 401
+    assert json.loads(response_body)["error"] == "unauthorized"
+
+
+@pytest.mark.asyncio
+async def test_service_token_works_alongside_oauth(
+    remote_oauth_env: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    token = "copilot-dual-token-dddddddddddddddddddddddddddd"  # noqa: S105
+    monkeypatch.setenv("UNIGROK_SERVICE_TOKENS", token)
+    monkeypatch.setenv("UNIGROK_SERVICE_TOKEN_LABEL", "github-copilot")
+
+    async def app(scope: dict[str, Any], receive: Any, send: Any) -> None:
+        response = JSONResponse(
+            {
+                "principal": (scope.get("unigrok.oauth") or {}).get("unigrok_principal"),
+                "auth": (scope.get("unigrok.oauth") or {}).get("unigrok_auth"),
+            }
+        )
+        await response(scope, receive, send)
+
+    body = b'{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+    status, _headers, response_body = await _asgi_exchange(
+        remote_auth.RemoteOAuthMiddleware(app),
+        path="/mcp",
+        method="POST",
+        body_chunks=(body,),
+        headers=((b"authorization", f"Bearer {token}".encode()),),
+    )
+    assert status == 200
+    payload = json.loads(response_body)
+    assert payload["auth"] == "service_token"
+    assert payload["principal"] == "service:github-copilot"

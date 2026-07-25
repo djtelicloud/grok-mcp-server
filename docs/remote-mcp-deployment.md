@@ -43,6 +43,21 @@ Do not expose the local Compose port directly to a LAN or the internet. Cloud
 mode is the reviewed remote boundary; it is not enabled by changing only the
 bind address.
 
+## Service tokens (GitHub Copilot and non-OAuth bots)
+
+GitHub Copilot cloud agent and code review **cannot** complete remote OAuth.
+For those clients, mint an operator service token and set on the public gateway:
+
+| Variable | Purpose |
+|----------|---------|
+| `UNIGROK_SERVICE_TOKENS` | Comma-separated plaintext tokens (min 32 chars, URL-safe) |
+| `UNIGROK_SERVICE_TOKEN_SHA256` | Comma-separated SHA-256 hex digests (preferred at rest) |
+| `UNIGROK_SERVICE_TOKEN_LABEL` | Principal label (default `automation` → `service:<label>`) |
+| `UNIGROK_SERVICE_TOKEN_SCOPES` | Optional scope list (default: full public MCP scopes) |
+
+Clients send `Authorization: Bearer <token>`. OAuth and service tokens both work when
+configured together. See [github-copilot-mcp.md](./github-copilot-mcp.md).
+
 ## OAuth contract
 
 The gateway publishes RFC 9728 protected-resource metadata and WebMCP discovery
