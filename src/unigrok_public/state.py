@@ -260,6 +260,7 @@ class PublicStateStore:
                 CREATE TABLE IF NOT EXISTS telemetry (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     created_at TEXT NOT NULL,
+                    session_name TEXT,
                     caller TEXT NOT NULL,
                     request_kind TEXT NOT NULL,
                     route TEXT,
@@ -386,6 +387,16 @@ class PublicStateStore:
                 connection.execute(
                     "ALTER TABLE autonomy_jobs ADD COLUMN request_json TEXT"
                 )
+            telemetry_columns = {
+                str(row[1])
+                for row in connection.execute("PRAGMA table_info(telemetry)").fetchall()
+            }
+            if telemetry_columns and "session_name" not in telemetry_columns:
+                connection.execute("ALTER TABLE telemetry ADD COLUMN session_name TEXT")
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS telemetry_session_created "
+                "ON telemetry(session_name, created_at DESC)"
+            )
             agent_job_columns = {
                 str(row[1])
                 for row in connection.execute("PRAGMA table_info(agent_jobs)").fetchall()
@@ -833,7 +844,12 @@ class PublicStateStore:
 
     def _delete_session_sync(self, session: str) -> bool:
         with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
             cursor = connection.execute("DELETE FROM sessions WHERE name=?", (session,))
+            connection.execute(
+                "UPDATE telemetry SET session_name=NULL WHERE session_name=?",
+                (session,),
+            )
             connection.commit()
         return bool(cursor.rowcount)
 
@@ -986,13 +1002,14 @@ class PublicStateStore:
             cursor = connection.execute(
                 """
                 INSERT INTO telemetry(
-                    created_at, caller, request_kind, route, requested_plane,
+                    created_at, session_name, caller, request_kind, route, requested_plane,
                     resolved_plane, model, success, verified, latency_ms,
                     cost_usd, fallback_reason, stop_reason, metadata
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     utc_now(),
+                    str(row.get("session_name") or "")[:160] or None,
                     str(row.get("caller") or "anonymous")[:160],
                     str(row.get("request_kind") or "agent")[:80],
                     str(row.get("route") or "")[:80] or None,
