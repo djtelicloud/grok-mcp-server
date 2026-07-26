@@ -6,7 +6,6 @@ import contextlib
 import hashlib
 import ipaddress
 import json
-import mimetypes
 import os
 import re
 import secrets
@@ -26,9 +25,9 @@ from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import ToolAnnotations
 from pydantic import BaseModel, Field
 from starlette.requests import Request
-from starlette.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
+from starlette.responses import HTMLResponse, JSONResponse, PlainTextResponse
 
-from . import __version__, github_auth, local_plane_loader, xai_api
+from . import __version__, local_plane_loader, xai_api
 from .autonomy import (
     JOB_COMPLETE,
     JOB_ERROR,
@@ -96,7 +95,6 @@ from .remote_auth import (
 from .state import PublicStateStore, normalize_scope, normalize_session, redact_secrets
 
 SERVICE_NAME = "UniGrok xAI Gateway"
-CURSOR_REFERRAL_URL = "https://cursor.com/referral?code=VJWHUMXIKTHG"
 STATIC_ROOT = Path(__file__).with_name("static")
 CLI_PATH = os.environ.get("UNIGROK_CLI_PATH", "grok").strip() or "grok"
 AUTH_PATH = Path(
@@ -341,24 +339,15 @@ SHADOW_DONE_VOTE = os.environ.get("UNIGROK_SHADOW_DONE_VOTE", "off").strip().low
     "yes",
     "on",
 }
-# Surface selection (thin forge hooks). "public" is the default and changes nothing.
-# "forge" additionally registers skeleton contributor control-plane routes that answer
-# 401 until the real OAuth slice lands. The public image never ships forge UI assets;
-# a forge deployment mounts its private console at runtime via UNIGROK_UI_ROOT.
-SURFACE = os.environ.get("UNIGROK_SURFACE", "public").strip().lower() or "public"
-UI_ROOT_OVERRIDE = os.environ.get("UNIGROK_UI_ROOT", "").strip()
-# Layer identity — injected at deploy time, never hardcoded per-layer.
-# Empty string = public free instance (zero collection deps, default behaviour).
-_LAYER_NAME_PATTERN = re.compile(r"[a-z0-9](?:[a-z0-9_-]{0,30}[a-z0-9])?")
+# Public layer identity is limited to the optional local Gemma helper.
+# Empty string is the normal UniGrok Core service.
+_PUBLIC_LAYER_NAMES = frozenset({"", "gemma"})
 
 
 def _normalize_layer_name(value: str | None) -> str:
     layer = str(value or "").strip().lower()
-    if layer and not _LAYER_NAME_PATTERN.fullmatch(layer):
-        raise ValueError(
-            "UNIGROK_LAYER must be 1-32 lowercase letters, digits, hyphens, or "
-            "underscores and cannot start or end with punctuation"
-        )
+    if layer not in _PUBLIC_LAYER_NAMES:
+        raise ValueError("UNIGROK_LAYER supports only the public Gemma local helper")
     return layer
 
 
@@ -370,8 +359,9 @@ def _resolve_local_runtime_url() -> str:
     """Local plane is automatic: default Docker Model Runner unless disabled.
 
     Explicit ``UNIGROK_LOCAL_RUNTIME_URL`` always wins. When unset, default to
-    host DMR at ``host.docker.internal:12434`` unless ``UNIGROK_LOCAL_AUTO`` is
-    off/false/0. Probe still fail-closes if the runtime is absent.
+    host DMR's OpenAI-compatible ``/engines/v1`` API unless
+    ``UNIGROK_LOCAL_AUTO`` is off/false/0. Probe still fail-closes if the
+    runtime is absent.
     """
     explicit = os.environ.get("UNIGROK_LOCAL_RUNTIME_URL", "").strip()
     if explicit:
@@ -379,36 +369,10 @@ def _resolve_local_runtime_url() -> str:
     mode = os.environ.get("UNIGROK_LOCAL_AUTO", "on").strip().lower()
     if mode in {"0", "false", "off", "no"}:
         return ""
-    return "http://host.docker.internal:12434"
+    return "http://host.docker.internal:12434/engines/v1"
 
 
 LOCAL_RUNTIME_URL = _resolve_local_runtime_url()
-
-# Tier-nav targets for the Control Center switcher. Each tier may carry its
-# own full URL (factory surfaces live on distinct origins); the port is the
-# same-host fallback when no URL is configured. The hosted runtime omits the
-# block entirely.
-PUBLIC_TIER_PORT = _bounded_int("UNIGROK_PUBLIC_PORT", 4765, 1, 65535)
-SKY_TIER_PORT = _bounded_int("UNIGROK_SKY_PORT", 4768, 1, 65535)
-SPACE_TIER_PORT = _bounded_int("UNIGROK_SPACE_PORT", 4769, 1, 65535)
-
-
-def _tier_url(name: str) -> str | None:
-    """Validated per-tier origin from env; never credentials, never long."""
-    raw = os.environ.get(name, "").strip()
-    if not raw or len(raw) > 200 or "@" in raw:
-        return None
-    if not raw.startswith(("http://", "https://")):
-        return None
-    return raw.rstrip("/")
-
-
-def _tier_nav() -> dict[str, dict[str, Any]]:
-    return {
-        "public": {"port": PUBLIC_TIER_PORT, "url": _tier_url("UNIGROK_PUBLIC_URL")},
-        "sky": {"port": SKY_TIER_PORT, "url": _tier_url("UNIGROK_SKY_URL")},
-        "space": {"port": SPACE_TIER_PORT, "url": _tier_url("UNIGROK_SPACE_URL")},
-    }
 LOCAL_PROBE_TIMEOUT_SECONDS = _bounded_int("UNIGROK_LOCAL_PROBE_TIMEOUT", 5, 1, 60)
 _LOCAL_PROBE_BACKENDS = None
 LOCAL_DIRECT_TALK_MODE = os.environ.get("UNIGROK_LOCAL_DIRECT_TALK_MODE", "").strip().lower()
@@ -2104,8 +2068,10 @@ def _live_self_description(catalogs: dict[str, Any]) -> dict[str, Any]:
     cli_ready = bool(catalogs["cli"].get("ready", False))
     api_ready = bool(catalogs["api"].get("ready", False))
     api_configured = bool(catalogs["api"].get("configured", False))
+    local_catalog = catalogs.get("local") or {}
+    local_ready = bool(local_catalog.get("ready", False)) and not cloud_mode
     can_spend_api = bool(api_ready and METERED_API_ENABLED)
-    can_chat = can_spend_api if cloud_mode else cli_ready or can_spend_api
+    can_chat = can_spend_api if cloud_mode else cli_ready or can_spend_api or local_ready
     notices: list[dict[str, Any]] = []
     if api_configured and not METERED_API_ENABLED:
         notices.append(
@@ -2133,28 +2099,36 @@ def _live_self_description(catalogs: dict[str, Any]) -> dict[str, Any]:
                 "action": "Use billing receipts to report API usage and cost.",
             }
         )
-    if not cli_ready and not can_spend_api:
-        # No Grok access at all: point new users at the getting-started paths,
-        # including the project's Cursor referral link (disclosed as a referral).
+    if local_ready and not cli_ready and not can_spend_api:
         notices.append(
             {
-                "id": "no_grok_credentials",
+                "id": "local_runtime_ready",
+                "prompt_user": False,
+                "severity": "info",
+                "summary": "The zero-key local model route is ready.",
+                "action": (
+                    "Use local text assistance now; configure Grok Build or XAI_API_KEY "
+                    "only if you want provider-hosted capabilities."
+                ),
+            }
+        )
+    if not cli_ready and not can_spend_api and not local_ready:
+        notices.append(
+            {
+                "id": "no_inference_route",
                 "prompt_user": True,
                 "severity": "warning",
                 "summary": (
                     "The hosted xAI API plane is unavailable."
                     if cloud_mode
-                    else "Neither Grok plane is available: the Grok Build CLI is not "
-                    "logged in and no xAI API key is configured."
+                    else "No inference route is ready."
                 ),
                 "action": (
                     "Contact the hosted service operator; remote callers must never add "
                     "provider keys to client configuration."
                     if cloud_mode
-                    else "Log in with `grok login --device-auth` (subscription plane) or "
-                    "add XAI_API_KEY to your .env (metered plane). New to Grok-powered "
-                    "coding? You can also sign up for Cursor via the project's referral "
-                    "link: " + CURSOR_REFERRAL_URL
+                    else "Start the README Docker Model Runner route, log in to Grok "
+                    "Build, or add XAI_API_KEY to the service environment."
                 ),
             }
         )
@@ -2173,11 +2147,11 @@ def _live_self_description(catalogs: dict[str, Any]) -> dict[str, Any]:
         f"bounded semantic router may use up to {ROUTER_MAX_OUTPUT_TOKENS} output tokens. "
         "The calling agent must disclose API use."
         if cloud_mode
-        else "All agent tools are available by default. Routing uses heuristics or three "
-        "CLI-first bounded votes. If those votes are inconclusive and the API is ready, "
-        f"a semantic fallback is capped at {ROUTER_MAX_OUTPUT_TOKENS} output tokens. "
-        "Selected work stays CLI-first unless it needs a specialist or recovery. The "
-        "calling agent must disclose API use."
+        else "Agent capabilities depend on the live-selected route. Routing uses "
+        "heuristics or bounded votes. When Grok Build is ready it remains the preferred "
+        "remote lead; a compatible local runtime can serve zero-key text work; and an "
+        f"API semantic fallback is capped at {ROUTER_MAX_OUTPUT_TOKENS} output tokens. "
+        "The calling agent must disclose API use."
     )
     return {
         "schema_version": 1,
@@ -2211,12 +2185,16 @@ def _live_self_description(catalogs: dict[str, Any]) -> dict[str, Any]:
         },
         "credential_planes": {
             "version": 1,
-            "policy": "api_only" if cloud_mode else "cli_first",
+            "policy": "api_only" if cloud_mode else "automatic_live_routes",
             "preferred_plane": "api" if cloud_mode else "cli",
             "effective_plane": (
                 "api"
                 if cloud_mode and can_spend_api
-                else ("cli" if cli_ready else ("api" if can_spend_api else None))
+                else (
+                    "cli"
+                    if cli_ready
+                    else ("api" if can_spend_api else ("local" if local_ready else None))
+                )
             ),
             "service_usable": can_chat,
             "degraded": (not can_spend_api) if cloud_mode else not cli_ready,
@@ -2243,6 +2221,16 @@ def _live_self_description(catalogs: dict[str, Any]) -> dict[str, Any]:
                 "default_model": catalogs["api"].get("default_model"),
                 "billing": "metered",
             },
+            "local": {
+                "name": "Local model runtime",
+                "configured": bool(local_catalog.get("configured", False)),
+                "ready": local_ready,
+                "models": local_catalog.get("models", []),
+                "default_model": local_catalog.get("default_model"),
+                "billing": "local_runtime",
+                "cost_usd": 0.0,
+                "disabled_by_policy": cloud_mode,
+            },
             "notices": notices,
             "notice_behavior": "Informational only; no client prompt is required.",
         },
@@ -2250,7 +2238,11 @@ def _live_self_description(catalogs: dict[str, Any]) -> dict[str, Any]:
             "lead": (
                 "heuristics then bounded API semantic routing"
                 if cloud_mode
-                else "heuristics then CLI-first bounded votes; API semantic fallback if needed"
+                else (
+                    "local router floor and local text model"
+                    if local_ready and not cli_ready and not can_spend_api
+                    else "heuristics then CLI-first bounded votes; compatible recovery if needed"
+                )
             ),
             "specialists": (
                 "lead-authored briefs select provider-discovered code or media specialists"
@@ -2262,7 +2254,7 @@ def _live_self_description(catalogs: dict[str, Any]) -> dict[str, Any]:
             "cross_plane": (
                 "unavailable because the hosted CLI plane is disabled"
                 if cloud_mode
-                else "one bounded API recovery after CLI failure or throttling"
+                else "one bounded recovery between compatible ready routes"
             ),
         },
         "capability_defaults": {
@@ -2422,7 +2414,7 @@ async def _durable_knowledge_block(
     if not facts and UNIGROK_LAYER:
         with contextlib.suppress(Exception):
             facts = await STATE.search_facts(
-                f"{UNIGROK_LAYER} policy holds GO PROMOTE",
+                f"{UNIGROK_LAYER} operator policy",
                 scope=search_scope,
                 limit=min(5, limit),
             )
@@ -2435,7 +2427,7 @@ async def _durable_knowledge_block(
     with contextlib.suppress(Exception):
         await STATE.touch_facts([int(item["id"]) for item in facts])
     return (
-        "# Durable seat knowledge (untrusted hints; prefer over inventing policy)\n"
+        "# Durable knowledge (untrusted hints; prefer over inventing policy)\n"
         + rendered
     )
 
@@ -6107,7 +6099,7 @@ async def chat(
 
     Min intelligence: when UNIGROK_CHAT_MEMORY is on (default), durable SQLite
     knowledge is injected before routing so chat matches agent memory floor.
-    Layer seats also inject layer identity (SkyGrok / SpaceGrok / GemmaGrok).
+    Optional custom layers inject their generic layer identity.
     """
     safe_prompt = _validated_prompt(prompt, "prompt")
 
@@ -6235,6 +6227,12 @@ async def grok_mcp_status(refresh: bool = False) -> dict[str, Any]:
         "tool_count": len(PUBLIC_TOOLS),
         "cli": catalogs["cli"],
         "api": catalogs["api"],
+        "local": catalogs.get("local") or {
+            "configured": False,
+            "ready": False,
+            "models": [],
+            "default_model": None,
+        },
         "bootstrap": description["bootstrap"],
         "credential_planes": description["credential_planes"],
         "api_spend_enforcement": {
@@ -6779,25 +6777,11 @@ async def xai_delete_file(
     return await _run_durable_job(_produce, ctx=ctx, kind="xai_delete_file")
 
 
-def _client_is_loopback(request: Request) -> bool:
-    """True only when the direct TCP peer is loopback.
-
-    Deliberately ignores X-Forwarded-For and every other client-supplied header:
-    a spoofed header must never widen the loopback operator exemption. Callers
-    that sit behind a trusted proxy do not exist in this deployment shape (both
-    gateways bind 127.0.0.1), so the peer address is the only truth.
-    """
-    client = request.scope.get("client")
-    return bool(client) and client[0] in {"127.0.0.1", "::1"}
-
-
 def _ui_index_response(index_path: Path) -> HTMLResponse:
     # The page is served under a per-response nonce so the CSP can forbid all
     # other script execution (blocking injected-script exfiltration of the
     # rendered telemetry) without moving to an external bundle. Dynamic
-    # style="width:.." bars still require 'unsafe-inline' for styles. The nonce
-    # replacement no-ops for pages with no inline script (the mounted forge
-    # console uses only same-origin external files, which 'self' covers).
+    # style="width:.." bars still require 'unsafe-inline' for styles.
     nonce = secrets.token_urlsafe(16)
     html = index_path.read_text(encoding="utf-8")
     html = html.replace("<script>", f'<script nonce="{nonce}">', 1)
@@ -6817,308 +6801,8 @@ def _ui_index_response(index_path: Path) -> HTMLResponse:
 @mcp.custom_route("/ui/", methods=["GET"], include_in_schema=False)
 @mcp.custom_route("/ui", methods=["GET"], include_in_schema=False)
 async def control_center(_: Request) -> HTMLResponse:
-    # /ui never consults Authorization or any identity state, on every surface:
-    # loopback operators always get the page, and public telemetry is identity-free.
-    if UI_ROOT_OVERRIDE:
-        index = Path(UI_ROOT_OVERRIDE) / "index.html"
-        if index.is_file():
-            return _ui_index_response(index)
+    """Serve the baked, identity-free public dashboard."""
     return _ui_index_response(STATIC_ROOT / "dashboard.html")
-
-
-def _resolve_ui_asset(raw: str) -> Response:
-    """Resolve one mounted-console asset path with traversal safety (sync)."""
-    if not UI_ROOT_OVERRIDE:
-        return PlainTextResponse("Not Found", status_code=404)
-    if not raw or any(part in {"", ".", ".."} or part.startswith(".") for part in raw.split("/")):
-        return PlainTextResponse("Not Found", status_code=404)
-    root = Path(UI_ROOT_OVERRIDE).resolve()
-    try:
-        target = (root / raw).resolve()
-        target.relative_to(root)
-    except (OSError, ValueError):
-        return PlainTextResponse("Not Found", status_code=404)
-    if not target.is_file():
-        return PlainTextResponse("Not Found", status_code=404)
-    media_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
-    return Response(target.read_bytes(), media_type=media_type)
-
-
-@mcp.custom_route("/ui/{asset_path:path}", methods=["GET"], include_in_schema=False)
-async def ui_asset(request: Request) -> Response:
-    """Serve same-origin assets for a runtime-mounted console.
-
-    Only active when UNIGROK_UI_ROOT is set (forge deployments mount their
-    private console there). Without the override this returns 404 for every
-    subpath, exactly like the routeless default it replaces — the baked-in
-    public dashboard is a single self-contained page.
-    """
-    return _resolve_ui_asset(request.path_params.get("asset_path", ""))
-
-
-def _forge_control_callback_url() -> str:
-    """Canonical loopback callback; never trust a request Host header."""
-    configured = _tier_url("UNIGROK_PUBLIC_URL")
-    if configured:
-        try:
-            parsed = urlsplit(configured)
-            if (
-                parsed.scheme == "http"
-                and parsed.hostname in {"127.0.0.1", "localhost", "::1"}
-                and parsed.port
-                and parsed.path in {"", "/"}
-                and not parsed.query
-                and not parsed.fragment
-                and not parsed.username
-                and not parsed.password
-            ):
-                return f"{configured.rstrip('/')}/auth/control/callback"
-        except ValueError:
-            pass
-    return f"http://127.0.0.1:{PUBLIC_TIER_PORT}/auth/control/callback"
-
-
-def _forge_request_is_canonical(request: Request) -> bool:
-    """Accept Forge auth only through the loopback-published canonical Host."""
-    raw_host = request.headers.get("host", "").strip()
-    if not raw_host or len(raw_host) > 255:
-        return False
-    try:
-        supplied = urlsplit(f"http://{raw_host}")
-        expected = urlsplit(_forge_control_callback_url())
-        return (
-            supplied.hostname in {"127.0.0.1", "localhost", "::1"}
-            and supplied.port == expected.port
-            and supplied.username is None
-            and supplied.password is None
-            and supplied.path == ""
-            and not supplied.query
-            and not supplied.fragment
-        )
-    except ValueError:
-        return False
-
-
-def _forge_auth_guard(request: Request) -> Response | None:
-    if SURFACE != "forge":
-        return PlainTextResponse("Not Found", status_code=404)
-    if not _forge_request_is_canonical(request):
-        return PlainTextResponse(
-            "Forbidden",
-            status_code=403,
-            headers={"cache-control": "no-store"},
-        )
-    return None
-
-
-def _forge_csrf_is_valid(request: Request) -> bool:
-    """Require a non-simple same-loopback request for Forge auth mutations."""
-    if request.headers.get("x-unigrok-csrf") != "1":
-        return False
-    origin = request.headers.get("origin")
-    if not origin:
-        return True
-    try:
-        supplied = urlsplit(origin)
-        expected = urlsplit(_forge_control_callback_url())
-        return (
-            supplied.scheme == "http"
-            and supplied.hostname in {"127.0.0.1", "localhost", "::1"}
-            and supplied.port == expected.port
-            and supplied.username is None
-            and supplied.password is None
-            and supplied.path in {"", "/"}
-            and not supplied.query
-            and not supplied.fragment
-        )
-    except ValueError:
-        return False
-
-
-@mcp.custom_route("/control", methods=["GET"], include_in_schema=False)
-@mcp.custom_route("/api/me", methods=["GET"], include_in_schema=False)
-async def forge_identity(request: Request) -> Response:
-    """GitHub-gated identity on the forge surface.
-
-    Public surface: indistinguishable from unregistered routes (identity-free
-    4765 contract). Forge: 401 signed out, 200 {login, tier} once the device
-    flow completes. The loopback /ui operator exemption never applies here.
-    """
-    guard = _forge_auth_guard(request)
-    if guard is not None:
-        return guard
-    device_session = github_auth.session_info(
-        request.cookies.get(github_auth.SESSION_COOKIE)
-    )
-    control_session = await github_auth.control_session_info(None)
-    if control_session and control_session.get("error") == "authorization_unavailable":
-        if device_session:
-            return JSONResponse(
-                device_session,
-                headers={"cache-control": "no-store"},
-            )
-        return JSONResponse(
-            {"error": "authorization_unavailable"},
-            status_code=503,
-            headers={"cache-control": "no-store"},
-        )
-    if control_session:
-        return JSONResponse(control_session, headers={"cache-control": "no-store"})
-    if not device_session:
-        return JSONResponse(
-            {"error": "authentication_required"},
-            status_code=401,
-            headers={"cache-control": "no-store"},
-        )
-    return JSONResponse(device_session, headers={"cache-control": "no-store"})
-
-
-@mcp.custom_route("/auth/control/start", methods=["GET"], include_in_schema=False)
-async def forge_control_start(request: Request) -> Response:
-    """Prefer the existing Cloud OAuth/PKCE registration and GitHub session."""
-    guard = _forge_auth_guard(request)
-    if guard is not None:
-        return guard
-    result = await github_auth.start_control_flow(_forge_control_callback_url())
-    authorization_url = str(result.get("authorization_url") or "")
-    if not authorization_url:
-        return Response(
-            status_code=302,
-            headers={
-                "cache-control": "no-store",
-                "location": "/ui/?control=unavailable",
-                "referrer-policy": "no-referrer",
-            },
-        )
-    return Response(
-        status_code=302,
-        headers={
-            "cache-control": "no-store",
-            "location": authorization_url,
-            "referrer-policy": "no-referrer",
-        },
-    )
-
-
-@mcp.custom_route(
-    "/auth/control/callback",
-    methods=["GET"],
-    include_in_schema=False,
-)
-async def forge_control_callback(request: Request) -> Response:
-    """Finish the loopback PKCE exchange without exposing tokens to page scripts."""
-    guard = _forge_auth_guard(request)
-    if guard is not None:
-        return guard
-    query = request.query_params
-    states = query.getlist("state")
-    codes = query.getlist("code")
-    if len(states) != 1 or len(codes) != 1:
-        return PlainTextResponse(
-            "Cloud sign-in could not be completed.",
-            status_code=400,
-            headers={"cache-control": "no-store"},
-        )
-    result = await github_auth.finish_control_flow(states[0], codes[0])
-    if not result.get("login"):
-        return PlainTextResponse(
-            "Cloud sign-in could not be completed.",
-            status_code=400,
-            headers={"cache-control": "no-store"},
-        )
-    response = Response(
-        status_code=302,
-        headers={
-            "cache-control": "no-store",
-            "location": "/ui/",
-            "referrer-policy": "no-referrer",
-        },
-    )
-    return response
-
-
-@mcp.custom_route("/auth/github", methods=["GET"], include_in_schema=False)
-@mcp.custom_route("/auth/github/start", methods=["POST"], include_in_schema=False)
-async def forge_github_start(request: Request) -> Response:
-    """Kick the GitHub device flow (real auth; no secret, no stored token)."""
-    guard = _forge_auth_guard(request)
-    if guard is not None:
-        return guard
-    if not _forge_csrf_is_valid(request):
-        return JSONResponse(
-            {"error": "csrf_required"},
-            status_code=403,
-            headers={"cache-control": "no-store"},
-        )
-    if not github_auth.client_id():
-        return JSONResponse(
-            {
-                "error": "github_oauth_not_configured",
-                "hint": "set UNIGROK_GITHUB_CLIENT_ID in the forge environment",
-            },
-            status_code=501,
-        )
-    result = await github_auth.start_flow()
-    return JSONResponse(result, status_code=502 if "error" in result else 200)
-
-
-@mcp.custom_route("/auth/github/poll", methods=["POST"], include_in_schema=False)
-async def forge_github_poll(request: Request) -> Response:
-    guard = _forge_auth_guard(request)
-    if guard is not None:
-        return guard
-    if not _forge_csrf_is_valid(request):
-        return JSONResponse(
-            {"error": "csrf_required"},
-            status_code=403,
-            headers={"cache-control": "no-store"},
-        )
-    try:
-        body = await request.json()
-    except ValueError:
-        body = {}
-    result = await github_auth.poll_flow(str((body or {}).get("flow") or ""))
-    sid = result.pop("session", None)
-    status = 200
-    if "error" in result:
-        status = {
-            "github_unreachable": 502,
-            "session_unavailable": 503,
-        }.get(result["error"], 400)
-    response = JSONResponse(result, status_code=status)
-    if sid:
-        # Loopback http: HttpOnly + SameSite keep the session out of scripts
-        # and cross-site posts; Secure is meaningless without TLS here.
-        response.set_cookie(
-            github_auth.SESSION_COOKIE,
-            sid,
-            max_age=12 * 3600,
-            httponly=True,
-            samesite="lax",
-            path="/",
-        )
-    return response
-
-
-@mcp.custom_route("/auth/logout", methods=["POST"], include_in_schema=False)
-async def forge_logout(request: Request) -> Response:
-    guard = _forge_auth_guard(request)
-    if guard is not None:
-        return guard
-    if not _forge_csrf_is_valid(request):
-        return JSONResponse(
-            {"error": "csrf_required"},
-            status_code=403,
-            headers={"cache-control": "no-store"},
-        )
-    github_auth.end_session(request.cookies.get(github_auth.SESSION_COOKIE))
-    github_auth.end_control_session(None)
-    response = JSONResponse(
-        {"status": "signed_out"},
-        headers={"cache-control": "no-store"},
-    )
-    response.delete_cookie(github_auth.SESSION_COOKIE, path="/")
-    return response
 
 
 @mcp.custom_route("/.well-known/webmcp", methods=["GET"], include_in_schema=False)
@@ -7345,8 +7029,6 @@ async def runtimez(_: Request) -> JSONResponse:
             "task_rag": {**description["task_rag"], "fact_count": fact_count},
             "credential_planes": description["credential_planes"],
     }
-    if not is_cloudrun_runtime():
-        payload["tier_nav"] = _tier_nav()
     return JSONResponse(payload)
 
 
@@ -7981,7 +7663,7 @@ async def _openai_compat_chat(
     max_tokens: int | None,
     timeout: float,  # noqa: ASYNC109
 ) -> dict[str, Any]:
-    """Shared OpenAI-compatible ``/v1/chat/completions`` transport.
+    """Shared OpenAI-compatible ``/chat/completions`` transport.
 
     Single source of truth for the local HTTP shape used by BOTH the certified,
     role-bound ``_local_chat`` and the non-certified direct-talk peer. Returns
@@ -7995,9 +7677,9 @@ async def _openai_compat_chat(
     body: dict[str, Any] = {"model": model, "messages": messages, "stream": False}
     if max_tokens is not None:
         body["max_tokens"] = int(max_tokens)
-    base = base_url.rstrip("/")
+    api_base = local_plane_loader.openai_compat_api_base(base_url)
     async with httpx.AsyncClient(timeout=timeout) as client:
-        resp = await client.post(f"{base}/v1/chat/completions", json=body)
+        resp = await client.post(f"{api_base}/chat/completions", json=body)
         resp.raise_for_status()
         payload = resp.json() if resp.content else {}
     if not isinstance(payload, dict):

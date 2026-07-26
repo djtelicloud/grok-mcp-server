@@ -1,17 +1,30 @@
 #!/usr/bin/env bash
 # Insider-boundary deny-list (CI gate).
 #
-# The public gateway image must never ship contributor/forge UI assets, private
-# deploy overlays, or secret material. Forge deployments mount their private
-# console at runtime (UNIGROK_UI_ROOT); nothing insider is ever committed here.
+# The public gateway image must contain only the generic clone/build/start/use
+# experience documented in README.md. Private UI, topology, coordination, raw
+# evaluation, operator state, and secret material stay outside this repository.
 # This checks tracked plus untracked, non-ignored repository files so a local gate
 # catches provenance before staging. The deny-list itself is excluded from text scans.
 set -euo pipefail
 
 deny_patterns=(
-  '^mcp_ui/'                 # private forge console tree
+  '(^|/)\.DS_Store$'         # Finder metadata
+  '^\.claude/'               # provider-local state
+  '^\.a2a/'                  # private team relay
+  '^archives/'               # private historical material
+  '^evals/'                  # raw evaluation artifacts
+  '^harvest/'                # private derived-work staging
+  '^mcp_ui/'                 # private console tree
   '^sites/'                  # private control-center app tree
   '(^|/)forge-console'       # private launch tooling
+  '^docs/(AUTONOMY_INTEL|DEOVERFIT|OFFLINE_FREE_VARIANT|PUBLIC_STRANGER_SURFACE|SLEEP_PLANE|WASM_DOGFOOD)\.md$'
+  '^docs/(design/ui-data-pipeline|github-copilot-mcp|onboarding-extraction|remote-mcp-deployment|team-readiness)\.md$'
+  '^scripts/(bench_slim_preprompt|bench_stable_vs_slim|benchmark_deep|dogfood_optimize|parallel_probe|persona_bench|smoke_team_harness|soak_nokey|triage_optimize)\.py$'
+  '^scripts/(check_runtime_parity|seed_dev_telemetry)\.py$'
+  '^assets/(control-center-live|logo|og-banner)\.(png|svg)$'
+  '^src/unigrok_public/github_auth\.py$'
+  '^tests/test_(github_device_auth|control_oauth_bridge|forge_surface)\.py$'
   '\.override\.ya?ml$'       # private compose overlays
   '(^|/)\.env($|\.)'         # environment secret files
   'client_secret'            # OAuth secret material
@@ -26,6 +39,12 @@ provenance_patterns=(
   'internal donor'
   'donor-research'
   'private DoR'
+  '(SkyCommand|SpaceCommand|GroundCommand)'
+  '@(sky|space)grok([^A-Za-z0-9_]|$)'
+  'UNIGROK_(SKY|SPACE|FORGE|SURFACE|CONTRIBUTOR)'
+  'XAI_API_KEY_(SKY_INFERENCE|GROUND|UNIGROK_GROUND)'
+  'KEY_HOMES\.md'
+  'grok-mcp-intelligence'
   'telemetry([ _-]?(ID|id))?[` )=:#-]*[0-9]{2,}'
   'metered cost of \$[0-9]'
 )

@@ -6,8 +6,8 @@ Known limits of the current release are tracked in [Known limits](known-limits.m
 
 ## How an IDE agent should drive `agent`
 
-Unless a paragraph is explicitly marked hosted, persistence and CLI-first routing below
-describe local Compose. The hosted pilot is API-only and its SQLite state is
+Unless a paragraph is explicitly marked remote, persistence and CLI-first routing below
+describe local Compose. Generic remote mode is API-only and its SQLite state is
 instance-local.
 
 - **Default:** call `agent` with just `task`. The router picks route, effort, and
@@ -35,12 +35,6 @@ instance-local.
   `pfc_absent` → current request instead of the full transcript dump. Receipts land on
   `context_pack` (`prefrontal`, `pfc_loops`, `pfc_absent`, …). Process default is
   **off**; **Docker compose live default is `cpu`**. Inspect `/runtimez` → `autonomy.context_pack`.
-- **De-overfitting doctrine:** freeze only near-physics envelopes; treat cognition
-  weights, timeouts, and pools as versioned posteriors. See [DEOVERFIT.md](DEOVERFIT.md).
-- **WASM × dogfood (design only):** sandbox agents that **run** code, not ones that
-  **think**. No wasm runtime in the shipping gateway; today’s untrusted local exec is
-  the host dogfood script. Guest ABI and trigger conditions:
-  [WASM_DOGFOOD.md](WASM_DOGFOOD.md).
 - **`level`** (optional, explicit rung): `none` · `minimal` · `low` · `medium` ·
   `high` · `xhigh` (one call at that native Grok effort) → `max` (silent deep harness)
   → `ultra` (parallel hive: draft → persona votes → merge). Setting `level` skips
@@ -154,25 +148,17 @@ http://localhost:4765/mcp
 
 Transport: Streamable HTTP. The MCP handshake, `/healthz`, `/readyz`, `/runtimez`,
 `grok_mcp_status`, and `grok_mcp_discover_self` all report version `1.1.0`.
-`/healthz`, `/runtimez`, and discovery also expose a non-secret
-`source_fingerprint`, which identifies the byte content and relative paths of the baked
-public runtime tree. For local Docker, compare it with the checkout using
-`uv run python scripts/check_runtime_parity.py --container unigrok`.
+The README build copies the source tree into the image. Rebuild after source changes;
+health and version responses do not prove that an older image contains the current
+checkout.
 
-The owner-operated hosted pilot uses `https://mcp.grokmcp.org/mcp`. It publishes
-OAuth protected-resource metadata and requires an active, correctly scoped Control
-token for every protected request. MCP initialization needs `unigrok:connect`; general
-tools need `unigrok:invoke`; review and status use their dedicated scopes. The
-`unigrok:chat` scope is reserved; this core does not expose a `/v1` chat route.
-An OAuth-capable client should discover and authorize from the resource URL instead of
-storing a provider key or static bearer.
-
-Hosted mode is API-only: the Grok Build CLI is disabled by policy. OAuth principals
+An operator may deploy the same generic runtime behind an OAuth-capable MCP gateway.
+Remote mode is API-only: the Grok Build CLI is disabled by policy. OAuth principals
 receive tenant-scoped sessions, facts, jobs, and telemetry. xAI file tools additionally
 require a principal-bound provider credential. The current hosted SQLite directory is
 instance-local, so the local-volume restart guarantees below do not extend across Cloud
-Run instance replacement or horizontal scaling. See
-[Authenticated remote deployment](remote-mcp-deployment.md).
+Run instance replacement or horizontal scaling. Operator deployment state and runbooks
+are intentionally outside this public clone.
 
 ## Public tools
 
@@ -187,7 +173,7 @@ Run instance replacement or horizontal scaling. See
 - `grok_mcp_discover_self` — authoritative live self-description
 - `grok_mcp_onboard_client` — consent-first client integration plan; never writes files
 - `grok_mcp_status` — non-secret runtime and plane readiness
-- `list_models` — independent live CLI and API model catalogs
+- `list_models` — independent live local, CLI, and API model catalogs
 - `benchmark_status` — route, latency, cost, caller, fallback, and breaker aggregates
 - `record_benchmark_result` — attach an explicit pass/fail outcome to a telemetry receipt
 
@@ -242,8 +228,9 @@ through discovery and never attempts the disabled CLI plane.
 - API responses include provider billing receipts when available.
 - Destructive tools require `confirm_delete=true`.
 
-Language model IDs are discovered independently from the live CLI and API catalogs.
-The caller does not select them. Media tools retain provider-defined media defaults.
+Language model IDs are discovered independently from the live local, CLI, and API
+catalogs. The caller does not select them. Media tools retain provider-defined media
+defaults.
 
 ## Runtime limits
 
@@ -353,7 +340,5 @@ IDE configuration, plugins, private intelligence, subordinate providers, or thei
 credentials. Its session database contains only caller-supplied MCP content after
 redaction.
 
-Needle remains visibly inactive. Design and evaluation artifacts do not constitute a
-live shadow/reflex runtime. WASM guest isolation for dogfood/local code-exec is
-likewise design-only until a sandboxed promotion oracle or local RCE path exists
-([WASM_DOGFOOD.md](WASM_DOGFOOD.md)).
+Needle remains visibly inactive. Private design and evaluation artifacts do not
+constitute a live shadow or reflex runtime in UniGrok Core.

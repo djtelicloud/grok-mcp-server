@@ -1097,8 +1097,24 @@ class ProbeBackend(Protocol):
         ...
 
 
+def openai_compat_api_base(base_url: str) -> str:
+    """Return one normalized OpenAI-compatible API base.
+
+    Runtime configuration may point either at a server root (for example,
+    ``http://runtime:8000``) or at an already-versioned API base (for example,
+    Docker Model Runner's ``.../engines/v1``). Preserve versioned bases and add
+    ``/v1`` only for unversioned roots.
+    """
+    base = str(base_url).strip().rstrip("/")
+    if not base:
+        raise ValueError("OpenAI-compatible runtime URL is empty")
+    if base.rsplit("/", 1)[-1] == "v1":
+        return base
+    return f"{base}/v1"
+
+
 class OpenAICompatProbe:
-    """GET ``{base}/v1/models`` — OpenAI-shaped ``{"data":[{"id":...}]}``."""
+    """GET ``{api_base}/models`` — OpenAI-shaped ``{"data":[{"id":...}]}``."""
 
     name = "openai_compat"
 
@@ -1107,10 +1123,10 @@ class OpenAICompatProbe:
             import httpx
         except Exception as exc:  # pragma: no cover - import env
             return ProbeResult(runtime_up=False, errors=(f"openai_compat:httpx:{exc}",))
-        base = base_url.rstrip("/")
         try:
+            api_base = openai_compat_api_base(base_url)
             async with httpx.AsyncClient(timeout=timeout) as client:
-                resp = await client.get(f"{base}/v1/models")
+                resp = await client.get(f"{api_base}/models")
                 resp.raise_for_status()
                 payload = resp.json()
             rows = payload.get("data") if isinstance(payload, dict) else None
@@ -1180,7 +1196,7 @@ class OllamaProbe:
 
 
 class MLXProbe:
-    """Example second backend: OpenAI-compat ``/v1/models`` path, ``runtime="mlx"``.
+    """Example second backend: OpenAI-compat ``/models`` path, ``runtime="mlx"``.
 
     Not in ``DEFAULT_PROBE_BACKENDS`` — proves the shape is brand-agnostic.
     """
@@ -1192,10 +1208,10 @@ class MLXProbe:
             import httpx
         except Exception as exc:  # pragma: no cover - import env
             return ProbeResult(runtime_up=False, errors=(f"mlx:httpx:{exc}",))
-        base = base_url.rstrip("/")
         try:
+            api_base = openai_compat_api_base(base_url)
             async with httpx.AsyncClient(timeout=timeout) as client:
-                resp = await client.get(f"{base}/v1/models")
+                resp = await client.get(f"{api_base}/models")
                 resp.raise_for_status()
                 payload = resp.json()
             rows = payload.get("data") if isinstance(payload, dict) else None

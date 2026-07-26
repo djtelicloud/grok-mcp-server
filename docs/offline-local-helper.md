@@ -1,44 +1,55 @@
-# Optional local-model helper
+# Local model routes
 
-UniGrok includes an experimental, default-off MCP helper for an operator-owned
-local model runtime. It is useful when a model and all of its runtime assets are
-already present on the machine and remote Grok planes are unavailable.
+UniGrok Core supports a zero-key local route inside the normal `@grok` service on
+port `4765`. It also includes a smaller, optional named helper for callers that want
+one specific local model directly.
 
-This first stage is deliberately narrow:
+Neither route receives a Grok login, xAI API key, workspace, shell, file, or web
+authority. Local results carry `billing_class: local_runtime` and `cost_usd: 0`.
 
-- it is a separate MCP server named `gemmagrok-local`, normally on
-  `http://127.0.0.1:4777/mcp`;
-- it exposes only `chat` and `status`;
-- it accepts only a loopback or Docker-host runtime origin and disables proxy
-  inheritance and redirects;
-- it receives no Grok login, xAI API key, workspace, shell, file, or web access;
-- it never becomes an automatic fallback for the public `@grok` server.
+## Integrated zero-key route
 
-The main `grok-mcp` service still uses only its documented CLI and API planes.
-An authentication failure remains a denial; it does not route into this helper.
+On Docker Desktop, enable Docker Model Runner and pull the pinned README model:
 
-## Prerequisite: a staged local runtime
-
-Start an OpenAI-compatible local runtime that serves both:
-
-```text
-GET  /v1/models
-POST /v1/chat/completions
+```bash
+docker desktop enable model-runner --tcp 12434
+docker model pull ai/gemma3:4B-Q4_K_M
+docker model run --detach ai/gemma3:4B-Q4_K_M
 ```
 
-The runtime must be reachable on the same machine. The helper rejects remote
-hosts, URL credentials, redirects, and runtime URLs with extra paths. If the
-runtime advertises more than one model, select one exact live-discovered id with
-`GEMMAGROK_MODEL_ID`; the helper does not contain a model allowlist or download a
-replacement.
+Then start UniGrok normally:
 
-For a real no-internet run, pre-stage the image, Python dependencies, model,
-tokenizer, and any adapters before disconnecting. This helper does not itself
-certify or seal those external assets.
+```bash
+docker compose up -d grok-mcp
+curl --fail --silent http://127.0.0.1:4765/readyz
+curl --fail --silent http://127.0.0.1:4765/runtimez
+```
 
-## Start the default-off Compose profile
+The container automatically probes Docker Model Runner through
+`host.docker.internal:12434`. When no remote route is ready, the discovered Gemma
+model supplies the bounded router and text path. Requests without a funded local role,
+including cloud-only media and search, fail closed instead of escaping to a paid service
+or fabricating a result.
 
-Assuming the local runtime listens on host port `8081`:
+Set `UNIGROK_LOCAL_AUTO=off` to disable automatic probing. For another
+OpenAI-compatible loopback runtime, set `UNIGROK_LOCAL_RUNTIME_URL` to its base URL.
+The runtime must expose model discovery and chat completions and must remain on the
+same machine.
+
+Docker Model Runner's endpoint is unauthenticated. Keep port `12434` on loopback.
+For a genuinely offline run, pre-stage the image, model, tokenizer, and dependencies
+before disconnecting.
+
+## Optional named helper
+
+The default-off `gemmagrok-local` service is separate from `@grok`:
+
+- MCP URL: `http://127.0.0.1:4777/mcp`
+- tools: `chat` and `status`
+- route: exactly one live-discovered model selected with `GEMMAGROK_MODEL_ID`
+- recovery: none; it never escapes to a remote provider
+
+Assuming an OpenAI-compatible runtime listens on host port `8081`:
 
 ```bash
 export GEMMAGROK_MODEL_ID='<exact id from the local /v1/models response>'
@@ -46,11 +57,7 @@ docker compose --profile offline up -d gemmagrok-local
 curl --fail --silent http://127.0.0.1:4777/readyz
 ```
 
-The service is not started by a normal `docker compose up -d grok-mcp`. Change
-the helper port with `GEMMAGROK_PORT` and the host runtime port with
-`GEMMAGROK_RUNTIME_PORT`.
-
-You can also run it directly without Docker:
+To run the helper directly:
 
 ```bash
 GEMMAGROK_RUNTIME_URL=http://127.0.0.1:8081 \
@@ -58,32 +65,6 @@ GEMMAGROK_MODEL_ID='<exact local model id>' \
 uv run python -m unigrok_public.gemmagrok_peer
 ```
 
-## Connect an IDE explicitly
-
-Add a second MCP entry without credentials. For example:
-
-```json
-{
-  "mcpServers": {
-    "gemmagrok-local": {
-      "url": "http://127.0.0.1:4777/mcp",
-      "headers": {
-        "X-Client-ID": "cursor-gemmagrok-local"
-      }
-    }
-  }
-}
-```
-
-Use this named helper only when you explicitly want a local answer. Keep the
-normal `grok` entry on port `4765`; the two identities and their readiness are
-independent.
-
-## Current promotion boundary
-
-This stage proves a useful local MCP surface, not production failover routing.
-Before any future automatic or `failover=local` path can ship, it still needs a
-separate shadow-mode change with outage classification, an authorization-deny
-test, sealed-asset verification, bounded request eligibility, and rollback
-receipts. Hosted Cloud Run does not gain a local model from enabling this
-Compose-only helper.
+Connect it as a second MCP server only when you explicitly want that local model.
+The normal `grok` entry remains `http://127.0.0.1:4765/mcp`; the two identities and
+readiness checks are independent.

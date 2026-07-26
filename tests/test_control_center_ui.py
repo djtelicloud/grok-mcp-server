@@ -1,9 +1,4 @@
-"""Control Center honesty and pane-contract regression tests.
-
-Pipeline plan: docs/design/ui-data-pipeline.md. The dashboard must render
-runtime truth (readyz status verbatim), expose the plane/kind aggregates, and
-carry the Time/Kind/Stop receipt columns.
-"""
+"""Public dashboard honesty and pane-contract regression tests."""
 
 import asyncio
 import re
@@ -42,7 +37,6 @@ def test_tables_replaced_by_groupby_and_standouts() -> None:
         'id="outcomes"',
         'id="risktools"',
         'id="standouts"',
-        'id="claimstate"',
     ):
         assert pane_id in html
     assert "function cbars(" in html
@@ -62,8 +56,8 @@ def test_per_panel_color_coding_and_legend() -> None:
 
 
 def test_connect_panel_and_plane_usage() -> None:
-    # Forge fold: an MCP-connect panel (non-secret config, live client status)
-    # and per-plane usage reporting on the routing planes.
+    # The public dashboard carries an MCP-connect panel (non-secret config,
+    # live client status) and per-plane usage reporting.
     html = DASHBOARD.read_text(encoding="utf-8")
     assert 'id="clients"' in html and 'id="mcpsnippet"' in html
     assert "planeUse" in html
@@ -103,17 +97,13 @@ def test_agent_paste_command_present_and_non_secret() -> None:
         assert secret not in m.group(0)
 
 
-def test_command_drawer_structure_and_veil() -> None:
-    # Drawer mirrors the control-site groups, anchor-scrolls to panels, and
-    # hides contributor items on the public tier; sign-in links the control
-    # origin and the deck never handles credentials.
+def test_command_drawer_indexes_only_public_panels() -> None:
     html = DASHBOARD.read_text(encoding="utf-8")
     assert 'id="drawer"' in html and 'id="dmenu"' in html and 'id="backdrop"' in html
-    for group in ("'This machine'", "'Your project'", "'Build'", "'Account'"):
+    for group in ("'This machine'", "'Build'"):
         assert group in html
-    assert "tierLevel>0||i.min===0" in html  # veil: public tier lists only public items
-    # nav default + identity fallback + drawer sign-out
-    assert html.count("https://control.grokmcp.org") == 3
+    for removed_group in ("'Your project'", "'Account'"):
+        assert removed_group not in html
     assert "scrollIntoView" in html
 
 
@@ -148,18 +138,6 @@ def test_null_feed_never_fabricates_safe_state() -> None:
     assert html.count(".catch(()=>null)") >= 3
 
 
-def test_tier_gating_reveal_is_pinned() -> None:
-    # The hierarchical reveal is the load-bearing access rule; assert it
-    # verbatim so deleting or inverting it fails.
-    html = DASHBOARD.read_text(encoding="utf-8")
-    assert "{public:0,sky:1,space:2}" in html
-    assert ".get('preview')" in html
-    assert "$('sky-tier').style.display=tierLevel>=1?'':'none'" in html
-    assert "$('space-tier').style.display=tierLevel>=2?'':'none'" in html
-    assert "if(tierLevel>=1)renderSky()" in html
-    assert "if(tierLevel>=2)renderSpace(" in html
-
-
 def test_governance_and_build_panels() -> None:
     # Smart adds from real /runtimez data: build/durable metrics and the
     # policy/governance flags (spend-enabling reads warning).
@@ -167,21 +145,6 @@ def test_governance_and_build_panels() -> None:
     assert 'id="build"' in html and 'id="policy"' in html
     assert "grok_build" in html and "api_spend_enforcement" in html
     assert "routing_advisor" in html and "automatic_judge_spend" in html
-
-
-def test_contributor_sample_panels_gated() -> None:
-    # Sky/Space contributor shells live INSIDE their tier sections (positional
-    # containment), so tier gating actually governs them.
-    html = DASHBOARD.read_text(encoding="utf-8")
-    assert (
-        html.index('id="sky-tier"')
-        < html.index('id="ghreviews"')
-        < html.index('id="space-tier"')
-        < html.index('id="reportcard"')
-    )
-    assert 'id="liverun"' in html and 'id="devices"' in html
-    # sealed report card must not headline a fabricated non-floor claim
-    assert "sealed" in html.lower() and "% floor" in html
 
 
 def test_severity_scoring_handles_numeric_success() -> None:
@@ -192,39 +155,21 @@ def test_severity_scoring_handles_numeric_success() -> None:
     assert "r.verified&&!r.success" in html
 
 
-def test_tier_nav_renders_all_three_surfaces() -> None:
-    # Sponsor decision: the unified switcher shows all three tiers and links
-    # each to its own surface port (public 4765, sky 4768, space 4769). Higher
-    # tiers enforce their own auth on arrival; the nav is navigation, not access.
+def test_dashboard_is_public_core_only() -> None:
     html = DASHBOARD.read_text(encoding="utf-8")
-    assert 'id="tiernav"' in html
-    # Full tuples, not bare ports (a port can appear in unrelated sample data).
-    # Each tier carries its command name + eyebrow for the dynamic page title.
-    for tup in (
-        "{id:'public',label:'@grok Public Core',port:'4765',name:'GroundCommand'",
-        "{id:'sky',label:'@skygrok Sky Observer',port:'4768',name:'SkyCommand'",
-        "{id:'space',label:'@spacegrok Space Awareness',port:'4769',name:'SpaceCommand'",
+    assert "UniGrok Core" in html
+    assert 'id="mcpendpoint">/mcp' in html
+    for forbidden in (
+        "UNIGROK_GITHUB_CLIENT_ID",
+        "/auth/github",
+        "/auth/control",
+        "/api/me",
+        "tier_nav",
+        "?preview=",
+        "SPACE=DARK",
+        "4-lane swarm grid",
     ):
-        assert tup in html
-    # applyTier drives title/eyebrow/tab state from the active tier
-    assert "function applyTier(" in html and "$('pagetitle').textContent" in html
-
-
-def test_tier_scoped_panels_present_and_gated() -> None:
-    # Sky/Space panels exist but are display:none by default; JS reveals them
-    # only when the active tier warrants (hierarchical scoping). Sample data is
-    # clearly marked and no sealed READY / non-null gate_id is invented.
-    html = DASHBOARD.read_text(encoding="utf-8")
-    assert 'id="sky-tier"' in html and 'id="space-tier"' in html
-    assert html.count('style="display:none"') >= 2
-    for panel in ("4-lane swarm grid", "Claim plane", "security monitor"):
-        assert panel.lower() in html.lower()
-    assert "SAMPLE" in html
-    # gate_id must be null (anchored — the OR-fallback version was tautological)
-    assert "gate_id null" in html.lower()
-    assert not re.findall(r"gate_id (?!null)\S+", html.lower())
-    # every "sealed READY" occurrence must be negated ("no sealed READY")
-    assert re.findall(r"(?<!no )sealed READY", html) == []
+        assert forbidden not in html
 
 
 def test_level_color_palette_wired() -> None:
@@ -297,35 +242,17 @@ def test_state_store_counts_durable_facts(tmp_path: Path) -> None:
     assert asyncio.run(store.count_facts()) == 2
 
 
-def test_tier_nav_ports_are_bounded_env_values() -> None:
-    # tier_nav ports come from names-only env params; the hosted runtime
-    # omits the block entirely (asserted via the cloudrun gate in runtimez).
-    from unigrok_public.server import (
-        PUBLIC_TIER_PORT,
-        SKY_TIER_PORT,
-        SPACE_TIER_PORT,
-    )
-
-    assert (PUBLIC_TIER_PORT, SKY_TIER_PORT, SPACE_TIER_PORT) == (4765, 4768, 4769)
+def test_runtimez_has_no_private_topology() -> None:
     source = Path("src/unigrok_public/server.py").read_text(encoding="utf-8")
     gate = source[source.index("async def runtimez") :]
     gate = gate[: gate.index("class CallerIdentityMiddleware")]
-    assert 'if not is_cloudrun_runtime():' in gate
-    assert '"tier_nav"' in gate
-    # /runtimez surfaces the tier feeds the deck consumes.
+    assert '"tier_nav"' not in gate
     for key in ('"layer"', '"task_rag"', '"credential_planes"', '"fact_count"'):
         assert key in gate
 
 
-def test_dashboard_consumes_server_tier_truth() -> None:
+def test_dashboard_consumes_public_runtime_truth() -> None:
     html = DASHBOARD.read_text(encoding="utf-8")
-    # Server layer wins over port sniffing; nav targets come from tier_nav —
-    # per-tier URLs first, same-host port fallback second.
-    assert "function applyRuntimeTier(rt)" in html
-    assert "rt.tier_nav" in html
-    assert "nav.url" in html and "nav.port" in html
-    assert "LEVEL[rt.layer]" in html
-    assert "applyRuntimeTier(rt);" in html
     # Credential-planes posture renders server truth, threat when no plane.
     assert "rt?.credential_planes" in html
     assert "cp.effective_plane" in html
@@ -336,50 +263,3 @@ def test_dashboard_consumes_server_tier_truth() -> None:
     assert "fact_count" in html
     # Local-runtime billing class carries the local plane blue.
     assert "local_runtime:{c:'#7bafe9'" in html
-
-
-def test_dashboard_identity_states_follow_gateway_truth() -> None:
-    # Identity comes from the gateway's /api/me, never the browser's own
-    # github.com session: 200 -> signed-in pill; Forge signed-out -> existing
-    # Control OAuth first with the device-code path retained as fallback.
-    html = DASHBOARD.read_text(encoding="utf-8")
-    assert "function applyIdentity(me)" in html
-    assert "fetch('/api/me')" in html
-    assert "Signed in · ${me.login}" in html
-    assert "Continue with Cloud" in html
-    assert "el.href='/auth/control/start'" in html
-    assert "location.replace('/auth/control/start')" in html
-    assert "CLOUD_RESUME_KEY" in html
-    assert "CLOUD_AUTO_KEY" in html
-    assert "Cloud link reconnecting" in html
-    assert "Cloud temporarily unavailable" in html
-    assert "unavailable:true" in html
-    assert "Use device code" in html
-    # Fallback contract: device flow start/poll + one-time code chip, no
-    # password fields, and honest failure states.
-    assert "fetch('/auth/github/start',{method:'POST',headers:{'X-UniGrok-CSRF':'1'}})" in html
-    assert "fetch('/auth/github/poll',{method:'POST'" in html
-    assert "'X-UniGrok-CSRF':'1'" in html
-    assert "github.com/login/device" in html
-    assert "github_oauth_not_configured" in html
-    assert "type=\"password\"" not in html and "type='password'" not in html
-    # Public surface keeps the external control-site navigation.
-    assert html.count("Open contributor control") == 2  # static anchor + JS branch
-    assert "el.href='https://control.grokmcp.org'" in html
-
-
-def test_authenticated_tier_survives_runtime_refresh_and_logout_relocks() -> None:
-    html = DASHBOARD.read_text(encoding="utf-8")
-    runtime = html[html.index("function applyRuntimeTier(rt)") :]
-    runtime = runtime[: runtime.index("// One delegated click handler")]
-    identity = html[html.index("function applyIdentity(me)") :]
-    identity = identity[: identity.index("// Device-flow driver")]
-
-    assert "let runtimeTier=portTier,sessionTier=null;" in html
-    assert "function reconcileTier()" in html
-    assert "runtimeTier=rt.layer" in runtime
-    assert "activeTier=rt.layer" not in runtime
-    assert "sessionTier=LEVEL[me.tier]!=null?me.tier:null" in identity
-    assert identity.count("sessionTier=null") == 3
-    assert "reconcileTier();" in runtime
-    assert "reconcileTier();" in identity

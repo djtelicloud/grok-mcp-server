@@ -2,7 +2,6 @@
 
 Weights live in a versioned bundle (POSTERIOR defaults), not as scattered
 control-flow law. Regex signals are *features*, not final risk law.
-See docs/DEOVERFIT.md Phase 1.
 """
 
 from __future__ import annotations

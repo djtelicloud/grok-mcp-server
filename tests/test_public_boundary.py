@@ -12,11 +12,14 @@ def _catalogs(
     *,
     cli_ready: bool = True,
     api_ready: bool = True,
+    local_ready: bool = False,
     cli_models: list[str] | None = None,
     api_models: list[str] | None = None,
+    local_models: list[str] | None = None,
 ) -> dict:
     cli_ids = cli_models if cli_models is not None else ["grok-cli-live"]
     api_ids = api_models if api_models is not None else ["grok-api-live"]
+    local_ids = local_models if local_models is not None else ["local-gemma-live"]
     return {
         "cli": {
             "ready": cli_ready,
@@ -32,6 +35,14 @@ def _catalogs(
             "models": [{"id": model} for model in api_ids],
             "image_models": [{"id": "grok-image-live"}],
             "default_model": api_ids[0] if api_ids else None,
+        },
+        "local": {
+            "configured": local_ready,
+            "ready": local_ready,
+            "runtime_up": local_ready,
+            "models": local_ids if local_ready else [],
+            "default_model": local_ids[0] if local_ready and local_ids else None,
+            "data_ready": local_ready,
         },
     }
 
@@ -271,6 +282,61 @@ async def test_readyz_accepts_healthy_runtime_with_live_cli_credentials(
     assert payload["bootstrap"]["status"] == "OK"
     assert payload["bootstrap"]["can_chat"] is True
     assert payload["state"] == {"ready": True, "backend": "sqlite"}
+
+
+@pytest.mark.asyncio
+async def test_readyz_accepts_healthy_zero_key_local_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_catalogs(*, refresh: bool = False) -> dict:
+        return _catalogs(
+            cli_ready=False,
+            api_ready=False,
+            local_ready=True,
+            cli_models=[],
+            api_models=[],
+        )
+
+    class HealthyState:
+        async def health(self) -> bool:
+            return True
+
+    monkeypatch.setattr(server, "_catalogs", fake_catalogs)
+    monkeypatch.setattr(server, "STATE", HealthyState())
+    monkeypatch.setattr(server, "is_cloudrun_runtime", lambda: False)
+
+    response = await server.readyz(None)
+    payload = json.loads(response.body)
+
+    assert response.status_code == 200
+    assert payload["status"] == "ready"
+    assert payload["bootstrap"]["can_chat"] is True
+    assert payload["planes"]["local"]["ready"] is True
+    assert payload["bootstrap"]["warnings"] == []
+
+
+def test_self_description_reports_zero_key_local_route(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(server, "is_cloudrun_runtime", lambda: False)
+    description = server._live_self_description(
+        _catalogs(
+            cli_ready=False,
+            api_ready=False,
+            local_ready=True,
+            cli_models=[],
+            api_models=[],
+        )
+    )
+
+    planes = description["credential_planes"]
+    assert description["bootstrap"]["can_chat"] is True
+    assert planes["service_usable"] is True
+    assert planes["effective_plane"] == "local"
+    assert planes["local"]["ready"] is True
+    assert planes["local"]["billing"] == "local_runtime"
+    assert planes["local"]["cost_usd"] == 0.0
+    assert planes["notices"][0]["id"] == "local_runtime_ready"
 
 
 @pytest.mark.asyncio

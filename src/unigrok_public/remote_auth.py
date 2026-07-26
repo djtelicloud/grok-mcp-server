@@ -1,4 +1,4 @@
-"""Fail-closed auth edge for the owner-operated remote MCP deployment.
+"""Fail-closed auth edge for a generic remote MCP deployment.
 
 Local Docker remains loopback-first and credential-free at the gateway layer.
 When ``UNIGROK_RUNTIME=cloudrun``, protected requests require either:
@@ -9,8 +9,8 @@ When ``UNIGROK_RUNTIME=cloudrun``, protected requests require either:
    GitHub Copilot cloud agent / code review.
 
 Provider keys stay server-side and are never accepted as gateway bearer
-credentials. Service tokens are not OAuth and never unlock private Sky/Space
-seats — this module only gates the public MCP resource.
+credentials. Service tokens are not OAuth and never expand authority beyond
+this public MCP resource.
 """
 
 from __future__ import annotations

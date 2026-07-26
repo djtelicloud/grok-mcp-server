@@ -51,7 +51,6 @@ def test_direct_talk_requires_full_combo(monkeypatch):
         _reload_with(
             monkeypatch,
             {
-                "UNIGROK_LAYER": "sky",
                 "UNIGROK_LOCAL_DIRECT_TALK_MODE": "non_certified",
                 "UNIGROK_LOCAL_DIRECT_MODEL": "gemma4",
                 "UNIGROK_LOCAL_RUNTIME_URL": "http://rt.test",

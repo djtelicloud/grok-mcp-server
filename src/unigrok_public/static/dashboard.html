@@ -52,24 +52,12 @@
       font-size:clamp(13px,0.3vw+11px,15px)}
     .breaker.open{border-color:#8a3042;color:#ffc1ca}
     .footer{color:var(--muted);margin-top:18px;font-size:clamp(12px,0.26vw+10px,13.5px)}
-    .tier-nav{display:flex;align-items:center;gap:10px;margin:0 0 18px;padding:9px 14px;border:1px solid var(--line);
+    .top-nav{display:flex;align-items:center;gap:10px;margin:0 0 18px;padding:9px 14px;border:1px solid var(--line);
       border-radius:14px;background:#0d132480;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);flex-wrap:wrap}
-    .tier-label{color:var(--muted);font-size:clamp(11px,0.24vw+9.5px,12.5px);font-weight:750;letter-spacing:.12em;text-transform:uppercase}
-    .tier-tab{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:99px;
-      padding:7px 15px;color:var(--muted);font-weight:650;font-size:clamp(13px,0.3vw+11px,15.5px);
-      text-decoration:none;transition:color .12s,border-color .12s}
+    .top-label{color:var(--muted);font-size:clamp(11px,0.24vw+9.5px,12.5px);font-weight:750;letter-spacing:.12em;text-transform:uppercase}
     .menu-btn{border:1px solid var(--line);background:#0d1324cc;color:var(--text);border-radius:10px;
       padding:6px 13px;font-size:clamp(15px,0.34vw+12px,18px);cursor:pointer;line-height:1;transition:border-color .12s}
     .menu-btn:hover{border-color:var(--cyan)}
-    .signin{margin-left:auto;order:99;display:inline-flex;align-items:center;border:1px solid #1e5f5a;
-      background:linear-gradient(90deg,#12302880,#15254180);color:#baf7c7;border-radius:99px;padding:7px 16px;
-      font-weight:750;font-size:clamp(12.5px,0.3vw+10.5px,14.5px);text-decoration:none;transition:box-shadow .15s}
-    .signin:hover{box-shadow:0 0 14px #3fa26644}
-    .signin-alt{order:100;display:none;color:#9bb6d8;font-size:clamp(10.5px,0.22vw+9.5px,12px);
-      text-decoration:underline;text-underline-offset:2px;white-space:nowrap}
-    .ghflow{order:100;margin-left:8px;font-size:clamp(11px,0.25vw+10px,12.5px);color:var(--muted);
-      display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
-    .ghflow b{color:#58e6d9;letter-spacing:.08em}.ghflow a{color:#58a6ff}
     .backdrop{position:fixed;inset:0;background:#04060cbb;opacity:0;pointer-events:none;transition:opacity .18s;z-index:40}
     body.drawer-open .backdrop{opacity:1;pointer-events:auto}
     .drawer{position:fixed;top:0;left:0;bottom:0;width:min(330px,88vw);background:#0d1324f5;
@@ -87,16 +75,9 @@
       font-weight:650;background:none;border:0;cursor:pointer;font-size:clamp(13.5px,0.32vw+11.5px,15.5px);
       text-align:left;text-decoration:none}
     .ditem:hover{background:#141c33}
-    .ditem.locked{color:var(--muted);cursor:default}.ditem.locked:hover{background:none}
-    .lockhint{margin-left:auto;font-size:.78em;color:var(--muted);letter-spacing:.05em}
     .drawer-foot{margin-top:auto;padding-top:16px;border-top:1px solid var(--line);color:var(--muted);
       font-size:clamp(11.5px,0.25vw+10px,13px)}
-    .tier-tab:hover{color:var(--text);border-color:var(--blue)}
-    .tier-tab.active{color:var(--text);border-color:#1e5f5a;background:#11172acc;box-shadow:0 0 14px #58e6d922}
-    .tier-dot{width:8px;height:8px;border-radius:50%}
-    .tier-dot.public{background:var(--cyan);box-shadow:0 0 8px var(--cyan)}
-    .tier-dot.sky{background:var(--blue);box-shadow:0 0 8px var(--blue)}
-    .tier-dot.space{background:var(--purple);box-shadow:0 0 8px var(--purple)}
+    .status-dot{width:8px;height:8px;border-radius:50%}
     .planes{display:grid;grid-template-columns:repeat(auto-fit,minmax(235px,1fr));gap:10px;margin-top:14px}
     .plane-row{display:flex;flex-direction:column;gap:8px;border:1px solid var(--line);border-radius:12px;padding:12px 15px;min-width:0}
     .plane-head{display:flex;align-items:center;gap:10px}
@@ -146,24 +127,8 @@
       letter-spacing:.07em;text-transform:uppercase;font-size:clamp(10.5px,0.24vw+9px,12px)}
     .sniplabel .copybtn{margin-left:auto}
     .snip2 .snippet{margin-top:8px;white-space:pre-wrap;word-break:break-word}
-    .tier-section{margin-top:16px}
-    .tierhead{display:flex;align-items:center;gap:10px;font-weight:800;letter-spacing:.06em;
-      font-size:clamp(13px,0.3vw+11px,15.5px);color:var(--text)}
-    .sample{font-size:10px;font-weight:800;letter-spacing:.08em;border-radius:99px;padding:2px 9px;color:var(--amber);background:#2e2412}
-    .tiernote{color:var(--muted);font-weight:600;font-size:12.5px;margin-left:auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-    .lanes{display:grid;grid-template-columns:repeat(auto-fit,minmax(195px,1fr));gap:12px;margin-top:14px}
-    .lane{border:1px solid var(--line);border-radius:14px;padding:15px;display:flex;flex-direction:column;gap:8px;min-width:0}
-    .lane-tag{font-size:clamp(10px,0.22vw+8.5px,11.5px);font-weight:800;letter-spacing:.1em;color:var(--cyan)}
-    .lane-owner{font-weight:750;font-size:clamp(14px,0.32vw+12px,16.5px)}
-    .lane-state{font-size:clamp(11px,0.24vw+9.5px,12.5px);font-weight:750;border-radius:99px;padding:3px 11px;align-self:flex-start;background:#141c33;color:var(--muted)}
-    .lane-state.active{background:#12291a}.lane-state.probe{background:#152541}
-    .lane-detail{color:var(--muted);font-size:clamp(12px,0.26vw+10px,13.5px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     .kv{display:grid;grid-template-columns:auto 1fr;gap:9px 18px;margin-top:14px;font-size:clamp(13px,0.3vw+11px,15.5px)}
     .kv span{color:var(--muted)}.kv b{font-weight:650;font-variant-numeric:tabular-nums}
-    #sky-tier .card,#sky-tier .lane{border-color:#2b4a7799}
-    #space-tier .card{border-color:#54407a99}
-    .ring{display:inline-grid;place-items:center;position:relative;width:88px;height:88px;flex:none}
-    .ring b{position:absolute;font-size:20px;font-weight:850}
     /* Fluid-first: internal grids auto-fit continuously; column drops come late
        so wide desktop/IDE panes keep the two-up layout as long as it fits. */
     @media(max-width:1150px){.card{grid-column:span 6}}
@@ -177,9 +142,9 @@
   <aside id="drawer" class="drawer" aria-label="command drawer">
     <div class="drawer-head">Command Drawer<button class="dclose" id="dclose" aria-label="close">✕</button></div>
     <nav id="ditems"></nav>
-    <div class="drawer-foot">Drawer is an index of this deck — items scroll to their panel. Contributor actions live on the control site.</div>
+    <div class="drawer-foot">Drawer is an index of this public dashboard — items scroll to their panel.</div>
   </aside>
-  <nav class="tier-nav" id="tiernav" aria-label="surface tier"><button id="dmenu" class="menu-btn" aria-label="open command drawer">☰</button><span class="tier-label">Surface</span><a class="signin" id="signin" href="https://control.grokmcp.org" title="sign-in happens on control.grokmcp.org — this deck never logs you in locally">Open contributor control</a><a class="signin-alt" id="deviceauth" href="#" title="Use GitHub's device-code flow on this Forge">Use device code</a></nav>
+  <nav class="top-nav" aria-label="public dashboard"><button id="dmenu" class="menu-btn" aria-label="open command drawer">☰</button><span class="top-label">UniGrok public dashboard</span></nav>
   <div class="legend" aria-label="status color key"><span class="lg-label">Levels</span>
     <span class="lg"><i style="background:#3fa266"></i>great</span>
     <span class="lg"><i style="background:#81a1c1"></i>good</span>
@@ -187,7 +152,7 @@
     <span class="lg"><i style="background:#f1b467"></i>warning</span>
     <span class="lg"><i style="background:#dd7f76"></i>threat</span>
     <span class="lg"><i style="background:#fc6b83"></i>critical</span></div>
-  <header><div><div class="eyebrow" id="eyebrow">UniGrok 1.1 · public core</div><h1 id="pagetitle">GroundCommand</h1>
+  <header><div><div class="eyebrow" id="eyebrow">UniGrok 1.1 · public core</div><h1 id="pagetitle">UniGrok Core</h1>
     <div class="sub">Live routing, reliability, cost, and benchmark truth—without prompt capture.</div></div>
     <div class="status"><span id="service" class="pill">Service …</span><span id="cli" class="pill">CLI …</span>
       <span id="api" class="pill">API …</span><span id="updated" class="pill">Loading …</span></div></header>
@@ -229,31 +194,6 @@
       <div class="hint" id="copyhint">Pick a client above, then copy either block — the JSON goes in MCP settings; the command pastes straight into your agent. Non-secret: the API key stays in the gateway, never in an editor. Say <code>@grok</code> to route work here.</div></article>
   </section>
 
-  <section class="grid tier-section" id="sky-tier" style="display:none">
-    <article class="card full tierhead"><span class="tier-dot sky"></span>@skygrok Sky Observer · Tier 2
-      <span class="sample">SAMPLE</span><span class="tiernote">panels awaiting live wiring on :4768</span></article>
-    <article class="card full"><div class="label">4-lane swarm grid</div><div id="swarmgrid" class="lanes"></div></article>
-    <article class="card wide"><div class="label">Circuit breakers &amp; trip rates</div><div id="skybreakers" class="breakers"></div></article>
-    <article class="card wide"><div class="label">P95 latency by surface · ms</div><div id="latdist" class="bars"></div></article>
-    <article class="card full"><div class="label">GitHub reviews · Grok score <span class="sample">SAMPLE</span></div>
-      <div id="ghreviews" style="display:flex;gap:20px;align-items:center;margin-top:12px"></div></article>
-    <article class="card full"><div class="label">Live run · streaming <span class="sample">SAMPLE</span></div>
-      <div id="liverun"></div></article>
-  </section>
-
-  <section class="grid tier-section" id="space-tier" style="display:none">
-    <article class="card full tierhead"><span class="tier-dot space"></span>@spacegrok Space Awareness · Tier 3 · SPACE=DARK
-      <span class="sample">SAMPLE</span><span class="tiernote">read-only monitor · gate_id null · ABSTAIN OPEN preserved</span></article>
-    <article class="card full"><div class="label">Claim plane · by state</div>
-      <div id="claimstate" class="bars"></div>
-      <div class="scroll" style="margin-top:14px"><table><thead><tr>
-        <th>Tip</th><th>Claim</th><th>Predicate</th><th>Proof (sha256)</th><th>Verified</th></tr></thead><tbody id="claimmatrix"></tbody></table></div></article>
-    <article class="card wide"><div class="label">Memory &amp; RAG index telemetry</div><div id="ragstats" class="kv"></div></article>
-    <article class="card wide"><div class="label">Space awareness security monitor <span class="sample">SAMPLE</span></div><div id="spacesec" class="kv"></div></article>
-    <article class="card wide"><div class="label">Report card · sealed floor <span class="sample">SAMPLE</span></div><div id="reportcard"></div></article>
-    <article class="card wide"><div class="label">Linked devices <span class="sample">SAMPLE</span></div><div id="devices"></div></article>
-  </section>
-
   <div class="footer">Refreshes every 10 seconds · telemetry stores receipts and explicit outcomes, never prompts.</div>
 </main><script>
 // SINGLE INLINE SCRIPT — the server's CSP nonce is injected into the FIRST
@@ -267,10 +207,9 @@ function levelOf(s){s=String(s||'').toLowerCase();
   if(/blocked|busy|\bfail\b/.test(s))return'threat';
   if(/warn|stale|drift/.test(s))return'warning';
   if(/\blive\b|promote yes|heavy|failover|\bready\b|\bactive\b/.test(s))return'great';
-  if(/\bdone\b|sealed|accepted|claim[- ]plane/.test(s))return'good';
-  if(/\bopen\b|space=dark|diff_off|untouched|abstain|\bnull\b|zero[- ]write|read[- ]only|evidence[- ]only|\bidle\b|preserved/.test(s))return'expected';
+  if(/\bdone\b|sealed|accepted/.test(s))return'good';
+  if(/\bopen\b|untouched|\bnull\b|read[- ]only|\bidle\b|preserved/.test(s))return'expected';
   return'';}
-function lv(s,label){const c=levelOf(s),txt=esc(label!=null?label:s);return c?`<span class="lv-${c}">${txt}</span>`:txt;}
 // Colored group-by bars: items are {name, val, color}. Ranked highest-first.
 function cbars(id,items){const root=$(id),max=Math.max(1,...items.map(x=>x.val||0));root.innerHTML=items.length?
   items.map(x=>`<div class="bar-row"><div class="bar-label" title="${esc(x.name)}">${esc(x.name)}</div>
@@ -295,35 +234,8 @@ const METERED_KINDS=new Set(['web_search','x_search','remote_code_execution','ch
 const KIND_COL=n=>METERED_KINDS.has(n)?lvHex.warning:'#4a5675';   // metered (costs) vs free (neutral)
 const ROUTE_COL=n=>n==='error'?lvHex.threat:GRADFILL;             // only error carries a level
 const MODEL_COL=()=>GRADFILL;                                     // model choice has no severity
-const UI_BUILD='unigrok-ui-v1.1.0-r25';
-const CLOUD_AUTO_KEY='unigrok-cloud-auto-r25',CLOUD_RESUME_KEY='unigrok-cloud-resume-r25';
-const CONTROL_START_FAILED=new URLSearchParams(location.search).get('control')==='unavailable';
-// Unified 3-tier switcher: each tab links to its own surface on the same host.
-// The active tier is the current port; ?preview=sky|space lets one running
-// container show a higher tier's panels for review. Hierarchical scoping:
-// each tier renders its own panels plus every lower tier's. Higher tiers still
-// enforce their own auth on arrival — this is navigation, not access.
-const TIERS=[
-  {id:'public',label:'@grok Public Core',port:'4765',name:'GroundCommand',eyebrow:'public core'},
-  {id:'sky',label:'@skygrok Sky Observer',port:'4768',name:'SkyCommand',eyebrow:'sky observer'},
-  {id:'space',label:'@spacegrok Space Awareness',port:'4769',name:'SpaceCommand',eyebrow:'space awareness'},
-];
-const LEVEL={public:0,sky:1,space:2};
-const herePort=location.port||(location.protocol==='https:'?'443':'80');
-const preview=new URLSearchParams(location.search).get('preview');
-const portTier=(TIERS.find(t=>t.port===herePort)||{}).id||'public';
-let runtimeTier=portTier,sessionTier=null;
-let activeTier=(preview&&LEVEL[preview]!=null)?preview:runtimeTier;
-let tierLevel=LEVEL[activeTier];
-document.getElementById('tiernav').insertAdjacentHTML('beforeend',TIERS.map(t=>{
-  const href=`${location.protocol}//${location.hostname}:${t.port}/ui/`;
-  const tip=t.id==='public'?'the public core surface':`opens the ${t.id} surface — requires that stack to be running`;
-  return `<a class="tier-tab" data-tier="${t.id}" href="${href}" title="${tip}">`+
-    `<span class="tier-dot ${t.id}"></span>${t.label}</a>`;
-}).join(''));
-// Command Drawer: an index of this deck mirroring the control-site groups.
-// Items anchor-scroll to their panel; contributor items are hidden on the
-// public tier (veil) and render locked-with-hint one tier below their home.
+const UI_BUILD='unigrok-ui-v1.1.0-r26';
+// Command Drawer: an index of this public dashboard.
 const DRAWER=[
   {group:'This machine',items:[
     {label:'Home',target:'pagetitle',min:0},
@@ -331,66 +243,21 @@ const DRAWER=[
     {label:'Activity & receipts',target:'outcomes',min:0},
     {label:'Connect your IDE',target:'clients',min:0},
   ]},
-  {group:'Your project',items:[
-    {label:'GitHub & reviews',target:'ghreviews',min:1},
-    {label:'Report card',target:'reportcard',min:2},
-  ]},
-  {group:'Build',items:[{label:'Swarm',target:'swarmgrid',min:1}]},
-  {group:'Account',items:[
-    {label:'You & devices',target:'devices',min:2},
-    {label:'Sign out',href:'https://control.grokmcp.org',min:1},
+  {group:'Build',items:[
+    {label:'Durable work',target:'build',min:0},
+    {label:'Tool registry',target:'tools',min:0},
   ]},
 ];
 function renderDrawer(){
   $('ditems').innerHTML=DRAWER.map(g=>{
-    const items=g.items.filter(i=>tierLevel>0||i.min===0);
-    if(!items.length)return'';
-    return `<div class="dgroup">${esc(g.group)}</div>`+items.map(i=>{
-      const locked=i.min>tierLevel;
-      if(i.href&&!locked)return `<a class="ditem" href="${i.href}">${esc(i.label)}</a>`;
-      return `<button class="ditem${locked?' locked':''}"${locked?' disabled':''} data-target="${esc(i.target||'')}">${esc(i.label)}${
-        locked?`<span class="lockhint">${i.min===2?'space':'sky'} tier</span>`:''}</button>`;
-    }).join('');
+    return `<div class="dgroup">${esc(g.group)}</div>`+g.items.map(i=>
+      `<button class="ditem" data-target="${esc(i.target)}">${esc(i.label)}</button>`
+    ).join('');
   }).join('');
 }
-// Tier identity: title, eyebrow, tab highlight, and hierarchical panel reveal.
-function applyTier(){const ti=TIERS.find(x=>x.id===activeTier)||TIERS[0];
-  tierLevel=LEVEL[activeTier];
-  $('pagetitle').textContent=ti.name;document.title=`${ti.name} · UniGrok`;
-  $('eyebrow').textContent=`UniGrok 1.1 · ${ti.eyebrow}`;
-  document.querySelectorAll('.tier-tab').forEach(a=>a.classList.toggle('active',a.dataset.tier===activeTier));
-  $('sky-tier').style.display=tierLevel>=1?'':'none';
-  $('space-tier').style.display=tierLevel>=2?'':'none';
-  renderDrawer();
-}
-function reconcileTier(){
-  if(preview&&LEVEL[preview]!=null)activeTier=preview;
-  else activeTier=sessionTier&&LEVEL[sessionTier]>LEVEL[runtimeTier]?sessionTier:runtimeTier;
-  applyTier();
-}
-applyTier();
-// Server truth wins over port-sniffing: /runtimez.layer names the tier this
-// instance actually serves, and tier_nav carries the Docker-configured host
-// ports (loopback-bound; the hosted runtime omits the block). ?preview= keeps
-// review priority; absent feeds change nothing.
-function applyRuntimeTier(rt){
-  if(!rt)return;
-  // Each tier may live on its own origin (factory URLs from the env); the
-  // port is only the same-host fallback when no URL is configured.
-  if(rt.tier_nav){TIERS.forEach(ti=>{const nav=rt.tier_nav[ti.id];if(!nav)return;
-    const a=document.querySelector(`.tier-tab[data-tier="${ti.id}"]`);if(!a)return;
-    if(nav.url){a.href=`${nav.url}/ui/`;}
-    else if(nav.port){ti.port=String(nav.port);a.href=`${location.protocol}//${location.hostname}:${ti.port}/ui/`;}});}
-  if(LEVEL[rt.layer]!=null)runtimeTier=rt.layer;
-  reconcileTier();
-}
+renderDrawer();
 // One delegated click handler for the drawer (open/close/navigate) + Esc.
 document.addEventListener('click',e=>{
-  const gh=e.target.closest('#signin');
-  if(e.target.closest('#deviceauth')){e.preventDefault();ghStart();return;}
-  if(gh&&gh.dataset.ghout){e.preventDefault();ghOut();return;}
-  if(gh&&gh.getAttribute('href')==='/auth/control/start'){
-    localStorage.removeItem(CLOUD_AUTO_KEY);sessionStorage.setItem(CLOUD_RESUME_KEY,'1');}
   if(e.target.closest('#dmenu')){document.body.classList.add('drawer-open');return;}
   if(e.target.closest('#dclose')||e.target.id==='backdrop'){document.body.classList.remove('drawer-open');return;}
   const it=e.target.closest('.ditem[data-target]');
@@ -399,96 +266,6 @@ document.addEventListener('click',e=>{
     if(el)(el.closest('.card')||el).scrollIntoView({behavior:'smooth',block:'start'});}
 });
 document.addEventListener('keydown',e=>{if(e.key==='Escape')document.body.classList.remove('drawer-open');});
-// Tier-scoped panels: sample structure from the plan, clearly marked; live data
-// wires on the real surfaces (private overlay), never on the public core.
-const SKY={
-  lanes:[
-    {tag:'L1 · TRAIN',owner:'Claude',state:'active',detail:'r2 ckpt100 · 120/120'},
-    {tag:'L2 · MEASURE',owner:'Codex',state:'idle',detail:'snapshot deploys · on GO'},
-    {tag:'L3 · PROBE',owner:'Antigravity Gemini',state:'probe',detail:'ui-surface probe · ro'},
-    {tag:'L4 · MONITOR',owner:'Cursor Ground Lead',state:'active',detail:'20s diff · manifests'},
-  ],
-  breakers:[
-    {name:'cli',open:false,failures:0,trips:0},
-    {name:'api',open:false,failures:0,trips:0},
-    {name:'local',open:false,failures:0,trips:0},
-  ],
-  latency:[
-    {port:'4765',surface:'public core',p95:8},
-    {port:'4768',surface:'sky observer',p95:11},
-    {port:'4775',surface:'public alt',p95:9},
-  ],
-  github:{score:93,prs:[
-    {pr:'#508',what:'Forge groundwork in the public gateway',checks:'18/18',state:'merged'},
-    {pr:'#1',what:'Private Forge console overlay',checks:'7/7',state:'merged'},
-    {pr:'#2',what:'small probe fix',checks:'3/3',state:'waiting'},
-  ]},
-  run:[
-    {t:'depth 1',d:'route → cli · grok-4'},
-    {t:'tool',d:'web_search · start'},
-    {t:'tool',d:'web_search · end 412 ms'},
-    {t:'cost',d:'$0.0000 so far'},
-    {t:'depth 2',d:'compose answer'},
-  ],
-};
-const SPACE={
-  claims:[
-    {tip:'b796776',claim:'READY · claim plane',pred:'bounded verifiable domain',proof:'sample — wires from receipts',ok:'claim'},
-    {tip:'d08210ca',claim:'r2 ckpt100 scorecard',pred:'Wilson L ≥ 0.969',proof:'sample — wires from SCORECARD.json',ok:'claim'},
-    {tip:'—',claim:'all-traffic ABSTAIN',pred:'floor OPEN',proof:'gate_id null',ok:'open'},
-  ],
-  report:{floor:87,rows:[
-    {test:'Answers verified correct',score:'41/44',range:'79–97%'},
-    {test:'Recovered after a failure',score:'9/11',range:'52–94%'},
-  ]},
-  devices:[{name:'MacBook Pro — this machine',linked:'Jul 19',status:'linked'}],
-};
-function renderSky(){
-  const laneLv={active:'great',idle:'expected',probe:'good'};
-  $('swarmgrid').innerHTML=SKY.lanes.map(l=>`<div class="lane"><span class="lane-tag">${esc(l.tag)}</span>
-    <span class="lane-owner">${esc(l.owner)}</span><span class="lane-state ${l.state} lv-${laneLv[l.state]||'expected'}">${esc(l.state)}</span>
-    <span class="lane-detail" title="${esc(l.detail)}">${esc(l.detail)}</span></div>`).join('');
-  $('skybreakers').innerHTML=SKY.breakers.map(b=>`<div class="breaker ${b.open?'open':''}"><b>${esc(b.name)}</b> · <span class="lv-${b.open?'threat':'expected'}">${b.open?'OPEN':'closed'}</span> · failures ${b.failures} · trips ${b.trips}</div>`).join('');
-  cbars('latdist',SKY.latency.map(r=>({name:`${r.port} · ${r.surface}`,val:r.p95,
-    color:r.p95<10?lvHex.great:r.p95<20?lvHex.warning:lvHex.threat})));
-  const g=SKY.github,C=2*Math.PI*38,off=C*(1-g.score/100),stCol={merged:'great',waiting:'warning',open:'expected',closed:'threat'};
-  $('ghreviews').innerHTML=`<div class="ring"><svg width="88" height="88" viewBox="0 0 88 88">
-    <circle cx="44" cy="44" r="38" fill="none" stroke="#202b47" stroke-width="8"/>
-    <circle cx="44" cy="44" r="38" fill="none" stroke="url(#rg)" stroke-width="8" stroke-linecap="round"
-      stroke-dasharray="${C.toFixed(0)}" stroke-dashoffset="${off.toFixed(0)}" transform="rotate(-90 44 44)"/>
-    <defs><linearGradient id="rg"><stop offset="0%" stop-color="#58a6ff"/><stop offset="100%" stop-color="#bc8cff"/></linearGradient></defs></svg>
-    <b>${g.score}%</b></div>
-    <div class="scroll" style="flex:1"><table><thead><tr><th>PR</th><th>What</th><th>Checks</th><th>State</th></tr></thead><tbody>${
-    g.prs.map(p=>`<tr><td>${esc(p.pr)}</td><td class="wrap">${esc(p.what)}</td><td>${esc(p.checks)}</td>
-      <td><span class="lv-${stCol[p.state]||'expected'}">${esc(p.state)}</span></td></tr>`).join('')}</tbody></table></div>`;
-  $('liverun').innerHTML=`<div class="breakers">${SKY.run.map(s=>`<div class="breaker"><b>${esc(s.t)}</b> · ${esc(s.d)}</div>`).join('')}</div>
-    <div class="hint">Live SSE run events (depth, tool start/end, cost-so-far). <button class="copybtn" disabled>Run — contributor</button></div>`;
-}
-function renderSpace(rt){
-  const cs={};SPACE.claims.forEach(c=>{const k=c.ok==='open'?'ABSTAIN':'claim-plane';cs[k]=(cs[k]||0)+1;});
-  cbars('claimstate',[['claim-plane','#81a1c1'],['ABSTAIN','#7bafe9']].filter(([k])=>cs[k]).map(([k,col])=>({name:k,val:cs[k],color:col})));
-  $('claimmatrix').innerHTML=SPACE.claims.map(c=>`<tr><td>${esc(c.tip)}</td><td>${lv(c.claim)}</td><td>${lv(c.pred)}</td>
-    <td class="wrap">${esc(c.proof)}</td><td>${lv(c.ok==='open'?'ABSTAIN':'claim-plane')}</td></tr>`).join('');
-  const backend=rt?.state_backend||'—',tools=rt?.tool_count??'—',tr=rt?.task_rag;
-  $('ragstats').innerHTML=`<span>State backend</span><b>${esc(backend)}</b>
-    <span>RAG mode</span><b>${tr?esc(tr.mode||'—'):'—'}</b>
-    <span>Stored facts</span><b>${tr&&tr.fact_count!=null?Number(tr.fact_count).toLocaleString('en-US'):'—'}</b>
-    <span>xAI collections</span><b>${tr?.collection_label_set?'label set':'no label'} · never named</b>
-    <span>Tools exposed</span><b>${esc(String(tools))}</b>`;
-  $('spacesec').innerHTML=`<span>Policy</span><b class="lv-expected">SPACE=DARK</b>
-    <span>Write access</span><b class="lv-expected">zero-write · read-only monitor</b>
-    <span>Claim plane</span><b class="lv-expected">evidence-only · no sealed READY</b>
-    <span>gate_id</span><b class="lv-expected">null (preserved)</b>
-    <span>Diff</span><b class="lv-expected">DIFF_OFF</b>`;
-  const rc=SPACE.report;
-  $('reportcard').innerHTML=`<div class="metric lv-${rc.floor>=85?'great':rc.floor>=70?'warning':'threat'}">${rc.floor}<small>% floor</small></div>
-    <div class="hint">The one headline-eligible number: even with bad luck, the true pass rate is at least this. Sealed — shown, never edited.</div>
-    <div class="scroll" style="margin-top:12px"><table><thead><tr><th>Test</th><th>Score</th><th>Fair range</th></tr></thead><tbody>${
-    rc.rows.map(r=>`<tr><td>${esc(r.test)}</td><td>${esc(r.score)}</td><td>${esc(r.range)}</td></tr>`).join('')}</tbody></table></div>`;
-  $('devices').innerHTML=`<div class="scroll"><table><thead><tr><th>Machine</th><th>Linked</th><th>Status</th></tr></thead><tbody>${
-    SPACE.devices.map(d=>`<tr><td>${esc(d.name)}</td><td>${esc(d.linked)}</td><td><span class="lv-great">${esc(d.status)}</span></td></tr>`).join('')}</tbody></table></div>
-    <div class="hint">Link another machine: mint a one-time code, paste into that machine's console. <button class="copybtn" disabled>Get link code</button></div>`;
-}
 // Arc gauge: value 0..1 sweeps a 240° dial; segs=[{v,color}] stack sub-arcs.
 function arcPt(cx,cy,r,deg){const a=(deg-90)*Math.PI/180;return[cx+r*Math.cos(a),cy+r*Math.sin(a)];}
 function arcPath(cx,cy,r,a0,a1){const [x0,y0]=arcPt(cx,cy,r,a0),[x1,y1]=arcPt(cx,cy,r,a1);
@@ -519,58 +296,10 @@ $('connectcard').addEventListener('click',e=>{const btn=e.target.closest('.ctab,
   const src=btn.getAttribute('data-copy');if(!src)return;
   const txt=$(src).textContent;
   navigator.clipboard?.writeText(txt).then(()=>{$('copyhint').textContent=`Copied ${src==='agentcmd'?'agent command':'MCP config'} for ${SEL_CLIENT}.`;},()=>{});});
-// Identity via the gateway's own flow, never the browser's github.com session:
-// /api/me is 404 on the public surface (identity-free contract), 401 on the
-// forge until the GitHub OAuth slice answers, 200 {login,tier?} once gated.
-// The deck renders exactly that truth — signed-out is never dressed up.
-function applyIdentity(me){const el=$('signin'),fallback=$('deviceauth');if(!el)return;
-  if(me&&me.login){el.textContent=`Signed in · ${me.login}`;el.href='#';el.dataset.ghout='1';
-    el.title='contributor session active — click to sign out';
-    sessionTier=LEVEL[me.tier]!=null?me.tier:null;if(me.kind==='control')localStorage.removeItem(CLOUD_AUTO_KEY);
-    sessionStorage.removeItem(CLOUD_RESUME_KEY);if(fallback)fallback.style.display='none';}
-  else if(me&&me.unavailable){el.textContent='Cloud link reconnecting';el.href='#';delete el.dataset.ghout;
-    el.title='your remembered login is retained; use device code if Cloud is temporarily unavailable';sessionTier=null;
-    if(fallback)fallback.style.display='inline-flex';}
-  else if(me&&me.surface==='forge'){
-    if(!CONTROL_START_FAILED&&localStorage.getItem(CLOUD_AUTO_KEY)!=='off'&&sessionStorage.getItem(CLOUD_RESUME_KEY)!=='1'){
-      sessionStorage.setItem(CLOUD_RESUME_KEY,'1');location.replace('/auth/control/start');return;}
-    el.textContent=CONTROL_START_FAILED?'Cloud temporarily unavailable':'Continue with Cloud';el.href='/auth/control/start';delete el.dataset.ghout;
-    el.title='reuse your remembered control.grokmcp.org GitHub session';sessionTier=null;
-    if(fallback)fallback.style.display='inline-flex';}
-  else{el.textContent='Open contributor control';el.href='https://control.grokmcp.org';delete el.dataset.ghout;
-    el.title='sign-in happens on control.grokmcp.org';sessionTier=null;
-    if(fallback)fallback.style.display='none';}
-  reconcileTier();}
-// Device-flow driver: start -> show the one-time code + github link -> poll
-// until GitHub confirms -> session cookie set server-side -> pill flips.
-// Every failure renders its honest name; nothing ever pretends to be signed in.
-let GHFLOW=null;
-function ghChip(html){let c=$('ghflow');if(!c){c=document.createElement('span');c.id='ghflow';c.className='ghflow';
-  $('signin').after(c);}c.innerHTML=html;}
-async function ghStart(){if(GHFLOW)return;
-  localStorage.setItem(CLOUD_AUTO_KEY,'off');sessionStorage.setItem(CLOUD_RESUME_KEY,'1');
-  const r=await fetch('/auth/github/start',{method:'POST',headers:{'X-UniGrok-CSRF':'1'}}).catch(()=>null);
-  const d=r?await r.json().catch(()=>null):null;
-  if(!d||d.error){ghChip(`<span class="lv-warning">${d&&d.error==='github_oauth_not_configured'?'not configured — set UNIGROK_GITHUB_CLIENT_ID':'GitHub unreachable'}</span>`);return;}
-  GHFLOW=d.flow;
-  ghChip(`code <b>${esc(d.user_code)}</b> → <a href="${esc(d.verification_uri)}" target="_blank" rel="noopener">github.com/login/device</a>`);
-  const tick=async()=>{if(!GHFLOW)return;
-    const p=await fetch('/auth/github/poll',{method:'POST',headers:{'Content-Type':'application/json','X-UniGrok-CSRF':'1'},
-      body:JSON.stringify({flow:GHFLOW})}).catch(()=>null);
-    const j=p?await p.json().catch(()=>null):null;
-    if(j&&j.login){GHFLOW=null;document.getElementById('ghflow')?.remove();applyIdentity({login:j.login,tier:j.tier});return;}
-    if(!j||j.error){GHFLOW=null;ghChip(`<span class="lv-warning">${esc((j&&j.error)||'connection lost')} — click to retry</span>`);return;}
-    setTimeout(tick,(d.interval||5)*1000);};
-  setTimeout(tick,(d.interval||5)*1000);}
-async function ghOut(){localStorage.setItem(CLOUD_AUTO_KEY,'off');sessionStorage.setItem(CLOUD_RESUME_KEY,'1');
-  await fetch('/auth/logout',{method:'POST',headers:{'X-UniGrok-CSRF':'1'}}).catch(()=>null);
-  document.getElementById('ghflow')?.remove();applyIdentity({surface:'forge'});}
-async function refresh(){if(refresh.busy)return;refresh.busy=true;try{const [ready,b,rt,me]=await Promise.all([
+async function refresh(){if(refresh.busy)return;refresh.busy=true;try{const [ready,b,rt]=await Promise.all([
   fetch('/readyz').then(r=>r.json()).catch(()=>null),
   fetch('/benchmarkz').then(r=>r.json()).catch(()=>null),
-  fetch('/runtimez').then(r=>r.json()).catch(()=>null),
-  fetch('/api/me').then(r=>r.status===200?r.json():(r.status===503?{surface:'forge',unavailable:true}:(r.status===401?{surface:'forge'}:null))).catch(()=>null)]);
-  applyIdentity(me);
+  fetch('/runtimez').then(r=>r.json()).catch(()=>null)]);
   // Each feed is guarded independently: a missing feed reads "unreachable"/"—",
   // never a fabricated safe default. Absence of data is never shown as proof.
   const t=(b&&b.telemetry)||{};
@@ -641,7 +370,6 @@ async function refresh(){if(refresh.busy)return;refresh.busy=true;try{const [rea
       // Plane notices: static server templates (never embed key material).
       (rt.credential_planes?.notices||[]).map(n=>`<span>Notice</span><b class="lv-${
         n.severity==='warning'?'warning':'expected'}">${esc(n.summary||n.id||'')}</b>`).join('');}
-  applyRuntimeTier(rt);
   const planeUse={};(t.planes||[]).forEach(x=>planeUse[x.name]={calls:x.calls,cost:x.cost_usd});
   // Policy strip: routing posture from credential_planes (server truth, never
   // inferred client-side). Degraded reads warning; no usable plane reads threat.
@@ -657,11 +385,11 @@ async function refresh(){if(refresh.busy)return;refresh.busy=true;try{const [rea
   MCP_EP=rt?.mcp_endpoint||'/mcp';$('mcpendpoint').textContent=MCP_EP;
   const seen={};(t.callers||[]).forEach(x=>seen[x.name]=x.calls);
   const KNOWN_CLIENTS=['claude-code','cursor','vscode','codex','gemini'];
-  // Segmented client tabs (mirrors the tier-tab language); live status inline:
+  // Segmented client tabs show live status inline:
   // green dot + call count when the client is actually hitting the gateway.
   $('clients').innerHTML=KNOWN_CLIENTS.map(c=>{const n=seen[c]||0;
     return `<button class="ctab${c===SEL_CLIENT?' active':''}" data-client="${esc(c)}" title="${n?`${n} calls recorded`:'no calls recorded'}">
-      <span class="tier-dot" style="background:${n?'#3fa266':'#4a5675'};${n?'box-shadow:0 0 8px #3fa266':''}"></span>${esc(c)}${n?`<span class="ctab-n">${n}</span>`:''}</button>`}).join('');
+      <span class="status-dot" style="background:${n?'#3fa266':'#4a5675'};${n?'box-shadow:0 0 8px #3fa266':''}"></span>${esc(c)}${n?`<span class="ctab-n">${n}</span>`:''}</button>`}).join('');
   if($('mcpsnippet').textContent==='…')updSnippets();
   const tools=rt?.tools||[];$('toolslabel').textContent=`Tool surface · ${rt?tools.length:'—'} · by billing`;$('toolcount').textContent=rt?tools.length:'—';
   // group-by billing class, ranked by exposure severity (metered/destructive first)
@@ -678,8 +406,6 @@ async function refresh(){if(refresh.busy)return;refresh.busy=true;try{const [rea
   $('tools').innerHTML=tools.length?tools.map(t=>`<tr><td>${esc(t.name)}${t.destructive?'<span class="tool-flag">DESTRUCTIVE</span>':''}</td>
     <td>${esc(t.plane)}</td><td><span class="bill ${esc(t.billing_class)}">${esc(t.billing_class)}</span></td><td>${esc(t.confirmation_policy)}</td>
     <td class="wrap">${esc(t.purpose)}</td></tr>`).join(''):'<tr><td colspan="5" class="empty">Registry unavailable.</td></tr>';
-  if(tierLevel>=1)renderSky();
-  if(tierLevel>=2)renderSpace(rt);
   const bs=(b&&b.circuit_breakers)||{};$('breakers').innerHTML=Object.keys(bs).length?Object.entries(bs).map(([k,v])=>
     `<div class="breaker ${v.open?'open':''}"><b>${esc(k)}</b> · <span class="lv-${v.open?'threat':'expected'}">${v.open?'OPEN':'closed'}</span> · failures ${v.failures} · trips ${v.trips}</div>`).join(''):'<div class="empty">No breaker activity this session — breakers arm on live provider traffic.</div>';
   const recent=t.recent||[];$('recentcount').textContent=recent.length;
