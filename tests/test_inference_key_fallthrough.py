@@ -1,4 +1,4 @@
-"""Owner-default xAI inference key allowlist fall-through (factory patch)."""
+"""Public owner-default xAI inference-key boundary."""
 
 from __future__ import annotations
 
@@ -8,37 +8,56 @@ from unigrok_public import principal_xai
 from unigrok_public.principal_xai import resolve_xai_api_key
 
 
-def test_falls_through_empty_primary_to_sky_inference() -> None:
-    env = {
-        "XAI_API_KEY": "",
-        "XAI_API_KEY_SKY_INFERENCE": "xai-live-sky",
-        "XAI_API_KEY_GROUND": "xai-other",
-    }
-    key, source = resolve_xai_api_key(principal=None, environ=env)
-    assert key == "xai-live-sky"
-    assert source == "owner_default:XAI_API_KEY_SKY_INFERENCE"
+def test_resolves_only_canonical_owner_key() -> None:
+    key, source = resolve_xai_api_key(
+        principal=None,
+        environ={"XAI_API_KEY": "xai-public-owner"},
+    )
 
-
-def test_preferred_empty_falls_through_to_xai_api_key() -> None:
-    env = {
-        "XAI_PLANE_API": "XAI_API_KEY_GROUND",
-        "XAI_API_KEY_GROUND": "",
-        "XAI_API_KEY": "xai-main",
-    }
-    key, source = resolve_xai_api_key(principal=None, environ=env)
-    assert key == "xai-main"
+    assert key == "xai-public-owner"
     assert source == "owner_default:XAI_API_KEY"
 
 
-def test_skips_cursor_tokens() -> None:
-    env = {
-        "XAI_API_KEY": "",
-        "XAI_API_KEY_CURSOR_SKY": "crsr_not_valid_here",
-        "XAI_API_KEY_GROUND": "xai-ground-ok",
-    }
-    key, source = resolve_xai_api_key(principal=None, environ=env)
-    assert key == "xai-ground-ok"
-    assert source == "owner_default:XAI_API_KEY_GROUND"
+@pytest.mark.parametrize(
+    "alias",
+    (
+        "XAI_API_KEY_SKY_INFERENCE",
+        "XAI_API_KEY_GROUND",
+        "XAI_API_KEY_UNIGROK_GROUND",
+        "XAI_API_KEY_CURSOR_SKY",
+        "XAI_MANAGEMENT_API_KEY",
+    ),
+)
+def test_non_public_owner_slots_are_ignored(alias: str) -> None:
+    key, source = resolve_xai_api_key(
+        principal=None,
+        environ={alias: "xai-not-public"},
+    )
+
+    assert key == ""
+    assert source == "owner_default"
+
+
+def test_preference_variable_cannot_redirect_owner_key() -> None:
+    key, source = resolve_xai_api_key(
+        principal=None,
+        environ={
+            "XAI_PLANE_API": "XAI_API_KEY_GROUND",
+            "XAI_API_KEY_GROUND": "xai-private-alias",
+            "XAI_API_KEY": "xai-public-owner",
+        },
+    )
+
+    assert key == "xai-public-owner"
+    assert source == "owner_default:XAI_API_KEY"
+
+
+@pytest.mark.parametrize("value", ("crsr_not_valid_here", "management-token"))
+def test_canonical_slot_rejects_non_inference_material(value: str) -> None:
+    assert resolve_xai_api_key(
+        principal=None,
+        environ={"XAI_API_KEY": value},
+    ) == ("", "owner_default")
 
 
 @pytest.mark.parametrize(
@@ -46,7 +65,6 @@ def test_skips_cursor_tokens() -> None:
     (
         "owner_default",
         "owner_default:XAI_API_KEY",
-        "owner_default:XAI_API_KEY_SKY_INFERENCE",
     ),
 )
 def test_owner_sources_use_shared_generation_slot(

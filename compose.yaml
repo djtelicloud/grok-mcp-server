@@ -9,11 +9,11 @@ services:
     container_name: unigrok
     ports:
       - "127.0.0.1:${UNIGROK_PORT:-4765}:8080"
-    # Ground keys: inject ONLY XAI_API_KEY via compose --env-file (host SoT), not full env dump.
+    # Inject only XAI_API_KEY via compose --env-file, never a full host environment dump.
     environment:
       UNIGROK_HOST: 0.0.0.0
       PORT: 8080
-      # Factory: all chat/agent tools on all the time
+      # Public defaults: all chat/agent tools available.
       UNIGROK_CHAT_TOOLS: ${UNIGROK_CHAT_TOOLS:-always}
       UNIGROK_SWARM: ${UNIGROK_SWARM:-active}
       UNIGROK_DEFAULT_LEVEL: ${UNIGROK_DEFAULT_LEVEL:-max}
@@ -48,28 +48,8 @@ services:
       UNIGROK_MAX_WORKSPACE_CONTEXT_CHARS: ${UNIGROK_MAX_WORKSPACE_CONTEXT_CHARS:-100000}
       UNIGROK_ENABLE_METERED_API: ${UNIGROK_ENABLE_METERED_API:-true}
       UNIGROK_API_MODEL: ${UNIGROK_API_MODEL:-}
-      # Control Center tier nav: per-tier URLs win, host ports are the fallback.
-      UNIGROK_PUBLIC_PORT: ${UNIGROK_PORT:-4765}
-      UNIGROK_SKY_PORT: ${UNIGROK_SKY_PORT:-4768}
-      UNIGROK_SPACE_PORT: ${UNIGROK_SPACE_PORT:-4769}
-      UNIGROK_PUBLIC_URL: ${UNIGROK_PUBLIC_URL:-}
-      UNIGROK_SKY_URL: ${UNIGROK_SKY_URL:-}
-      UNIGROK_SPACE_URL: ${UNIGROK_SPACE_URL:-}
-      # Forge-surface GitHub sign-in (device flow): public client id, never a secret.
-      UNIGROK_SURFACE: ${UNIGROK_SURFACE:-public}
-      UNIGROK_GITHUB_CLIENT_ID: ${UNIGROK_GITHUB_CLIENT_ID:-}
-      UNIGROK_CONTRIBUTOR_LOGINS: ${UNIGROK_CONTRIBUTOR_LOGINS:-}
-      UNIGROK_CONTRIBUTOR_TIER: ${UNIGROK_CONTRIBUTOR_TIER:-sky}
-      UNIGROK_CONTROL_TOKEN_PATH: ${UNIGROK_CONTROL_TOKEN_PATH:-}
-      UNIGROK_FORGE_SESSION_KEY_PATH: ${UNIGROK_FORGE_SESSION_KEY_PATH:-}
-      UNIGROK_FORGE_SESSION_SECRET: ${UNIGROK_FORGE_SESSION_SECRET:-}
-      # Inference key allowlist (first non-empty wins for XAI_API_KEY).
-      # Never inject multi-provider C2 keys here.
-      XAI_PLANE_API: ${XAI_PLANE_API:-}
-      XAI_API_KEY_SKY_INFERENCE: ${XAI_API_KEY_SKY_INFERENCE:-}
-      XAI_API_KEY_GROUND: ${XAI_API_KEY_GROUND:-}
-      XAI_API_KEY_UNIGROK_GROUND: ${XAI_API_KEY_UNIGROK_GROUND:-}
-      XAI_API_KEY: ${XAI_API_KEY:-${XAI_API_KEY_SKY_INFERENCE:-${XAI_API_KEY_GROUND:-${XAI_API_KEY_UNIGROK_GROUND:-}}}}
+      # Optional metered xAI developer API plane.
+      XAI_API_KEY: ${XAI_API_KEY:-}
     volumes:
       - grok-cli-auth:/home/appuser/.grok
       - grok-public-state:/state

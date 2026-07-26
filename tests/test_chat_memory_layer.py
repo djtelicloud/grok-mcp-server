@@ -63,6 +63,9 @@ def test_layer_name_validation_and_consistent_service_identity(
     ):
         with pytest.raises(ValueError, match="UNIGROK_LAYER"):
             server._normalize_layer_name(invalid)
+    for private_runtime_name in ("forge", "sky", "space"):
+        with pytest.raises(ValueError, match="private runtime topology"):
+            server._normalize_layer_name(private_runtime_name)
 
     monkeypatch.setattr(server, "UNIGROK_LAYER", "research-lab")
     assert server._layer_service_label() == "ResearchLabGrok"
@@ -92,25 +95,16 @@ def test_custom_layer_sets_actual_mcp_handshake_name() -> None:
 def test_layer_context_is_generic_and_withholds_collection_value(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    sentinel = "private-vault-sentinel"
-    monkeypatch.setattr(server, "UNIGROK_LAYER", "sky")
+    sentinel = "operator-collection-sentinel"
+    monkeypatch.setattr(server, "UNIGROK_LAYER", "research-lab")
     monkeypatch.setattr(server, "UNIGROK_LAYER_COLLECTION", sentinel)
     monkeypatch.setattr(server, "UNIGROK_TASK_RAG_COLLECTION", "")
     monkeypatch.setattr(server, "TASK_RAG_ACTIVE", True)
 
     block = server._layer_context_block()
-    assert "SkyGrok" in block
+    assert "ResearchLabGrok" in block
     assert "operator collection label is configured" in block.lower()
-    for forbidden in (
-        sentinel,
-        "AgentixAI",
-        "Space",
-        "Ground",
-        "vault",
-        "disaster recovery",
-        "GO_WITH_CONSTRAINTS",
-    ):
-        assert forbidden not in block
+    assert sentinel not in block
 
 
 def test_task_rag_honesty_mode(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -155,7 +149,7 @@ def test_chat_injects_knowledge_when_facts_exist(
     assert out["status"] == "complete"
     assert captured["system_context"]
     assert "alpha policy" in captured["system_context"]
-    assert "Durable seat knowledge" in captured["system_context"]
+    assert "Durable knowledge" in captured["system_context"]
 
 
 def test_authenticated_chat_memory_is_tenant_scoped(
@@ -209,18 +203,18 @@ def test_authenticated_chat_memory_is_tenant_scoped(
     assert all(int(item["uses"]) == 0 for item in bob_results)
 
 
-def test_authenticated_layer_fallback_uses_tenant_global(
+def test_authenticated_generic_layer_fallback_uses_tenant_global(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     store = PublicStateStore(tmp_path / "tenant-fallback.db")
     monkeypatch.setattr(server, "STATE", store)
-    monkeypatch.setattr(server, "UNIGROK_LAYER", "sky")
+    monkeypatch.setattr(server, "UNIGROK_LAYER", "research-lab")
 
     alice_token = set_active_principal("oauth:issuer:alice")
     try:
         asyncio.run(
             store.save_fact(
-                "sky policy holds GO PROMOTE alice", scope=scoped_scope("global")
+                "research-lab operator policy alice", scope=scoped_scope("global")
             )
         )
     finally:
@@ -230,7 +224,7 @@ def test_authenticated_layer_fallback_uses_tenant_global(
     try:
         asyncio.run(
             store.save_fact(
-                "sky policy holds GO PROMOTE bob", scope=scoped_scope("global")
+                "research-lab operator policy bob", scope=scoped_scope("global")
             )
         )
     finally:

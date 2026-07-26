@@ -22,22 +22,9 @@ _CANONICAL_PRINCIPAL = re.compile(r"^oauth:[^:]+:[^:]+$")
 _GENERATIONS: dict[str, tuple[str, str]] = {}
 _GENERATIONS_LOCK = threading.Lock()
 
-# Owner-default inference slots (never management / never Cursor crsr_ tokens).
-# Order: preferred plane first (if set), then these allowlisted names.
-_INFERENCE_KEY_CANDIDATES: tuple[str, ...] = (
-    "XAI_API_KEY",
-    "XAI_API_KEY_SKY_INFERENCE",
-    "XAI_API_KEY_GROUND",
-    "XAI_API_KEY_UNIGROK_GROUND",
-)
-_FORBIDDEN_INFERENCE_ENV: frozenset[str] = frozenset(
-    {
-        "XAI_MANAGEMENT_API_KEY",
-        "XAI_MANAGEMENT_TOKEN",
-        "XAI_API_KEY_CURSOR_SKY",
-        "XAI_API_KEY_CURSOR_SUB",
-    }
-)
+# The public runtime accepts one owner-default inference slot. Management keys,
+# editor tokens, and factory-specific aliases are never candidates.
+_OWNER_INFERENCE_ENV = "XAI_API_KEY"
 
 
 class PrincipalXAIConfigurationError(ValueError):
@@ -138,36 +125,10 @@ def _looks_like_inference_key(key: str) -> bool:
 def _resolve_owner_inference_key(
     source: Mapping[str, str],
 ) -> tuple[str, str]:
-    """Pick first non-empty allowlisted owner inference key.
-
-    Does not fail closed when a preferred slot is empty — falls through to the
-    next allowed pattern. Never selects management or Cursor token env names.
-    """
-    names: list[str] = []
-    preferred = str(source.get("XAI_PLANE_API") or "").strip()
-    if (
-        preferred
-        and preferred not in _FORBIDDEN_INFERENCE_ENV
-        and (
-            preferred in _INFERENCE_KEY_CANDIDATES
-            or preferred.startswith("XAI_API_KEY")
-        )
-    ):
-        names.append(preferred)
-    for name in _INFERENCE_KEY_CANDIDATES:
-        if name not in names and name not in _FORBIDDEN_INFERENCE_ENV:
-            names.append(name)
-
-    for name in names:
-        if name in _FORBIDDEN_INFERENCE_ENV:
-            continue
-        key = _normalize_key(source.get(name))
-        if not key or not _looks_like_inference_key(key):
-            continue
-        # Strict shape for alternate slots; XAI_API_KEY keeps loose test keys.
-        if name != "XAI_API_KEY" and not key.startswith("xai-"):
-            continue
-        return key, f"owner_default:{name}"
+    """Resolve the public runtime's single owner-default inference key."""
+    key = _normalize_key(source.get(_OWNER_INFERENCE_ENV))
+    if key and _looks_like_inference_key(key):
+        return key, f"owner_default:{_OWNER_INFERENCE_ENV}"
     return "", "owner_default"
 
 
