@@ -97,7 +97,12 @@ async def _durable_tool_call(
 
 
 async def smoke(
-    url: str, invoke_cli: bool, invoke_api: bool, invoke_research: bool, invoke_code: bool
+    url: str,
+    invoke_cli: bool,
+    invoke_local: bool,
+    invoke_api: bool,
+    invoke_research: bool,
+    invoke_code: bool,
 ) -> None:
     headers = {"X-Client-ID": "release-smoke"}
     bearer = os.environ.get("UNIGROK_MCP_BEARER_TOKEN", "").strip()
@@ -138,7 +143,8 @@ async def smoke(
             print(
                 "planes="
                 f"cli:{str(status.get('cli', {}).get('ready', False)).lower()},"
-                f"api:{str(status.get('api', {}).get('ready', False)).lower()}"
+                f"api:{str(status.get('api', {}).get('ready', False)).lower()},"
+                f"local:{str(status.get('local', {}).get('ready', False)).lower()}"
             )
 
             discover_result = await session.call_tool("grok_mcp_discover_self", {})
@@ -228,6 +234,25 @@ async def smoke(
                     raise RuntimeError("X-Client-ID was not attributed in benchmark telemetry")
                 print("auto_all_tools=SEQUENTIAL_TEST_GROK plane=cli")
 
+            if invoke_local:
+                result, payload = await _agent_call(
+                    session,
+                    {
+                        "task": "Reply with exactly LOCAL_ROUTE_OK",
+                        "disable_tools": ["web", "x_search", "remote_code_execution"],
+                    },
+                )
+                text = str(payload.get("text") or "")
+                if result.isError or "LOCAL_ROUTE_OK" not in text:
+                    raise RuntimeError("zero-key local agent smoke failed")
+                if payload.get("resolved_plane") != "local":
+                    raise RuntimeError("zero-key smoke did not use the local route")
+                if payload.get("billing_class") != "local_runtime":
+                    raise RuntimeError("local smoke omitted the local billing class")
+                if float(payload.get("cost_usd") or 0.0) != 0.0:
+                    raise RuntimeError("local smoke reported a non-zero provider cost")
+                print("local=LOCAL_ROUTE_OK plane=local cost_usd=0")
+
             if invoke_research:
                 result, payload = await _agent_call(
                     session,
@@ -294,6 +319,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--url", default="http://127.0.0.1:4765/mcp")
     parser.add_argument("--invoke-cli", action="store_true")
+    parser.add_argument("--invoke-local", action="store_true")
     parser.add_argument("--invoke-api", action="store_true")
     parser.add_argument("--invoke-research", action="store_true")
     parser.add_argument("--invoke-code", action="store_true")
@@ -302,6 +328,7 @@ def main() -> None:
         smoke(
             args.url,
             args.invoke_cli,
+            args.invoke_local,
             args.invoke_api,
             args.invoke_research,
             args.invoke_code,

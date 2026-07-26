@@ -95,7 +95,6 @@ from .remote_auth import (
 from .state import PublicStateStore, normalize_scope, normalize_session, redact_secrets
 
 SERVICE_NAME = "UniGrok xAI Gateway"
-CURSOR_REFERRAL_URL = "https://cursor.com/referral?code=VJWHUMXIKTHG"
 STATIC_ROOT = Path(__file__).with_name("static")
 CLI_PATH = os.environ.get("UNIGROK_CLI_PATH", "grok").strip() or "grok"
 AUTH_PATH = Path(
@@ -2069,8 +2068,10 @@ def _live_self_description(catalogs: dict[str, Any]) -> dict[str, Any]:
     cli_ready = bool(catalogs["cli"].get("ready", False))
     api_ready = bool(catalogs["api"].get("ready", False))
     api_configured = bool(catalogs["api"].get("configured", False))
+    local_catalog = catalogs.get("local") or {}
+    local_ready = bool(local_catalog.get("ready", False)) and not cloud_mode
     can_spend_api = bool(api_ready and METERED_API_ENABLED)
-    can_chat = can_spend_api if cloud_mode else cli_ready or can_spend_api
+    can_chat = can_spend_api if cloud_mode else cli_ready or can_spend_api or local_ready
     notices: list[dict[str, Any]] = []
     if api_configured and not METERED_API_ENABLED:
         notices.append(
@@ -2098,28 +2099,36 @@ def _live_self_description(catalogs: dict[str, Any]) -> dict[str, Any]:
                 "action": "Use billing receipts to report API usage and cost.",
             }
         )
-    if not cli_ready and not can_spend_api:
-        # No Grok access at all: point new users at the getting-started paths,
-        # including the project's Cursor referral link (disclosed as a referral).
+    if local_ready and not cli_ready and not can_spend_api:
         notices.append(
             {
-                "id": "no_grok_credentials",
+                "id": "local_runtime_ready",
+                "prompt_user": False,
+                "severity": "info",
+                "summary": "The zero-key local model route is ready.",
+                "action": (
+                    "Use local text assistance now; configure Grok Build or XAI_API_KEY "
+                    "only if you want provider-hosted capabilities."
+                ),
+            }
+        )
+    if not cli_ready and not can_spend_api and not local_ready:
+        notices.append(
+            {
+                "id": "no_inference_route",
                 "prompt_user": True,
                 "severity": "warning",
                 "summary": (
                     "The hosted xAI API plane is unavailable."
                     if cloud_mode
-                    else "Neither Grok plane is available: the Grok Build CLI is not "
-                    "logged in and no xAI API key is configured."
+                    else "No inference route is ready."
                 ),
                 "action": (
                     "Contact the hosted service operator; remote callers must never add "
                     "provider keys to client configuration."
                     if cloud_mode
-                    else "Log in with `grok login --device-auth` (subscription plane) or "
-                    "add XAI_API_KEY to your .env (metered plane). New to Grok-powered "
-                    "coding? You can also sign up for Cursor via the project's referral "
-                    "link: " + CURSOR_REFERRAL_URL
+                    else "Start the README Docker Model Runner route, log in to Grok "
+                    "Build, or add XAI_API_KEY to the service environment."
                 ),
             }
         )
@@ -2138,11 +2147,11 @@ def _live_self_description(catalogs: dict[str, Any]) -> dict[str, Any]:
         f"bounded semantic router may use up to {ROUTER_MAX_OUTPUT_TOKENS} output tokens. "
         "The calling agent must disclose API use."
         if cloud_mode
-        else "All agent tools are available by default. Routing uses heuristics or three "
-        "CLI-first bounded votes. If those votes are inconclusive and the API is ready, "
-        f"a semantic fallback is capped at {ROUTER_MAX_OUTPUT_TOKENS} output tokens. "
-        "Selected work stays CLI-first unless it needs a specialist or recovery. The "
-        "calling agent must disclose API use."
+        else "Agent capabilities depend on the live-selected route. Routing uses "
+        "heuristics or bounded votes. When Grok Build is ready it remains the preferred "
+        "remote lead; a compatible local runtime can serve zero-key text work; and an "
+        f"API semantic fallback is capped at {ROUTER_MAX_OUTPUT_TOKENS} output tokens. "
+        "The calling agent must disclose API use."
     )
     return {
         "schema_version": 1,
@@ -2176,12 +2185,16 @@ def _live_self_description(catalogs: dict[str, Any]) -> dict[str, Any]:
         },
         "credential_planes": {
             "version": 1,
-            "policy": "api_only" if cloud_mode else "cli_first",
+            "policy": "api_only" if cloud_mode else "automatic_live_routes",
             "preferred_plane": "api" if cloud_mode else "cli",
             "effective_plane": (
                 "api"
                 if cloud_mode and can_spend_api
-                else ("cli" if cli_ready else ("api" if can_spend_api else None))
+                else (
+                    "cli"
+                    if cli_ready
+                    else ("api" if can_spend_api else ("local" if local_ready else None))
+                )
             ),
             "service_usable": can_chat,
             "degraded": (not can_spend_api) if cloud_mode else not cli_ready,
@@ -2208,6 +2221,16 @@ def _live_self_description(catalogs: dict[str, Any]) -> dict[str, Any]:
                 "default_model": catalogs["api"].get("default_model"),
                 "billing": "metered",
             },
+            "local": {
+                "name": "Local model runtime",
+                "configured": bool(local_catalog.get("configured", False)),
+                "ready": local_ready,
+                "models": local_catalog.get("models", []),
+                "default_model": local_catalog.get("default_model"),
+                "billing": "local_runtime",
+                "cost_usd": 0.0,
+                "disabled_by_policy": cloud_mode,
+            },
             "notices": notices,
             "notice_behavior": "Informational only; no client prompt is required.",
         },
@@ -2215,7 +2238,11 @@ def _live_self_description(catalogs: dict[str, Any]) -> dict[str, Any]:
             "lead": (
                 "heuristics then bounded API semantic routing"
                 if cloud_mode
-                else "heuristics then CLI-first bounded votes; API semantic fallback if needed"
+                else (
+                    "local router floor and local text model"
+                    if local_ready and not cli_ready and not can_spend_api
+                    else "heuristics then CLI-first bounded votes; compatible recovery if needed"
+                )
             ),
             "specialists": (
                 "lead-authored briefs select provider-discovered code or media specialists"
@@ -2227,7 +2254,7 @@ def _live_self_description(catalogs: dict[str, Any]) -> dict[str, Any]:
             "cross_plane": (
                 "unavailable because the hosted CLI plane is disabled"
                 if cloud_mode
-                else "one bounded API recovery after CLI failure or throttling"
+                else "one bounded recovery between compatible ready routes"
             ),
         },
         "capability_defaults": {
@@ -6200,6 +6227,12 @@ async def grok_mcp_status(refresh: bool = False) -> dict[str, Any]:
         "tool_count": len(PUBLIC_TOOLS),
         "cli": catalogs["cli"],
         "api": catalogs["api"],
+        "local": catalogs.get("local") or {
+            "configured": False,
+            "ready": False,
+            "models": [],
+            "default_model": None,
+        },
         "bootstrap": description["bootstrap"],
         "credential_planes": description["credential_planes"],
         "api_spend_enforcement": {

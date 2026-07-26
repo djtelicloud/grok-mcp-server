@@ -36,6 +36,14 @@ Then open a real IDE MCP client against `http://127.0.0.1:4775/mcp` (header
 `grok_mcp_discover_self` and exercise every configured public route. Rebuild the image
 after source changes; do not infer source parity from a healthy old container.
 
+When Docker Model Runner is ready, prove that the no-key route completes a real turn:
+
+```bash
+uv run python scripts/smoke_mcp.py \
+  --url http://127.0.0.1:4775/mcp \
+  --invoke-local
+```
+
 Restore the normal port by recreating the same service with `UNIGROK_PORT=4765`.
 Use `UNIGROK_IMAGE` to select the reviewed candidate or recorded rollback image. Do not
 point two containers at the same SQLite state volume.
