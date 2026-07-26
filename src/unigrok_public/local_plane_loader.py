@@ -1125,7 +1125,11 @@ class OpenAICompatProbe:
             return ProbeResult(runtime_up=False, errors=(f"openai_compat:httpx:{exc}",))
         try:
             api_base = openai_compat_api_base(base_url)
-            async with httpx.AsyncClient(timeout=timeout) as client:
+            async with httpx.AsyncClient(
+                timeout=timeout,
+                follow_redirects=False,
+                trust_env=False,
+            ) as client:
                 resp = await client.get(f"{api_base}/models")
                 resp.raise_for_status()
                 payload = resp.json()
@@ -1166,7 +1170,11 @@ class OllamaProbe:
             return ProbeResult(runtime_up=False, errors=(f"ollama:httpx:{exc}",))
         base = base_url.rstrip("/")
         try:
-            async with httpx.AsyncClient(timeout=timeout) as client:
+            async with httpx.AsyncClient(
+                timeout=timeout,
+                follow_redirects=False,
+                trust_env=False,
+            ) as client:
                 resp = await client.get(f"{base}/api/tags")
                 resp.raise_for_status()
                 payload = resp.json()
@@ -1210,7 +1218,11 @@ class MLXProbe:
             return ProbeResult(runtime_up=False, errors=(f"mlx:httpx:{exc}",))
         try:
             api_base = openai_compat_api_base(base_url)
-            async with httpx.AsyncClient(timeout=timeout) as client:
+            async with httpx.AsyncClient(
+                timeout=timeout,
+                follow_redirects=False,
+                trust_env=False,
+            ) as client:
                 resp = await client.get(f"{api_base}/models")
                 resp.raise_for_status()
                 payload = resp.json()

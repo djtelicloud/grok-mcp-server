@@ -355,6 +355,46 @@ UNIGROK_LAYER = _normalize_layer_name(os.environ.get("UNIGROK_LAYER", ""))
 UNIGROK_LAYER_COLLECTION = os.environ.get("UNIGROK_LAYER_COLLECTION", "").strip()
 
 # --- offline local plane constants ---
+_LOCAL_RUNTIME_HOSTS = frozenset(
+    {
+        "localhost",
+        "host.docker.internal",
+        "gateway.docker.internal",
+        "model-runner.docker.internal",
+    }
+)
+
+
+def _validated_local_runtime_url(value: str) -> str:
+    """Return a local HTTP runtime URL or refuse remote/credentialed routing."""
+
+    raw = str(value or "").strip().rstrip("/")
+    if not raw:
+        raise ValueError("local runtime URL is empty")
+    parsed = urlsplit(raw)
+    if parsed.scheme != "http":
+        raise ValueError("local runtime must use HTTP on the operator's machine")
+    if parsed.username or parsed.password:
+        raise ValueError("local runtime URL must not contain credentials")
+    if parsed.query or parsed.fragment:
+        raise ValueError("local runtime URL must not contain a query or fragment")
+    try:
+        _ = parsed.port
+    except ValueError as exc:
+        raise ValueError("local runtime URL has an invalid port") from exc
+
+    host = (parsed.hostname or "").lower()
+    local = host in _LOCAL_RUNTIME_HOSTS
+    if not local:
+        try:
+            local = ipaddress.ip_address(host).is_loopback
+        except ValueError:
+            local = False
+    if not local:
+        raise ValueError("local runtime must use an explicit local host")
+    return raw
+
+
 def _resolve_local_runtime_url() -> str:
     """Local plane is automatic: default Docker Model Runner unless disabled.
 
@@ -365,11 +405,11 @@ def _resolve_local_runtime_url() -> str:
     """
     explicit = os.environ.get("UNIGROK_LOCAL_RUNTIME_URL", "").strip()
     if explicit:
-        return explicit
+        return _validated_local_runtime_url(explicit)
     mode = os.environ.get("UNIGROK_LOCAL_AUTO", "on").strip().lower()
     if mode in {"0", "false", "off", "no"}:
         return ""
-    return "http://host.docker.internal:12434/engines/v1"
+    return "http://model-runner.docker.internal/engines/v1"
 
 
 LOCAL_RUNTIME_URL = _resolve_local_runtime_url()
@@ -7678,7 +7718,11 @@ async def _openai_compat_chat(
     if max_tokens is not None:
         body["max_tokens"] = int(max_tokens)
     api_base = local_plane_loader.openai_compat_api_base(base_url)
-    async with httpx.AsyncClient(timeout=timeout) as client:
+    async with httpx.AsyncClient(
+        timeout=timeout,
+        follow_redirects=False,
+        trust_env=False,
+    ) as client:
         resp = await client.post(f"{api_base}/chat/completions", json=body)
         resp.raise_for_status()
         payload = resp.json() if resp.content else {}

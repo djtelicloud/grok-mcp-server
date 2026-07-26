@@ -12,7 +12,7 @@ authority. Local results carry `billing_class: local_runtime` and `cost_usd: 0`.
 On Docker Desktop, enable Docker Model Runner and pull the pinned README model:
 
 ```bash
-docker desktop enable model-runner --tcp 12434
+docker desktop enable model-runner
 docker model pull ai/gemma3:4B-Q4_K_M
 docker model run --detach ai/gemma3:4B-Q4_K_M
 ```
@@ -26,19 +26,19 @@ curl --fail --silent http://127.0.0.1:4765/runtimez
 ```
 
 The container automatically probes Docker Model Runner through
-`host.docker.internal:12434`. When no remote route is ready, the discovered Gemma
-model supplies the bounded router and text path. Requests without a funded local role,
-including cloud-only media and search, fail closed instead of escaping to a paid service
-or fabricating a result.
+`model-runner.docker.internal`, Docker Desktop's private container endpoint. When no
+remote route is ready, the discovered Gemma model supplies the bounded router and text
+path. Requests without a funded local role, including cloud-only media and search, fail
+closed instead of escaping to a paid service or fabricating a result.
 
 Set `UNIGROK_LOCAL_AUTO=off` to disable automatic probing. For another
 OpenAI-compatible loopback runtime, set `UNIGROK_LOCAL_RUNTIME_URL` to its base URL.
 The runtime must expose model discovery and chat completions and must remain on the
-same machine.
+same machine; remote, credentialed, and non-HTTP URLs are refused.
 
-Docker Model Runner's endpoint is unauthenticated. Keep port `12434` on loopback.
-For a genuinely offline run, pre-stage the image, model, tokenizer, and dependencies
-before disconnecting.
+Docker Model Runner's endpoint is unauthenticated. Leave host-side TCP support
+disabled unless you separately secure it. For a genuinely offline run, pre-stage the
+image, model, tokenizer, and dependencies before disconnecting.
 
 ## Optional named helper
 

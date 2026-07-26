@@ -53,7 +53,7 @@ def test_direct_talk_requires_full_combo(monkeypatch):
             {
                 "UNIGROK_LOCAL_DIRECT_TALK_MODE": "non_certified",
                 "UNIGROK_LOCAL_DIRECT_MODEL": "gemma4",
-                "UNIGROK_LOCAL_RUNTIME_URL": "http://rt.test",
+                "UNIGROK_LOCAL_RUNTIME_URL": "http://127.0.0.1:8081",
             },
         ).DIRECT_TALK_ACTIVE
         is False
@@ -67,7 +67,7 @@ def _active(monkeypatch):
             "UNIGROK_LAYER": "gemma",
             "UNIGROK_LOCAL_DIRECT_TALK_MODE": "non_certified",
             "UNIGROK_LOCAL_DIRECT_MODEL": "gemma4",
-            "UNIGROK_LOCAL_RUNTIME_URL": "http://rt.test",
+            "UNIGROK_LOCAL_RUNTIME_URL": "http://127.0.0.1:8081",
         },
     )
 
@@ -89,7 +89,7 @@ def test_run_unified_direct_talk_never_resolves_plane(monkeypatch):
     async def _fake_transport(
         base, model, messages, *, max_tokens, timeout  # noqa: ASYNC109
     ):
-        assert base == "http://rt.test"
+        assert base == "http://127.0.0.1:8081"
         assert model == "gemma4"
         return {"text": "hello from gemma", "stop_reason": "stop"}
 
