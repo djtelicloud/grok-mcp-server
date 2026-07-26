@@ -12,38 +12,30 @@
 
 # One Grok teammate. Every coding agent.
 
-Install UniGrok once, connect every MCP-capable IDE, and use `@grok` from any project.
-Your Grok login and optional xAI API key stay inside one local service — not scattered
-through editor settings.
+Install UniGrok Core once, connect every MCP-capable IDE, and use `@grok` from any
+project. Start with a no-key local model, a Grok Build login, an optional xAI API key,
+or any combination of those routes.
 
 ```text
 http://localhost:4765/mcp
 ```
 
-Approved collaborators can also use the owner-operated hosted pilot at
-`https://mcp.grokmcp.org/mcp`. It uses browser OAuth and never asks an IDE for an
-xAI key. Local Compose remains the private, persistent default; see
-[Authenticated remote deployment](docs/remote-mcp-deployment.md) for the
-different hosted security and state contract.
-
-<div align="center">
-
-<img src="assets/control-center-live.png" alt="UniGrok Control Center — live route mix, model mix, callers, cost, and fallback receipts" width="100%" />
-
-<sub>The local Control Center at <code>http://localhost:4765/ui/</code> — live routing, cost, and benchmark receipts.</sub>
-
-</div>
+This clone, the commands below, and the service they start on port `4765` are the
+complete public offering. Private provider coordination and operator infrastructure are
+not part of UniGrok Core.
 
 ## Get running in three minutes
 
-You need [Docker Desktop](https://www.docker.com/products/docker-desktop/) and Git, plus
-Grok access. UniGrok runs on two Grok planes, in this order:
+You need [Docker Desktop](https://www.docker.com/products/docker-desktop/) and Git.
+Choose at least one inference route:
 
-1. **Grok Build subscription** — the default, flat-rate plane. This is all you need.
-2. **xAI developer API key** ([console.x.ai](https://console.x.ai/)) — optional, metered;
-   adds vision, image/video, X search, and silent failover.
+1. **No-key local model** — Docker Model Runner plus a compatible local model.
+2. **Grok Build login** — subscription or available free-tier CLI access.
+3. **xAI developer API key** ([console.x.ai](https://console.x.ai/)) — optional and
+   metered; adds provider-hosted files, media, search, and code execution.
 
-Set up plane 1 to get going; add plane 2 whenever you want the extras.
+UniGrok discovers the routes that are actually ready. A local-only installation stays
+local and reports unsupported cloud-only capabilities honestly.
 
 > In a hurry? `npx @djtelicloud/unigrok` prints these setup steps in your terminal.
 > (A full launcher that runs the setup for you is planned; today UniGrok installs via
@@ -57,10 +49,23 @@ cd grok-mcp-server
 docker compose build
 ```
 
-### 2. Connect Grok
+### 2. Choose an inference route
 
-**Grok subscription (recommended).** Log in once — the device-login runs inside the
-container and stores the session in a private Docker volume:
+**No paid key or CLI login.** Enable Docker Model Runner, pull a pinned Gemma model,
+and start it locally:
+
+```bash
+docker desktop enable model-runner --tcp 12434
+docker model pull ai/gemma3:4B-Q4_K_M
+docker model run --detach ai/gemma3:4B-Q4_K_M
+```
+
+This route uses Docker's loopback-only OpenAI-compatible endpoint and no API key.
+The pinned model supplies bounded local text assistance; UniGrok does not pretend
+that it provides cloud search, media generation, or a separately certified code role.
+
+**Grok Build.** Log in once — the device login runs inside the container and stores
+the session in a private Docker volume:
 
 ```bash
 docker compose run --rm grok-cli-auth
@@ -72,17 +77,16 @@ Want the Grok CLI on your own machine too? It is optional:
 curl -fsSL https://x.ai/cli/install.sh | bash
 ```
 
-**xAI API key (optional, metered).** Adds vision, image/video, and silent failover.
-Keep the key in the **service owner env** only — never IDE MCP JSON, never a second
-SoT under `src/`. Factory GroundCommand uses the monorepo Ground key home (parent
-`.env` / `KEY_HOMES.md`); generic installs can export `XAI_API_KEY` or use
-`docker compose --env-file <private-env>`.
+**xAI API key (optional, metered).** Adds provider-hosted files, vision, image/video,
+search, code execution, and bounded recovery. Keep the key in the service environment
+only — never in IDE MCP JSON:
 
-Allowed inference env names (first non-empty wins):
-`XAI_API_KEY`, `XAI_API_KEY_SKY_INFERENCE`, `XAI_API_KEY_GROUND`,
-`XAI_API_KEY_UNIGROK_GROUND` (never management / Cursor tokens).
+```bash
+export XAI_API_KEY='<your key>'
+```
 
-Either CLI login or API key works alone; set both if you want everything.
+Any one route works alone. Configure more than one if you want bounded, receipted
+recovery between compatible routes.
 
 ### 3. Start UniGrok
 
@@ -114,19 +118,6 @@ Configure an MCP server named grok for this machine.
 
 The config filename varies by IDE, but every client connects to the same local URL.
 
-### Hosted pilot (approved collaborators)
-
-For an OAuth-capable MCP client, use this resource instead:
-
-```text
-https://mcp.grokmcp.org/mcp
-```
-
-Do not add an API key or hand-written bearer. The client follows the protected-resource
-metadata, opens Control OAuth, and receives only the scopes the operator approves.
-Authorization policy can still deny access. The hosted plane is API-only, tenant-scoped,
-and currently uses instance-local state; it is a collaboration pilot, not anonymous SaaS.
-
 ## Try it in 60 seconds
 
 Start a fresh conversation in any project and try:
@@ -152,18 +143,12 @@ you. Every answer comes back with a plane and cost receipt.
 |---|---|
 | ⚡ | **One tool, `agent`** — say what you want; routing, effort, and recovery are automatic |
 | 🎚️ | **Levels that scale** — from a quick answer up to a parallel review swarm, picked for you |
-| 💸 | **Free by default locally** — Compose prefers your flat-rate Grok subscription; the hosted pilot is metered API-only |
+| 💸 | **A real zero-key route** — a compatible Docker Model Runner model can serve local text without a paid provider key |
 | 🧾 | **Receipts on every answer** — plane, cost, route, and fallback, so nothing is hidden |
 | 🧠 | **Sessions and memory** — named sessions and facts you control, kept locally |
 | 🎨 | **Images, video, vision, files, web + X search** when you add an API key |
 | 🤖 | **PR reviews on comment** — a maintainer types `@grok review` on a pull request and a read-only Grok review answers |
 | 🔐 | **One credential boundary** — keys live in UniGrok, not in every project |
-
-<div align="center">
-
-<img src="assets/og-banner.png" alt="UniGrok — one Grok gateway, every coding agent · open source, local first, MCP native" width="100%" />
-
-</div>
 
 ## What's new in 1.1
 
@@ -186,35 +171,30 @@ the model. Generic durable jobs keep results recorded before restart. If a gener
 was interrupted before a result was recorded, it returns `lost`: the provider outcome
 is unknown, so inspect state before retrying a metered or mutating operation.
 
-### A gateway that optimizes itself, honestly
-The dogfood loop lets the hive rewrite the gateway's own functions — but a rewrite ships
-only when it is proven behavior-identical and measured >8% faster, with no new imports
-and a bounded diff. Six functions shipped this way (up to +52.8% measured). Sub-noise
-"wins" are rejected on principle.
+## Three routes, one simple entry point
 
-## Two Grok planes, one simple entry point
-
-This routing section describes local Compose. The authenticated hosted pilot disables
-the CLI plane and uses the metered API only.
-
-Need an explicitly selected helper when the network is unavailable? The
-[optional local-model helper](docs/offline-local-helper.md) runs as a separate,
-default-off MCP server. It is not a third `@grok` plane and never activates on an
-authentication or provider failure.
+The normal `@grok` service discovers a compatible local runtime automatically. It
+prefers a ready Grok Build login, can use a service-owned API key when authorized, and
+uses the local route when remote routes are unavailable. See
+[Local model routes](docs/offline-local-helper.md) for the integrated route and the
+optional named helper.
 
 ```mermaid
 flowchart TD
-    T["{ task: Your request }"] --> L["Live-discovered Grok lead"]
-    L -->|"answer / research / reasoning"| D["Direct Grok work"]
-    L -->|"lead-authored code brief"| C["Discovered Grok Build specialist"]
-    L -->|"lead-authored media brief"| M["Provider image / video specialist"]
-    D --> R["Result + model / plane / cost receipt"]
-    C --> R
-    M --> R
+    T["{ task: Your request }"] --> R["Live route discovery"]
+    R -->|"no-key local"| G["Local Gemma route"]
+    R -->|"Grok Build ready"| D["Subscription / free-tier work"]
+    R -->|"API explicitly configured"| M["Metered specialists"]
+    G --> O["Result + model / plane / cost receipt"]
+    D --> O
+    M --> O
 ```
 
-- `agent` makes web, X search, and code tools available by default.
-- The live Grok subscription default leads every request and writes specialist briefs.
+- `agent` makes web, X search, and code tools available when the selected route supports
+  them.
+- A ready Grok Build login remains the preferred remote lead.
+- With no remote credential, a compatible local runtime provides bounded local text help
+  at `cost_usd: 0`.
 - UniGrok selects models, planes, reasoning effort, and recovery automatically.
 - Clear tasks route heuristically; otherwise three bounded, CLI-first intent votes select
   shape. If too few votes parse, an API semantic fallback may run (256 output tokens by
@@ -282,10 +262,8 @@ See [SECURITY.md](SECURITY.md) for the complete public runtime boundary.
 | I want to… | Read |
 |---|---|
 | Understand the service and state machines | [Public architecture](docs/architecture.md) |
-| Prove source, Docker, and deployment readiness | [Team readiness](docs/team-readiness.md) |
 | See every tool and routing rule | [Technical reference](docs/reference.md) |
-| Understand or operate the authenticated hosted service | [Remote deployment](docs/remote-mcp-deployment.md) |
-| Run the explicit no-internet local helper | [Optional local-model helper](docs/offline-local-helper.md) |
+| Use the integrated local route or named local helper | [Local model routes](docs/offline-local-helper.md) |
 | Drive `agent` from an IDE agent | [Technical reference](docs/reference.md#how-an-ide-agent-should-drive-agent) |
 | Develop or acceptance-test UniGrok | [Development guide](docs/development.md) |
 | See what has limited soak and how to report a miss | [Known limits](docs/known-limits.md) |

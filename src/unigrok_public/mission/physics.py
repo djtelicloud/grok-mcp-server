@@ -2,7 +2,7 @@
 
 These are resource / causality / non-exfil ceilings. Cognition posteriors and
 operational defaults live elsewhere (governor weight bundles, env knobs under
-these caps). See docs/DEOVERFIT.md.
+these caps).
 """
 
 from __future__ import annotations

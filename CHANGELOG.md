@@ -5,10 +5,6 @@ All notable changes to the public UniGrok gateway.
 ## [Unreleased]
 
 ### Added
-- Forge r25 Cloud-first contributor linking reuses the established Control
-  dynamic-registration + PKCE flow and remembered GitHub App session. The scoped
-  UniGrok link is stored in the Forge-owned state volume and rechecked against
-  current repository access; GitHub Device Flow remains an explicit fallback.
 - Experimental `gemmagrok-local` Compose profile and standalone MCP helper for an
   explicitly selected, operator-owned local model runtime. The helper is loopback-only,
   exposes `chat`/`status`, receives no Grok credentials, and is not part of automatic
@@ -23,18 +19,11 @@ All notable changes to the public UniGrok gateway.
   generation can CommitDone structurally; run/test/prove outcomes require independent
   evidence. Callers may provide typed, pre-candidate `caller_evidence`, while candidate
   hashes and candidate-projection references remain forbidden as self-evidence.
-- De-overfitting pass (hive-merged plan in `docs/DEOVERFIT.md`): physics envelope
-  stub; governor magic numbers moved into versioned `WEIGHT_BUNDLE`; mechanism
-  tests (`inspect.getsource`, `_JOB_TASKS` shape, semaphore identity) replaced
-  with behavioral contracts. Needle remains inactive by default.
+- Resource ceilings and causality invariants are explicit; governor weights live in a
+  versioned `WEIGHT_BUNDLE`; mechanism tests were replaced with behavioral contracts.
+  Needle remains inactive by default.
 
 ### Fixed
-- Forge contributor identity now survives page, browser, process, and container
-  restarts. Device-flow sessions use a durable signed HttpOnly cookie, while the
-  preferred Cloud link persists only its scoped UniGrok token in a `0600` vault.
-  A signed-out Forge now resumes an existing Control/GitHub login automatically,
-  keeps device authorization as the outage fallback, and makes explicit logout
-  opt out of automatic relinking.
 - Durable shutdown is monotonic: an atomic interrupted transition cannot overwrite a
   terminal result, shutdown cancellation preserves the honest `lost`/unknown-provider
   payload, explicit cancellation remains distinguishable, and first restart polls make
@@ -143,13 +132,8 @@ All notable changes to the public UniGrok gateway.
   actual bounded 600-second service-token lifetime.
 
 ### Documentation
-- Add a current public architecture, a source/Docker/public/hosted readiness matrix, a
-  release evidence template, runtime source fingerprints, a read-only container-parity
-  checker, and CI-enforced release-version parity.
-- Restore and update the authenticated remote-deployment runbook with the current OAuth,
-  secret-version, tenant, instance-local-state, atomic-cutover, smoke, and rollback
-  contracts; link the hosted pilot from README, reference, security, development, known
-  limits, launch, and contributor guidance.
+- Add current public architecture, clone-state verification, and CI-enforced
+  release-version parity.
 - Document the `review_pull_request` MCP tool and pollable review metadata in
   `docs/reference.md`.
 - Document the `depth` compatibility parameter (`auto`/`deep`/`hive`) alongside the
@@ -205,9 +189,6 @@ All notable changes to the public UniGrok gateway.
   dynamic voter sizing
 - Agent job persistence to SQLite (recorded results survive restarts; interrupted
   generic jobs return status `"lost"` with an unknown provider outcome)
-- Verifying benchmark suite: `benchmark_deep.py` (executed-code checks, level sweeps, `--voters` sweep), `persona_bench.py` tournament, `parallel_probe.py`, `triage_optimize.py` scout
-- Dogfood optimizer loop (`dogfood_optimize.py`) with anti-Goodhart counter-metric gate (no new imports, bounded diff) and 8% noise floor
-- Six gateway functions hive-optimized with measured wins (+52.8%, +22.6%, +20.8%, +18.9%, +18.0% ×2)
 - Shadow done-vote experiment flag `UNIGROK_SHADOW_DONE_VOTE` (off by default)
 - Metered-API output cap on micro-emit votes (`UNIGROK_VOTE_MAX_OUTPUT`, default 128)
 

@@ -5,12 +5,11 @@ report that we can actually reproduce. One section per release, newest first.
 
 ## 1.1.0
 
-### Hosted collaboration is authenticated, but state is instance-local
+### Optional remote mode is authenticated, but state is instance-local
 
-The owner-operated remote endpoint is an OAuth-gated collaboration pilot, not an
-anonymous multi-tenant SaaS. OAuth identity isolates sessions, facts, jobs, telemetry,
-and configured budgets, while hosted xAI file tools require a principal-bound provider
-credential.
+The generic remote mode is OAuth-gated, not anonymous multi-tenant SaaS. OAuth identity
+isolates sessions, facts, jobs, telemetry, and configured budgets, while hosted xAI
+file tools require a principal-bound provider credential.
 
 Cloud Run currently stores SQLite under `/tmp`. A revision or instance replacement can
 therefore lose hosted sessions, facts, and durable-job state, and two scaled instances
@@ -44,8 +43,9 @@ is exactly the feedback we need. A depth-mode miss usually looks like one of:
 
 ### Plane fallback is visible — check the receipts
 
-In local Compose, the subscription CLI plane is the default; the metered xAI API plane is for
-selected specialists and bounded recovery. Every result carries
+In local Compose, a ready subscription CLI plane is the preferred remote route; the
+no-key local route can serve when remote routes are unavailable, and the metered xAI
+API is for selected specialists and bounded recovery. Every result carries
 `resolved_plane`, `fallback_occurred` / `fallback_reason`, and `usage`. If
 those receipts show a fallback to the API plane that you did not expect, file
 a bug with those fields — they tell most of the story.

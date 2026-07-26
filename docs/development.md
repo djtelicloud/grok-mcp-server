@@ -3,13 +3,6 @@
 This guide is for contributors and release verification. Ordinary users only need the
 README. See also [CONTRIBUTING.md](../CONTRIBUTING.md).
 
-The authenticated Cloud Run service has a separate digest-pinned release and rollback
-gate. Do not infer a public deployment from a local Compose rebuild; operators must use
-the [remote deployment runbook](remote-mcp-deployment.md).
-
-Design notes (no runtime claims): [WASM × dogfood](WASM_DOGFOOD.md) — guest ABI and
-trigger conditions; wasm is **not** in the shipping gateway today.
-
 ## Local checks
 
 ```bash
@@ -25,39 +18,29 @@ docker compose build grok-mcp
 
 ## Rebuild and runtime-test the local service
 
-The checked-in Compose file intentionally uses one fixed container and the persistent
-`unigrok-*` auth/state volumes. It is not a side-by-side deployment definition. Stop the
-current container, then recreate the same local service on `4775` if you want to keep an
-IDE's `4765` configuration file untouched while testing. Clients still pointed at
-`4765` are offline until the service is restored. Drain active jobs first, because this
-recreates the only local runtime. Before the candidate touches SQLite, create the image
-tag and stopped-volume snapshot in [Team readiness](team-readiness.md):
+The checked-in Compose file uses one fixed container and persistent `unigrok-*`
+auth/state volumes. It is not a side-by-side deployment definition. Drain active jobs
+before recreating the service. Use port `4775` for an isolated endpoint smoke:
 
 ```bash
-UNIGROK_IMAGE=unigrok:team-ready-candidate UNIGROK_PORT=4775 \
-  docker compose --env-file .env up --build -d grok-mcp
+UNIGROK_IMAGE=unigrok:public-candidate UNIGROK_PORT=4775 \
+  docker compose up --build -d grok-mcp
 curl -fsS http://127.0.0.1:4775/healthz
 curl -fsS http://127.0.0.1:4775/readyz
 curl -fsS http://127.0.0.1:4775/runtimez
 uv run python scripts/smoke_mcp.py --url http://127.0.0.1:4775/mcp
-uv run python scripts/check_runtime_parity.py --container unigrok
 ```
 
 Then open a real IDE MCP client against `http://127.0.0.1:4775/mcp` (header
 `X-Client-ID` as needed). Before release, compare MCP `tools/list` with
-`grok_mcp_discover_self`, exercise both configured credential planes, and confirm
-host sources match the running container for `src/` and static UI files.
-
-The parity command is read-only and compares a content fingerprint plus every public
-runtime path. Treat `DRIFT` as a stop signal; do not assume the checkout should overwrite
-an active container. See [Team readiness](team-readiness.md) for the evidence matrix and
-handoff format.
+`grok_mcp_discover_self` and exercise every configured public route. Rebuild the image
+after source changes; do not infer source parity from a healthy old container.
 
 Restore the normal port by recreating the same service with `UNIGROK_PORT=4765`.
 Use `UNIGROK_IMAGE` to select the reviewed candidate or recorded rollback image. Do not
 point two containers at the same SQLite state volume.
 
-To verify team-state persistence across a restart, create a named `agent` session,
+To verify state persistence across a restart, create a named `agent` session,
 restart the container, and confirm the same session still resolves through the MCP
 tools (facts / session history).
 

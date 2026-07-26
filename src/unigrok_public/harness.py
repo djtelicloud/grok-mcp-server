@@ -192,7 +192,7 @@ _HIVE_VOTE_JSON_RE = re.compile(r"\{[^{}]*\"v\"\s*:\s*\"(?:pass|fail|risk)\"[^{}
 
 def number_draft_lines(draft: str) -> str:
     """Diff-style index: number every draft line so votes can anchor precisely."""
-    # Hive-optimized via dogfood_optimize.py: +22.6% measured.
+    # Keep this hot path allocation-light; behavior is covered by harness tests.
     return "\n".join(
         f"L{i}: {line}" for i, line in enumerate(str(draft or "").splitlines(), 1)
     )
@@ -211,7 +211,7 @@ def build_vote_prompt(task: str, draft: str, persona: dict[str, str]) -> str:
 
 
 def parse_hive_vote(text: str) -> dict[str, Any] | None:
-    # Hive-optimized via dogfood_optimize.py: +18.0% measured.
+    # Parse only the bounded vote object; ignore surrounding provider chatter.
     match = _HIVE_VOTE_JSON_RE.search(str(text or ""))
     if not match:
         return None
@@ -350,7 +350,7 @@ def parse_done_vote(text: str) -> bool | None:
 
 def majority(values: list[str], default: str) -> str:
     """Plain-code vote count; ties break toward the first-seen most common value."""
-    # Hive-optimized via dogfood_optimize.py: +20.8% measured.
+    # One pass preserves first-seen tie behavior without a second sort.
     if not values:
         return default
     counts: dict[str, int] = {}
@@ -483,7 +483,6 @@ def _prompt_requests_plan(prompt: str) -> bool:
 
 
 def _looks_like_plan(text: str) -> bool:
-    # Hive-optimized via dogfood_optimize.py (scout hit; telemetry): +52.8% measured.
     # Same rule as before — >=2 action lines, at most 1 non-action line — but exits
     # on the second non-action line instead of regex-scanning the whole text.
     if _PLAN_ONLY_HEADING_RE.search(text):
@@ -505,7 +504,6 @@ def _looks_like_plan(text: str) -> bool:
 def is_nonanswer_completion(content: Any, *, prompt: str = "") -> bool:
     """Reject an empty promise or unsolicited plan that delivers no result."""
 
-    # Hive-optimized via dogfood_optimize.py: +18.0% measured.
     if not isinstance(content, str):
         return True
     stripped = content.strip()

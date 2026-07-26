@@ -7,7 +7,7 @@ disposable, empty directory with a temporary home. Project discovery, user
 configuration, local files, Git, shell commands, edits, external MCP servers, memory,
 subagents, and private intelligence are outside the public contract.
 
-The two xAI credentials are isolated:
+Provider credentials are isolated:
 
 - The CLI subprocess receives only its Grok OAuth authentication path. Provider API
   keys, management credentials, and subordinate-provider credentials are removed.
@@ -48,9 +48,8 @@ authorization, state ownership, or budget identity.
 
 The current hosted SQLite state directory is instance-local. Tenant isolation does not
 make it durable across instance replacement or shared across scaled instances; do not
-retry an unknown metered or mutating outcome blindly. See the
-[remote deployment runbook](docs/remote-mcp-deployment.md) for the complete contract,
-release gate, and rollback procedure.
+retry an unknown metered or mutating outcome blindly. Hosted release and rollback
+operations are owner-only and are intentionally not part of this public clone.
 
 ## Reporting
 
