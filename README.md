@@ -55,14 +55,16 @@ docker compose build
 and start it locally:
 
 ```bash
-docker desktop enable model-runner --tcp 12434
+docker desktop enable model-runner
 docker model pull ai/gemma3:4B-Q4_K_M
 docker model run --detach ai/gemma3:4B-Q4_K_M
 ```
 
-This route uses Docker's loopback-only OpenAI-compatible endpoint and no API key.
-The pinned model supplies bounded local text assistance; UniGrok does not pretend
-that it provides cloud search, media generation, or a separately certified code role.
+This route uses Docker Desktop's private container endpoint and no API key. Leave
+host-side TCP support disabled: Docker Model Runner's API is unauthenticated, and
+enabling `--tcp` can expose it beyond localhost on some installations. The pinned
+model supplies bounded local text assistance; UniGrok does not pretend that it
+provides cloud search, media generation, or a separately certified code role.
 
 **Grok Build.** Log in once — the device login runs inside the container and stores
 the session in a private Docker volume:
