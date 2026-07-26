@@ -366,8 +366,9 @@ def _resolve_local_runtime_url() -> str:
     """Local plane is automatic: default Docker Model Runner unless disabled.
 
     Explicit ``UNIGROK_LOCAL_RUNTIME_URL`` always wins. When unset, default to
-    host DMR at ``host.docker.internal:12434`` unless ``UNIGROK_LOCAL_AUTO`` is
-    off/false/0. Probe still fail-closes if the runtime is absent.
+    host DMR's OpenAI-compatible ``/engines/v1`` API unless
+    ``UNIGROK_LOCAL_AUTO`` is off/false/0. Probe still fail-closes if the
+    runtime is absent.
     """
     explicit = os.environ.get("UNIGROK_LOCAL_RUNTIME_URL", "").strip()
     if explicit:
@@ -375,7 +376,7 @@ def _resolve_local_runtime_url() -> str:
     mode = os.environ.get("UNIGROK_LOCAL_AUTO", "on").strip().lower()
     if mode in {"0", "false", "off", "no"}:
         return ""
-    return "http://host.docker.internal:12434"
+    return "http://host.docker.internal:12434/engines/v1"
 
 
 LOCAL_RUNTIME_URL = _resolve_local_runtime_url()
@@ -7635,7 +7636,7 @@ async def _openai_compat_chat(
     max_tokens: int | None,
     timeout: float,  # noqa: ASYNC109
 ) -> dict[str, Any]:
-    """Shared OpenAI-compatible ``/v1/chat/completions`` transport.
+    """Shared OpenAI-compatible ``/chat/completions`` transport.
 
     Single source of truth for the local HTTP shape used by BOTH the certified,
     role-bound ``_local_chat`` and the non-certified direct-talk peer. Returns
@@ -7649,9 +7650,9 @@ async def _openai_compat_chat(
     body: dict[str, Any] = {"model": model, "messages": messages, "stream": False}
     if max_tokens is not None:
         body["max_tokens"] = int(max_tokens)
-    base = base_url.rstrip("/")
+    api_base = local_plane_loader.openai_compat_api_base(base_url)
     async with httpx.AsyncClient(timeout=timeout) as client:
-        resp = await client.post(f"{base}/v1/chat/completions", json=body)
+        resp = await client.post(f"{api_base}/chat/completions", json=body)
         resp.raise_for_status()
         payload = resp.json() if resp.content else {}
     if not isinstance(payload, dict):
