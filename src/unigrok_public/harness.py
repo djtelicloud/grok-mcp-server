@@ -127,8 +127,7 @@ def needs_final_polish(text: str) -> bool:
 
 # Hive mode: parallel persona voters (Grok-authored set, 2026-07-17) with a terse
 # JSON vote schema, merged by one editor turn. All voters run flat-rate and tiny.
-# Order = priority: dynamic voter counts slice from the front. The "gate" persona is
-# harvested from forge's static gate — its cheapest, highest-yield kill.
+# Order = priority: dynamic voter counts slice from the front.
 HIVE_PERSONAS: tuple[dict[str, str], ...] = (
     {
         "id": "critic",

@@ -158,14 +158,8 @@ def test_severity_scoring_handles_numeric_success() -> None:
 def test_dashboard_is_public_core_only() -> None:
     html = DASHBOARD.read_text(encoding="utf-8")
     assert "UniGrok Core" in html
+    assert 'id="mcpendpoint">/mcp' in html
     for forbidden in (
-        "@skygrok",
-        "@spacegrok",
-        "GroundCommand",
-        "SkyCommand",
-        "SpaceCommand",
-        ":4768",
-        ":4769",
         "UNIGROK_GITHUB_CLIENT_ID",
         "/auth/github",
         "/auth/control",

@@ -55,7 +55,7 @@ async def test_telemetry_session_migration_preserves_rows_and_adds_index(
     await store.initialize()
     new_id = await store.save_telemetry(
         {
-            "session_name": "forge:verification",
+            "session_name": "demo:verification",
             "caller": "codex",
             "request_kind": "agent",
             "success": True,
@@ -77,7 +77,7 @@ async def test_telemetry_session_migration_preserves_rows_and_adds_index(
 
     assert "session_name" in columns
     assert "telemetry_session_created" in indexes
-    assert rows == [(1, None, None), (new_id, "forge:verification", 1)]
+    assert rows == [(1, None, None), (new_id, "demo:verification", 1)]
 
 
 @pytest.mark.asyncio
@@ -106,14 +106,14 @@ async def test_agent_records_session_and_success_for_completed_stop_reasons(
     monkeypatch.setattr(server, "SHADOW_DONE_VOTE", False)
     monkeypatch.setattr(server, "_DURABLE_JOBS", {})
 
-    result = await server.agent(task="Answer this", session="forge:verification")
+    result = await server.agent(task="Answer this", session="demo:verification")
 
     assert result["status"] == "complete"
     with sqlite3.connect(state.path) as connection:
         row = connection.execute(
             "SELECT session_name, success, verified FROM telemetry ORDER BY id DESC LIMIT 1"
         ).fetchone()
-    assert row == ("forge:verification", 1, 0)
+    assert row == ("demo:verification", 1, 0)
 
 
 @pytest.mark.asyncio
@@ -144,14 +144,14 @@ async def test_agent_still_records_telemetry_when_outcome_classifier_fails(
     monkeypatch.setattr(server, "SHADOW_DONE_VOTE", False)
     monkeypatch.setattr(server, "_DURABLE_JOBS", {})
 
-    result = await server.agent(task="Answer this", session="forge:verification")
+    result = await server.agent(task="Answer this", session="demo:verification")
 
     assert result["status"] == "complete"
     with sqlite3.connect(state.path) as connection:
         row = connection.execute(
             "SELECT session_name, success FROM telemetry ORDER BY id DESC LIMIT 1"
         ).fetchone()
-    assert row == ("forge:verification", None)
+    assert row == ("demo:verification", None)
 
 
 @pytest.mark.asyncio
@@ -160,7 +160,7 @@ async def test_agent_records_failed_stop_and_forget_session_clears_join_key(
     tmp_path: Path,
 ) -> None:
     state = PublicStateStore(tmp_path / "failed-stop.db")
-    await state.append_turn("forge:forget-me", "Question", "Prior answer")
+    await state.append_turn("demo:forget-me", "Question", "Prior answer")
 
     async def incomplete_turn(**_kwargs: object) -> dict:
         return {
@@ -179,16 +179,16 @@ async def test_agent_records_failed_stop_and_forget_session_clears_join_key(
     monkeypatch.setattr(server, "SHADOW_DONE_VOTE", False)
     monkeypatch.setattr(server, "_DURABLE_JOBS", {})
 
-    result = await server.agent(task="Answer this", session="forge:forget-me")
+    result = await server.agent(task="Answer this", session="demo:forget-me")
     assert result["status"] == "complete"
 
     with sqlite3.connect(state.path) as connection:
         row = connection.execute(
             "SELECT session_name, success FROM telemetry ORDER BY id DESC LIMIT 1"
         ).fetchone()
-    assert row == ("forge:forget-me", 0)
+    assert row == ("demo:forget-me", 0)
 
-    assert await state.delete_session("forge:forget-me") is True
+    assert await state.delete_session("demo:forget-me") is True
     with sqlite3.connect(state.path) as connection:
         cleared = connection.execute(
             "SELECT session_name, success FROM telemetry ORDER BY id DESC LIMIT 1"

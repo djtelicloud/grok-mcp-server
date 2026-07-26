@@ -21,10 +21,8 @@ def test_resolves_only_canonical_owner_key() -> None:
 @pytest.mark.parametrize(
     "alias",
     (
-        "XAI_API_KEY_SKY_INFERENCE",
-        "XAI_API_KEY_GROUND",
-        "XAI_API_KEY_UNIGROK_GROUND",
-        "XAI_API_KEY_CURSOR_SKY",
+        "XAI_API_KEY_SECONDARY",
+        "UNRELATED_PROVIDER_KEY",
         "XAI_MANAGEMENT_API_KEY",
     ),
 )
@@ -38,12 +36,11 @@ def test_non_public_owner_slots_are_ignored(alias: str) -> None:
     assert source == "owner_default"
 
 
-def test_preference_variable_cannot_redirect_owner_key() -> None:
+def test_extra_environment_cannot_redirect_owner_key() -> None:
     key, source = resolve_xai_api_key(
         principal=None,
         environ={
-            "XAI_PLANE_API": "XAI_API_KEY_GROUND",
-            "XAI_API_KEY_GROUND": "xai-private-alias",
+            "XAI_API_KEY_SECONDARY": "xai-unrelated",
             "XAI_API_KEY": "xai-public-owner",
         },
     )

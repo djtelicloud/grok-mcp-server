@@ -340,21 +340,15 @@ SHADOW_DONE_VOTE = os.environ.get("UNIGROK_SHADOW_DONE_VOTE", "off").strip().low
     "yes",
     "on",
 }
-# Layer identity — injected at deploy time, never hardcoded per-layer.
-# Empty string = public free instance (zero collection deps, default behaviour).
-_LAYER_NAME_PATTERN = re.compile(r"[a-z0-9](?:[a-z0-9_-]{0,30}[a-z0-9])?")
-_PRIVATE_RUNTIME_LAYER_NAMES = frozenset({"forge", "sky", "space"})
+# Public layer identity is limited to the optional local Gemma helper.
+# Empty string is the normal UniGrok Core service.
+_PUBLIC_LAYER_NAMES = frozenset({"", "gemma"})
 
 
 def _normalize_layer_name(value: str | None) -> str:
     layer = str(value or "").strip().lower()
-    if layer and not _LAYER_NAME_PATTERN.fullmatch(layer):
-        raise ValueError(
-            "UNIGROK_LAYER must be 1-32 lowercase letters, digits, hyphens, or "
-            "underscores and cannot start or end with punctuation"
-        )
-    if layer in _PRIVATE_RUNTIME_LAYER_NAMES:
-        raise ValueError("UNIGROK_LAYER cannot select a private runtime topology")
+    if layer not in _PUBLIC_LAYER_NAMES:
+        raise ValueError("UNIGROK_LAYER supports only the public Gemma local helper")
     return layer
 
 

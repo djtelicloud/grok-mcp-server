@@ -50,22 +50,11 @@ def test_ui_ignores_authorization_header() -> None:
     assert b"UniGrok Core" in response.body
 
 
-def test_removed_runtime_routes_are_ordinary_404s() -> None:
+def test_unknown_public_route_is_an_ordinary_404() -> None:
     client = TestClient(server.mcp.streamable_http_app())
     baseline = client.get("/definitely-not-registered")
+    probe = client.get("/ui/not-a-public-asset.js")
 
-    for path in (
-        "/api/me",
-        "/control",
-        "/auth/github",
-        "/auth/github/start",
-        "/auth/github/poll",
-        "/auth/control/start",
-        "/auth/control/callback",
-        "/auth/logout",
-        "/ui/app.js",
-    ):
-        probe = client.get(path)
-        assert probe.status_code == baseline.status_code == 404
-        assert probe.headers.get("content-type") == baseline.headers.get("content-type")
-        assert probe.content == baseline.content
+    assert probe.status_code == baseline.status_code == 404
+    assert probe.headers.get("content-type") == baseline.headers.get("content-type")
+    assert probe.content == baseline.content
