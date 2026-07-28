@@ -50,6 +50,7 @@ from .context_pack import (
     format_session_with_pack,
 )
 from .tools import chats as chat_tools
+from .tools import media as media_tools
 from .tools import system as system_tools
 from .grok_build import GrokBuildACPManager
 from .harness import (
@@ -1675,34 +1676,15 @@ def _validated_effort(value: str | None) -> str | None:
 
 
 def _validated_file_id(value: str) -> str:
-    file_id = str(value or "").strip()
-    if not FILE_ID_PATTERN.fullmatch(file_id):
-        raise ValueError("file_id contains unsupported characters")
-    return file_id
+    return media_tools.validated_file_id(value)
 
 
 def _validated_media_url(value: str, field: str) -> str:
-    url = str(value or "").strip()
-    parts = urlsplit(url)
-    if parts.scheme != "https" or not parts.netloc or parts.username or parts.password:
-        raise ValueError(f"{field} must be a public https URL")
-    host = parts.hostname or ""
-    try:
-        address = ipaddress.ip_address(host)
-    except ValueError as exc:
-        if host == "localhost" or host.endswith((".localhost", ".local")):
-            raise ValueError(f"{field} must be a public https URL") from exc
-    else:
-        if not address.is_global:
-            raise ValueError(f"{field} must be a public https URL")
-    return url
+    return media_tools.validated_media_url(value, field)
 
 
 def _validated_media_urls(values: Sequence[str] | None, field: str, maximum: int) -> list[str]:
-    items = list(values or [])
-    if len(items) > maximum:
-        raise ValueError(f"{field} accepts at most {maximum} URLs")
-    return [_validated_media_url(value, field) for value in items]
+    return media_tools.validated_media_urls(values, field, maximum)
 
 
 def _validated_domains(values: Sequence[str] | None, field: str) -> list[str]:
@@ -6255,81 +6237,29 @@ async def grok_mcp_status(refresh: bool = False) -> dict[str, Any]:
         STATE.telemetry_summary(limit=1000, caller=_tenant_caller()),
     )
     description = _live_self_description(catalogs)
-    return {
-        "service": MCP_SERVER_NAME,
-        "version": __version__,
-        "mode": "public_core",
-        "layer": UNIGROK_LAYER or "public",
-        "task_rag": description.get("task_rag"),
-        "transport": "streamable_http",
-        "mcp_endpoint": "/mcp",
-        "workspace_attached": False,
-        "requires_project_files": False,
-        "tool_count": len(PUBLIC_TOOLS),
-        "cli": catalogs["cli"],
-        "api": catalogs["api"],
-        "local": catalogs.get("local") or {
-            "configured": False,
-            "ready": False,
-            "models": [],
-            "default_model": None,
-        },
-        "bootstrap": description["bootstrap"],
-        "credential_planes": description["credential_planes"],
-        "api_spend_enforcement": {
-            "owner_enabled": METERED_API_ENABLED,
-            "per_request_confirmation_required": False,
-            "authorization_source": "server_owner_configuration",
-        },
-        "state": {
-            "ready": state_ready,
-            "backend": "sqlite",
-            "sessions": True,
-            "knowledge": True,
-            "telemetry": True,
-            "lifetime": ("instance_local" if is_cloudrun_runtime() else "persistent_volume"),
-        },
-        "benchmark_summary": {
-            key: telemetry[key]
-            for key in (
-                "sample_size",
-                "verified_samples",
-                "verified_success_rate",
-                "latency_ms",
-                "cost_usd",
-                "callers",
-                "models",
-                "routes",
-                "planes",
-                "fallbacks",
-            )
-        },
-        "circuit_breakers": _breaker_snapshot(),
-        "needle_active": False,
-    }
+    return system_tools.status_body(
+        service=MCP_SERVER_NAME,
+        version=__version__,
+        layer=UNIGROK_LAYER or "public",
+        tool_count=len(PUBLIC_TOOLS),
+        catalogs=catalogs,
+        description=description,
+        state_ready=state_ready,
+        telemetry=telemetry,
+        circuit_breakers=_breaker_snapshot(),
+        metered_api_enabled=METERED_API_ENABLED,
+        cloudrun=is_cloudrun_runtime(),
+    )
 
 
 @mcp.tool(annotations=READ_ONLY)
 async def benchmark_status(limit: int = 1000) -> dict[str, Any]:
     """Return public-safe benchmark aggregates and live circuit-breaker state."""
     summary = await STATE.telemetry_summary(limit=limit, caller=_tenant_caller())
-    return {
-        "telemetry": summary,
-        "circuit_breakers": _breaker_snapshot(),
-        "routing_advisor": {
-            "policy": "live_discovered_lead_with_provider_discovered_specialists",
-            "automatic_model_experiments": False,
-            "reason": (
-                "Lead and specialists are selected from live provider catalogs; "
-                "telemetry is observational."
-            ),
-        },
-        "semantic_evaluation": {
-            "mode": "explicit_feedback",
-            "tool": "record_benchmark_result",
-            "automatic_judge_spend": False,
-        },
-    }
+    return system_tools.benchmark_status_body(
+        telemetry=summary,
+        circuit_breakers=_breaker_snapshot(),
+    )
 
 
 @mcp.tool()
@@ -6361,32 +6291,12 @@ async def record_benchmark_result(
 async def list_models(refresh: bool = False) -> dict[str, Any]:
     """List every model discovered from each configured Grok credential plane."""
     catalogs = await _catalogs(refresh=refresh)
-    cli_models = list(catalogs["cli"].get("models", []))
-    api_models = _api_ids(catalogs)
-    return {
-        "cli": {
-            "ready": catalogs["cli"].get("ready", False),
-            "models": cli_models,
-            "default_model": catalogs["cli"].get("default_model"),
-        },
-        "api": {
-            "configured": catalogs["api"].get("configured", False),
-            "ready": catalogs["api"].get("ready", False),
-            "models": api_models,
-            "language_models": api_models,
-            "image_models": [
-                item["id"] for item in catalogs["api"].get("image_models", []) if item.get("id")
-            ],
-            "default_model": catalogs["api"].get("default_model"),
-        },
-        "all_model_ids": sorted(set(cli_models) | set(api_models)),
-        "shared_model_ids": sorted(set(cli_models) & set(api_models)),
-        "model_allowlist": None,
-        "note": (
-            "Media tools accept provider model ids directly; they are not restricted "
-            "by this language-model catalog."
-        ),
-    }
+    return system_tools.list_models_body(
+        catalogs=catalogs,
+        api_model_ids=_api_ids(catalogs),
+    )
+
+
 
 
 @mcp.tool(annotations=READ_ONLY)
@@ -6639,9 +6549,7 @@ async def generate_image(
 ) -> dict[str, Any]:
     """Generate or edit images through the metered xAI API; returns hosted URLs."""
     _require_metered_api_enabled()
-    count = int(n)
-    if not 1 <= count <= 10:
-        raise ValueError("n must be between 1 and 10")
+    count = media_tools.validated_image_count(n)
     catalogs = await _catalogs()
     image_models = [
         str(item["id"]) for item in catalogs["api"].get("image_models", []) if item.get("id")
@@ -6681,8 +6589,7 @@ async def generate_video(
     _require_metered_api_enabled()
     if image_url and video_url:
         raise ValueError("provide image_url or video_url, not both")
-    if duration is not None and not 1 <= int(duration) <= 15:
-        raise ValueError("duration must be between 1 and 15 seconds")
+    media_tools.validated_video_duration(duration, lo=1, hi=15)
     safe_prompt = _validated_prompt(prompt, "prompt")
     safe_image = _validated_media_url(image_url, "image_url") if image_url else None
     safe_video = _validated_media_url(video_url, "video_url") if video_url else None
@@ -6714,8 +6621,7 @@ async def extend_video(
 ) -> dict[str, Any]:
     """Extend a public HTTPS video through the metered xAI API."""
     _require_metered_api_enabled()
-    if duration is not None and not 2 <= int(duration) <= 10:
-        raise ValueError("duration must be between 2 and 10 seconds")
+    media_tools.validated_video_duration(duration, lo=2, hi=10)
     safe_prompt = _validated_prompt(prompt, "prompt")
     safe_video = _validated_media_url(video_url, "video_url")
     dur = int(duration) if duration is not None else None
@@ -6740,16 +6646,11 @@ async def xai_upload_file(
 ) -> dict[str, Any]:
     """Upload caller-provided bytes to xAI without granting local filesystem access."""
     _require_remote_file_isolation()
-    safe_name = str(filename or "").strip()
-    if not safe_name or Path(safe_name).name != safe_name or len(safe_name) > 255:
-        raise ValueError("filename must be a plain filename without path components")
-    try:
-        content = base64.b64decode(content_base64, validate=True)
-    except (ValueError, TypeError) as exc:
-        raise ValueError("content_base64 is not valid base64") from exc
-    if not content or len(content) > MAX_UPLOAD_BYTES:
-        raise ValueError(f"decoded file must be between 1 and {MAX_UPLOAD_BYTES} bytes")
-    expires = max(3_600, min(int(expires_after_seconds), 2_592_000))
+    safe_name = media_tools.validated_upload_filename(filename)
+    content = media_tools.decode_upload_content(
+        content_base64, max_bytes=MAX_UPLOAD_BYTES
+    )
+    expires = media_tools.clamp_expires_after(expires_after_seconds)
 
     async def _produce() -> dict[str, Any]:
         return await xai_api.upload_file(
@@ -6795,7 +6696,7 @@ async def xai_get_file_content(
     """Return bounded text or base64 content for an xAI-hosted file."""
     _require_remote_file_isolation()
     safe_id = _validated_file_id(file_id)
-    limit = max(1_024, min(int(max_bytes), 1_000_000))
+    limit = media_tools.clamp_file_content_limit(max_bytes)
 
     async def _produce() -> dict[str, Any]:
         return await xai_api.get_file_content(safe_id, max_bytes=limit)
@@ -6811,8 +6712,7 @@ async def xai_delete_file(
 ) -> dict[str, Any]:
     """Permanently delete one file from the configured xAI API account."""
     _require_remote_file_isolation()
-    if confirm_delete is not True:
-        raise ValueError("Permanently deleting an xAI file requires confirm_delete=true")
+    media_tools.require_confirm_delete(confirm_delete, what="an xAI file")
     safe_id = _validated_file_id(file_id)
 
     async def _produce() -> dict[str, Any]:
@@ -6978,19 +6878,16 @@ async def runtimez(_: Request) -> JSONResponse:
     )
     runtime_contract = _runtime_state_contract()
     description = _live_self_description(catalogs)
-    payload: dict[str, Any] = {
-            "service": SERVICE_NAME,
-            "version": __version__,
-            "mode": "public_core",
-            "layer": UNIGROK_LAYER or "public",
-            "workspace_attached": False,
-            "requires_project_files": False,
-            "state_persistence": runtime_contract["state_persistence"],
-            "state_lifetime": runtime_contract["state_lifetime"],
-            "state_backend": "sqlite",
-            "workspace_context_transport": "explicit_bounded_redacted_courier",
-            "local_subagents": False,
-            "completion_recovery": runtime_contract["completion_recovery"],
+    core = system_tools.runtimez_core(
+        service=SERVICE_NAME,
+        version=__version__,
+        layer=UNIGROK_LAYER or "public",
+        tool_count=len(PUBLIC_TOOLS),
+        state_persistence=runtime_contract["state_persistence"],
+        state_lifetime=runtime_contract["state_lifetime"],
+        completion_recovery=runtime_contract["completion_recovery"],
+    )
+    payload: dict[str, Any] = system_tools.runtimez_merge(core, {
             "request_limits": {
                 "build_concurrency": "provider_managed",
                 "build_timeout_seconds": BUILD_TIMEOUT_SECONDS,
@@ -7043,10 +6940,7 @@ async def runtimez(_: Request) -> JSONResponse:
                 "per_request_confirmation_required": False,
                 "authorization_source": "server_owner_configuration",
             },
-            "tool_count": len(PUBLIC_TOOLS),
             "tools": _runtime_public_tools(),
-            "mcp_endpoint": "/mcp",
-            "needle_active": False,
             "autonomy": {
                 "enabled": AUTONOMY_ENABLED,
                 "mission_v2": MISSION_V2_ENABLED and AUTONOMY_ENABLED,
@@ -7065,7 +6959,7 @@ async def runtimez(_: Request) -> JSONResponse:
             },
             "task_rag": {**description["task_rag"], "fact_count": fact_count},
             "credential_planes": description["credential_planes"],
-    }
+    })
     return JSONResponse(payload)
 
 

@@ -1,9 +1,5 @@
-"""Phase 3 SRP tool domains (chats, system, media-later).
+"""Phase 3 SRP tool domains (chats, system, media)."""
 
-Handlers stay registered on the FastMCP app in server.py; domain modules own
-payload construction and pure session/chat helpers so server.py can shrink.
-"""
+from . import chats, media, system
 
-from . import chats, system
-
-__all__ = ["chats", "system"]
+__all__ = ["chats", "media", "system"]

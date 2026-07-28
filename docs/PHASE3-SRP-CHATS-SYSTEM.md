@@ -1,31 +1,26 @@
-# Phase 3 SRP — chats + system (bounded)
+# Phase 3 SRP — chats + system + media
 
-**Branch:** `terminalgrok/phase3-srp-chats-system`  
-**Goal:** Decompose the monolithic `server.py` into domain modules without behavior drift.
+**Branch:** `terminalgrok/phase3-srp-chats-system`
 
-## Domains (this wave)
+## Honest critique of wave 1
+- **Too thin:** mostly response-shape shims; server still ~8k lines; no real risk removed.
+- **Missed behavior ownership:** validators, status, media params still lived in server.py.
+- **Good:** package boundary exists; pure unit tests; registration stayed stable.
 
-| Domain | Module | Owns |
-|--------|--------|------|
-| **system** | `src/unigrok_public/tools/system.py` | `/healthz`, `/readyz` payload builders; `/runtimez` core identity fields |
-| **chats** | `src/unigrok_public/tools/chats.py` | `chat` system-context join; `list_sessions` / `session_history` / `forget_session` response shape |
+## Wave 2 (this commit)
+| Domain | Module | Owns now |
+|--------|--------|----------|
+| system | `tools/system.py` | healthz, readyz, status, list_models, benchmark_status, runtimez core/merge |
+| chats | `tools/chats.py` | chat context join, session list/history/forget shapes |
+| media | `tools/media.py` | file_id/URL validation, image/video/upload param checks (logic moved out of server) |
 
-FastMCP `@mcp.tool` / `@mcp.custom_route` registration **stays in server.py** for this wave (stable discovery). Logic moves out first.
-
-## Non-goals (this wave)
-- Full media domain extraction
-- Moving `_run_unified` / agent hive
-- JSON chat-file migration (already SQLite on main path)
-- Public promote / release cut
-
-## Next waves
-1. `tools/media.py` — image/video/file tools  
-2. Extract `runtimez` remainder + status tools into system  
-3. Optional FastMCP registration helpers per domain  
-4. Shrink server.py under 4k lines
+## Still deferred
+- Moving FastMCP registration out of server.py
+- Extracting `_run_unified` / agent hive
+- Full media tool handlers (still durable-job wrappers in server)
+- server.py under 4k lines
 
 ## Verify
 ```bash
-pytest tests/test_phase3_tools_srp.py -q
-pytest tests/test_public_boundary.py -q --tb=no
+PYTHONPATH=src pytest tests/test_phase3_tools_srp.py -q
 ```

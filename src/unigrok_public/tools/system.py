@@ -1,8 +1,4 @@
-"""System domain — health/ready/runtime payload builders (Phase 3 SRP).
-
-No FastMCP registration here: server routes call these builders so HTTP shape
-stays unit-testable without spinning the full gateway.
-"""
+"""System domain — health/ready/runtime/status payload builders (Phase 3 SRP)."""
 from __future__ import annotations
 
 from typing import Any
@@ -25,7 +21,6 @@ def readyz_body(
     state_ready: bool,
     cloudrun: bool = False,
 ) -> tuple[dict[str, Any], int]:
-    """Return (json_body, http_status). Cloud Run keeps a minimal body."""
     status = "ready" if ready else "not_ready"
     code = 200 if ready else 503
     if cloudrun:
@@ -38,6 +33,141 @@ def readyz_body(
     }, code
 
 
+def list_models_body(
+    *,
+    catalogs: dict[str, Any],
+    api_model_ids: list[str],
+) -> dict[str, Any]:
+    """Preserve public list_models shape (language catalog + media note)."""
+    cli_models = list(catalogs["cli"].get("models", []))
+    api_models = list(api_model_ids)
+    return {
+        "cli": {
+            "ready": catalogs["cli"].get("ready", False),
+            "models": cli_models,
+            "default_model": catalogs["cli"].get("default_model"),
+        },
+        "api": {
+            "configured": catalogs["api"].get("configured", False),
+            "ready": catalogs["api"].get("ready", False),
+            "models": api_models,
+            "language_models": api_models,
+            "image_models": [
+                item["id"]
+                for item in catalogs["api"].get("image_models", [])
+                if item.get("id")
+            ],
+            "default_model": catalogs["api"].get("default_model"),
+        },
+        "all_model_ids": sorted(set(cli_models) | set(api_models)),
+        "shared_model_ids": sorted(set(cli_models) & set(api_models)),
+        "model_allowlist": None,
+        "note": (
+            "Media tools accept provider model ids directly; they are not restricted "
+            "by this language-model catalog."
+        ),
+    }
+
+
+def status_body(
+    *,
+    service: str,
+    version: str,
+    layer: str,
+    tool_count: int,
+    catalogs: dict[str, Any],
+    description: dict[str, Any],
+    state_ready: bool,
+    telemetry: dict[str, Any],
+    circuit_breakers: dict[str, Any],
+    metered_api_enabled: bool,
+    cloudrun: bool,
+) -> dict[str, Any]:
+    local = catalogs.get("local") or {
+        "configured": False,
+        "ready": False,
+        "models": [],
+        "default_model": None,
+    }
+    return {
+        "service": service,
+        "version": version,
+        "mode": "public_core",
+        "layer": layer or "public",
+        "task_rag": description.get("task_rag"),
+        "transport": "streamable_http",
+        "mcp_endpoint": "/mcp",
+        "workspace_attached": False,
+        "requires_project_files": False,
+        "tool_count": tool_count,
+        "cli": catalogs["cli"],
+        "api": catalogs["api"],
+        "local": local,
+        "bootstrap": description["bootstrap"],
+        "credential_planes": description["credential_planes"],
+        "api_spend_enforcement": {
+            "owner_enabled": metered_api_enabled,
+            "per_request_confirmation_required": False,
+            "authorization_source": "server_owner_configuration",
+        },
+        "state": {
+            "ready": state_ready,
+            "backend": "sqlite",
+            "sessions": True,
+            "knowledge": True,
+            "telemetry": True,
+            "lifetime": ("instance_local" if cloudrun else "persistent_volume"),
+        },
+        "benchmark_summary": {
+            key: telemetry[key]
+            for key in (
+                "sample_size",
+                "verified_samples",
+                "verified_success_rate",
+                "latency_ms",
+                "cost_usd",
+                "callers",
+                "models",
+                "routes",
+                "planes",
+                "fallbacks",
+            )
+            if key in telemetry
+        },
+        "circuit_breakers": circuit_breakers,
+        "needle_active": False,
+    }
+
+
+def benchmark_status_body(
+    *, telemetry: dict[str, Any], circuit_breakers: dict[str, Any]
+) -> dict[str, Any]:
+    return {
+        "telemetry": telemetry,
+        "circuit_breakers": circuit_breakers,
+        "routing_advisor": {
+            "policy": "live_discovered_lead_with_provider_discovered_specialists",
+            "automatic_model_experiments": False,
+            "reason": (
+                "Lead and specialists are selected from live provider catalogs; "
+                "telemetry is observational."
+            ),
+        },
+        "semantic_evaluation": {
+            "mode": "explicit_feedback",
+            "tool": "record_benchmark_result",
+            "automatic_judge_spend": False,
+        },
+    }
+
+
+def runtimez_merge(core: dict[str, Any], extra: dict[str, Any]) -> dict[str, Any]:
+    """Merge live metrics into the stable runtimez core without clobbering identity."""
+    out = dict(core)
+    out.update(extra)
+    return out
+
+
 def runtimez_core(
     *,
     service: str,
@@ -48,7 +178,6 @@ def runtimez_core(
     state_lifetime: Any,
     completion_recovery: Any,
 ) -> dict[str, Any]:
-    """Stable identity fields for /runtimez (extended by server with live metrics)."""
     return {
         "service": service,
         "version": version,
