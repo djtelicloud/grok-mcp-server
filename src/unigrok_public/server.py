@@ -49,6 +49,8 @@ from .context_pack import (
     context_pack_mode,
     format_session_with_pack,
 )
+from .tools import chats as chat_tools
+from .tools import system as system_tools
 from .grok_build import GrokBuildACPManager
 from .harness import (
     HIVE_PERSONAS,
@@ -6144,15 +6146,14 @@ async def chat(
     safe_prompt = _validated_prompt(prompt, "prompt")
 
     async def _produce() -> dict[str, Any]:
-        parts: list[str] = []
         layer_block = _layer_context_block()
-        if layer_block:
-            parts.append(layer_block)
+        mem = None
         if CHAT_MEMORY_ALWAYS:
             mem = await _durable_knowledge_block(safe_prompt, limit=8)
-            if mem:
-                parts.append(mem)
-        system_context = "\n\n".join(parts) if parts else None
+        system_context = chat_tools.build_chat_system_context(
+            layer_block=layer_block,
+            knowledge_block=mem,
+        )
         return await _run_unified(
             safe_prompt,
             model=None,
@@ -6394,7 +6395,7 @@ async def list_sessions(limit: int = 50) -> dict[str, Any]:
     sessions = await STATE.list_sessions(limit=limit, prefix=tenant_prefix())
     for item in sessions:
         item["name"] = public_state_name(item.get("name"))
-    return {"sessions": sessions, "count": len(sessions)}
+    return chat_tools.list_sessions_body(sessions)
 
 
 @mcp.tool(annotations=READ_ONLY)
@@ -6403,7 +6404,10 @@ async def session_history(session: str, limit: int = 50) -> dict[str, Any]:
     public_name = normalize_session(session)
     name = normalize_session(scoped_session(public_name))
     messages = await STATE.load_messages(name, limit=limit)
-    return {"session": public_state_name(name), "messages": messages, "count": len(messages)}
+    return chat_tools.session_history_body(
+        session=public_state_name(name),
+        messages=messages,
+    )
 
 
 @mcp.tool(annotations=DESTRUCTIVE)
@@ -6415,10 +6419,10 @@ async def forget_session(session: str, confirm_delete: bool = False) -> dict[str
     name = normalize_session(scoped_session(public_name))
     async with _session_lock(name):
         deleted = await STATE.delete_session(name)
-    return {
-        "session": public_state_name(name),
-        "status": "deleted" if deleted else "not_found",
-    }
+    return chat_tools.forget_session_body(
+        session=public_state_name(name),
+        deleted=deleted,
+    )
 
 
 @mcp.tool()
@@ -6942,12 +6946,11 @@ async def benchmarkz(_: Request) -> JSONResponse:
 @mcp.custom_route("/healthz", methods=["GET"], include_in_schema=False)
 async def healthz(_: Request) -> JSONResponse:
     return JSONResponse(
-        {
-            "status": "ok",
-            "service": MCP_SERVER_NAME,
-            "version": __version__,
-            "layer": UNIGROK_LAYER or "public",
-        }
+        system_tools.healthz_body(
+            service=MCP_SERVER_NAME,
+            version=__version__,
+            layer=UNIGROK_LAYER or "public",
+        )
     )
 
 
@@ -6956,20 +6959,14 @@ async def readyz(_: Request) -> JSONResponse:
     catalogs, state_ready = await asyncio.gather(_catalogs(), STATE.health())
     description = _live_self_description(catalogs)
     ready = bool(state_ready and description["bootstrap"]["can_chat"])
-    if is_cloudrun_runtime():
-        return JSONResponse(
-            {"status": "ready" if ready else "not_ready"},
-            status_code=200 if ready else 503,
-        )
-    return JSONResponse(
-        {
-            "status": "ready" if ready else "not_ready",
-            "planes": catalogs,
-            "bootstrap": description["bootstrap"],
-            "state": {"ready": state_ready, "backend": "sqlite"},
-        },
-        status_code=200 if ready else 503,
+    body, code = system_tools.readyz_body(
+        ready=ready,
+        catalogs=catalogs,
+        bootstrap=description["bootstrap"],
+        state_ready=state_ready,
+        cloudrun=is_cloudrun_runtime(),
     )
+    return JSONResponse(body, status_code=code)
 
 
 @mcp.custom_route("/runtimez", methods=["GET"], include_in_schema=False)
