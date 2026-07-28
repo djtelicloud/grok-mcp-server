@@ -4,9 +4,10 @@ from __future__ import annotations
 import base64
 import ipaddress
 import re
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Sequence
+from typing import Any
 from urllib.parse import urlsplit
 
 FILE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$")
