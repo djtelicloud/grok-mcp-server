@@ -49,6 +49,9 @@ from .context_pack import (
     context_pack_mode,
     format_session_with_pack,
 )
+from .tools import chats as chat_tools
+from .tools import media as media_tools
+from .tools import system as system_tools
 from .grok_build import GrokBuildACPManager
 from .harness import (
     HIVE_PERSONAS,
@@ -339,15 +342,19 @@ SHADOW_DONE_VOTE = os.environ.get("UNIGROK_SHADOW_DONE_VOTE", "off").strip().low
     "yes",
     "on",
 }
-# Public layer identity is limited to the optional local Gemma helper.
-# Empty string is the normal UniGrok Core service.
-_PUBLIC_LAYER_NAMES = frozenset({"", "gemma"})
+# Layer identity for multi-seat fleet (empty = UniGrok Core / ground).
+# Gemma is the free local helper; sky/space/forge/public are named seats.
+_PUBLIC_LAYER_NAMES = frozenset(
+    {"", "gemma", "sky", "space", "forge", "public", "ground", "core"}
+)
 
 
 def _normalize_layer_name(value: str | None) -> str:
     layer = str(value or "").strip().lower()
     if layer not in _PUBLIC_LAYER_NAMES:
-        raise ValueError("UNIGROK_LAYER supports only the public Gemma local helper")
+        raise ValueError(
+            "UNIGROK_LAYER must be empty or one of: gemma, sky, space, forge, public, ground, core"
+        )
     return layer
 
 
@@ -1673,34 +1680,15 @@ def _validated_effort(value: str | None) -> str | None:
 
 
 def _validated_file_id(value: str) -> str:
-    file_id = str(value or "").strip()
-    if not FILE_ID_PATTERN.fullmatch(file_id):
-        raise ValueError("file_id contains unsupported characters")
-    return file_id
+    return media_tools.validated_file_id(value)
 
 
 def _validated_media_url(value: str, field: str) -> str:
-    url = str(value or "").strip()
-    parts = urlsplit(url)
-    if parts.scheme != "https" or not parts.netloc or parts.username or parts.password:
-        raise ValueError(f"{field} must be a public https URL")
-    host = parts.hostname or ""
-    try:
-        address = ipaddress.ip_address(host)
-    except ValueError as exc:
-        if host == "localhost" or host.endswith((".localhost", ".local")):
-            raise ValueError(f"{field} must be a public https URL") from exc
-    else:
-        if not address.is_global:
-            raise ValueError(f"{field} must be a public https URL")
-    return url
+    return media_tools.validated_media_url(value, field)
 
 
 def _validated_media_urls(values: Sequence[str] | None, field: str, maximum: int) -> list[str]:
-    items = list(values or [])
-    if len(items) > maximum:
-        raise ValueError(f"{field} accepts at most {maximum} URLs")
-    return [_validated_media_url(value, field) for value in items]
+    return media_tools.validated_media_urls(values, field, maximum)
 
 
 def _validated_domains(values: Sequence[str] | None, field: str) -> list[str]:
@@ -6144,15 +6132,14 @@ async def chat(
     safe_prompt = _validated_prompt(prompt, "prompt")
 
     async def _produce() -> dict[str, Any]:
-        parts: list[str] = []
         layer_block = _layer_context_block()
-        if layer_block:
-            parts.append(layer_block)
+        mem = None
         if CHAT_MEMORY_ALWAYS:
             mem = await _durable_knowledge_block(safe_prompt, limit=8)
-            if mem:
-                parts.append(mem)
-        system_context = "\n\n".join(parts) if parts else None
+        system_context = chat_tools.build_chat_system_context(
+            layer_block=layer_block,
+            knowledge_block=mem,
+        )
         return await _run_unified(
             safe_prompt,
             model=None,
@@ -6254,81 +6241,29 @@ async def grok_mcp_status(refresh: bool = False) -> dict[str, Any]:
         STATE.telemetry_summary(limit=1000, caller=_tenant_caller()),
     )
     description = _live_self_description(catalogs)
-    return {
-        "service": MCP_SERVER_NAME,
-        "version": __version__,
-        "mode": "public_core",
-        "layer": UNIGROK_LAYER or "public",
-        "task_rag": description.get("task_rag"),
-        "transport": "streamable_http",
-        "mcp_endpoint": "/mcp",
-        "workspace_attached": False,
-        "requires_project_files": False,
-        "tool_count": len(PUBLIC_TOOLS),
-        "cli": catalogs["cli"],
-        "api": catalogs["api"],
-        "local": catalogs.get("local") or {
-            "configured": False,
-            "ready": False,
-            "models": [],
-            "default_model": None,
-        },
-        "bootstrap": description["bootstrap"],
-        "credential_planes": description["credential_planes"],
-        "api_spend_enforcement": {
-            "owner_enabled": METERED_API_ENABLED,
-            "per_request_confirmation_required": False,
-            "authorization_source": "server_owner_configuration",
-        },
-        "state": {
-            "ready": state_ready,
-            "backend": "sqlite",
-            "sessions": True,
-            "knowledge": True,
-            "telemetry": True,
-            "lifetime": ("instance_local" if is_cloudrun_runtime() else "persistent_volume"),
-        },
-        "benchmark_summary": {
-            key: telemetry[key]
-            for key in (
-                "sample_size",
-                "verified_samples",
-                "verified_success_rate",
-                "latency_ms",
-                "cost_usd",
-                "callers",
-                "models",
-                "routes",
-                "planes",
-                "fallbacks",
-            )
-        },
-        "circuit_breakers": _breaker_snapshot(),
-        "needle_active": False,
-    }
+    return system_tools.status_body(
+        service=MCP_SERVER_NAME,
+        version=__version__,
+        layer=UNIGROK_LAYER or "public",
+        tool_count=len(PUBLIC_TOOLS),
+        catalogs=catalogs,
+        description=description,
+        state_ready=state_ready,
+        telemetry=telemetry,
+        circuit_breakers=_breaker_snapshot(),
+        metered_api_enabled=METERED_API_ENABLED,
+        cloudrun=is_cloudrun_runtime(),
+    )
 
 
 @mcp.tool(annotations=READ_ONLY)
 async def benchmark_status(limit: int = 1000) -> dict[str, Any]:
     """Return public-safe benchmark aggregates and live circuit-breaker state."""
     summary = await STATE.telemetry_summary(limit=limit, caller=_tenant_caller())
-    return {
-        "telemetry": summary,
-        "circuit_breakers": _breaker_snapshot(),
-        "routing_advisor": {
-            "policy": "live_discovered_lead_with_provider_discovered_specialists",
-            "automatic_model_experiments": False,
-            "reason": (
-                "Lead and specialists are selected from live provider catalogs; "
-                "telemetry is observational."
-            ),
-        },
-        "semantic_evaluation": {
-            "mode": "explicit_feedback",
-            "tool": "record_benchmark_result",
-            "automatic_judge_spend": False,
-        },
-    }
+    return system_tools.benchmark_status_body(
+        telemetry=summary,
+        circuit_breakers=_breaker_snapshot(),
+    )
 
 
 @mcp.tool()
@@ -6360,32 +6295,12 @@ async def record_benchmark_result(
 async def list_models(refresh: bool = False) -> dict[str, Any]:
     """List every model discovered from each configured Grok credential plane."""
     catalogs = await _catalogs(refresh=refresh)
-    cli_models = list(catalogs["cli"].get("models", []))
-    api_models = _api_ids(catalogs)
-    return {
-        "cli": {
-            "ready": catalogs["cli"].get("ready", False),
-            "models": cli_models,
-            "default_model": catalogs["cli"].get("default_model"),
-        },
-        "api": {
-            "configured": catalogs["api"].get("configured", False),
-            "ready": catalogs["api"].get("ready", False),
-            "models": api_models,
-            "language_models": api_models,
-            "image_models": [
-                item["id"] for item in catalogs["api"].get("image_models", []) if item.get("id")
-            ],
-            "default_model": catalogs["api"].get("default_model"),
-        },
-        "all_model_ids": sorted(set(cli_models) | set(api_models)),
-        "shared_model_ids": sorted(set(cli_models) & set(api_models)),
-        "model_allowlist": None,
-        "note": (
-            "Media tools accept provider model ids directly; they are not restricted "
-            "by this language-model catalog."
-        ),
-    }
+    return system_tools.list_models_body(
+        catalogs=catalogs,
+        api_model_ids=_api_ids(catalogs),
+    )
+
+
 
 
 @mcp.tool(annotations=READ_ONLY)
@@ -6394,7 +6309,7 @@ async def list_sessions(limit: int = 50) -> dict[str, Any]:
     sessions = await STATE.list_sessions(limit=limit, prefix=tenant_prefix())
     for item in sessions:
         item["name"] = public_state_name(item.get("name"))
-    return {"sessions": sessions, "count": len(sessions)}
+    return chat_tools.list_sessions_body(sessions)
 
 
 @mcp.tool(annotations=READ_ONLY)
@@ -6403,7 +6318,10 @@ async def session_history(session: str, limit: int = 50) -> dict[str, Any]:
     public_name = normalize_session(session)
     name = normalize_session(scoped_session(public_name))
     messages = await STATE.load_messages(name, limit=limit)
-    return {"session": public_state_name(name), "messages": messages, "count": len(messages)}
+    return chat_tools.session_history_body(
+        session=public_state_name(name),
+        messages=messages,
+    )
 
 
 @mcp.tool(annotations=DESTRUCTIVE)
@@ -6415,10 +6333,10 @@ async def forget_session(session: str, confirm_delete: bool = False) -> dict[str
     name = normalize_session(scoped_session(public_name))
     async with _session_lock(name):
         deleted = await STATE.delete_session(name)
-    return {
-        "session": public_state_name(name),
-        "status": "deleted" if deleted else "not_found",
-    }
+    return chat_tools.forget_session_body(
+        session=public_state_name(name),
+        deleted=deleted,
+    )
 
 
 @mcp.tool()
@@ -6635,28 +6553,25 @@ async def generate_image(
 ) -> dict[str, Any]:
     """Generate or edit images through the metered xAI API; returns hosted URLs."""
     _require_metered_api_enabled()
-    count = int(n)
-    if not 1 <= count <= 10:
-        raise ValueError("n must be between 1 and 10")
     catalogs = await _catalogs()
-    image_models = [
-        str(item["id"]) for item in catalogs["api"].get("image_models", []) if item.get("id")
-    ]
-    if not image_models:
-        raise RuntimeError("The provider returned no image-generation model")
-    safe_prompt = _validated_prompt(prompt, "prompt")
-    urls = _validated_media_urls(image_urls, "image_urls", 10)
-    ratio = str(aspect_ratio).strip() if aspect_ratio else None
-    model = image_models[0]
+    plan = media_tools.plan_generate_image(
+        prompt=prompt,
+        image_urls=image_urls,
+        n=n,
+        aspect_ratio=aspect_ratio,
+        resolution=resolution,
+        catalogs=catalogs,
+        validate_prompt=_validated_prompt,
+    )
 
     async def _produce() -> dict[str, Any]:
         return await xai_api.generate_image(
-            safe_prompt,
-            model=model,
-            image_urls=urls,
-            n=count,
-            aspect_ratio=ratio,
-            resolution=resolution,
+            plan.prompt,
+            model=plan.model,
+            image_urls=plan.image_urls,
+            n=plan.n,
+            aspect_ratio=plan.aspect_ratio,
+            resolution=plan.resolution,
         )
 
     return await _run_durable_job(_produce, ctx=ctx, kind="generate_image")
@@ -6675,27 +6590,27 @@ async def generate_video(
 ) -> dict[str, Any]:
     """Generate or edit video through the metered xAI API."""
     _require_metered_api_enabled()
-    if image_url and video_url:
-        raise ValueError("provide image_url or video_url, not both")
-    if duration is not None and not 1 <= int(duration) <= 15:
-        raise ValueError("duration must be between 1 and 15 seconds")
-    safe_prompt = _validated_prompt(prompt, "prompt")
-    safe_image = _validated_media_url(image_url, "image_url") if image_url else None
-    safe_video = _validated_media_url(video_url, "video_url") if video_url else None
-    refs = _validated_media_urls(reference_image_urls, "reference_image_urls", 10)
-    ratio = str(aspect_ratio).strip() if aspect_ratio else None
-    dur = int(duration) if duration is not None else None
+    plan = media_tools.plan_generate_video(
+        prompt=prompt,
+        image_url=image_url,
+        video_url=video_url,
+        reference_image_urls=reference_image_urls,
+        duration=duration,
+        aspect_ratio=aspect_ratio,
+        resolution=resolution,
+        validate_prompt=_validated_prompt,
+    )
 
     async def _produce() -> dict[str, Any]:
         return await xai_api.generate_video(
-            safe_prompt,
-            model="grok-imagine-video",
-            image_url=safe_image,
-            video_url=safe_video,
-            reference_image_urls=refs,
-            duration=dur,
-            aspect_ratio=ratio,
-            resolution=resolution,
+            plan.prompt,
+            model=plan.model,
+            image_url=plan.image_url,
+            video_url=plan.video_url,
+            reference_image_urls=plan.reference_image_urls,
+            duration=plan.duration,
+            aspect_ratio=plan.aspect_ratio,
+            resolution=plan.resolution,
         )
 
     return await _run_durable_job(_produce, ctx=ctx, kind="generate_video")
@@ -6710,18 +6625,19 @@ async def extend_video(
 ) -> dict[str, Any]:
     """Extend a public HTTPS video through the metered xAI API."""
     _require_metered_api_enabled()
-    if duration is not None and not 2 <= int(duration) <= 10:
-        raise ValueError("duration must be between 2 and 10 seconds")
-    safe_prompt = _validated_prompt(prompt, "prompt")
-    safe_video = _validated_media_url(video_url, "video_url")
-    dur = int(duration) if duration is not None else None
+    plan = media_tools.plan_extend_video(
+        prompt=prompt,
+        video_url=video_url,
+        duration=duration,
+        validate_prompt=_validated_prompt,
+    )
 
     async def _produce() -> dict[str, Any]:
         return await xai_api.extend_video(
-            safe_prompt,
-            model="grok-imagine-video",
-            video_url=safe_video,
-            duration=dur,
+            plan.prompt,
+            model=plan.model,
+            video_url=plan.video_url,
+            duration=plan.duration,
         )
 
     return await _run_durable_job(_produce, ctx=ctx, kind="extend_video")
@@ -6736,20 +6652,18 @@ async def xai_upload_file(
 ) -> dict[str, Any]:
     """Upload caller-provided bytes to xAI without granting local filesystem access."""
     _require_remote_file_isolation()
-    safe_name = str(filename or "").strip()
-    if not safe_name or Path(safe_name).name != safe_name or len(safe_name) > 255:
-        raise ValueError("filename must be a plain filename without path components")
-    try:
-        content = base64.b64decode(content_base64, validate=True)
-    except (ValueError, TypeError) as exc:
-        raise ValueError("content_base64 is not valid base64") from exc
-    if not content or len(content) > MAX_UPLOAD_BYTES:
-        raise ValueError(f"decoded file must be between 1 and {MAX_UPLOAD_BYTES} bytes")
-    expires = max(3_600, min(int(expires_after_seconds), 2_592_000))
+    plan = media_tools.plan_upload_file(
+        filename=filename,
+        content_base64=content_base64,
+        expires_after_seconds=expires_after_seconds,
+        max_bytes=MAX_UPLOAD_BYTES,
+    )
 
     async def _produce() -> dict[str, Any]:
         return await xai_api.upload_file(
-            content, filename=safe_name, expires_after_seconds=expires
+            plan.content,
+            filename=plan.filename,
+            expires_after_seconds=plan.expires_after_seconds,
         )
 
     return await _run_durable_job(_produce, ctx=ctx, kind="xai_upload_file")
@@ -6762,7 +6676,7 @@ async def xai_list_files(limit: int = 100, ctx: Context | None = None) -> dict[s
     Slow provider lists return status=pending with a job_id; poll agent_result.
     """
     _require_remote_file_isolation()
-    bounded = max(1, min(int(limit), 100))
+    bounded = media_tools.clamp_list_files_limit(limit)
 
     async def _produce() -> dict[str, Any]:
         return await xai_api.list_files(bounded)
@@ -6791,7 +6705,7 @@ async def xai_get_file_content(
     """Return bounded text or base64 content for an xAI-hosted file."""
     _require_remote_file_isolation()
     safe_id = _validated_file_id(file_id)
-    limit = max(1_024, min(int(max_bytes), 1_000_000))
+    limit = media_tools.clamp_file_content_limit(max_bytes)
 
     async def _produce() -> dict[str, Any]:
         return await xai_api.get_file_content(safe_id, max_bytes=limit)
@@ -6807,8 +6721,7 @@ async def xai_delete_file(
 ) -> dict[str, Any]:
     """Permanently delete one file from the configured xAI API account."""
     _require_remote_file_isolation()
-    if confirm_delete is not True:
-        raise ValueError("Permanently deleting an xAI file requires confirm_delete=true")
+    media_tools.require_confirm_delete(confirm_delete, what="an xAI file")
     safe_id = _validated_file_id(file_id)
 
     async def _produce() -> dict[str, Any]:
@@ -6942,12 +6855,11 @@ async def benchmarkz(_: Request) -> JSONResponse:
 @mcp.custom_route("/healthz", methods=["GET"], include_in_schema=False)
 async def healthz(_: Request) -> JSONResponse:
     return JSONResponse(
-        {
-            "status": "ok",
-            "service": MCP_SERVER_NAME,
-            "version": __version__,
-            "layer": UNIGROK_LAYER or "public",
-        }
+        system_tools.healthz_body(
+            service=MCP_SERVER_NAME,
+            version=__version__,
+            layer=UNIGROK_LAYER or "public",
+        )
     )
 
 
@@ -6956,20 +6868,14 @@ async def readyz(_: Request) -> JSONResponse:
     catalogs, state_ready = await asyncio.gather(_catalogs(), STATE.health())
     description = _live_self_description(catalogs)
     ready = bool(state_ready and description["bootstrap"]["can_chat"])
-    if is_cloudrun_runtime():
-        return JSONResponse(
-            {"status": "ready" if ready else "not_ready"},
-            status_code=200 if ready else 503,
-        )
-    return JSONResponse(
-        {
-            "status": "ready" if ready else "not_ready",
-            "planes": catalogs,
-            "bootstrap": description["bootstrap"],
-            "state": {"ready": state_ready, "backend": "sqlite"},
-        },
-        status_code=200 if ready else 503,
+    body, code = system_tools.readyz_body(
+        ready=ready,
+        catalogs=catalogs,
+        bootstrap=description["bootstrap"],
+        state_ready=state_ready,
+        cloudrun=is_cloudrun_runtime(),
     )
+    return JSONResponse(body, status_code=code)
 
 
 @mcp.custom_route("/runtimez", methods=["GET"], include_in_schema=False)
@@ -6981,19 +6887,16 @@ async def runtimez(_: Request) -> JSONResponse:
     )
     runtime_contract = _runtime_state_contract()
     description = _live_self_description(catalogs)
-    payload: dict[str, Any] = {
-            "service": SERVICE_NAME,
-            "version": __version__,
-            "mode": "public_core",
-            "layer": UNIGROK_LAYER or "public",
-            "workspace_attached": False,
-            "requires_project_files": False,
-            "state_persistence": runtime_contract["state_persistence"],
-            "state_lifetime": runtime_contract["state_lifetime"],
-            "state_backend": "sqlite",
-            "workspace_context_transport": "explicit_bounded_redacted_courier",
-            "local_subagents": False,
-            "completion_recovery": runtime_contract["completion_recovery"],
+    core = system_tools.runtimez_core(
+        service=SERVICE_NAME,
+        version=__version__,
+        layer=UNIGROK_LAYER or "public",
+        tool_count=len(PUBLIC_TOOLS),
+        state_persistence=runtime_contract["state_persistence"],
+        state_lifetime=runtime_contract["state_lifetime"],
+        completion_recovery=runtime_contract["completion_recovery"],
+    )
+    payload: dict[str, Any] = system_tools.runtimez_merge(core, {
             "request_limits": {
                 "build_concurrency": "provider_managed",
                 "build_timeout_seconds": BUILD_TIMEOUT_SECONDS,
@@ -7046,10 +6949,7 @@ async def runtimez(_: Request) -> JSONResponse:
                 "per_request_confirmation_required": False,
                 "authorization_source": "server_owner_configuration",
             },
-            "tool_count": len(PUBLIC_TOOLS),
             "tools": _runtime_public_tools(),
-            "mcp_endpoint": "/mcp",
-            "needle_active": False,
             "autonomy": {
                 "enabled": AUTONOMY_ENABLED,
                 "mission_v2": MISSION_V2_ENABLED and AUTONOMY_ENABLED,
@@ -7068,7 +6968,7 @@ async def runtimez(_: Request) -> JSONResponse:
             },
             "task_rag": {**description["task_rag"], "fact_count": fact_count},
             "credential_planes": description["credential_planes"],
-    }
+    })
     return JSONResponse(payload)
 
 
@@ -7590,15 +7490,10 @@ async def _local_role_fit(
 
 
 
-async def _local_router_floor(
-    prompt: str,
-    *,
-    system_context: str | None = None,
-) -> dict[str, Any]:
-    """One local router-floor invoke -> {route, brief, router_model} (fail-closed)."""
-    catalogs = await _catalogs()
+def _local_model_ids(catalogs: dict[str, Any]) -> list[str]:
+    """Ordered local model ids from a live catalog (strings or dict entries)."""
     models = (catalogs.get("local") or {}).get("models") or []
-    router_model: str | None = None
+    ids: list[str] = []
     for entry in models:
         if isinstance(entry, str):
             mid = entry
@@ -7606,11 +7501,41 @@ async def _local_router_floor(
             mid = str(entry.get("model_id") or entry.get("id") or "")
         else:
             mid = str(entry or "")
-        if not mid:
-            continue
-        if await STATE.local_bind(mid, "router") is not None:
-            router_model = mid
-            break
+        mid = mid.strip()
+        if mid and mid not in ids:
+            ids.append(mid)
+    default = (catalogs.get("local") or {}).get("default_model")
+    if isinstance(default, str) and default.strip() and default not in ids:
+        ids.insert(0, default.strip())
+    return ids
+
+
+async def _pick_local_role_model(role: str, catalogs: dict[str, Any]) -> str | None:
+    """Prefer certified bind for role; soft-fund with any live local model if unbound.
+
+    Direct DMR calls work without role certs. Hard-failing offline when models
+    are listed but unbound turns config lag into fake peer answers.
+    """
+    for mid in _local_model_ids(catalogs):
+        if await STATE.local_bind(mid, role) is not None:
+            return mid
+    # Soft fund: first live local model (config lag / dogfood bind miss)
+    ids = _local_model_ids(catalogs)
+    return ids[0] if ids else None
+
+
+async def _local_router_floor(
+    prompt: str,
+    *,
+    system_context: str | None = None,
+) -> dict[str, Any]:
+    """One local router-floor invoke -> {route, brief, router_model}.
+
+    Soft-funds with any live local model when role binds are empty so offline
+    serve does not return the unfunded sentence as the answer text.
+    """
+    catalogs = await _catalogs()
+    router_model = await _pick_local_role_model("router", catalogs)
     if router_model is None:
         raise RuntimeError("local router floor unfunded (no_floor)")
     instruction = (
@@ -7631,7 +7556,8 @@ async def _local_router_floor(
     parsed = _coerce_local_route_brief(str(payload.get("text") or ""))
     brief = str(parsed.get("brief") or "").strip()
     if not brief:
-        raise RuntimeError("local router brief unfunded")
+        # Soft brief: still route direct so specialist can answer real text
+        brief = f"Direct local answer for: {prompt[:120]}"
     route = parsed.get("route") or "direct"
     return {
         "route": route or "direct",
@@ -7945,19 +7871,22 @@ async def _serve_local_offline(
         return env
 
     def _degraded(stop_reason: str, reason: str) -> dict[str, Any]:
+        # Keep error out of the answer slot so reflections do not critique it as peer review.
         if stop_reason == "local_capacity_exhausted":
-            text = "Local concurrency capacity is exhausted; offline serve is degraded."
+            err = "Local concurrency capacity is exhausted; offline serve is degraded."
         elif stop_reason == "local_skill_no_floor":
-            text = (
+            err = (
                 "The requested skill has no certified local floor; "
                 "offline serve fails closed."
             )
         elif stop_reason == "local_non_answer":
-            text = "Local specialist returned a non-answer; offline serve is degraded."
+            err = "Local specialist returned a non-answer; offline serve is degraded."
         else:
-            text = "Local router floor is unfunded; offline serve is degraded."
+            err = "Local router floor is unfunded; offline serve is degraded."
         return {
-            "text": text,
+            "text": "",
+            "error": err,
+            "status": "error",
             "model": None,
             "plane": "local",
             "billing_class": "local_runtime",
@@ -8001,16 +7930,31 @@ async def _serve_local_offline(
             env["status"] = "error"
             return _stamp_latency(env)
         heuristic = _heuristic_route(prompt)
+        router_source = "heuristic" if heuristic is not None else "local_router_floor"
         try:
             routed = await _local_router_floor(prompt, system_context=system_context)
         except Exception:
-            env = _degraded(
-                "local_router_floor_unfunded", "local_router_floor_unfunded"
+            # Direct local answer — models work; missing role bind is config lag.
+            try:
+                direct = await _local_chat(prompt, system_prompt=system_context)
+            except Exception:
+                env = _degraded(
+                    "local_router_floor_unfunded", "local_router_floor_unfunded"
+                )
+                return _stamp_latency(env)
+            direct["requested_plane"] = "auto"
+            direct["resolved_plane"] = "local"
+            direct["fallback_occurred"] = False
+            direct["degraded"] = False
+            direct["router_source"] = "direct_local_no_floor"
+            _stamp_router_receipt_fields(
+                direct,
+                router_source="direct_local_no_floor",
+                heuristic_only=True,
+                brief_source=None,
             )
-            env["status"] = "error"
-            return _stamp_latency(env)
+            return _stamp_latency(direct)
         route = heuristic if heuristic is not None else routed["route"]
-        router_source = "heuristic" if heuristic is not None else "local_router_floor"
         specialist_system = "# Router brief (from local router floor)\n" + str(routed["brief"])
         if system_context:
             specialist_system = specialist_system + "\n\n" + system_context
