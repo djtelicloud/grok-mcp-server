@@ -10,13 +10,22 @@ set -euo pipefail
 
 deny_patterns=(
   '(^|/)\.DS_Store$'         # Finder metadata
+  '^\.agents/'               # private shared-agent canon and skills
   '^\.claude/'               # provider-local state
   '^\.a2a/'                  # private team relay
+  '^agentixos/'              # private control plane and courier runtime
+  '^architecture/agentixos/' # private control-plane contracts
   '^archives/'               # private historical material
+  '^campaigns/'              # private orchestration campaigns
+  '^codex/'                  # private provider workspace
+  '^cursor/'                 # private provider workspace
   '^evals/'                  # raw evaluation artifacts
   '^harvest/'                # private derived-work staging
   '^mcp_ui/'                 # private console tree
+  '^playbooks/'              # private orchestration methods
+  '^providers/'              # private provider profiles and adapters
   '^sites/'                  # private control-center app tree
+  '^tools/'                  # private experimental and training suites
   '(^|/)forge-console'       # private launch tooling
   '^docs/(AUTONOMY_INTEL|DEOVERFIT|OFFLINE_FREE_VARIANT|PUBLIC_STRANGER_SURFACE|SLEEP_PLANE|WASM_DOGFOOD)\.md$'
   '^docs/(design/ui-data-pipeline|github-copilot-mcp|onboarding-extraction|remote-mcp-deployment|team-readiness)\.md$'
