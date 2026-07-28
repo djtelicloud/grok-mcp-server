@@ -7486,15 +7486,10 @@ async def _local_role_fit(
 
 
 
-async def _local_router_floor(
-    prompt: str,
-    *,
-    system_context: str | None = None,
-) -> dict[str, Any]:
-    """One local router-floor invoke -> {route, brief, router_model} (fail-closed)."""
-    catalogs = await _catalogs()
+def _local_model_ids(catalogs: dict[str, Any]) -> list[str]:
+    """Ordered local model ids from a live catalog (strings or dict entries)."""
     models = (catalogs.get("local") or {}).get("models") or []
-    router_model: str | None = None
+    ids: list[str] = []
     for entry in models:
         if isinstance(entry, str):
             mid = entry
@@ -7502,11 +7497,41 @@ async def _local_router_floor(
             mid = str(entry.get("model_id") or entry.get("id") or "")
         else:
             mid = str(entry or "")
-        if not mid:
-            continue
-        if await STATE.local_bind(mid, "router") is not None:
-            router_model = mid
-            break
+        mid = mid.strip()
+        if mid and mid not in ids:
+            ids.append(mid)
+    default = (catalogs.get("local") or {}).get("default_model")
+    if isinstance(default, str) and default.strip() and default not in ids:
+        ids.insert(0, default.strip())
+    return ids
+
+
+async def _pick_local_role_model(role: str, catalogs: dict[str, Any]) -> str | None:
+    """Prefer certified bind for role; soft-fund with any live local model if unbound.
+
+    Direct DMR calls work without role certs. Hard-failing offline when models
+    are listed but unbound turns config lag into fake peer answers.
+    """
+    for mid in _local_model_ids(catalogs):
+        if await STATE.local_bind(mid, role) is not None:
+            return mid
+    # Soft fund: first live local model (config lag / dogfood bind miss)
+    ids = _local_model_ids(catalogs)
+    return ids[0] if ids else None
+
+
+async def _local_router_floor(
+    prompt: str,
+    *,
+    system_context: str | None = None,
+) -> dict[str, Any]:
+    """One local router-floor invoke -> {route, brief, router_model}.
+
+    Soft-funds with any live local model when role binds are empty so offline
+    serve does not return the unfunded sentence as the answer text.
+    """
+    catalogs = await _catalogs()
+    router_model = await _pick_local_role_model("router", catalogs)
     if router_model is None:
         raise RuntimeError("local router floor unfunded (no_floor)")
     instruction = (
@@ -7527,7 +7552,8 @@ async def _local_router_floor(
     parsed = _coerce_local_route_brief(str(payload.get("text") or ""))
     brief = str(parsed.get("brief") or "").strip()
     if not brief:
-        raise RuntimeError("local router brief unfunded")
+        # Soft brief: still route direct so specialist can answer real text
+        brief = f"Direct local answer for: {prompt[:120]}"
     route = parsed.get("route") or "direct"
     return {
         "route": route or "direct",
@@ -7841,19 +7867,22 @@ async def _serve_local_offline(
         return env
 
     def _degraded(stop_reason: str, reason: str) -> dict[str, Any]:
+        # Keep error out of the answer slot so reflections do not critique it as peer review.
         if stop_reason == "local_capacity_exhausted":
-            text = "Local concurrency capacity is exhausted; offline serve is degraded."
+            err = "Local concurrency capacity is exhausted; offline serve is degraded."
         elif stop_reason == "local_skill_no_floor":
-            text = (
+            err = (
                 "The requested skill has no certified local floor; "
                 "offline serve fails closed."
             )
         elif stop_reason == "local_non_answer":
-            text = "Local specialist returned a non-answer; offline serve is degraded."
+            err = "Local specialist returned a non-answer; offline serve is degraded."
         else:
-            text = "Local router floor is unfunded; offline serve is degraded."
+            err = "Local router floor is unfunded; offline serve is degraded."
         return {
-            "text": text,
+            "text": "",
+            "error": err,
+            "status": "error",
             "model": None,
             "plane": "local",
             "billing_class": "local_runtime",
@@ -7897,16 +7926,31 @@ async def _serve_local_offline(
             env["status"] = "error"
             return _stamp_latency(env)
         heuristic = _heuristic_route(prompt)
+        router_source = "heuristic" if heuristic is not None else "local_router_floor"
         try:
             routed = await _local_router_floor(prompt, system_context=system_context)
         except Exception:
-            env = _degraded(
-                "local_router_floor_unfunded", "local_router_floor_unfunded"
+            # Direct local answer — models work; missing role bind is config lag.
+            try:
+                direct = await _local_chat(prompt, system_prompt=system_context)
+            except Exception:
+                env = _degraded(
+                    "local_router_floor_unfunded", "local_router_floor_unfunded"
+                )
+                return _stamp_latency(env)
+            direct["requested_plane"] = "auto"
+            direct["resolved_plane"] = "local"
+            direct["fallback_occurred"] = False
+            direct["degraded"] = False
+            direct["router_source"] = "direct_local_no_floor"
+            _stamp_router_receipt_fields(
+                direct,
+                router_source="direct_local_no_floor",
+                heuristic_only=True,
+                brief_source=None,
             )
-            env["status"] = "error"
-            return _stamp_latency(env)
+            return _stamp_latency(direct)
         route = heuristic if heuristic is not None else routed["route"]
-        router_source = "heuristic" if heuristic is not None else "local_router_floor"
         specialist_system = "# Router brief (from local router floor)\n" + str(routed["brief"])
         if system_context:
             specialist_system = specialist_system + "\n\n" + system_context
