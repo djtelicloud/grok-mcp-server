@@ -6896,8 +6896,12 @@ async def runtimez(_: Request) -> JSONResponse:
         state_lifetime=runtime_contract["state_lifetime"],
         completion_recovery=runtime_contract["completion_recovery"],
     )
-    if core.get("layer") != expected_layer:
-        raise RuntimeError("runtimez core omitted the public layer identity")
+    actual_layer = core.get("layer")
+    if actual_layer != expected_layer:
+        raise RuntimeError(
+            f"runtimez core layer mismatch: expected {expected_layer!r}, "
+            f"got {actual_layer!r}"
+        )
     payload: dict[str, Any] = system_tools.runtimez_merge(core, {
             "request_limits": {
                 "build_concurrency": "provider_managed",
