@@ -107,3 +107,55 @@ def test_media_validators():
     media.require_confirm_delete(True, what="x")
     with pytest.raises(ValueError):
         media.require_confirm_delete(False, what="x")
+
+
+def test_media_plans():
+    catalogs = {"api": {"image_models": [{"id": "img-model-1"}]}}
+
+    def vp(v: str, f: str) -> str:
+        if not v.strip():
+            raise ValueError("empty")
+        return v.strip()
+
+    img = media.plan_generate_image(
+        prompt=" a cat ",
+        image_urls=["https://cdn.example.com/a.png"],
+        n=2,
+        aspect_ratio="1:1",
+        resolution="1k",
+        catalogs=catalogs,
+        validate_prompt=vp,
+    )
+    assert img.model == "img-model-1"
+    assert img.n == 2
+    assert img.prompt == "a cat"
+    vid = media.plan_generate_video(
+        prompt="hi",
+        image_url="https://cdn.example.com/a.png",
+        video_url=None,
+        reference_image_urls=None,
+        duration=3,
+        aspect_ratio=None,
+        resolution="720p",
+        validate_prompt=vp,
+    )
+    assert vid.duration == 3
+    with pytest.raises(ValueError):
+        media.plan_generate_video(
+            prompt="hi",
+            image_url="https://cdn.example.com/a.png",
+            video_url="https://cdn.example.com/b.mp4",
+            reference_image_urls=None,
+            duration=None,
+            aspect_ratio=None,
+            resolution=None,
+            validate_prompt=vp,
+        )
+    up = media.plan_upload_file(
+        filename="x.txt",
+        content_base64="YQ==",
+        expires_after_seconds=7200,
+        max_bytes=100,
+    )
+    assert up.content == b"a"
+    assert media.clamp_list_files_limit(500) == 100

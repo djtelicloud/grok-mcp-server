@@ -6549,26 +6549,25 @@ async def generate_image(
 ) -> dict[str, Any]:
     """Generate or edit images through the metered xAI API; returns hosted URLs."""
     _require_metered_api_enabled()
-    count = media_tools.validated_image_count(n)
     catalogs = await _catalogs()
-    image_models = [
-        str(item["id"]) for item in catalogs["api"].get("image_models", []) if item.get("id")
-    ]
-    if not image_models:
-        raise RuntimeError("The provider returned no image-generation model")
-    safe_prompt = _validated_prompt(prompt, "prompt")
-    urls = _validated_media_urls(image_urls, "image_urls", 10)
-    ratio = str(aspect_ratio).strip() if aspect_ratio else None
-    model = image_models[0]
+    plan = media_tools.plan_generate_image(
+        prompt=prompt,
+        image_urls=image_urls,
+        n=n,
+        aspect_ratio=aspect_ratio,
+        resolution=resolution,
+        catalogs=catalogs,
+        validate_prompt=_validated_prompt,
+    )
 
     async def _produce() -> dict[str, Any]:
         return await xai_api.generate_image(
-            safe_prompt,
-            model=model,
-            image_urls=urls,
-            n=count,
-            aspect_ratio=ratio,
-            resolution=resolution,
+            plan.prompt,
+            model=plan.model,
+            image_urls=plan.image_urls,
+            n=plan.n,
+            aspect_ratio=plan.aspect_ratio,
+            resolution=plan.resolution,
         )
 
     return await _run_durable_job(_produce, ctx=ctx, kind="generate_image")
@@ -6587,26 +6586,27 @@ async def generate_video(
 ) -> dict[str, Any]:
     """Generate or edit video through the metered xAI API."""
     _require_metered_api_enabled()
-    if image_url and video_url:
-        raise ValueError("provide image_url or video_url, not both")
-    media_tools.validated_video_duration(duration, lo=1, hi=15)
-    safe_prompt = _validated_prompt(prompt, "prompt")
-    safe_image = _validated_media_url(image_url, "image_url") if image_url else None
-    safe_video = _validated_media_url(video_url, "video_url") if video_url else None
-    refs = _validated_media_urls(reference_image_urls, "reference_image_urls", 10)
-    ratio = str(aspect_ratio).strip() if aspect_ratio else None
-    dur = int(duration) if duration is not None else None
+    plan = media_tools.plan_generate_video(
+        prompt=prompt,
+        image_url=image_url,
+        video_url=video_url,
+        reference_image_urls=reference_image_urls,
+        duration=duration,
+        aspect_ratio=aspect_ratio,
+        resolution=resolution,
+        validate_prompt=_validated_prompt,
+    )
 
     async def _produce() -> dict[str, Any]:
         return await xai_api.generate_video(
-            safe_prompt,
-            model="grok-imagine-video",
-            image_url=safe_image,
-            video_url=safe_video,
-            reference_image_urls=refs,
-            duration=dur,
-            aspect_ratio=ratio,
-            resolution=resolution,
+            plan.prompt,
+            model=plan.model,
+            image_url=plan.image_url,
+            video_url=plan.video_url,
+            reference_image_urls=plan.reference_image_urls,
+            duration=plan.duration,
+            aspect_ratio=plan.aspect_ratio,
+            resolution=plan.resolution,
         )
 
     return await _run_durable_job(_produce, ctx=ctx, kind="generate_video")
@@ -6621,17 +6621,19 @@ async def extend_video(
 ) -> dict[str, Any]:
     """Extend a public HTTPS video through the metered xAI API."""
     _require_metered_api_enabled()
-    media_tools.validated_video_duration(duration, lo=2, hi=10)
-    safe_prompt = _validated_prompt(prompt, "prompt")
-    safe_video = _validated_media_url(video_url, "video_url")
-    dur = int(duration) if duration is not None else None
+    plan = media_tools.plan_extend_video(
+        prompt=prompt,
+        video_url=video_url,
+        duration=duration,
+        validate_prompt=_validated_prompt,
+    )
 
     async def _produce() -> dict[str, Any]:
         return await xai_api.extend_video(
-            safe_prompt,
-            model="grok-imagine-video",
-            video_url=safe_video,
-            duration=dur,
+            plan.prompt,
+            model=plan.model,
+            video_url=plan.video_url,
+            duration=plan.duration,
         )
 
     return await _run_durable_job(_produce, ctx=ctx, kind="extend_video")
@@ -6646,15 +6648,18 @@ async def xai_upload_file(
 ) -> dict[str, Any]:
     """Upload caller-provided bytes to xAI without granting local filesystem access."""
     _require_remote_file_isolation()
-    safe_name = media_tools.validated_upload_filename(filename)
-    content = media_tools.decode_upload_content(
-        content_base64, max_bytes=MAX_UPLOAD_BYTES
+    plan = media_tools.plan_upload_file(
+        filename=filename,
+        content_base64=content_base64,
+        expires_after_seconds=expires_after_seconds,
+        max_bytes=MAX_UPLOAD_BYTES,
     )
-    expires = media_tools.clamp_expires_after(expires_after_seconds)
 
     async def _produce() -> dict[str, Any]:
         return await xai_api.upload_file(
-            content, filename=safe_name, expires_after_seconds=expires
+            plan.content,
+            filename=plan.filename,
+            expires_after_seconds=plan.expires_after_seconds,
         )
 
     return await _run_durable_job(_produce, ctx=ctx, kind="xai_upload_file")
@@ -6667,7 +6672,7 @@ async def xai_list_files(limit: int = 100, ctx: Context | None = None) -> dict[s
     Slow provider lists return status=pending with a job_id; poll agent_result.
     """
     _require_remote_file_isolation()
-    bounded = max(1, min(int(limit), 100))
+    bounded = media_tools.clamp_list_files_limit(limit)
 
     async def _produce() -> dict[str, Any]:
         return await xai_api.list_files(bounded)

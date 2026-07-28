@@ -2,23 +2,20 @@
 
 **Branch:** `terminalgrok/phase3-srp-chats-system`
 
-## Honest critique of wave 1
-- **Too thin:** mostly response-shape shims; server still ~8k lines; no real risk removed.
-- **Missed behavior ownership:** validators, status, media params still lived in server.py.
-- **Good:** package boundary exists; pure unit tests; registration stayed stable.
+## Wave 3 (media plans)
+- `tools/media.py` owns **ImageGenPlan / VideoGenPlan / VideoExtendPlan / UploadPlan**
+- server tools call `plan_*` then durable-job + `xai_api` (registration stays in server)
+- list_files limit clamp in media
 
-## Wave 2 (this commit)
-| Domain | Module | Owns now |
-|--------|--------|----------|
-| system | `tools/system.py` | healthz, readyz, status, list_models, benchmark_status, runtimez core/merge |
-| chats | `tools/chats.py` | chat context join, session list/history/forget shapes |
-| media | `tools/media.py` | file_id/URL validation, image/video/upload param checks (logic moved out of server) |
+## Prior waves
+- Wave 1: thin builders (critiqued as too light)
+- Wave 2: real validators + system status/list_models/runtimez
 
-## Still deferred
-- Moving FastMCP registration out of server.py
-- Extracting `_run_unified` / agent hive
-- Full media tool handlers (still durable-job wrappers in server)
-- server.py under 4k lines
+## Remaining
+- chat_with_vision / chat_with_files prep helpers
+- agent/router pure helpers → tools/agent.py
+- registration factory (optional)
+- server.py still large; continue incremental shrink
 
 ## Verify
 ```bash
