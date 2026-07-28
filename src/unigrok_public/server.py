@@ -342,15 +342,19 @@ SHADOW_DONE_VOTE = os.environ.get("UNIGROK_SHADOW_DONE_VOTE", "off").strip().low
     "yes",
     "on",
 }
-# Public layer identity is limited to the optional local Gemma helper.
-# Empty string is the normal UniGrok Core service.
-_PUBLIC_LAYER_NAMES = frozenset({"", "gemma"})
+# Layer identity for multi-seat fleet (empty = UniGrok Core / ground).
+# Gemma is the free local helper; sky/space/forge/public are named seats.
+_PUBLIC_LAYER_NAMES = frozenset(
+    {"", "gemma", "sky", "space", "forge", "public", "ground", "core"}
+)
 
 
 def _normalize_layer_name(value: str | None) -> str:
     layer = str(value or "").strip().lower()
     if layer not in _PUBLIC_LAYER_NAMES:
-        raise ValueError("UNIGROK_LAYER supports only the public Gemma local helper")
+        raise ValueError(
+            "UNIGROK_LAYER must be empty or one of: gemma, sky, space, forge, public, ground, core"
+        )
     return layer
 
 
