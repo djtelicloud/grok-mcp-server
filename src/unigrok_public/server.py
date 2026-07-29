@@ -3629,10 +3629,10 @@ async def _seal_autonomy_done(
 
 
 def _durable_store_status(payload: dict[str, Any]) -> str:
-    status = str(payload.get("status") or "")
+    status = str(payload.get("status") or "").strip().casefold()
     if status == "error":
         return JOB_ERROR
-    if status == "continue":
+    if status not in {"", "complete"}:
         return JOB_NEEDS_CONTINUATION
     return JOB_COMPLETE
 
@@ -4718,10 +4718,15 @@ async def _execute_team_turn(
     fact_ids = [int(item["id"]) for item in facts]
     message_count = len(history)
     context_pack_meta: dict[str, Any] | None = None
+    turn_status = str(result.get("status") or "").strip().casefold()
+    turn_completed = turn_status in {"", "complete"}
+    persist_completed_session = bool(
+        session and persist_session and turn_completed
+    )
     try:
-        if fact_ids:
+        if fact_ids and turn_completed:
             await STATE.touch_facts(fact_ids)
-        if session and persist_session:
+        if persist_completed_session:
             message_count, context_pack_meta = await _persist_committed_session_turn(
                 session=session,
                 prompt=prompt,
@@ -4749,7 +4754,7 @@ async def _execute_team_turn(
             "workspace_context_supplied": bool(courier),
             "memory_scope": public_state_name(scope) if use_memory else None,
             "memory_fact_ids": fact_ids,
-            "session_turn_persisted": bool(session and persist_session),
+            "session_turn_persisted": persist_completed_session,
         }
     )
     if context_pack_meta is not None:
@@ -5598,9 +5603,10 @@ async def agent(
             with contextlib.suppress(Exception):
                 await STATE.save_agent_job(job_id, JOB_ERROR, payload, owner=caller)
             return payload
+        turn_status = str(result.get("status") or "").strip().casefold()
         result.update(
             {
-                "status": "complete",
+                "status": turn_status or "complete",
                 "job_id": job_id,
                 "requested_mode": depth,
                 "level": level,
@@ -5630,7 +5636,7 @@ async def agent(
         if governor_execution is not None:
             result["governor_execution"] = governor_execution
         shadow_done: dict[str, Any] | None = None
-        if SHADOW_DONE_VOTE:
+        if SHADOW_DONE_VOTE and result["status"] == "complete":
             shadow_done = await _shadow_done_vote(prompt, str(result.get("text") or ""))
             if shadow_done is not None:
                 result["shadow_done_vote"] = shadow_done
