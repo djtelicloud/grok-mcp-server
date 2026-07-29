@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from collections.abc import Callable
 from pathlib import Path
@@ -9,7 +10,7 @@ from typing import Any
 import pytest
 from starlette.responses import JSONResponse
 
-from unigrok_public import remote_auth, server
+from unigrok_public import remote_auth, server, xai_api
 from unigrok_public.identity import (
     principal_label,
     public_state_name,
@@ -456,6 +457,108 @@ async def test_oauth_middleware_replays_body_and_propagates_canonical_claims(
     assert observed["introspection"] == ("opaque-token", "unigrok:connect")
     assert observed["body"] == body
     assert observed["claims"]["unigrok_principal"] == principal
+
+
+async def test_oauth_introspection_allowlists_claims_from_hostile_payload(
+    remote_oauth_env: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    marker = "hostile-secret-marker"
+    original_scope = "unigrok:status unigrok:connect"
+    payload = {
+        "active": True,
+        "scope": original_scope,
+        "iss": AUTHORIZATION_SERVER,
+        "sub": "reviewer:42",
+        "aud": [PUBLIC_RESOURCE],
+        "unigrok_auth": marker,
+        "access_token": marker,
+        "client_secret": marker,
+        "provider_metadata": {"private": marker},
+    }
+
+    class Response:
+        status_code = 200
+        content = b"{}"
+
+        def json(self) -> dict[str, Any]:
+            return payload
+
+    class Client:
+        async def __aenter__(self) -> Client:
+            return self
+
+        async def __aexit__(self, *_args: Any) -> None:
+            return None
+
+        async def post(self, *_args: Any, **_kwargs: Any) -> Response:
+            return Response()
+
+    monkeypatch.setattr(remote_auth.httpx, "AsyncClient", lambda **_kwargs: Client())
+
+    claims = await remote_auth.introspect_oauth_token(
+        "opaque-token", "unigrok:connect"
+    )
+
+    assert claims == {
+        "active": True,
+        "scope": original_scope,
+        "unigrok_principal": _canonical_principal("reviewer:42"),
+        "unigrok_auth": "oauth",
+    }
+    assert marker not in json.dumps(claims, sort_keys=True)
+
+
+async def test_oauth_middleware_logs_constant_route_provenance(
+    remote_oauth_env: None,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    marker = "hostile-auth-kind-marker"
+    principal = _canonical_principal("reviewer:42")
+
+    async def hostile_claims(_token: str, required: str) -> dict[str, Any]:
+        return {
+            "active": True,
+            "scope": required,
+            "unigrok_principal": principal,
+            "unigrok_auth": marker,
+        }
+
+    monkeypatch.setattr(remote_auth, "introspect_oauth_token", hostile_claims)
+    caplog.set_level(logging.INFO, logger=remote_auth.__name__)
+
+    async def downstream(scope: dict[str, Any], receive: Any, send: Any) -> None:
+        await JSONResponse({"ok": True})(scope, receive, send)
+
+    status, _, response_body = await _asgi_exchange(
+        remote_auth.RemoteOAuthMiddleware(downstream),
+        path="/v1/models",
+        headers=((b"authorization", b"Bearer opaque-token"),),
+    )
+
+    assert status == 200
+    assert json.loads(response_body) == {"ok": True}
+    assert "oauth access_allowed" in caplog.text
+    assert marker not in caplog.text
+
+
+def test_observability_identifiers_exclude_raw_auth_material(
+    remote_oauth_env: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    principal = _canonical_principal("privacy-marker-subject")
+    label = principal_label(principal)
+    assert label == principal_label(principal)
+    assert label is not None
+    assert principal not in label
+    assert "privacy-marker-subject" not in label
+    assert AUTHORIZATION_SERVER not in label
+
+    credential_marker = "synthetic-credential-marker-xxxxxxxxxxxxxxxx"
+    monkeypatch.setenv("XAI_API_KEY", credential_marker)
+    monkeypatch.delenv("UNIGROK_PRINCIPAL_XAI_KEYS_JSON", raising=False)
+    cache_key = xai_api.credential_cache_key()
+    assert credential_marker not in cache_key
+    assert cache_key.startswith("owner_default:")
 
 
 def test_principal_key_selection_never_crosses_oauth_tenants(
