@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -420,6 +421,89 @@ async def test_agent_session_couriers_context_and_reuses_history(
     assert second["session_message_count"] == 4
     assert "Review the failure" in captured[1]["prompt"]
     assert "team response complete" in captured[1]["prompt"]
+
+
+@pytest.mark.parametrize(
+    ("status", "stop_reason", "durable_status"),
+    [
+        ("continue", "local_capacity_exhausted", server.JOB_NEEDS_CONTINUATION),
+        ("error", "local_skill_no_floor", server.JOB_ERROR),
+    ],
+)
+@pytest.mark.asyncio
+async def test_agent_preserves_noncomplete_status_without_persisting_session_turn(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    status: str,
+    stop_reason: str,
+    durable_status: str,
+) -> None:
+    state = PublicStateStore(tmp_path / f"agent-{status}.db")
+
+    async def fake_unified(prompt: str, **kwargs) -> dict:
+        return {
+            "status": status,
+            "text": "",
+            "error": "Local serve did not complete.",
+            "model": None,
+            "plane": "local",
+            "requested_plane": "auto",
+            "resolved_plane": "local",
+            "fallback_occurred": False,
+            "cost_usd": 0.0,
+            "degraded": True,
+            "stop_reason": stop_reason,
+            "orchestration": {
+                "lead": None,
+                "route": "direct",
+                "specialist_model": None,
+                "brief_authored_by_lead": False,
+                "router_source": "heuristic",
+                "brief_source": None,
+            },
+        }
+
+    async def fake_local_offline(prompt: str, **kwargs) -> dict:
+        return await fake_unified(prompt, **kwargs)
+
+    async def fake_catalogs(*, refresh: bool = False) -> dict:
+        return {
+            "cli": {"ready": False, "models": [], "default_model": None},
+            "api": {"ready": False, "models": [], "image_models": []},
+            "local": {
+                "ready": True,
+                "models": ["local-test"],
+                "default_model": "local-test",
+            },
+        }
+
+    async def fake_route(prompt: str, catalogs: dict) -> dict[str, str]:
+        return {"route": "direct", "specialist_prompt": prompt}
+
+    shadow_done = AsyncMock()
+    monkeypatch.setattr(server, "STATE", state)
+    monkeypatch.setattr(server, "AUTONOMY_ENABLED", False)
+    monkeypatch.setattr(server, "SHADOW_DONE_VOTE", True)
+    monkeypatch.setattr(server, "_shadow_done_vote", shadow_done)
+    monkeypatch.setattr(server, "_run_unified", fake_unified)
+    monkeypatch.setattr(server, "_serve_local_offline", fake_local_offline)
+    monkeypatch.setattr(server, "_catalogs", fake_catalogs)
+    monkeypatch.setattr(server, "_route_task", fake_route)
+    server._SESSION_LOCKS.clear()
+
+    result = await server.agent(
+        "Use the local plane",
+        session=f"vscode:{status}",
+        use_memory=False,
+    )
+
+    assert result["status"] == status, result
+    assert result["session_turn_persisted"] is False
+    assert await state.load_messages(f"vscode:{status}") == []
+    stored = await state.load_agent_job(result["job_id"])
+    assert stored is not None
+    assert stored["status"] == durable_status
+    shadow_done.assert_not_awaited()
 
 
 @pytest.mark.asyncio

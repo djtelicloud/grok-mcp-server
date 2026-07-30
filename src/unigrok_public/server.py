@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import base64
 import contextlib
 import hashlib
 import ipaddress
@@ -49,9 +48,6 @@ from .context_pack import (
     context_pack_mode,
     format_session_with_pack,
 )
-from .tools import chats as chat_tools
-from .tools import media as media_tools
-from .tools import system as system_tools
 from .grok_build import GrokBuildACPManager
 from .harness import (
     HIVE_PERSONAS,
@@ -96,6 +92,9 @@ from .remote_auth import (
     validate_remote_configuration,
 )
 from .state import PublicStateStore, normalize_scope, normalize_session, redact_secrets
+from .tools import chats as chat_tools
+from .tools import media as media_tools
+from .tools import system as system_tools
 
 SERVICE_NAME = "UniGrok xAI Gateway"
 STATIC_ROOT = Path(__file__).with_name("static")
@@ -3630,10 +3629,10 @@ async def _seal_autonomy_done(
 
 
 def _durable_store_status(payload: dict[str, Any]) -> str:
-    status = str(payload.get("status") or "")
+    status = str(payload.get("status") or "").strip().casefold()
     if status == "error":
         return JOB_ERROR
-    if status == "continue":
+    if status not in {"", "complete"}:
         return JOB_NEEDS_CONTINUATION
     return JOB_COMPLETE
 
@@ -4719,10 +4718,15 @@ async def _execute_team_turn(
     fact_ids = [int(item["id"]) for item in facts]
     message_count = len(history)
     context_pack_meta: dict[str, Any] | None = None
+    turn_status = str(result.get("status") or "").strip().casefold()
+    turn_completed = turn_status in {"", "complete"}
+    persist_completed_session = bool(
+        session and persist_session and turn_completed
+    )
     try:
-        if fact_ids:
+        if fact_ids and turn_completed:
             await STATE.touch_facts(fact_ids)
-        if session and persist_session:
+        if persist_completed_session:
             message_count, context_pack_meta = await _persist_committed_session_turn(
                 session=session,
                 prompt=prompt,
@@ -4750,7 +4754,7 @@ async def _execute_team_turn(
             "workspace_context_supplied": bool(courier),
             "memory_scope": public_state_name(scope) if use_memory else None,
             "memory_fact_ids": fact_ids,
-            "session_turn_persisted": bool(session and persist_session),
+            "session_turn_persisted": persist_completed_session,
         }
     )
     if context_pack_meta is not None:
@@ -5599,9 +5603,10 @@ async def agent(
             with contextlib.suppress(Exception):
                 await STATE.save_agent_job(job_id, JOB_ERROR, payload, owner=caller)
             return payload
+        turn_status = str(result.get("status") or "").strip().casefold()
         result.update(
             {
-                "status": "complete",
+                "status": turn_status or "complete",
                 "job_id": job_id,
                 "requested_mode": depth,
                 "level": level,
@@ -5631,7 +5636,7 @@ async def agent(
         if governor_execution is not None:
             result["governor_execution"] = governor_execution
         shadow_done: dict[str, Any] | None = None
-        if SHADOW_DONE_VOTE:
+        if SHADOW_DONE_VOTE and result["status"] == "complete":
             shadow_done = await _shadow_done_vote(prompt, str(result.get("text") or ""))
             if shadow_done is not None:
                 result["shadow_done_vote"] = shadow_done
@@ -6887,15 +6892,22 @@ async def runtimez(_: Request) -> JSONResponse:
     )
     runtime_contract = _runtime_state_contract()
     description = _live_self_description(catalogs)
+    expected_layer = UNIGROK_LAYER or "public"
     core = system_tools.runtimez_core(
         service=SERVICE_NAME,
         version=__version__,
-        layer=UNIGROK_LAYER or "public",
+        layer=expected_layer,
         tool_count=len(PUBLIC_TOOLS),
         state_persistence=runtime_contract["state_persistence"],
         state_lifetime=runtime_contract["state_lifetime"],
         completion_recovery=runtime_contract["completion_recovery"],
     )
+    actual_layer = core.get("layer")
+    if actual_layer != expected_layer:
+        raise RuntimeError(
+            f"runtimez core layer mismatch: expected {expected_layer!r}, "
+            f"got {actual_layer!r}"
+        )
     payload: dict[str, Any] = system_tools.runtimez_merge(core, {
             "request_limits": {
                 "build_concurrency": "provider_managed",
@@ -7886,7 +7898,6 @@ async def _serve_local_offline(
         return {
             "text": "",
             "error": err,
-            "status": "error",
             "model": None,
             "plane": "local",
             "billing_class": "local_runtime",
@@ -7941,12 +7952,29 @@ async def _serve_local_offline(
                 env = _degraded(
                     "local_router_floor_unfunded", "local_router_floor_unfunded"
                 )
+                env["status"] = "error"
                 return _stamp_latency(env)
-            direct["requested_plane"] = "auto"
-            direct["resolved_plane"] = "local"
-            direct["fallback_occurred"] = False
-            direct["degraded"] = False
-            direct["router_source"] = "direct_local_no_floor"
+            direct.update(
+                {
+                    "requested_plane": "auto",
+                    "resolved_plane": "local",
+                    "fallback_policy": "cross_plane",
+                    "fallback_occurred": False,
+                    "fallback_from": None,
+                    "fallback_reason": "local_router_floor_unfunded",
+                    "degraded": True,
+                    "trigger": "no_floor",
+                    "continue_count": int(prior_continue_count or 0),
+                    "orchestration": {
+                        "lead": None,
+                        "route": "direct",
+                        "specialist_model": direct.get("model"),
+                        "brief_authored_by_lead": False,
+                        "router_source": "direct_local_no_floor",
+                        "brief_source": None,
+                    },
+                }
+            )
             _stamp_router_receipt_fields(
                 direct,
                 router_source="direct_local_no_floor",

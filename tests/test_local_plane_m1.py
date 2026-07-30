@@ -588,8 +588,10 @@ def test_offline_serve_receipts(
         _reset_local_slots()
         monkeypatch.setattr(server, "_CATALOG_CACHE", None)
         degraded = asyncio.run(server._serve_local_offline("What is a WAL?"))
+        assert degraded.get("text") == "WAL is a write-ahead log used for durability."
         assert degraded.get("degraded") is True
         assert degraded.get("fallback_reason") == "local_router_floor_unfunded"
+        assert degraded.get("router_source") == "direct_local_no_floor"
         assert degraded.get("billing_class") == "local_runtime"
         assert float(degraded.get("cost_usd") or 0.0) == 0.0
     finally:
