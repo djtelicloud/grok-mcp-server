@@ -3389,10 +3389,14 @@ async def _durable_mission_terminal_payload(mission: dict[str, Any]) -> dict[str
         )
         raw_scope = request.get("memory_scope")
         scope = normalize_scope(raw_scope) if raw_scope else session_name
-        use_memory = bool(request.get("use_memory", True))
+        use_session_history, use_global_memory = _resolve_memory_controls(
+            use_memory=bool(request.get("use_memory", True)),
+            use_session_history=bool(request.get("use_session_history", True)),
+            use_global_memory=request.get("use_global_memory"),
+        )
         facts = (
             await STATE.search_facts(prompt, scope=scope, limit=5)
-            if use_memory
+            if use_global_memory
             else []
         )
         message_count, context_pack_meta = await _persist_committed_session_turn(
@@ -3402,7 +3406,8 @@ async def _durable_mission_terminal_payload(mission: dict[str, Any]) -> dict[str
             model=None,
             mode="auto",
             facts=facts,
-            use_memory=use_memory,
+            use_session_history=use_session_history,
+            use_global_memory=use_global_memory,
             commit_key=str(mission["job_id"]),
         )
     except Exception:
@@ -4254,6 +4259,19 @@ async def _run_hive(
     return result
 
 
+def _resolve_memory_controls(
+    *,
+    use_memory: bool,
+    use_session_history: bool,
+    use_global_memory: bool | None,
+) -> tuple[bool, bool]:
+    """Resolve independent recall controls without collapsing explicit false."""
+    return (
+        bool(use_session_history),
+        bool(use_memory if use_global_memory is None else use_global_memory),
+    )
+
+
 async def _persist_committed_session_turn(
     *,
     session: str,
@@ -4262,11 +4280,16 @@ async def _persist_committed_session_turn(
     model: str | None,
     mode: str,
     facts: list[dict[str, Any]],
-    use_memory: bool,
+    use_session_history: bool,
+    use_global_memory: bool,
     commit_key: str | None = None,
 ) -> tuple[int, dict[str, Any] | None]:
     """Persist only a committed answer, then derive the next-turn context pack."""
-    prior_pack = ContextPack.from_dict(await STATE.load_context_pack(session))
+    prior_pack = (
+        ContextPack.from_dict(await STATE.load_context_pack(session))
+        if use_session_history and use_global_memory
+        else None
+    )
     append_kwargs = {
         "model": str(result.get("model") or model or "") or None,
         "plane": str(result.get("resolved_plane") or result.get("plane") or "") or None,
@@ -4297,13 +4320,17 @@ async def _persist_committed_session_turn(
         return message_count, None
     context_pack_meta: dict[str, Any] | None = None
     if context_pack_mode() != "off":
-        refreshed = await STATE.load_messages(session)
+        refreshed = (
+            await STATE.load_messages(session)
+            if use_session_history
+            else []
+        )
         prior_version = int(prior_pack.version) if prior_pack else 0
         pack = build_context_pack(
             session=session,
             history=refreshed,
             next_task=prompt,
-            facts=facts if use_memory else None,
+            facts=facts if use_global_memory else None,
             version=prior_version + 1,
         )
         if pack is not None:
@@ -4314,13 +4341,11 @@ async def _persist_committed_session_turn(
                 "keeps": len(pack.keeps),
                 "donts": len(pack.donts),
                 "dropped": pack.dropped,
-                "lead_notes": pack.lead_notes,
-                "prefrontal": pack.prefrontal,
+                "has_lead_notes": bool(pack.lead_notes),
+                "has_prefrontal": bool(pack.prefrontal),
                 "pfc_loops": pack.pfc_loops,
                 "pfc_points": pack.pfc_points,
-                "pfc_confidence": pack.pfc_confidence,
-                "pfc_absent": pack.pfc_absent,
-                "pfc_absent_confidence": pack.pfc_absent_confidence,
+                "has_pfc_absent": bool(pack.pfc_absent),
             }
     return message_count, context_pack_meta
 
@@ -4359,6 +4384,8 @@ async def _execute_team_turn(
     caller_instructions: str,
     memory_scope: str | None,
     use_memory: bool,
+    use_session_history: bool = True,
+    use_global_memory: bool | None = None,
     model: str | None,
     effort: str | None,
     mode: Literal["auto", "fast", "reasoning", "research"],
@@ -4373,9 +4400,26 @@ async def _execute_team_turn(
     persist_session: bool = True,
     prior_continue_count: int = 0,
 ) -> dict[str, Any]:
-    history = await STATE.load_messages(session) if session else []
+    (
+        effective_use_session_history,
+        effective_use_global_memory,
+    ) = _resolve_memory_controls(
+        use_memory=use_memory,
+        use_session_history=use_session_history,
+        use_global_memory=use_global_memory,
+    )
+    history = (
+        await STATE.load_messages(session)
+        if session and effective_use_session_history
+        else []
+    )
     prior_pack: ContextPack | None = None
-    if session and context_pack_mode() != "off":
+    if (
+        session
+        and effective_use_session_history
+        and effective_use_global_memory
+        and context_pack_mode() != "off"
+    ):
         prior_pack = ContextPack.from_dict(await STATE.load_context_pack(session))
     if prior_pack is not None and (
         prior_pack.keeps
@@ -4393,7 +4437,11 @@ async def _execute_team_turn(
         provider_prompt = apply_deep_harness(provider_prompt)
         effort = effort or "xhigh"
     scope = normalize_scope(memory_scope or session or "global")
-    facts = await STATE.search_facts(prompt, scope=scope, limit=5) if use_memory else []
+    facts = (
+        await STATE.search_facts(prompt, scope=scope, limit=5)
+        if effective_use_global_memory
+        else []
+    )
     context_parts: list[str] = []
     layer_block = _layer_context_block()
     if layer_block:
@@ -4416,7 +4464,7 @@ async def _execute_team_turn(
             for item in facts
         )
         context_parts.append("# Durable user-controlled knowledge (untrusted hints)\n" + rendered)
-    elif use_memory and UNIGROK_LAYER:
+    elif effective_use_global_memory and UNIGROK_LAYER:
         # Layer seats: if scoped search empty, still pull global seat law.
         extra = await _durable_knowledge_block(prompt, scope=scope, limit=5)
         if extra:
@@ -4734,7 +4782,8 @@ async def _execute_team_turn(
                 model=model,
                 mode=mode,
                 facts=facts,
-                use_memory=use_memory,
+                use_session_history=effective_use_session_history,
+                use_global_memory=effective_use_global_memory,
             )
     except Exception as exc:
         completed_attempts = _usage_attempts_for_result(
@@ -4752,8 +4801,20 @@ async def _execute_team_turn(
             "state_lifetime": runtime_contract["state_lifetime"],
             "workspace_attached": False,
             "workspace_context_supplied": bool(courier),
-            "memory_scope": public_state_name(scope) if use_memory else None,
-            "memory_fact_ids": fact_ids,
+            "memory_scope": (
+                public_state_name(scope)
+                if effective_use_global_memory
+                else None
+            ),
+            "memory_controls": {
+                "use_session_history": effective_use_session_history,
+                "use_global_memory": effective_use_global_memory,
+                "session_history_loaded": bool(
+                    session and effective_use_session_history
+                ),
+                "session_history_message_count": len(history),
+                "global_memory_fact_count": len(facts),
+            },
             "session_turn_persisted": persist_completed_session,
         }
     )
@@ -4855,6 +4916,8 @@ async def agent(
     system_prompt: str | None = None,
     memory_scope: str | None = None,
     use_memory: bool = True,
+    use_session_history: bool = True,
+    use_global_memory: bool | None = None,
     disable_tools: list[Literal["web", "x_search", "remote_code_execution"]] | None = None,
     depth: Literal["auto", "deep", "hive"] = "auto",
     level: Literal[
@@ -4889,6 +4952,10 @@ async def agent(
     `workspace_context` couriers explicitly selected text; it grants no direct
     filesystem, shell, Git, credential, or MCP authority. Stored facts are
     retrieved from `memory_scope` (the session name by default) plus global facts.
+    `use_session_history` independently controls named-session recall while
+    `use_global_memory` independently controls stored-fact retrieval. When
+    `use_global_memory` is omitted, it inherits legacy `use_memory`; disabling
+    recall never disables persistence of a committed current turn.
     Supplying an API key enables metered API execution by default; the service owner
     can disable it globally with `UNIGROK_ENABLE_METERED_API=false`.
     `prompt` is a compatibility alias for `task`; callers should supply only one.
@@ -5051,6 +5118,15 @@ async def agent(
             memory_scope = request_snapshot.get("memory_scope") or memory_scope
             if "use_memory" in request_snapshot:
                 use_memory = bool(request_snapshot.get("use_memory"))
+            use_session_history = bool(
+                request_snapshot.get("use_session_history", True)
+            )
+            raw_global_memory = request_snapshot.get("use_global_memory")
+            use_global_memory = (
+                None
+                if raw_global_memory is None
+                else bool(raw_global_memory)
+            )
             disable_tools = list(request_snapshot.get("disable_tools") or []) or None
             if request_snapshot.get("depth") in {"auto", "deep", "hive"}:
                 depth = request_snapshot["depth"]  # type: ignore[assignment]
@@ -5123,6 +5199,14 @@ async def agent(
     scope = normalize_scope(memory_scope) if memory_scope else None
     if get_active_principal() is not None:
         scope = normalize_scope(scoped_scope(scope or session_name or "global"))
+    (
+        effective_use_session_history,
+        effective_use_global_memory,
+    ) = _resolve_memory_controls(
+        use_memory=use_memory,
+        use_session_history=use_session_history,
+        use_global_memory=use_global_memory,
+    )
     disabled = set(disable_tools or [])
     allow_web = "web" not in disabled
     allow_x_search = "x_search" not in disabled
@@ -5229,6 +5313,8 @@ async def agent(
             caller_instructions=caller_instructions,
             memory_scope=scope,
             use_memory=bool(use_memory),
+            use_session_history=effective_use_session_history,
+            use_global_memory=effective_use_global_memory,
             model=None,
             effort=turn_effort,
             mode="auto",
@@ -5269,6 +5355,8 @@ async def agent(
                 "system_prompt": caller_instructions,
                 "memory_scope": scope,
                 "use_memory": bool(use_memory),
+                "use_session_history": effective_use_session_history,
+                "use_global_memory": use_global_memory,
                 "disable_tools": sorted(disabled),
                 "depth": depth,
                 "level": level,
@@ -5812,7 +5900,7 @@ async def agent(
             ):
                 persisted_facts = (
                     await STATE.search_facts(prompt, scope=scope or session_name, limit=5)
-                    if use_memory
+                    if effective_use_global_memory
                     else []
                 )
                 message_count, context_pack_meta = await _persist_committed_session_turn(
@@ -5822,7 +5910,8 @@ async def agent(
                     model=None,
                     mode="auto",
                     facts=persisted_facts,
-                    use_memory=bool(use_memory),
+                    use_session_history=effective_use_session_history,
+                    use_global_memory=effective_use_global_memory,
                     commit_key=job_id,
                 )
                 result["session_message_count"] = message_count

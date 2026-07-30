@@ -137,6 +137,15 @@ def test_public_mcp_tool_contract_is_exact_and_self_checked() -> None:
     assert ".agents/skills/<skill-name>/SKILL.md" in server.INSTRUCTIONS
     agent_tool = next(tool for tool in tools if tool.name == "agent")
     assert "disable_tools" in agent_tool.inputSchema["properties"]
+    session_history = agent_tool.inputSchema["properties"]["use_session_history"]
+    global_memory = agent_tool.inputSchema["properties"]["use_global_memory"]
+    assert session_history["default"] is True
+    assert session_history["type"] == "boolean"
+    assert global_memory["default"] is None
+    assert {choice["type"] for choice in global_memory["anyOf"]} == {
+        "boolean",
+        "null",
+    }
     caller_evidence = agent_tool.inputSchema["properties"]["caller_evidence"]
     evidence_schema = agent_tool.inputSchema["$defs"]["CallerEvidenceInput"]
     assert caller_evidence["anyOf"][0]["items"]["$ref"].endswith(
