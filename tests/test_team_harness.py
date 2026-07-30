@@ -436,6 +436,23 @@ async def test_agent_session_couriers_context_and_reuses_history(
     assert first["workspace_context_supplied"] is True
     assert "hidden-value" not in str(captured[0]["system_context"])
 
+    await state.save_fact(
+        "GLOBAL_MEMORY_SHOULD_STAY_OFF",
+        scope="vscode:alpha",
+    )
+    await state.save_context_pack(
+        "vscode:alpha",
+        ContextPack(
+            session="vscode:alpha",
+            version=99,
+            mode="cpu",
+            keeps=["PRIOR_PACK_SHOULD_STAY_OFF"],
+            donts=[],
+            dropped=0,
+            item_count=1,
+        ).to_dict(),
+        version=99,
+    )
     second = await server.agent(
         "Continue the review",
         session="vscode:alpha",
@@ -444,8 +461,14 @@ async def test_agent_session_couriers_context_and_reuses_history(
     assert second["session_message_count"] == 4
     assert "Review the failure" in captured[1]["prompt"]
     assert "team response complete" in captured[1]["prompt"]
+    assert "PRIOR_PACK_SHOULD_STAY_OFF" not in captured[1]["prompt"]
+    assert "GLOBAL_MEMORY_SHOULD_STAY_OFF" not in str(
+        captured[1]["system_context"]
+    )
     assert second["memory_controls"]["use_session_history"] is True
     assert second["memory_controls"]["use_global_memory"] is False
+    assert second["memory_controls"]["session_history_message_count"] == 2
+    assert second["memory_controls"]["global_memory_fact_count"] == 0
 
 
 @pytest.mark.parametrize(
