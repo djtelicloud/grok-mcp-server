@@ -382,6 +382,73 @@ def test_execute_team_turn_offline_via_resolve_no_hive_route(monkeypatch):
     assert out["cost_usd"] == 0.0
 
 
+def test_execute_team_turn_offline_explicit_hive_is_not_swallowed(monkeypatch):
+    """Explicit hive still runs its orchestration when auto resolves local."""
+    cats = _catalogs_fixture(local_ready=True)
+    offline_calls: list[str] = []
+    hive_calls: list[str] = []
+
+    async def _cats():
+        return cats
+
+    async def _offline(
+        prompt: str, *, system_context=None, prior_continue_count=0
+    ) -> dict[str, Any]:
+        offline_calls.append(prompt)
+        return {}
+
+    async def _hive(prompt: str, **kwargs: Any) -> dict[str, Any]:
+        hive_calls.append(prompt)
+        return {
+            "text": "hive answer",
+            "model": "local-synth",
+            "resolved_plane": "local",
+            "billing_class": "local_runtime",
+            "cost_usd": 0.0,
+            "hive": {
+                "stages": {
+                    "draft": {
+                        "route": "direct",
+                        "model": "local-synth",
+                    }
+                }
+            },
+        }
+
+    monkeypatch.setattr(server, "_catalogs", _cats)
+    monkeypatch.setattr(server, "_wants_media_generation", lambda p: None)
+    monkeypatch.setattr(server, "_serve_local_offline", _offline)
+    monkeypatch.setattr(server, "_run_hive", _hive)
+
+    out = asyncio.run(
+        server._execute_team_turn(
+            prompt="review offline",
+            session=None,
+            workspace_context="",
+            workspace_label="",
+            caller_instructions="",
+            memory_scope=None,
+            use_memory=False,
+            model=None,
+            effort=None,
+            mode="auto",
+            plane="auto",
+            fallback_policy="cross_plane",
+            turns=1,
+            allow_web=False,
+            allow_x_search=False,
+            allow_code=False,
+            depth="hive",
+        )
+    )
+
+    assert offline_calls == []
+    assert hive_calls == ["review offline"]
+    assert out["depth_engaged"] == "hive"
+    assert out["orchestration"]["route"] == "hive"
+    assert out["resolved_plane"] == "local"
+
+
 def test_run_unified_local_primary_serves_offline_envelope(monkeypatch):
     """_run_unified with resolve=local returns _serve_local_offline envelope as-is."""
     cats = _catalogs_fixture(local_ready=True)
