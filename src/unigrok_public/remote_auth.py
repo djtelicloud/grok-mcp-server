@@ -400,9 +400,15 @@ async def introspect_oauth_token(token: str, required: str) -> dict[str, Any] | 
         return None
     if public_mcp_resource() not in audiences:
         return None
-    claims = dict(payload)
-    claims["unigrok_principal"] = principal
-    return claims
+    # Treat the introspection response as untrusted boundary data.  Only the
+    # fields required by the public gateway survive validation; arbitrary
+    # provider metadata must not flow into request state or logs.
+    return {
+        "active": True,
+        "scope": scopes,
+        "unigrok_principal": principal,
+        "unigrok_auth": "oauth",
+    }
 
 
 def _metadata_url(path: str, query_string: bytes) -> str | None:
@@ -441,6 +447,7 @@ class RemoteOAuthMiddleware:
 
         token = _extract_bearer(_scope_header(scope, b"authorization"))
         claims: dict[str, Any] | None = match_service_token(token)
+        auth_kind = "service_token" if claims is not None else "oauth"
         body = b""
         if path == "/mcp" and scope.get("method") == "POST":
             # Authenticate the connection before buffering a potentially large
@@ -499,14 +506,15 @@ class RemoteOAuthMiddleware:
         else:
             claims = match_service_token(token)
             if claims is not None:
+                auth_kind = "service_token"
                 granted_scopes = set(str(claims.get("scope") or "").split())
                 if not set(required.split()).issubset(granted_scopes):
                     claims = None
             else:
+                auth_kind = "oauth"
                 claims = await introspect_oauth_token(token or "", required)
         if claims is not None:
             scope["unigrok.oauth"] = claims
-            auth_kind = str(claims.get("unigrok_auth") or "oauth")
             logger.info(
                 "%s access_allowed path=%s scope=%s principal=%s",
                 auth_kind,
