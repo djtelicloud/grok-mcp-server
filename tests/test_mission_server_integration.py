@@ -429,6 +429,101 @@ async def test_terminal_reattach_repairs_crash_before_session_commit(
 
 
 @pytest.mark.asyncio
+async def test_terminal_reattach_honors_explicit_memory_false_controls(
+    mission_server: PublicStateStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    job_id = "6" * 32
+    token = "1" * 32
+    task = "Reply with exactly OK"
+    session = "recover-session-explicit-false"
+    await mission_server.append_turn(session, "PRIOR_SESSION_SENTINEL", "prior answer")
+    await mission_server.save_fact(
+        "GLOBAL_MEMORY_SENTINEL",
+        scope=session,
+        source="terminal-reattach-test",
+    )
+    captured_pack: dict[str, object] = {}
+
+    def capture_context_pack(**kwargs: object) -> None:
+        captured_pack.update(kwargs)
+        return None
+
+    monkeypatch.setattr(server, "context_pack_mode", lambda: "cpu")
+    monkeypatch.setattr(server, "build_context_pack", capture_context_pack)
+    mission_id = await _create_mission(
+        mission_server,
+        job_id=job_id,
+        token=token,
+        task=task,
+        request={
+            "task": task,
+            "acceptance": task,
+            "session": session,
+            "use_memory": True,
+            "use_session_history": False,
+            "use_global_memory": False,
+        },
+    )
+    projection_kind = f"candidate_projection:{mission_id}"
+    projection_hash = sealed_content_hash("OK", kind=projection_kind)
+    assert await mission_server.put_mission_artifact(
+        mission_id,
+        projection_hash,
+        kind=projection_kind,
+        sealed="OK",
+        projection="OK",
+        lease_token=OWNER_LEASE,
+        lease_generation=1,
+    )
+    assert await mission_server.cas_mission_status(
+        mission_id,
+        expect_status="running",
+        expect_version=0,
+        expect_lease_generation=1,
+        expect_lease_token=OWNER_LEASE,
+        new_status="verifying",
+    )
+    winner = {
+        "status": "complete",
+        "job_id": job_id,
+        "acceptance_hash": "acceptance-hash",
+        "text": "OK",
+        "mission": {"status": "complete", "committed": True},
+        "autonomy": {"committed": True},
+    }
+    await mission_server.save_agent_job(job_id, "complete", winner)
+    assert await mission_server.cas_mission_status(
+        mission_id,
+        expect_status="verifying",
+        expect_version=1,
+        expect_lease_generation=1,
+        expect_lease_token=OWNER_LEASE,
+        new_status="complete",
+        checkpoint_update={
+            "candidate_hash": sealed_content_hash("OK", kind="candidate"),
+            "candidate_projection_hash": projection_hash,
+        },
+        clear_lease=True,
+    )
+
+    first = await server.agent(continue_token=token)
+    second = await server.agent(continue_token=token)
+
+    assert first["session_turn_persisted"] is True
+    assert second["session_turn_persisted"] is True
+    assert captured_pack["history"] == []
+    assert captured_pack["facts"] is None
+    messages = await mission_server.load_messages(session)
+    assert [message["content"] for message in messages] == [
+        "PRIOR_SESSION_SENTINEL",
+        "prior answer",
+        task,
+        "OK",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_terminal_reattach_ignores_stale_running_job_projection(
     mission_server: PublicStateStore,
 ) -> None:

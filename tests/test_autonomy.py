@@ -260,7 +260,10 @@ async def test_continue_restores_original_task_not_acceptance(
     first = await server.agent(
         task="Ship the service carefully",
         acceptance="Return a checklist of deploy steps including healthz",
+        session="controls:preserve-false",
         workspace_context="## Diff\n+ critical path",
+        use_session_history=False,
+        use_global_memory=False,
         disable_tools=["web"],
     )
     assert first["status"] == "continue"
@@ -272,4 +275,6 @@ async def test_continue_restores_original_task_not_acceptance(
     assert captured.get("prompt") == "Ship the service carefully"
     assert "critical path" in str(captured.get("workspace_context") or "")
     assert captured.get("allow_web") is False
+    assert captured.get("use_session_history") is False
+    assert captured.get("use_global_memory") is False
     assert second["status"] in {"continue", "complete", "pending"}

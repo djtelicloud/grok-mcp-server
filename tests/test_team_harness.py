@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from unigrok_public import server
+from unigrok_public.context_pack import ContextPack
 from unigrok_public.harness import (
     format_session_prompt,
     is_nonanswer_completion,
@@ -94,6 +95,28 @@ def test_history_format_and_nonanswer_contract() -> None:
     assert not is_nonanswer_completion(
         "Plan:\n1. Inspect files\n2. Run tests", prompt="Give me a plan"
     )
+
+
+@pytest.mark.parametrize(
+    ("use_memory", "use_session_history", "use_global_memory", "expected"),
+    [
+        (True, True, None, (True, True)),
+        (False, True, None, (True, False)),
+        (False, False, True, (False, True)),
+        (True, True, False, (True, False)),
+    ],
+)
+def test_memory_control_resolution_preserves_inheritance_and_false(
+    use_memory: bool,
+    use_session_history: bool,
+    use_global_memory: bool | None,
+    expected: tuple[bool, bool],
+) -> None:
+    assert server._resolve_memory_controls(
+        use_memory=use_memory,
+        use_session_history=use_session_history,
+        use_global_memory=use_global_memory,
+    ) == expected
 
 
 def test_nonanswer_catches_generic_promise_preambles() -> None:
@@ -413,6 +436,23 @@ async def test_agent_session_couriers_context_and_reuses_history(
     assert first["workspace_context_supplied"] is True
     assert "hidden-value" not in str(captured[0]["system_context"])
 
+    await state.save_fact(
+        "GLOBAL_MEMORY_SHOULD_STAY_OFF",
+        scope="vscode:alpha",
+    )
+    await state.save_context_pack(
+        "vscode:alpha",
+        ContextPack(
+            session="vscode:alpha",
+            version=99,
+            mode="cpu",
+            keeps=["PRIOR_PACK_SHOULD_STAY_OFF"],
+            donts=[],
+            dropped=0,
+            item_count=1,
+        ).to_dict(),
+        version=99,
+    )
     second = await server.agent(
         "Continue the review",
         session="vscode:alpha",
@@ -421,6 +461,151 @@ async def test_agent_session_couriers_context_and_reuses_history(
     assert second["session_message_count"] == 4
     assert "Review the failure" in captured[1]["prompt"]
     assert "team response complete" in captured[1]["prompt"]
+    assert "PRIOR_PACK_SHOULD_STAY_OFF" not in captured[1]["prompt"]
+    assert "GLOBAL_MEMORY_SHOULD_STAY_OFF" not in str(
+        captured[1]["system_context"]
+    )
+    assert second["memory_controls"]["use_session_history"] is True
+    assert second["memory_controls"]["use_global_memory"] is False
+    assert second["memory_controls"]["session_history_message_count"] == 2
+    assert second["memory_controls"]["global_memory_fact_count"] == 0
+
+
+@pytest.mark.parametrize(
+    ("use_session_history", "use_global_memory", "session_name"),
+    [
+        (True, False, "memory:modes"),
+        (False, True, "memory:modes"),
+        (True, True, "memory:modes"),
+        (False, False, "memory:modes"),
+        (True, False, None),
+    ],
+)
+@pytest.mark.asyncio
+async def test_agent_memory_controls_select_inputs_independently(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    use_session_history: bool,
+    use_global_memory: bool,
+    session_name: str | None,
+) -> None:
+    state = PublicStateStore(tmp_path / "memory-controls.db")
+    await state.append_turn(
+        "memory:modes",
+        "SESSION_HISTORY_SENTINEL",
+        "prior answer",
+    )
+    await state.save_fact(
+        "GLOBAL_MEMORY_SENTINEL for current task",
+        scope="memory:modes",
+    )
+    await state.save_context_pack(
+        "memory:modes",
+        ContextPack(
+            session="memory:modes",
+            version=1,
+            mode="cpu",
+            keeps=["PRIOR_PACK_MAY_INCLUDE_GLOBAL_SENTINEL"],
+            donts=[],
+            dropped=0,
+            item_count=1,
+        ).to_dict(),
+        version=1,
+    )
+    captured_turn: dict[str, object] = {}
+    captured_pack: dict[str, object] = {}
+
+    async def fake_unified(prompt: str, **kwargs: object) -> dict:
+        captured_turn.update({"prompt": prompt, **kwargs})
+        return {
+            "text": "current answer",
+            "model": "grok-test",
+            "plane": "grok_cli_oauth",
+            "resolved_plane": "cli",
+            "cost_usd": 0.0,
+            "degraded": False,
+        }
+
+    async def fake_catalogs(*, refresh: bool = False) -> dict:
+        return {
+            "cli": {
+                "ready": True,
+                "models": ["grok-test"],
+                "default_model": "grok-test",
+            },
+            "api": {"ready": False, "models": [], "image_models": []},
+        }
+
+    async def fake_route(prompt: str, catalogs: dict) -> dict[str, str]:
+        return {"route": "direct", "specialist_prompt": prompt}
+
+    def fake_build_context_pack(**kwargs: object) -> ContextPack:
+        captured_pack.update(kwargs)
+        return ContextPack(
+            session=str(kwargs["session"]),
+            version=int(kwargs["version"]),
+            mode="cpu",
+            keeps=["PACK_BODY_SENTINEL"],
+            donts=[],
+            dropped=0,
+            item_count=1,
+            lead_notes="LEAD_NOTES_BODY_SENTINEL",
+            prefrontal="PREFRONTAL_BODY_SENTINEL",
+            pfc_loops=1,
+            pfc_points=1,
+            pfc_confidence=0.8,
+            pfc_absent="PFC_ABSENT_BODY_SENTINEL",
+            pfc_absent_confidence=0.7,
+        )
+
+    monkeypatch.setattr(server, "STATE", state)
+    monkeypatch.setattr(server, "_run_unified", fake_unified)
+    monkeypatch.setattr(server, "_catalogs", fake_catalogs)
+    monkeypatch.setattr(server, "_route_task", fake_route)
+    monkeypatch.setattr(server, "context_pack_mode", lambda: "cpu")
+    monkeypatch.setattr(server, "build_context_pack", fake_build_context_pack)
+    server._SESSION_LOCKS.clear()
+
+    result = await server.agent(
+        task="current task",
+        session=session_name,
+        use_session_history=use_session_history,
+        use_global_memory=use_global_memory,
+    )
+
+    effective_session_history = bool(session_name and use_session_history)
+    provider_prompt = str(captured_turn["prompt"])
+    system_context = str(captured_turn.get("system_context") or "")
+    assert (
+        "SESSION_HISTORY_SENTINEL" in provider_prompt
+    ) is effective_session_history
+    assert (
+        "PRIOR_PACK_MAY_INCLUDE_GLOBAL_SENTINEL" in provider_prompt
+    ) is bool(session_name and use_session_history and use_global_memory)
+    assert ("GLOBAL_MEMORY_SENTINEL" in system_context) is use_global_memory
+    if session_name:
+        assert bool(captured_pack["history"]) is use_session_history
+        assert bool(captured_pack["facts"]) is use_global_memory
+    else:
+        assert captured_pack == {}
+    assert len(await state.load_messages("memory:modes")) == (
+        4 if session_name else 2
+    )
+    assert result["memory_controls"] == {
+        "use_session_history": use_session_history,
+        "use_global_memory": use_global_memory,
+        "session_history_loaded": effective_session_history,
+        "session_history_message_count": 2 if effective_session_history else 0,
+        "global_memory_fact_count": 1 if use_global_memory else 0,
+    }
+    assert "GLOBAL_MEMORY_SENTINEL" not in str(result)
+    for memory_body in (
+        "PACK_BODY_SENTINEL",
+        "LEAD_NOTES_BODY_SENTINEL",
+        "PREFRONTAL_BODY_SENTINEL",
+        "PFC_ABSENT_BODY_SENTINEL",
+    ):
+        assert memory_body not in str(result)
 
 
 @pytest.mark.parametrize(
