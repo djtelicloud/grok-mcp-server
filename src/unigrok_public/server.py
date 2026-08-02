@@ -4446,7 +4446,7 @@ async def _execute_team_turn(
             "router_model": None,
             "router_cost_usd": 0.0,
         }
-    elif offline_local:
+    elif offline_local and depth != "hive":
         result = await _serve_local_offline(
             provider_prompt,
             system_context="\n\n".join(context_parts) or None,
@@ -4553,7 +4553,7 @@ async def _execute_team_turn(
     router_attempts = _routing_usage_attempts(routing)
     if media_block is not None:
         pass  # honest capability message already set as result
-    elif offline_local:
+    elif offline_local and depth != "hive":
         pass  # full offline serve already produced the result
     elif depth == "hive":
         try:
