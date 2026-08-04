@@ -26,6 +26,7 @@ import logging
 import os
 import re
 import secrets
+import time
 from collections.abc import Mapping
 from typing import Any
 from urllib.parse import quote, urlsplit
@@ -36,6 +37,17 @@ from starlette.responses import JSONResponse
 from .identity import principal_label
 
 logger = logging.getLogger(__name__)
+
+# Local-token auth abuse controls (in-process; resets on restart).
+_AUTH_FAIL_WINDOW_SECONDS = 60.0
+_AUTH_FAIL_MAX = 30
+_auth_failures: dict[str, list[float]] = {}
+_FORWARDED_HEADERS = (
+    b"x-forwarded-for",
+    b"x-forwarded-host",
+    b"x-forwarded-proto",
+    b"forwarded",
+)
 
 _PUBLIC_PATHS = frozenset(
     {
@@ -225,8 +237,109 @@ def local_mcp_token_configured() -> bool:
     return bool(_configured_local_mcp_digests())
 
 
+def _peer_address(scope: Mapping[str, Any]) -> str | None:
+    client = scope.get("client")
+    if not isinstance(client, (list, tuple)) or not client:
+        return None
+    host = str(client[0] or "").strip()
+    return host or None
+
+
+def _is_loopback_peer(scope: Mapping[str, Any]) -> bool:
+    host = _peer_address(scope)
+    if not host:
+        return False
+    try:
+        return bool(ipaddress.ip_address(host).is_loopback)
+    except ValueError:
+        return host.lower() in {"localhost"}
+
+
+def _host_header_is_loopback(scope: Mapping[str, Any]) -> bool:
+    raw = _scope_header(scope, b"host")
+    if not raw:
+        return False
+    host = raw.split(":", 1)[0].strip().strip("[]").lower()
+    return host in {"localhost", "127.0.0.1", "::1"}
+
+
+def _has_forwarded_headers(scope: Mapping[str, Any]) -> bool:
+    for key, _value in scope.get("headers") or []:
+        if key.lower() in _FORWARDED_HEADERS:
+            return True
+    return False
+
+
+def _trust_proxy_enabled() -> bool:
+    return os.environ.get("UNIGROK_TRUST_PROXY", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+
+
+_DOCKER_LOCAL_NETWORKS = (
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+    ipaddress.ip_network("fc00::/7"),
+)
+
+
+def _is_compose_bridge_peer(address: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    """True for typical Docker/LAN private peers (not documentation TEST-NET ranges)."""
+    if address.is_loopback or address.is_link_local:
+        return True
+    return any(address in network for network in _DOCKER_LOCAL_NETWORKS)
+
+
+def local_mcp_request_allowed(scope: Mapping[str, Any]) -> bool:
+    """Allow local tokens only from loopback-shaped traffic.
+
+    Direct loopback peers always pass. Docker Compose port-publish usually shows a
+    bridge peer IP, so RFC1918/ULA peers are accepted only when the Host header is
+    localhost/127.0.0.1 and no untrusted forwarded headers are present.
+    """
+    if _has_forwarded_headers(scope) and not _trust_proxy_enabled():
+        return False
+    if _is_loopback_peer(scope):
+        return True
+    peer = _peer_address(scope)
+    if not peer:
+        return False
+    try:
+        address = ipaddress.ip_address(peer)
+    except ValueError:
+        return False
+    return bool(_is_compose_bridge_peer(address) and _host_header_is_loopback(scope))
+
+
+def _auth_failure_key(scope: Mapping[str, Any]) -> str:
+    return _peer_address(scope) or "unknown"
+
+
+def _auth_failures_limited(scope: Mapping[str, Any]) -> bool:
+    now = time.monotonic()
+    key = _auth_failure_key(scope)
+    stamps = [stamp for stamp in _auth_failures.get(key, []) if now - stamp < _AUTH_FAIL_WINDOW_SECONDS]
+    _auth_failures[key] = stamps
+    return len(stamps) >= _AUTH_FAIL_MAX
+
+
+def _record_auth_failure(scope: Mapping[str, Any]) -> None:
+    now = time.monotonic()
+    key = _auth_failure_key(scope)
+    stamps = [stamp for stamp in _auth_failures.get(key, []) if now - stamp < _AUTH_FAIL_WINDOW_SECONDS]
+    stamps.append(now)
+    _auth_failures[key] = stamps
+
+
 def match_local_mcp_token(token: str | None) -> dict[str, Any] | None:
-    """Return synthetic auth claims for a valid local MCP token, else None."""
+    """Return synthetic auth claims for a valid local MCP token, else None.
+
+    Uses constant-time digest compares. Callers must also enforce
+    :func:`local_mcp_request_allowed` so tokens never authorize non-loopback peers.
+    """
     if is_cloudrun_runtime():
         return None
     if not token or len(token) > _SERVICE_TOKEN_MAX:
@@ -242,6 +355,7 @@ def match_local_mcp_token(token: str | None) -> dict[str, Any] | None:
             break
     if not matched:
         return None
+    # Local operator token: full public MCP capability set (not hosted admin).
     scopes = " ".join(_DEFAULT_SERVICE_SCOPES)
     return {
         "active": True,
@@ -509,8 +623,26 @@ class RemoteOAuthMiddleware:
             await self.app(scope, receive, send)
             return
 
+        if local_mcp_token_configured() and _auth_failures_limited(scope):
+            logger.warning(
+                "local_mcp_token access_denied path=%s reason=rate_limited peer=%s",
+                path,
+                _auth_failure_key(scope),
+            )
+            response = JSONResponse({"error": "too_many_auth_failures"}, status_code=429)
+            await response(scope, receive, send)
+            return
+
         token = _extract_bearer(_scope_header(scope, b"authorization"))
         claims: dict[str, Any] | None = match_local_mcp_token(token)
+        if claims is not None and not local_mcp_request_allowed(scope):
+            # Valid secret presented from a non-loopback / proxied peer — hard deny.
+            claims = None
+            logger.warning(
+                "local_mcp_token access_denied path=%s reason=non_loopback_or_forwarded peer=%s",
+                path,
+                _auth_failure_key(scope),
+            )
         if claims is None:
             claims = match_service_token(token)
         if claims is not None and claims.get("unigrok_auth") == "local_mcp_token":
@@ -528,7 +660,14 @@ class RemoteOAuthMiddleware:
                 claims = await introspect_oauth_token(token or "", "unigrok:connect")
             if claims is None:
                 required = "unigrok:connect"
-                logger.warning("oauth access_denied path=%s scope=%s", path, required)
+                if local_mcp_token_configured():
+                    _record_auth_failure(scope)
+                logger.warning(
+                    "oauth access_denied path=%s scope=%s peer=%s",
+                    path,
+                    required,
+                    _auth_failure_key(scope),
+                )
                 response = JSONResponse({"error": "unauthorized"}, status_code=401)
                 metadata = _metadata_url(path, scope.get("query_string", b""))
                 response.headers["WWW-Authenticate"] = (
@@ -576,6 +715,8 @@ class RemoteOAuthMiddleware:
                 claims = None
         else:
             claims = match_local_mcp_token(token)
+            if claims is not None and not local_mcp_request_allowed(scope):
+                claims = None
             if claims is not None:
                 auth_kind = "local_mcp_token"
                 granted_scopes = set(str(claims.get("scope") or "").split())
@@ -603,7 +744,14 @@ class RemoteOAuthMiddleware:
             await self.app(scope, receive, send)
             return
 
-        logger.warning("oauth access_denied path=%s scope=%s", path, required)
+        if local_mcp_token_configured():
+            _record_auth_failure(scope)
+        logger.warning(
+            "oauth access_denied path=%s scope=%s peer=%s",
+            path,
+            required,
+            _auth_failure_key(scope),
+        )
         response = JSONResponse({"error": "unauthorized"}, status_code=401)
         metadata = _metadata_url(path, scope.get("query_string", b""))
         if metadata:

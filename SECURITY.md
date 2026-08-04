@@ -8,9 +8,13 @@ MCP tools. That is intentional for single-operator machines.
 
 Operators who want a tighter local edge can set `UNIGROK_LOCAL_MCP_TOKEN` (or
 `UNIGROK_LOCAL_MCP_TOKEN_SHA256`). When configured, protected surfaces require a
-matching `Authorization: Bearer` header; `/healthz` and `/readyz` stay public for
-probes. Put the same Bearer value in Cursor's `~/.cursor/mcp.json` headers — never
-commit it.
+matching `Authorization: Bearer` header from loopback-shaped traffic (direct
+loopback peer, or Docker bridge/private peer with `Host: localhost` /
+`127.0.0.1`). Forwarded-proxy headers are rejected unless `UNIGROK_TRUST_PROXY=true`.
+Failed local-token auth is rate-limited per peer. `/healthz` and `/readyz` stay
+public for probes. Put the same Bearer value in Cursor's `~/.cursor/mcp.json`
+headers — never commit it. Tokens are compared via SHA-256 digests with
+constant-time equality; bearer values are never logged.
 
 Optional `UNIGROK_LOCAL_DAILY_BUDGET_USD` fails closed against aggregate telemetry
 spend for the UTC day. Host header DNS-rebinding protection is enabled on the main

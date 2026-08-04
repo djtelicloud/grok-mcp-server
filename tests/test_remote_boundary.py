@@ -63,6 +63,7 @@ async def _asgi_exchange(
     method: str = "GET",
     body_chunks: tuple[bytes, ...] = (b"",),
     headers: tuple[tuple[bytes, bytes], ...] = (),
+    client: tuple[str, int] = ("203.0.113.10", 4444),
 ) -> tuple[int, dict[str, str], bytes]:
     requests = [
         {
@@ -97,7 +98,7 @@ async def _asgi_exchange(
             "raw_path": path.encode(),
             "query_string": b"",
             "headers": list(headers),
-            "client": ("203.0.113.10", 4444),
+            "client": client,
             "server": ("mcp.example.test", 443),
         },
         receive,
@@ -898,7 +899,9 @@ async def test_local_mcp_token_denies_anonymous_and_accepts_bearer(
     monkeypatch.delenv("UNIGROK_RUNTIME", raising=False)
     monkeypatch.delenv("UNIGROK_OAUTH_INTROSPECTION_URL", raising=False)
     monkeypatch.delenv("UNIGROK_SERVICE_TOKENS", raising=False)
+    monkeypatch.delenv("UNIGROK_TRUST_PROXY", raising=False)
     monkeypatch.setenv("UNIGROK_LOCAL_MCP_TOKEN", token)
+    remote_auth._auth_failures.clear()
 
     async def app(scope: dict[str, Any], receive: Any, send: Any) -> None:
         response = JSONResponse(
@@ -910,11 +913,13 @@ async def test_local_mcp_token_denies_anonymous_and_accepts_bearer(
         await response(scope, receive, send)
 
     body = b'{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+    loopback = ("127.0.0.1", 54321)
     denied_status, _denied_headers, denied_body = await _asgi_exchange(
         remote_auth.RemoteOAuthMiddleware(app),
         path="/mcp",
         method="POST",
         body_chunks=(body,),
+        client=loopback,
     )
     assert denied_status == 401
     assert json.loads(denied_body) == {"error": "unauthorized"}
@@ -925,17 +930,46 @@ async def test_local_mcp_token_denies_anonymous_and_accepts_bearer(
         method="POST",
         body_chunks=(body,),
         headers=((b"authorization", f"Bearer {token}".encode()),),
+        client=loopback,
     )
     assert ok_status == 200
     payload = json.loads(ok_body)
     assert payload["auth"] == "local_mcp_token"
     assert payload["principal"] == "local:operator"
 
+    # Valid token from a non-loopback peer is rejected.
+    remote_status, _rh, remote_body = await _asgi_exchange(
+        remote_auth.RemoteOAuthMiddleware(app),
+        path="/mcp",
+        method="POST",
+        body_chunks=(body,),
+        headers=((b"authorization", f"Bearer {token}".encode()),),
+        client=("203.0.113.10", 4444),
+    )
+    assert remote_status == 401
+    assert json.loads(remote_body) == {"error": "unauthorized"}
+
+    # Forwarded headers without UNIGROK_TRUST_PROXY also deny loopback peers.
+    forwarded_status, _fh, forwarded_body = await _asgi_exchange(
+        remote_auth.RemoteOAuthMiddleware(app),
+        path="/mcp",
+        method="POST",
+        body_chunks=(body,),
+        headers=(
+            (b"authorization", f"Bearer {token}".encode()),
+            (b"x-forwarded-for", b"203.0.113.10"),
+        ),
+        client=loopback,
+    )
+    assert forwarded_status == 401
+    assert json.loads(forwarded_body) == {"error": "unauthorized"}
+
     # Health stays public even when the local token is configured.
     health_status, _h, _b = await _asgi_exchange(
         remote_auth.RemoteOAuthMiddleware(app),
         path="/healthz",
         method="GET",
+        client=loopback,
     )
     assert health_status == 200
 
@@ -945,3 +979,39 @@ def test_local_mcp_token_ignored_on_cloudrun(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setenv("UNIGROK_RUNTIME", "cloudrun")
     monkeypatch.setenv("UNIGROK_LOCAL_MCP_TOKEN", token)
     assert remote_auth.match_local_mcp_token(token) is None
+
+
+def test_local_mcp_request_allowed_helpers(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("UNIGROK_TRUST_PROXY", raising=False)
+    assert remote_auth.local_mcp_request_allowed(
+        {"client": ("127.0.0.1", 1), "headers": []}
+    )
+    # Docker bridge peer + loopback Host (Compose port-publish path).
+    assert remote_auth.local_mcp_request_allowed(
+        {
+            "client": ("172.18.0.1", 1),
+            "headers": [(b"host", b"localhost:4765")],
+        }
+    )
+    assert not remote_auth.local_mcp_request_allowed(
+        {"client": ("203.0.113.10", 1), "headers": [(b"host", b"localhost:4765")]}
+    )
+    assert not remote_auth.local_mcp_request_allowed(
+        {
+            "client": ("172.18.0.1", 1),
+            "headers": [(b"host", b"evil.example")],
+        }
+    )
+    assert not remote_auth.local_mcp_request_allowed(
+        {
+            "client": ("127.0.0.1", 1),
+            "headers": [(b"x-forwarded-for", b"1.2.3.4")],
+        }
+    )
+    monkeypatch.setenv("UNIGROK_TRUST_PROXY", "true")
+    assert remote_auth.local_mcp_request_allowed(
+        {
+            "client": ("127.0.0.1", 1),
+            "headers": [(b"x-forwarded-for", b"1.2.3.4")],
+        }
+    )
