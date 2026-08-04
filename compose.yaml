@@ -16,7 +16,12 @@ services:
       # Public defaults: all chat/agent tools available.
       UNIGROK_CHAT_TOOLS: ${UNIGROK_CHAT_TOOLS:-always}
       UNIGROK_SWARM: ${UNIGROK_SWARM:-active}
-      UNIGROK_DEFAULT_LEVEL: ${UNIGROK_DEFAULT_LEVEL:-max}
+      UNIGROK_DEFAULT_LEVEL: ${UNIGROK_DEFAULT_LEVEL:-high}
+      # Optional local spend ceiling (USD/day, aggregate telemetry). Unset = uncapped.
+      UNIGROK_LOCAL_DAILY_BUDGET_USD: ${UNIGROK_LOCAL_DAILY_BUDGET_USD:-}
+      # Optional local MCP shared secret. When set, Cursor must send Authorization: Bearer …
+      UNIGROK_LOCAL_MCP_TOKEN: ${UNIGROK_LOCAL_MCP_TOKEN:-}
+      UNIGROK_LOCAL_MCP_TOKEN_SHA256: ${UNIGROK_LOCAL_MCP_TOKEN_SHA256:-}
       UNIGROK_AUTH_PATH: /home/appuser/.grok/auth.json
       UNIGROK_BUILD_TIMEOUT: ${UNIGROK_BUILD_TIMEOUT:-120}
       UNIGROK_API_TIMEOUT: ${UNIGROK_API_TIMEOUT:-120}

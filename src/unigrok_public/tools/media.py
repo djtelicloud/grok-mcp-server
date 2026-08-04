@@ -4,6 +4,7 @@ from __future__ import annotations
 import base64
 import ipaddress
 import re
+import socket
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,17 +21,49 @@ def validated_file_id(value: str) -> str:
     return file_id
 
 
+def _hostname_is_blocked_name(host: str) -> bool:
+    normalized = host.lower().rstrip(".")
+    if normalized == "localhost":
+        return True
+    return normalized.endswith((".localhost", ".local", ".internal"))
+
+
+def _resolved_addresses_are_public(host: str) -> bool:
+    """Return False when DNS answers include any non-global address.
+
+    Resolution failures are inconclusive and do not reject a host that already
+    passed static public-name checks (keeps offline CI stable).
+    """
+    try:
+        answers = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
+    except OSError:
+        return True
+    for entry in answers:
+        sockaddr = entry[4]
+        if not sockaddr:
+            continue
+        try:
+            address = ipaddress.ip_address(sockaddr[0])
+        except ValueError:
+            continue
+        if not address.is_global:
+            return False
+    return True
+
+
 def validated_media_url(value: str, field: str) -> str:
     url = str(value or "").strip()
     parts = urlsplit(url)
     if parts.scheme != "https" or not parts.netloc or parts.username or parts.password:
         raise ValueError(f"{field} must be a public https URL")
     host = parts.hostname or ""
+    if not host or _hostname_is_blocked_name(host):
+        raise ValueError(f"{field} must be a public https URL")
     try:
         address = ipaddress.ip_address(host)
-    except ValueError as exc:
-        if host == "localhost" or host.endswith((".localhost", ".local")):
-            raise ValueError(f"{field} must be a public https URL") from exc
+    except ValueError:
+        if not _resolved_addresses_are_public(host):
+            raise ValueError(f"{field} must be a public https URL") from None
     else:
         if not address.is_global:
             raise ValueError(f"{field} must be a public https URL")

@@ -480,8 +480,16 @@ def test_client_onboarding_detection_and_safe_non_filesystem_fallback() -> None:
     before = hooks["entry"]["hooks"]["beforeMCPExecution"][0]
     assert before["matcher"] == "agent"
     assert "~/.cursor/hooks/before-unigrok-agent.py" in rule_paths
-    # The hook auto-allows the agent tool and defers (ask) on anything else.
+    # The hook auto-allows agent / agent_result and asks on empty or other tools.
     assert '"allow"' in server.CURSOR_AGENT_HOOK and '"ask"' in server.CURSOR_AGENT_HOOK
+    assert "if not tool:" in server.CURSOR_AGENT_HOOK
+
+    safe = server._client_onboarding_plan("cursor", "global", safe_mode=True)
+    assert safe["safe_mode"] is True
+    assert safe.get("hooks") is None
+    assert not any(
+        item["path"].endswith("before-unigrok-agent.py") for item in safe["files"]
+    )
 
 
 @pytest.mark.asyncio
@@ -1275,6 +1283,8 @@ def test_local_and_unsafe_media_urls_are_rejected() -> None:
         "file:///private/secret.png",
         "http://localhost/a.png",
         "https://127.0.0.1/a.png",
+        "https://metadata.google.internal/computeMetadata/v1/",
+        "https://something.internal/path.png",
     ):
         with pytest.raises(ValueError, match="public https URL"):
             server._validated_media_url(value, "image_url")
@@ -1282,6 +1292,20 @@ def test_local_and_unsafe_media_urls_are_rejected() -> None:
         server._validated_media_url("https://images.example.com/a.png", "image_url")
         == "https://images.example.com/a.png"
     )
+
+
+def test_media_url_rejects_dns_rebinding_to_private(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_getaddrinfo(host: str, *args: object, **kwargs: object):
+        assert host == "evil.example"
+        return [
+            (0, 0, 0, "", ("127.0.0.1", 0)),
+        ]
+
+    monkeypatch.setattr(server.media_tools.socket, "getaddrinfo", fake_getaddrinfo)
+    with pytest.raises(ValueError, match="public https URL"):
+        server._validated_media_url("https://evil.example/a.png", "image_url")
 
 
 @pytest.mark.asyncio
@@ -1348,6 +1372,11 @@ def test_per_client_auto_approve_uses_native_mechanism() -> None:
         "mcp(grok/agent_result)",
     ]
     assert ag["gemini_cli_alternative"]["entry"]["mcpServers"]["grok"]["trust"] is True
+    assert "WARNING" in ag["gemini_cli_alternative"]["note"]
+    assert ag["gemini_cli_alternative"]["whole_server_trust"] is True
+    safe_ag = server._client_onboarding_plan("antigravity", "global", safe_mode=True)
+    assert "auto_approve" not in safe_ag
+    assert safe_ag["safe_mode"] is True
     ag_proj = server._auto_approve("antigravity", "project")
     assert ag_proj["target"] == ".gemini/settings.json"
     assert ag_proj["entry"]["globalPermissionGrants"]["allow"] == [

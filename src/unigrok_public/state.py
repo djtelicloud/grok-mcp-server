@@ -1057,6 +1057,21 @@ class PublicStateStore:
             )
         )
 
+    def _get_total_cost_today_sync(self, day_start: str) -> float:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT COALESCE(SUM(cost_usd), 0) FROM telemetry WHERE created_at>=?",
+                (day_start,),
+            ).fetchone()
+        return float(row[0] if row and row[0] is not None else 0.0)
+
+    async def get_total_cost_today(self) -> float:
+        """Return this UTC day's aggregate telemetry spend across all callers."""
+        day_start = datetime.now(UTC).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        ).isoformat()
+        return float(await self._read(self._get_total_cost_today_sync, day_start))
+
     def _reclassify_telemetry_error_sync(
         self,
         telemetry_id: int,

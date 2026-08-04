@@ -1,6 +1,10 @@
 """Fail-closed auth edge for a generic remote MCP deployment.
 
-Local Docker remains loopback-first and credential-free at the gateway layer.
+Local Docker remains loopback-first. By default the gateway stays credential-free
+for trusted loopback clients. Operators may opt in to a local shared secret with
+``UNIGROK_LOCAL_MCP_TOKEN`` / ``UNIGROK_LOCAL_MCP_TOKEN_SHA256``; when set, protected
+surfaces require a matching Bearer token (same middleware path as service tokens).
+
 When ``UNIGROK_RUNTIME=cloudrun``, protected requests require either:
 
 1. Control OAuth bearer tokens validated by remote introspection, or
@@ -9,7 +13,7 @@ When ``UNIGROK_RUNTIME=cloudrun``, protected requests require either:
    GitHub Copilot cloud agent / code review.
 
 Provider keys stay server-side and are never accepted as gateway bearer
-credentials. Service tokens are not OAuth and never expand authority beyond
+credentials. Service/local tokens are not OAuth and never expand authority beyond
 this public MCP resource.
 """
 
@@ -195,9 +199,69 @@ def service_tokens_configured() -> bool:
     return bool(_configured_service_digests())
 
 
+def _configured_local_mcp_digests() -> frozenset[bytes]:
+    """Digests for optional local Compose shared secrets."""
+    digests: set[bytes] = set()
+    for raw in os.environ.get("UNIGROK_LOCAL_MCP_TOKEN", "").split(","):
+        token = raw.strip()
+        if not token:
+            continue
+        if _SERVICE_TOKEN_RE.fullmatch(token) is None:
+            logger.warning("ignoring malformed UNIGROK_LOCAL_MCP_TOKEN entry")
+            continue
+        digests.add(_digest_token(token))
+    for raw in os.environ.get("UNIGROK_LOCAL_MCP_TOKEN_SHA256", "").split(","):
+        digest_hex = raw.strip().lower()
+        if not digest_hex:
+            continue
+        if re.fullmatch(r"[0-9a-f]{64}", digest_hex) is None:
+            logger.warning("ignoring malformed UNIGROK_LOCAL_MCP_TOKEN_SHA256 entry")
+            continue
+        digests.add(bytes.fromhex(digest_hex))
+    return frozenset(digests)
+
+
+def local_mcp_token_configured() -> bool:
+    return bool(_configured_local_mcp_digests())
+
+
+def match_local_mcp_token(token: str | None) -> dict[str, Any] | None:
+    """Return synthetic auth claims for a valid local MCP token, else None."""
+    if is_cloudrun_runtime():
+        return None
+    if not token or len(token) > _SERVICE_TOKEN_MAX:
+        return None
+    allowed = _configured_local_mcp_digests()
+    if not allowed:
+        return None
+    candidate = _digest_token(token)
+    matched = False
+    for digest in allowed:
+        if secrets.compare_digest(candidate, digest):
+            matched = True
+            break
+    if not matched:
+        return None
+    scopes = " ".join(_DEFAULT_SERVICE_SCOPES)
+    return {
+        "active": True,
+        "token_type": "local_mcp",
+        "scope": scopes,
+        "iss": "unigrok:local-mcp-token",
+        "sub": "operator",
+        "aud": "local-loopback",
+        "unigrok_principal": "local:operator",
+        "unigrok_auth": "local_mcp_token",
+    }
+
+
 def auth_enforcement_active() -> bool:
-    """True when the remote edge must reject anonymous protected traffic."""
-    return bool(introspection_url()) or service_tokens_configured()
+    """True when the edge must reject anonymous protected traffic."""
+    return (
+        bool(introspection_url())
+        or service_tokens_configured()
+        or local_mcp_token_configured()
+    )
 
 
 def match_service_token(token: str | None) -> dict[str, Any] | None:
@@ -446,12 +510,19 @@ class RemoteOAuthMiddleware:
             return
 
         token = _extract_bearer(_scope_header(scope, b"authorization"))
-        claims: dict[str, Any] | None = match_service_token(token)
-        auth_kind = "service_token" if claims is not None else "oauth"
+        claims: dict[str, Any] | None = match_local_mcp_token(token)
+        if claims is None:
+            claims = match_service_token(token)
+        if claims is not None and claims.get("unigrok_auth") == "local_mcp_token":
+            auth_kind = "local_mcp_token"
+        elif claims is not None:
+            auth_kind = "service_token"
+        else:
+            auth_kind = "oauth"
         body = b""
         if path == "/mcp" and scope.get("method") == "POST":
             # Authenticate the connection before buffering a potentially large
-            # base64 file request. Service tokens resolve locally; OAuth uses
+            # base64 file request. Local/service tokens resolve locally; OAuth uses
             # Control introspection. Scope is re-checked once tools/call is known.
             if claims is None:
                 claims = await introspect_oauth_token(token or "", "unigrok:connect")
@@ -504,15 +575,22 @@ class RemoteOAuthMiddleware:
                 # lacks the tool scope — hard deny, do not re-introspect.
                 claims = None
         else:
-            claims = match_service_token(token)
+            claims = match_local_mcp_token(token)
             if claims is not None:
-                auth_kind = "service_token"
+                auth_kind = "local_mcp_token"
                 granted_scopes = set(str(claims.get("scope") or "").split())
                 if not set(required.split()).issubset(granted_scopes):
                     claims = None
             else:
-                auth_kind = "oauth"
-                claims = await introspect_oauth_token(token or "", required)
+                claims = match_service_token(token)
+                if claims is not None:
+                    auth_kind = "service_token"
+                    granted_scopes = set(str(claims.get("scope") or "").split())
+                    if not set(required.split()).issubset(granted_scopes):
+                        claims = None
+                else:
+                    auth_kind = "oauth"
+                    claims = await introspect_oauth_token(token or "", required)
         if claims is not None:
             scope["unigrok.oauth"] = claims
             logger.info(

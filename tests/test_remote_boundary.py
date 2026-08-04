@@ -877,3 +877,71 @@ async def test_service_token_works_alongside_oauth(
     payload = json.loads(response_body)
     assert payload["auth"] == "service_token"
     assert payload["principal"] == "service:github-copilot"
+
+
+def test_local_mcp_token_is_opt_in(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("UNIGROK_RUNTIME", raising=False)
+    monkeypatch.delenv("UNIGROK_LOCAL_MCP_TOKEN", raising=False)
+    monkeypatch.delenv("UNIGROK_LOCAL_MCP_TOKEN_SHA256", raising=False)
+    monkeypatch.delenv("UNIGROK_SERVICE_TOKENS", raising=False)
+    monkeypatch.delenv("UNIGROK_SERVICE_TOKEN_SHA256", raising=False)
+    monkeypatch.delenv("UNIGROK_OAUTH_INTROSPECTION_URL", raising=False)
+    assert remote_auth.local_mcp_token_configured() is False
+    assert remote_auth.auth_enforcement_active() is False
+
+
+@pytest.mark.asyncio
+async def test_local_mcp_token_denies_anonymous_and_accepts_bearer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    token = "local-loopback-token-aaaaaaaaaaaaaaaaaaaaaa"  # noqa: S105
+    monkeypatch.delenv("UNIGROK_RUNTIME", raising=False)
+    monkeypatch.delenv("UNIGROK_OAUTH_INTROSPECTION_URL", raising=False)
+    monkeypatch.delenv("UNIGROK_SERVICE_TOKENS", raising=False)
+    monkeypatch.setenv("UNIGROK_LOCAL_MCP_TOKEN", token)
+
+    async def app(scope: dict[str, Any], receive: Any, send: Any) -> None:
+        response = JSONResponse(
+            {
+                "principal": (scope.get("unigrok.oauth") or {}).get("unigrok_principal"),
+                "auth": (scope.get("unigrok.oauth") or {}).get("unigrok_auth"),
+            }
+        )
+        await response(scope, receive, send)
+
+    body = b'{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+    denied_status, _denied_headers, denied_body = await _asgi_exchange(
+        remote_auth.RemoteOAuthMiddleware(app),
+        path="/mcp",
+        method="POST",
+        body_chunks=(body,),
+    )
+    assert denied_status == 401
+    assert json.loads(denied_body) == {"error": "unauthorized"}
+
+    ok_status, _ok_headers, ok_body = await _asgi_exchange(
+        remote_auth.RemoteOAuthMiddleware(app),
+        path="/mcp",
+        method="POST",
+        body_chunks=(body,),
+        headers=((b"authorization", f"Bearer {token}".encode()),),
+    )
+    assert ok_status == 200
+    payload = json.loads(ok_body)
+    assert payload["auth"] == "local_mcp_token"
+    assert payload["principal"] == "local:operator"
+
+    # Health stays public even when the local token is configured.
+    health_status, _h, _b = await _asgi_exchange(
+        remote_auth.RemoteOAuthMiddleware(app),
+        path="/healthz",
+        method="GET",
+    )
+    assert health_status == 200
+
+
+def test_local_mcp_token_ignored_on_cloudrun(monkeypatch: pytest.MonkeyPatch) -> None:
+    token = "local-loopback-token-bbbbbbbbbbbbbbbbbbbbbb"  # noqa: S105
+    monkeypatch.setenv("UNIGROK_RUNTIME", "cloudrun")
+    monkeypatch.setenv("UNIGROK_LOCAL_MCP_TOKEN", token)
+    assert remote_auth.match_local_mcp_token(token) is None

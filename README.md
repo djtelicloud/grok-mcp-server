@@ -257,7 +257,13 @@ the instructions and templates but remains workspace-neutral.
 - Ask for an image or video without an API key and UniGrok says so plainly — it never
   fabricates a media link.
 
-See [SECURITY.md](SECURITY.md) for the complete public runtime boundary.
+Optional local hardening (see [SECURITY.md](SECURITY.md) and `example.env`):
+
+- `UNIGROK_LOCAL_MCP_TOKEN` / `_SHA256` — require Bearer auth on `/mcp` while keeping health probes public
+- `UNIGROK_LOCAL_DAILY_BUDGET_USD` — fail-closed aggregate daily metered spend ceiling
+- `grok_mcp_onboard_client(safe_mode=true)` — install plan without auto-approve hooks / whole-server trust
+
+See [SECURITY.md](SECURITY.md) for the complete public runtime boundary and local IDE threat model.
 
 ## Go deeper when you need it
 

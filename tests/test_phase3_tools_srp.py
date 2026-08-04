@@ -92,6 +92,10 @@ def test_media_validators():
         media.validated_media_url("http://example.com/a.png", "image_url")
     with pytest.raises(ValueError):
         media.validated_media_url("https://127.0.0.1/a.png", "image_url")
+    with pytest.raises(ValueError):
+        media.validated_media_url(
+            "https://metadata.google.internal/computeMetadata/v1/", "image_url"
+        )
     assert media.validated_image_count(3) == 3
     with pytest.raises(ValueError):
         media.validated_image_count(0)

@@ -1,4 +1,4 @@
-"""Fail-closed daily spend caps for authenticated hosted callers."""
+"""Fail-closed daily spend caps for authenticated hosted callers and local Compose."""
 
 from __future__ import annotations
 
@@ -9,12 +9,17 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import unquote
 
 from .identity import get_active_principal, principal_kind, principal_label
-from .remote_auth import authorization_servers, canonical_oauth_principal
+from .remote_auth import (
+    authorization_servers,
+    canonical_oauth_principal,
+    is_cloudrun_runtime,
+)
 
 if TYPE_CHECKING:
     from .state import PublicStateStore
 
 _BUDGET_ENV = "UNIGROK_CALLER_BUDGETS"
+_LOCAL_BUDGET_ENV = "UNIGROK_LOCAL_DAILY_BUDGET_USD"
 _MAX_BUDGET_BYTES = 65_536
 _MAX_BUDGET_ENTRIES = 256
 _MAX_PRINCIPAL_CHARS = 160
@@ -102,19 +107,56 @@ def load_caller_budgets() -> dict[str, float]:
     return budgets
 
 
+def load_local_daily_budget() -> float | None:
+    """Parse optional local Compose daily USD cap; None means uncapped."""
+    raw = str(os.environ.get(_LOCAL_BUDGET_ENV, "") or "").strip()
+    if not raw:
+        return None
+    try:
+        limit = float(raw)
+    except ValueError as exc:
+        raise CallerBudgetConfigurationError("invalid_local_limit") from exc
+    if not math.isfinite(limit) or limit < 0:
+        raise CallerBudgetConfigurationError("invalid_local_limit")
+    return limit
+
+
 def validate_caller_budget_configuration() -> None:
-    """Startup validation hook for the hosted runtime."""
+    """Startup validation hook for hosted and local budget env vars."""
     load_caller_budgets()
+    load_local_daily_budget()
+
+
+async def enforce_local_daily_budget(store: PublicStateStore) -> None:
+    """Reject local metered spend when the aggregate daily USD cap is hit."""
+    if is_cloudrun_runtime():
+        return
+    limit = load_local_daily_budget()
+    if limit is None:
+        return
+    try:
+        spent = float(await store.get_total_cost_today())
+    except Exception:
+        raise CallerBudgetUnavailable(
+            "Local daily budget ledger is unavailable; provider spend was denied."
+        ) from None
+    if not math.isfinite(spent) or spent < 0:
+        raise CallerBudgetUnavailable(
+            "Local daily budget ledger is invalid; provider spend was denied."
+        )
+    if spent >= limit:
+        raise CallerBudgetExceeded(
+            f"Local daily budget exhausted (${spent:.6f}/${limit:.6f})."
+        )
 
 
 async def enforce_caller_budget(store: PublicStateStore) -> None:
     """Reject provider spend when the active principal is at its daily cap.
 
-    The hot path is a no-op when the environment variable is absent. If caps
-    are configured, missing authenticated context and ledger failures deny the
-    request rather than silently re-enabling owner spend. Principals omitted
-    from a valid map retain the historical uncapped behavior.
+    Local Compose also honors ``UNIGROK_LOCAL_DAILY_BUDGET_USD`` against aggregate
+    telemetry spend. Hosted OAuth maps remain opt-in via ``UNIGROK_CALLER_BUDGETS``.
     """
+    await enforce_local_daily_budget(store)
     if not os.environ.get(_BUDGET_ENV, "").strip():
         return
     budgets = load_caller_budgets()
