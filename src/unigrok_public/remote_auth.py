@@ -318,10 +318,15 @@ def _auth_failure_key(scope: Mapping[str, Any]) -> str:
     return _peer_address(scope) or "unknown"
 
 
+def _fresh_auth_failure_stamps(key: str, now: float) -> list[float]:
+    window = _AUTH_FAIL_WINDOW_SECONDS
+    return [stamp for stamp in _auth_failures.get(key, []) if now - stamp < window]
+
+
 def _auth_failures_limited(scope: Mapping[str, Any]) -> bool:
     now = time.monotonic()
     key = _auth_failure_key(scope)
-    stamps = [stamp for stamp in _auth_failures.get(key, []) if now - stamp < _AUTH_FAIL_WINDOW_SECONDS]
+    stamps = _fresh_auth_failure_stamps(key, now)
     _auth_failures[key] = stamps
     return len(stamps) >= _AUTH_FAIL_MAX
 
@@ -329,7 +334,7 @@ def _auth_failures_limited(scope: Mapping[str, Any]) -> bool:
 def _record_auth_failure(scope: Mapping[str, Any]) -> None:
     now = time.monotonic()
     key = _auth_failure_key(scope)
-    stamps = [stamp for stamp in _auth_failures.get(key, []) if now - stamp < _AUTH_FAIL_WINDOW_SECONDS]
+    stamps = _fresh_auth_failure_stamps(key, now)
     stamps.append(now)
     _auth_failures[key] = stamps
 
