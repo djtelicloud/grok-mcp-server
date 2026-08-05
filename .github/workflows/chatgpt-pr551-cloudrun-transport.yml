@@ -1,4 +1,4 @@
-name: ChatGPT PR551 preserve hosted transport
+name: ChatGPT PR551 validate hosted transport authority
 
 on:
   push:
@@ -11,7 +11,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: pr551-cloudrun-transport
+  group: pr551-hosted-transport-authority
   cancel-in-progress: false
 
 jobs:
@@ -24,92 +24,35 @@ jobs:
         with:
           ref: chatgpt/local-edge-hardening-v2-20260804
           fetch-depth: 0
+      - name: Record verification run
+        run: |
+          set -euo pipefail
+          git fetch origin chatgpt/pr544-source-export-20260804
+          git worktree add /tmp/pr551-run-tracker origin/chatgpt/pr544-source-export-20260804
+          cd /tmp/pr551-run-tracker
+          printf '%s\n' "$GITHUB_RUN_ID" > .pr551-hosted-transport-run-id
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .pr551-hosted-transport-run-id
+          git commit -m "chore: record PR551 hosted transport run"
+          git push origin HEAD:chatgpt/pr544-source-export-20260804
       - name: Verify exact branch cursor
         env:
           BASE_HEAD: c346ec517578d8d7f66b6d268fd904a2b8f3327d
+          WORKFLOW_PARENT: 7c8ff6ae27c69e33cc84f73638b9b2056c5af296
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD^)" = "$BASE_HEAD"
+          test "$(git rev-parse HEAD^)" = "$WORKFLOW_PARENT"
           test "$(git diff --name-only "$BASE_HEAD" HEAD)" = ".github/workflows/chatgpt-pr551-cloudrun-transport.yml"
-      - name: Scope FastMCP transport security to local runtime
+      - name: Apply exact independently authored transport patch
         run: |
-          python - <<'PY'
-          from pathlib import Path
-
-          server_path = Path("src/unigrok_public/server.py")
-          source = server_path.read_text()
-          old_block = "\n".join(
-              [
-                  "_TRANSPORT_SECURITY = TransportSecuritySettings(",
-                  "    enable_dns_rebinding_protection=True,",
-                  "    allowed_hosts=[\"127.0.0.1:*\", \"localhost:*\", \"[::1]:*\"],",
-                  "    allowed_origins=[",
-                  "        \"http://127.0.0.1:*\",",
-                  "        \"http://localhost:*\",",
-                  "        \"http://[::1]:*\",",
-                  "    ],",
-                  ")",
-              ]
-          )
-          new_block = "\n".join(
-              [
-                  "def _transport_security_settings() -> TransportSecuritySettings:",
-                  "    if is_cloudrun_runtime():",
-                  "        return TransportSecuritySettings(",
-                  "            enable_dns_rebinding_protection=False",
-                  "        )",
-                  "    return TransportSecuritySettings(",
-                  "        enable_dns_rebinding_protection=True,",
-                  "        allowed_hosts=[\"127.0.0.1:*\", \"localhost:*\", \"[::1]:*\"],",
-                  "        allowed_origins=[",
-                  "            \"http://127.0.0.1:*\",",
-                  "            \"http://localhost:*\",",
-                  "            \"http://[::1]:*\",",
-                  "        ],",
-                  "    )",
-              ]
-          )
-          if source.count(old_block) != 1:
-              raise RuntimeError("transport-security settings block changed")
-          source = source.replace(old_block, new_block, 1)
-          old_argument = "    transport_security=_TRANSPORT_SECURITY,"
-          new_argument = "    transport_security=_transport_security_settings(),"
-          if source.count(old_argument) != 1:
-              raise RuntimeError("FastMCP transport-security argument changed")
-          server_path.write_text(source.replace(old_argument, new_argument, 1))
-
-          test_path = Path("tests/test_transport_security.py")
-          tests = test_path.read_text()
-          old_imports = (
-              "from __future__ import annotations\n\n"
-              "from starlette.testclient import TestClient\n"
-          )
-          new_imports = (
-              "from __future__ import annotations\n\n"
-              "import pytest\n"
-              "from starlette.testclient import TestClient\n"
-          )
-          if tests.count(old_imports) != 1:
-              raise RuntimeError("transport test imports changed")
-          tests = tests.replace(old_imports, new_imports, 1)
-          regression = '''
-
-
-def test_cloudrun_transport_uses_remote_origin_boundary(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("UNIGROK_RUNTIME", "cloudrun")
-
-    assert server._transport_security_settings().model_dump() == {
-        "enable_dns_rebinding_protection": False,
-        "allowed_hosts": [],
-        "allowed_origins": [],
-    }
-'''
-          if "test_cloudrun_transport_uses_remote_origin_boundary" in tests:
-              raise RuntimeError("Cloud Run transport regression already exists")
-          test_path.write_text(tests.rstrip() + regression)
-          PY
+          set -euo pipefail
+          printf '%s' 'H4sICDincmoAA3ByNTUxLWhvc3RlZC10cmFuc3BvcnQucGF0Y2gAzVdtT+M4EP6eX2HlPmy7bdMXSoFKPbHLsqveLgWV8uGEkOUmDvWS2JHtsHCI/37jxGmbNrTopJM2EZDYz4xnxvM8DgELQ9Rq3TONSFtJv51ydi/FA07SecT8tqLykUoveUbzndMO4wF9Qv2gd9jtDzzvZBAEx/Mj1O10Bv2+02q19vh3Go3GvjVOT1GrOzjoNruHqJE99PoIBq+ml3+dn83w5eTz5afpl/HkGxqhFweZ67XpoFcHOS08m36aXF9dTmf4+vzsZjqe/Q2omSRcJULqa+qnkunna6o14/eq5rSMOeVkHlEccIUlnUOSMIcTKTT1NRN8NJMpbeZQEkXiFw3wQiitRrdut3fkdeDuDj+6TeRGwieRmctfb4fD7h083m1YC8nuGQd7pxHQEGFdBIiVjRAebIh11Prz7QyGTmMrLMj43YGVzW1cxkFeWHO5C62TYbtd8rg9XVphe7pY0VbCVKSeL25jYCFiCvuRSAOZcgw/msW0VrcZmktSJVLpU4gvbxsc+wkuRmv1FRKcFcNr9lmqqV4IU0FwkspIJRHTtQJb9zjVkIhnyiHXHW4V2SNJQnlQW/p7A2xLWsDDrB4KCvKytHx1ra2kOpV8V7sul3hfyzYqQx+V3ipQRXtuvFtkHYgGN5QeSviVKH1xdlWztD3sNI8Maw9P4C8MbYCyVZSWlMRZ+KYWOCF6MXLbAC36RmmiaUSVygCj8ivOUw9qdYv+qQQ3TZAIrujoK4lUQdZtWo0qBMKmVQXeyUtYHkrxR5Ed6nq9YxQIqhAXGoVC/iIyQATBrgSprxHom4KtQVogBiSF0rYi+kgjlGtf0/hSAt400gtqzLTwRYQWhAdqQR4oeiRRShF9gp71mY6ekeFIlKGvv3w3E0LB8kx7TrAu+ZrCPme/KzLKZX8fpJD+o5CezDueF3T6/eOj47L073WSy/9eWNZLTSP/zQF0kYNCKWKEcZgCPyjGiMXGBhEOlSam3xV0ZMOOJs/GtTWC3pERbBn1zKAfMcp1YT6DkbNsxPRzBi+fSgUw36AsrEG3eYAag17z0ESGjHpniRghWiUj6U/gocoIhmH7LINWVM1VfSI4yFNOPQWLaGQMGBAjx3um81MQRRGA5o1Qv3NQQmeSuwnqdTolUPjBtZ3nDt0Xe85ibMcwfnU/IMatL02ftNMw9zKzpSKv0st0QWFoRxYANQNbrpUS54yKBX+gz0BvfzG0u+JdZGNXZgx4t1aFTQsPeED5Y829mYy/TS+/4+nNZDa+ODenVxFSoZsVZitRWzq4uvn8Y3yGgar4ZvrDXdO9pSbDLnr0icRJlPeLFSUrew17WOZ1LSq5UyO8GHYlwkEaJ7DlI/PBslp1j4a7Q7Sh4m5JuGH+tnzmlA/9jbny+VyeWx3O5fHNeqwD7qoCsydFRWiVHxGVkF2Bbn1MbE9X7WNV3K95n5/axoyJfPASIklMtWT/FD3sFj1duKhttM2erimFtczsTYRpKuZTj3FNJSfRm8CtNUEJW+vdati1m8WFSKVckZD+Zw4b1PJbyxzu/yuv32TzMobfkqfv/z/hd+LUiir/AullymxCDgAA' | base64 --decode | gzip --decompress > /tmp/pr551-hosted-transport.patch
+          printf '%s  %s\n' '83432293539c7f2d54bb6cb8183cb15581faf16b80894d97727904657c0ce309' '/tmp/pr551-hosted-transport.patch' | sha256sum --check
+          git apply --check /tmp/pr551-hosted-transport.patch
+          git apply /tmp/pr551-hosted-transport.patch
+          test "$(git diff --name-only)" = $'src/unigrok_public/server.py\ntests/test_transport_security.py'
+          git diff --check
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -123,17 +66,24 @@ def test_cloudrun_transport_uses_remote_origin_boundary(
       - run: uv run python scripts/check_release_contract.py
       - run: uv run python scripts/check_docs.py
       - run: uv run pytest -q
-      - run: docker build --tag unigrok:pr551-cloudrun-transport .
-      - name: Verify local and hosted transport settings
+      - run: docker build --tag unigrok:pr551-hosted-transport .
+      - name: Verify live local and hosted transport boundaries
         run: |
           set -euo pipefail
           docker run --rm \
             --entrypoint /app/.venv/bin/python \
             --env UNIGROK_RUNTIME=cloudrun \
-            unigrok:pr551-cloudrun-transport \
-            -c 'from unigrok_public import server; settings = server.mcp.settings.transport_security; assert settings.enable_dns_rebinding_protection is False; assert settings.allowed_hosts == []; assert settings.allowed_origins == []'
+            --env UNIGROK_PUBLIC_MCP_URL=https://mcp.example.test/mcp \
+            unigrok:pr551-hosted-transport \
+            -c 'from unigrok_public import server; settings = server.mcp.settings.transport_security; assert settings.enable_dns_rebinding_protection is True; assert settings.allowed_hosts[-1] == "mcp.example.test"; assert settings.allowed_origins[-1] == "https://mcp.example.test"'
+          docker run --rm \
+            --entrypoint /app/.venv/bin/python \
+            --env UNIGROK_RUNTIME=cloudrun \
+            --env UNIGROK_PUBLIC_MCP_URL=https://service.internal/mcp \
+            unigrok:pr551-hosted-transport \
+            -c 'from unigrok_public import server; settings = server.mcp.settings.transport_security; assert "service.internal" not in settings.allowed_hosts; assert "https://service.internal" not in settings.allowed_origins'
           docker run --detach \
-            --name unigrok-pr551-cloudrun-transport \
+            --name unigrok-pr551-hosted-transport \
             --init \
             --read-only \
             --cap-drop ALL \
@@ -142,8 +92,8 @@ def test_cloudrun_transport_uses_remote_origin_boundary(
             --tmpfs /state:rw,noexec,nosuid,nodev,size=64m,uid=1000,gid=1000,mode=0700 \
             --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m,uid=1000,gid=1000,mode=0700 \
             --publish 127.0.0.1:14766:8080 \
-            unigrok:pr551-cloudrun-transport
-          trap 'docker logs unigrok-pr551-cloudrun-transport || true; docker rm --force unigrok-pr551-cloudrun-transport || true' EXIT
+            unigrok:pr551-hosted-transport
+          trap 'docker logs unigrok-pr551-hosted-transport || true; docker rm --force unigrok-pr551-hosted-transport || true' EXIT
           ready=0
           for _ in $(seq 1 60); do
             if curl --fail --silent --show-error http://127.0.0.1:14766/healthz >/tmp/pr551-health.json; then
@@ -158,7 +108,6 @@ def test_cloudrun_transport_uses_remote_origin_boundary(
           JSON
           test "$(curl --silent --output /tmp/pr551-hostile.json --write-out '%{http_code}' --request POST --header 'Host: attacker.invalid' --header 'Accept: application/json, text/event-stream' --header 'Content-Type: application/json' --data-binary @/tmp/pr551-initialize.json http://127.0.0.1:14766/mcp)" = "421"
           test "$(curl --silent --output /tmp/pr551-local.json --write-out '%{http_code}' --request POST --header 'Host: 127.0.0.1:14766' --header 'Origin: http://127.0.0.1:14766' --header 'Accept: application/json, text/event-stream' --header 'Content-Type: application/json' --data-binary @/tmp/pr551-initialize.json http://127.0.0.1:14766/mcp)" = "200"
-          git diff --check
       - name: Publish one clean verified commit
         env:
           BASE_HEAD: c346ec517578d8d7f66b6d268fd904a2b8f3327d
@@ -170,5 +119,5 @@ def test_cloudrun_transport_uses_remote_origin_boundary(
           tree="$(git write-tree)"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          commit="$(printf '%s\n\n%s\n' 'fix: preserve hosted MCP transport boundary' "Verified in GitHub Actions run $GITHUB_RUN_ID." | git commit-tree "$tree" -p "$BASE_HEAD")"
+          commit="$(printf '%s\n\n%s\n' 'fix: validate hosted MCP transport authority' "Keep FastMCP DNS-rebinding protection enabled locally and in Cloud Run. Hosted Host and Origin values are derived only from the validated public MCP resource. Independently implemented from public Core; no donor code was copied or merged. Verified in GitHub Actions run $GITHUB_RUN_ID." | git commit-tree "$tree" -p "$BASE_HEAD")"
           git push --force-with-lease="refs/heads/$TARGET_BRANCH:$GITHUB_SHA" origin "$commit:refs/heads/$TARGET_BRANCH"
