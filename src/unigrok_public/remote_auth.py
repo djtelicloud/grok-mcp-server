@@ -506,6 +506,44 @@ def _oauth_unavailable_response() -> JSONResponse:
     )
 
 
+_LOCAL_PREAUTHENTICATED_SCOPE = (
+    "unigrok:connect unigrok:invoke unigrok:review unigrok:status unigrok:chat"
+)
+_LOCAL_PREAUTHENTICATED_SCOPE_SET = frozenset(
+    _LOCAL_PREAUTHENTICATED_SCOPE.split()
+)
+
+
+def _preauthenticated_local_claims(
+    scope: dict[str, Any],
+) -> dict[str, Any] | None:
+    raw = scope.get("unigrok.oauth")
+    if not isinstance(raw, dict) or raw.get("active") is not True:
+        return None
+    granted = raw.get("scope")
+    if (
+        not isinstance(granted, str)
+        or frozenset(granted.split()) != _LOCAL_PREAUTHENTICATED_SCOPE_SET
+        or raw.get("token_type") != "local"
+        or raw.get("iss") != "unigrok:local-token"
+        or raw.get("sub") != "operator"
+        or raw.get("aud") != "local-mcp"
+        or raw.get("unigrok_principal") != "local:operator"
+        or raw.get("unigrok_auth") != "local_token"
+    ):
+        return None
+    return {
+        "active": True,
+        "token_type": "local",
+        "scope": _LOCAL_PREAUTHENTICATED_SCOPE,
+        "iss": "unigrok:local-token",
+        "sub": "operator",
+        "aud": "local-mcp",
+        "unigrok_principal": "local:operator",
+        "unigrok_auth": "local_token",
+    }
+
+
 class RemoteOAuthMiddleware:
     """Pure-ASGI OAuth enforcement that preserves MCP streaming semantics."""
 
@@ -523,8 +561,11 @@ class RemoteOAuthMiddleware:
             return
 
         token = _extract_bearer(_scope_header(scope, b"authorization"))
-        claims: dict[str, Any] | None = match_service_token(token)
-        auth_kind = "service_token" if claims is not None else "oauth"
+        claims = _preauthenticated_local_claims(scope)
+        auth_kind = "local_token" if claims is not None else None
+        if claims is None:
+            claims = match_service_token(token)
+            auth_kind = "service_token" if claims is not None else "oauth"
         body = b""
         if path == "/mcp" and scope.get("method") == "POST":
             # Authenticate the connection before buffering a potentially large
