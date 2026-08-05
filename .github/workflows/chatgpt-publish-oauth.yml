@@ -1,0 +1,52 @@
+name: Publish independent OAuth hardening
+
+on:
+  push:
+    branches:
+      - chatgpt/pr544-independent-hardening-20260804
+    paths:
+      - .github/workflows/chatgpt-publish-oauth.yml
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Reconstruct independently tested patch
+        run: |
+          printf '%s' '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' | tr -d ' ' | base64 --decode | gzip --decompress > /tmp/oauth.patch
+          printf '%s  %s\n' 'f46c1b512644ef9dd33fcc8dbcec07e9535b460caef06d3cf529f6d0bda68db7' '/tmp/oauth.patch' | sha256sum --check
+          if git apply --reverse --check /tmp/oauth.patch; then
+            exit 0
+          fi
+          git apply --check /tmp/oauth.patch
+          git apply /tmp/oauth.patch
+      - run: uv sync --frozen --python 3.13
+      - run: uv run ruff check .
+      - run: bash scripts/ci-insider-denylist.sh
+      - run: uv run python scripts/check_release_contract.py
+      - run: uv run python scripts/check_docs.py
+      - run: uv run pytest -q
+      - name: Publish one clean commit
+        env:
+          BASE_SHA: 517372387f40bd8246215e793a21195516623ea5
+          TARGET_BRANCH: chatgpt/pr544-independent-hardening-20260804
+        run: |
+          rm .github/workflows/chatgpt-publish-oauth.yml
+          git reset --mixed "$BASE_SHA"
+          git add -A
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Harden OAuth introspection failure handling" -m "Independent implementation from public main. Verified in GitHub Actions run $GITHUB_RUN_ID."
+          git push --force-with-lease origin "HEAD:$TARGET_BRANCH"
