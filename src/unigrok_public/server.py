@@ -34,6 +34,7 @@ from .autonomy import (
     JOB_NEEDS_CONTINUATION,
     TERMINAL_JOB_STATUSES,
     acceptance_hash,
+    apply_continue_cream,
     artifact_hash,
     check_propose_done,
     continue_envelope,
@@ -3714,7 +3715,7 @@ async def _seal_autonomy_done(
     ):
         if key in result:
             sealed[key] = result[key]
-    sealed["proposed_text"] = answer
+    sealed = apply_continue_cream(sealed, answer)
     sealed["autonomy"]["check"] = check
     return sealed
 

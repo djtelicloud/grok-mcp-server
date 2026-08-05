@@ -120,8 +120,18 @@ def _durable_agent_payload(payload: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(safe, dict):
         return {}
     mission = safe.get("mission")
-    if isinstance(mission, dict) and mission.get("protocol") == "unigrok_mission_v2":
-        for field in ("text", "proposed_text", "review"):
+    autonomy = safe.get("autonomy")
+    mission_payload = (
+        isinstance(mission, dict)
+        and mission.get("protocol") == "unigrok_mission_v2"
+    )
+    legacy_continue = (
+        safe.get("status") == "continue"
+        and isinstance(autonomy, dict)
+        and autonomy.get("protocol") == "unigrok_continue_v1"
+    )
+    if mission_payload or legacy_continue:
+        for field in ("text", "proposed_text", "status_text", "review"):
             if field in safe:
                 safe[field] = bounded_redacted_text(safe[field])
     return safe

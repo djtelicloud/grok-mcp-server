@@ -59,8 +59,11 @@ instance-local.
 ## Handling the response
 
 Every `agent` and metered-tool result is a **status envelope** — branch on `status`
-before reading `text`. On any non-`complete` result, `text` is a progress/status
-message, not the answer.
+before reading `text`. On `pending`, `error`, and `lost`, `text` is status or failure
+information. On `continue`, hosts that render only `text` may receive the uncommitted
+`proposed_text` draft first, followed by `[continue · not committed]` and the status
+note. That draft is never final: callers must still follow `continue_token`, `gaps`, and
+`committed: false`.
 
 | `status` | Meaning | What the caller must do |
 |----------|---------|-------------------------|
