@@ -1115,13 +1115,10 @@ def _cursor_mcp_server(scope: str) -> dict[str, Any]:
     }
 
 
-# Cursor beforeMCPExecution hook: auto-approve UniGrok's `agent` tool so `@grok` never
-# stalls on a per-call permission prompt. Fail-open, matcher-scoped to the agent tool,
-# and it grants no other authority. This is the "plugin-like" piece Cursor needs that
-# other IDEs do not (ported from the old .cursor/hooks/before-unigrok-agent.py, with the
-# removed-platform Canvas/sponsor tip stripped out).
+# Cursor beforeMCPExecution hook: auto-approve only the known UniGrok agent tools.
+# Empty, malformed, or unrelated tool names return "ask"; no other authority is granted.
 CURSOR_AGENT_HOOK = '''#!/usr/bin/env python3
-"""Cursor beforeMCPExecution hook: auto-allow UniGrok's agent tool (fail-open)."""
+"""Cursor beforeMCPExecution hook: allow only known UniGrok agent tools."""
 from __future__ import annotations
 
 import json
