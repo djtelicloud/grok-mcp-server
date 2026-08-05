@@ -1,0 +1,61 @@
+name: ChatGPT PR549 reconcile OAuth dependency
+
+on:
+  push:
+    branches:
+      - chatgpt/pr544-local-edge-hardening-20260804
+    paths:
+      - .github/workflows/chatgpt-pr549-reconcile-oauth.yml
+
+permissions:
+  contents: write
+
+jobs:
+  verify-and-publish:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: chatgpt/pr544-local-edge-hardening-20260804
+          fetch-depth: 0
+      - name: Verify branch cursors
+        env:
+          LOCAL_HEAD: 68f5b2d1fd9f4362626801aaced9c5ae19683db9
+          OAUTH_HEAD: 45fe3431ecea5fad2e9dff80c6ac4eddab881659
+        run: |
+          test "$(git diff --name-only "$LOCAL_HEAD" HEAD)" = ".github/workflows/chatgpt-pr549-reconcile-oauth.yml"
+          git fetch origin chatgpt/oauth-resilience-20260804
+          test "$(git rev-parse origin/chatgpt/oauth-resilience-20260804)" = "$OAUTH_HEAD"
+      - name: Construct clean dependency merge
+        env:
+          OAUTH_HEAD: 45fe3431ecea5fad2e9dff80c6ac4eddab881659
+        run: |
+          git merge --no-commit --no-ff "$OAUTH_HEAD"
+          git rm .github/workflows/chatgpt-pr549-reconcile-oauth.yml
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --frozen --python 3.12
+      - run: uv run ruff check .
+      - run: uv run pytest -q tests/test_local_auth.py tests/test_oauth_claim_isolation.py tests/test_oauth_introspection_control_status.py tests/test_remote_auth_cancelled_outage.py tests/test_remote_boundary.py -k 'local or oauth or introspection or cancelled'
+      - run: bash scripts/ci-insider-denylist.sh
+      - run: uv run python scripts/check_release_contract.py
+      - run: uv run python scripts/check_docs.py
+      - run: uv run pytest -q
+      - run: docker build -t unigrok-pr549-oauth-reconciled .
+      - name: Publish clean two-parent merge
+        env:
+          LOCAL_HEAD: 68f5b2d1fd9f4362626801aaced9c5ae19683db9
+          OAUTH_HEAD: 45fe3431ecea5fad2e9dff80c6ac4eddab881659
+          TARGET_BRANCH: chatgpt/pr544-local-edge-hardening-20260804
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          tree="$(git write-tree)"
+          commit="$(printf '%s\n\n%s\n' 'Merge verified OAuth hardening into local boundary' "Verified in GitHub Actions run $GITHUB_RUN_ID." | git commit-tree "$tree" -p "$LOCAL_HEAD" -p "$OAUTH_HEAD")"
+          git push --force-with-lease="refs/heads/$TARGET_BRANCH:$GITHUB_SHA" origin "$commit:refs/heads/$TARGET_BRANCH"
