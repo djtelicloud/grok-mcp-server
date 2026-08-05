@@ -1,0 +1,130 @@
+name: Publish corrected atomic local daily budget
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+concurrency:
+  group: chatgpt-pr554-local-budget-corrected-20260805
+  cancel-in-progress: false
+
+jobs:
+  verify-and-publish:
+    if: github.head_ref == 'chatgpt/pr554-local-budget-corrected-20260805'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      CLEAN_PARENT: 7aebc9fd657d01dc1522ecaa922401e65cb887a1
+      SOURCE_PARENT: c436f965090e38da5b2b57d2b7ca15a35197cd89
+      TARGET_BRANCH: chatgpt/pr554-local-budget-corrected-20260805
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - name: Verify isolated cursor
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test "$(git merge-base HEAD "$CLEAN_PARENT")" = "$CLEAN_PARENT"
+          expected_bootstrap="$(printf '%s\n%s' '.github/pr554-local-budget-reentrancy.patch' '.github/workflows/chatgpt-pr554-local-budget-corrected-gate.yml')"
+          test "$(git diff --name-only "$SOURCE_PARENT" HEAD)" = "$expected_bootstrap"
+          expected_all="$(printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s' '.github/pr554-local-budget-reentrancy.patch' '.github/workflows/chatgpt-pr554-local-budget-corrected-gate.yml' 'SECURITY.md' 'compose.yaml' 'example.env' 'src/unigrok_public/caller_budget.py' 'src/unigrok_public/server.py' 'src/unigrok_public/state.py' 'tests/test_local_daily_budget.py')"
+          test "$(git diff --name-only "$CLEAN_PARENT" HEAD)" = "$expected_all"
+      - name: Apply reproduced race corrections
+        run: |
+          set -euo pipefail
+          git apply --check .github/pr554-local-budget-reentrancy.patch
+          git apply .github/pr554-local-budget-reentrancy.patch
+          git rm .github/pr554-local-budget-reentrancy.patch .github/workflows/chatgpt-pr554-local-budget-corrected-gate.yml
+          git diff --check
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --frozen --python 3.12
+      - run: uv run ruff check src/unigrok_public/server.py tests/test_local_daily_budget.py --fix
+      - run: git diff --check
+      - run: uv run ruff check .
+      - run: uv run pytest -q tests/test_local_daily_budget.py tests/test_caller_budget.py tests/test_durable_job_detach.py tests/test_public_boundary.py
+      - run: bash scripts/ci-insider-denylist.sh
+      - run: uv run python scripts/check_release_contract.py
+      - run: uv run python scripts/check_docs.py
+      - run: uv run pytest -q
+      - run: docker build --tag unigrok:local-daily-budget-corrected .
+      - name: Verify installed-image budget concurrency contract
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            --env UNIGROK_LOCAL_DAILY_BUDGET_USD=1 \
+            --entrypoint /app/.venv/bin/python \
+            unigrok:local-daily-budget-corrected \
+            -c '
+          import asyncio
+          import tempfile
+          from pathlib import Path
+          from unigrok_public import server
+          from unigrok_public.state import PublicStateStore
+
+          async def verify():
+              with tempfile.TemporaryDirectory() as directory:
+                  store = PublicStateStore(Path(directory) / "state.db")
+                  server.STATE = store
+                  server._CIRCUIT_BREAKERS = {}
+                  server._ACTIVE_CALLER_BUDGET_RESERVATION.set(None)
+
+                  outer = await server._begin_caller_budget_reservation()
+                  inner = await server._begin_caller_budget_reservation()
+                  assert outer.store is store
+                  assert inner.store is None
+                  await server._settle_budget_success(inner, {"cost_usd": 0.0})
+                  assert (await store.get_local_budget_status(1.0))["status"] == "busy"
+                  await server._settle_budget_success(outer, {"cost_usd": 0.25})
+
+                  called = False
+                  original_breaker = server._breaker_before_call
+                  def reject(_plane, _model):
+                      raise RuntimeError("circuit breaker open")
+                  async def operation():
+                      nonlocal called
+                      called = True
+                      return {"cost_usd": 0.0}
+                  server._breaker_before_call = reject
+                  try:
+                      try:
+                          await server._guarded_provider_call("api", "grok-test", operation)
+                      except RuntimeError as exc:
+                          assert str(exc) == "circuit breaker open"
+                      else:
+                          raise AssertionError("open breaker admitted provider work")
+                  finally:
+                      server._breaker_before_call = original_breaker
+                  assert called is False
+                  assert (await store.get_local_budget_status(1.0))["status"] == "ready"
+
+          asyncio.run(verify())
+          '
+      - name: Publish one clean source commit
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          git add -A
+          expected="$(printf '%s\n%s\n%s\n%s\n%s\n%s\n%s' 'SECURITY.md' 'compose.yaml' 'example.env' 'src/unigrok_public/caller_budget.py' 'src/unigrok_public/server.py' 'src/unigrok_public/state.py' 'tests/test_local_daily_budget.py')"
+          test "$(git diff --cached --name-only "$CLEAN_PARENT")" = "$expected"
+          tree="$(git write-tree)"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          commit="$(printf '%s\n\n%s\n' 'security: add race-safe atomic local daily spend guard' "Verified in GitHub Actions run $GITHUB_RUN_ID." | git commit-tree "$tree" -p "$CLEAN_PARENT")"
+          test "$(git rev-parse "$commit^")" = "$CLEAN_PARENT"
+          test "$(git diff-tree --no-commit-id --name-only -r "$commit")" = "$expected"
+          git push --force-with-lease="refs/heads/$TARGET_BRANCH:$EXPECTED_HEAD" origin "$commit:refs/heads/$TARGET_BRANCH"
