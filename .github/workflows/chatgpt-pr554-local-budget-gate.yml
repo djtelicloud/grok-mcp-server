@@ -6,6 +6,7 @@ on:
       - chatgpt/pr554-local-budget-publication-20260805
     paths:
       - .github/pr554-local-budget-apply.py
+      - .github/pr554-local-budget-bootstrap-fix.py
       - .github/workflows/chatgpt-pr554-local-budget-gate.yml
   pull_request:
     branches:
@@ -33,13 +34,14 @@ jobs:
           CLEAN_PARENT: 7aebc9fd657d01dc1522ecaa922401e65cb887a1
         run: |
           set -euo pipefail
-          expected="$(printf '%s\n%s' '.github/pr554-local-budget-apply.py' '.github/workflows/chatgpt-pr554-local-budget-gate.yml')"
+          expected="$(printf '%s\n%s\n%s' '.github/pr554-local-budget-apply.py' '.github/pr554-local-budget-bootstrap-fix.py' '.github/workflows/chatgpt-pr554-local-budget-gate.yml')"
           test "$(git diff --name-only "$CLEAN_PARENT" HEAD)" = "$expected"
       - name: Apply independently authored local budget
         run: |
           set -euo pipefail
+          python .github/pr554-local-budget-bootstrap-fix.py
           python .github/pr554-local-budget-apply.py
-          git rm .github/pr554-local-budget-apply.py .github/workflows/chatgpt-pr554-local-budget-gate.yml
+          git rm .github/pr554-local-budget-apply.py .github/pr554-local-budget-bootstrap-fix.py .github/workflows/chatgpt-pr554-local-budget-gate.yml
           git diff --check
       - uses: actions/setup-python@v5
         with:
