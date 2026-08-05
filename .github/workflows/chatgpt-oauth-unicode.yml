@@ -1,0 +1,146 @@
+name: ChatGPT OAuth Unicode Gate
+
+on:
+  push:
+    branches:
+      - chatgpt/pr544-independent-hardening-20260804
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  remediate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --frozen
+      - name: Apply malformed Unicode denial fix
+        run: |
+          python - <<'PY'
+          from __future__ import annotations
+
+          import ast
+          from pathlib import Path
+
+          source_path = Path("src/unigrok_public/remote_auth.py")
+          source = source_path.read_text(encoding="utf-8")
+          marker = "OAuth identity claims must contain valid Unicode"
+          if marker not in source:
+              tree = ast.parse(source)
+              function = next(
+                  (
+                      node
+                      for node in tree.body
+                      if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                      and node.name == "canonical_oauth_principal"
+                  ),
+                  None,
+              )
+              if function is None or not function.body or function.end_lineno is None:
+                  raise SystemExit("canonical_oauth_principal was not found")
+              body_index = 0
+              first = function.body[0]
+              if (
+                  isinstance(first, ast.Expr)
+                  and isinstance(first.value, ast.Constant)
+                  and isinstance(first.value.value, str)
+              ):
+                  body_index = 1
+              if body_index >= len(function.body):
+                  raise SystemExit("canonical_oauth_principal has no executable body")
+              start = function.body[body_index].lineno - 1
+              end = function.end_lineno
+              lines = source.splitlines(keepends=True)
+              indent = " " * (function.col_offset + 4)
+              original = lines[start:end]
+              wrapped = [f"{indent}try:\n"]
+              wrapped.extend(
+                  f"    {line}" if line.strip() else line
+                  for line in original
+              )
+              wrapped.extend(
+                  [
+                      f"{indent}except UnicodeError as exc:\n",
+                      f'{indent}    raise ValueError("{marker}") from exc\n',
+                  ]
+              )
+              lines[start:end] = wrapped
+              source_path.write_text("".join(lines), encoding="utf-8")
+
+          test_path = Path("tests/test_oauth_unicode_regression.py")
+          test_path.write_text(
+              '''from __future__ import annotations
+
+import asyncio
+import inspect
+from typing import Any
+
+import pytest
+
+from unigrok_public.remote_auth import canonical_oauth_principal
+
+
+def _malformed_arguments() -> tuple[list[Any], dict[str, Any]]:
+    args: list[Any] = []
+    kwargs: dict[str, Any] = {}
+    for parameter in inspect.signature(canonical_oauth_principal).parameters.values():
+        if parameter.kind in {
+            inspect.Parameter.VAR_POSITIONAL,
+            inspect.Parameter.VAR_KEYWORD,
+        }:
+            continue
+        name = parameter.name.lower()
+        if "claim" in name or "identity" in name or "payload" in name:
+            value: Any = {"iss": "https://issuer.example", "sub": "\\ud800"}
+        elif "issuer" in name or name == "iss":
+            value = "https://issuer.example"
+        else:
+            value = "\\ud800"
+        if parameter.kind is inspect.Parameter.KEYWORD_ONLY:
+            kwargs[parameter.name] = value
+        else:
+            args.append(value)
+    return args, kwargs
+
+
+def _invoke_malformed_claim() -> type[BaseException] | None:
+    args, kwargs = _malformed_arguments()
+    try:
+        canonical_oauth_principal(*args, **kwargs)
+    except BaseException as exc:
+        return type(exc)
+    return None
+
+
+def test_malformed_unicode_oauth_identity_is_explicit_denial() -> None:
+    args, kwargs = _malformed_arguments()
+    with pytest.raises(ValueError, match="valid Unicode"):
+        canonical_oauth_principal(*args, **kwargs)
+
+
+@pytest.mark.asyncio
+async def test_simultaneous_malformed_unicode_oauth_identities_are_consistent() -> None:
+    outcomes = await asyncio.gather(
+        *(asyncio.to_thread(_invoke_malformed_claim) for _ in range(32))
+    )
+    assert outcomes == [ValueError] * 32
+''',
+              encoding="utf-8",
+          )
+          PY
+      - run: uv run ruff check src/unigrok_public/remote_auth.py tests/test_oauth_unicode_regression.py
+      - run: uv run pytest -q tests/test_oauth_unicode_regression.py
+      - run: uv run pytest -q
+      - name: Commit verified change
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/unigrok_public/remote_auth.py tests/test_oauth_unicode_regression.py
+          git diff --cached --quiet && exit 0
+          git commit -m "fix(auth): reject malformed Unicode claims consistently"
+          git push origin HEAD:${GITHUB_REF_NAME}
