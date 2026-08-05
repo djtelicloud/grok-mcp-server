@@ -1,0 +1,120 @@
+name: Publish public media URL boundary
+
+on:
+  push:
+    branches:
+      - chatgpt/local-edge-hardening-v2-20260804
+    paths:
+      - .github/workflows/chatgpt-pr551-publish-media-boundary.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pr551-publish-media-boundary
+  cancel-in-progress: false
+
+jobs:
+  verify-and-publish:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: chatgpt/local-edge-hardening-v2-20260804
+          fetch-depth: 0
+      - name: Verify exact branch cursor
+        env:
+          CLEAN_PARENT: c346ec517578d8d7f66b6d268fd904a2b8f3327d
+        run: |
+          expected="$(printf '%s\n%s' '.github/pr551-media-boundary.patch' '.github/workflows/chatgpt-pr551-publish-media-boundary.yml')"
+          actual="$(git diff --name-only "$CLEAN_PARENT" HEAD)"
+          test "$actual" = "$expected"
+      - name: Apply independently authored media boundary
+        run: |
+          git apply --check .github/pr551-media-boundary.patch
+          git apply .github/pr551-media-boundary.patch
+          git rm .github/pr551-media-boundary.patch
+          git rm .github/workflows/chatgpt-pr551-publish-media-boundary.yml
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --frozen --python 3.12
+      - run: uv run ruff check .
+      - run: uv run pytest -q tests/test_media_url_boundary.py tests/test_phase3_tools_srp.py tests/test_public_boundary.py tests/test_local_auth.py tests/test_local_auth_failure_history.py tests/test_transport_security.py
+      - run: bash scripts/ci-insider-denylist.sh
+      - run: uv run python scripts/check_release_contract.py
+      - run: uv run python scripts/check_docs.py
+      - run: uv run pytest -q
+      - run: docker build --tag unigrok:pr551-media-boundary .
+      - name: Verify the installed image rejects non-public media targets
+        run: |
+          cat >/tmp/pr551-media-container-check.py <<'PY'
+          import asyncio
+
+          from unigrok_public.tools import media
+
+
+          async def public_resolver(_host: str, _port: int):
+              return ["93.184.216.34"]
+
+
+          async def private_resolver(_host: str, _port: int):
+              return ["127.0.0.1"]
+
+
+          async def main() -> None:
+              accepted = await media.validated_public_media_url(
+                  "https://images.example.com/a.png",
+                  "image_url",
+                  resolver=public_resolver,
+              )
+              assert accepted == "https://images.example.com/a.png"
+              for value in (
+                  "https://service.internal/a.png",
+                  "https://example.com/" + chr(0xD800),
+              ):
+                  try:
+                      media.validated_media_url(value, "image_url")
+                  except ValueError:
+                      pass
+                  else:
+                      raise AssertionError(value)
+              try:
+                  await media.validated_public_media_url(
+                      "https://images.example.com/a.png",
+                      "image_url",
+                      resolver=private_resolver,
+                  )
+              except ValueError:
+                  pass
+              else:
+                  raise AssertionError("private DNS answer accepted")
+
+
+          asyncio.run(main())
+          PY
+          docker run --rm \
+            --volume /tmp/pr551-media-container-check.py:/tmp/pr551-media-container-check.py:ro \
+            --entrypoint /app/.venv/bin/python \
+            unigrok:pr551-media-boundary \
+            /tmp/pr551-media-container-check.py
+      - run: git diff --check
+      - name: Publish one clean verified commit
+        env:
+          CLEAN_PARENT: c346ec517578d8d7f66b6d268fd904a2b8f3327d
+          TARGET_BRANCH: chatgpt/local-edge-hardening-v2-20260804
+        run: |
+          git add -A
+          tree="$(git write-tree)"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          commit="$(printf '%s\n\n%s\n' 'security: reject non-public media URL targets' "Verified in GitHub Actions run $GITHUB_RUN_ID." | git commit-tree "$tree" -p "$CLEAN_PARENT")"
+          expected="$(printf '%s\n%s\n%s' 'src/unigrok_public/server.py' 'src/unigrok_public/tools/media.py' 'tests/test_media_url_boundary.py')"
+          actual="$(git diff-tree --no-commit-id --name-only -r "$commit")"
+          test "$actual" = "$expected"
+          git push --force-with-lease="refs/heads/$TARGET_BRANCH:$GITHUB_SHA" origin "$commit:refs/heads/$TARGET_BRANCH"
