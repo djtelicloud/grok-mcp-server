@@ -1,0 +1,41 @@
+name: ChatGPT PR551 v3 review export
+
+on:
+  pull_request:
+    branches:
+      - chatgpt/oauth-resilience-20260804
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: tar --exclude=.git -czf /tmp/pr551-v3-source.tgz .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pr551-v3-source
+          path: /tmp/pr551-v3-source.tgz
+          if-no-files-found: error
+          retention-days: 1
+
+  dependencies:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --frozen --python 3.12
+      - run: tar -czf /tmp/pr551-v3-python312.tgz .venv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pr551-v3-python312
+          path: /tmp/pr551-v3-python312.tgz
+          if-no-files-found: error
+          retention-days: 1
