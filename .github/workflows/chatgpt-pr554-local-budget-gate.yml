@@ -41,6 +41,7 @@ jobs:
           set -euo pipefail
           python .github/pr554-local-budget-bootstrap-fix.py
           python .github/pr554-local-budget-apply.py
+          sed -i 's/[[:space:]]\+$//' src/unigrok_public/state.py
           git rm -f .github/pr554-local-budget-apply.py .github/pr554-local-budget-bootstrap-fix.py .github/workflows/chatgpt-pr554-local-budget-gate.yml
           git diff --check
       - uses: actions/setup-python@v5
