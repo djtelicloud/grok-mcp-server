@@ -1,0 +1,25 @@
+name: Export PR554 budget source v2
+
+on:
+  push:
+    branches:
+      - chatgpt/pr554-budget-source-export-v2-20260805
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: chatgpt/pr554-budget-source-export-v2-20260805
+          fetch-depth: 1
+      - run: tar --exclude=.git --exclude=.venv -czf /tmp/pr554-budget-source-v2.tgz .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pr554-budget-source-v2
+          path: /tmp/pr554-budget-source-v2.tgz
+          if-no-files-found: error
+          retention-days: 1
