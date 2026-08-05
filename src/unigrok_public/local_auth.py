@@ -80,7 +80,8 @@ class _FailureLimiter:
 
     def record(self, peer: str, now: float) -> bool:
         events = self._events(peer, now)
-        events.append(now)
+        if len(events) <= self.failure_limit:
+            events.append(now)
         return len(events) > self.failure_limit
 
     def clear(self, peer: str) -> None:
