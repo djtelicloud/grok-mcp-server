@@ -1,0 +1,7 @@
+observer_run=30969910548
+observer_head=ecb59b8bae7cf34b1f8599d78c56649a956a6ab0
+workflow_parent=4609ab1ffae5a7e57c1195380624a6ff921403d1
+verified_commit=4f5c9679cd805d3cfe4fa13fb64ba7bb3a2c83d0
+verified_message_begin
+chore: make bounded-history run observable
+verified_message_end
