@@ -1,4 +1,4 @@
-name: Verify and publish PR551 hosted transport boundary
+name: Verify PR551 integration transport authority
 
 on:
   push:
@@ -11,7 +11,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: pr551-hosted-transport-publisher
+  group: pr551-integration-transport
   cancel-in-progress: false
 
 jobs:
@@ -23,20 +23,23 @@ jobs:
         with:
           ref: chatgpt/pr544-source-export-20260804
           fetch-depth: 0
+      - name: Record verification run
+        run: |
+          printf '%s\n' "$GITHUB_RUN_ID" > .pr551-integration-transport-run-id
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .pr551-integration-transport-run-id
+          git commit -m "chore: record PR551 integration transport run"
+          git push
       - uses: actions/checkout@v4
         with:
-          ref: c346ec517578d8d7f66b6d268fd904a2b8f3327d
+          ref: chatgpt/pr551-integration-20260805
           path: target
           fetch-depth: 0
-      - name: Verify exact target cursor
+      - name: Verify exact integration cursor
         working-directory: target
-        env:
-          EXPECTED_TARGET_HEAD: 7c8ff6ae27c69e33cc84f73638b9b2056c5af296
-          TARGET_BRANCH: chatgpt/local-edge-hardening-v2-20260804
         run: |
           set -euo pipefail
-          git fetch origin "$TARGET_BRANCH"
-          test "$(git rev-parse "origin/$TARGET_BRANCH")" = "$EXPECTED_TARGET_HEAD"
           test "$(git rev-parse HEAD)" = "c346ec517578d8d7f66b6d268fd904a2b8f3327d"
       - name: Apply exact independently authored transport patch
         working-directory: target
@@ -68,7 +71,7 @@ jobs:
         working-directory: target
       - run: uv run pytest -q
         working-directory: target
-      - run: docker build --tag unigrok:pr551-hosted-transport .
+      - run: docker build --tag unigrok:pr551-integration-transport .
         working-directory: target
       - name: Verify live local and hosted transport boundaries
         working-directory: target
@@ -78,16 +81,16 @@ jobs:
             --entrypoint /app/.venv/bin/python \
             --env UNIGROK_RUNTIME=cloudrun \
             --env UNIGROK_PUBLIC_MCP_URL=https://mcp.example.test/mcp \
-            unigrok:pr551-hosted-transport \
+            unigrok:pr551-integration-transport \
             -c 'from unigrok_public import server; settings = server.mcp.settings.transport_security; assert settings.enable_dns_rebinding_protection is True; assert settings.allowed_hosts[-1] == "mcp.example.test"; assert settings.allowed_origins[-1] == "https://mcp.example.test"'
           docker run --rm \
             --entrypoint /app/.venv/bin/python \
             --env UNIGROK_RUNTIME=cloudrun \
             --env UNIGROK_PUBLIC_MCP_URL=https://service.internal/mcp \
-            unigrok:pr551-hosted-transport \
+            unigrok:pr551-integration-transport \
             -c 'from unigrok_public import server; settings = server.mcp.settings.transport_security; assert "service.internal" not in settings.allowed_hosts; assert "https://service.internal" not in settings.allowed_origins'
           docker run --detach \
-            --name unigrok-pr551-hosted-transport \
+            --name unigrok-pr551-integration-transport \
             --init \
             --read-only \
             --cap-drop ALL \
@@ -96,8 +99,8 @@ jobs:
             --tmpfs /state:rw,noexec,nosuid,nodev,size=64m,uid=1000,gid=1000,mode=0700 \
             --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m,uid=1000,gid=1000,mode=0700 \
             --publish 127.0.0.1:14766:8080 \
-            unigrok:pr551-hosted-transport
-          trap 'docker logs unigrok-pr551-hosted-transport || true; docker rm --force unigrok-pr551-hosted-transport || true' EXIT
+            unigrok:pr551-integration-transport
+          trap 'docker logs unigrok-pr551-integration-transport || true; docker rm --force unigrok-pr551-integration-transport || true' EXIT
           ready=0
           for _ in $(seq 1 60); do
             if curl --fail --silent --show-error http://127.0.0.1:14766/healthz >/tmp/pr551-health.json; then
@@ -112,11 +115,8 @@ jobs:
           JSON
           test "$(curl --silent --output /tmp/pr551-hostile.json --write-out '%{http_code}' --request POST --header 'Host: attacker.invalid' --header 'Accept: application/json, text/event-stream' --header 'Content-Type: application/json' --data-binary @/tmp/pr551-initialize.json http://127.0.0.1:14766/mcp)" = "421"
           test "$(curl --silent --output /tmp/pr551-local.json --write-out '%{http_code}' --request POST --header 'Host: 127.0.0.1:14766' --header 'Origin: http://127.0.0.1:14766' --header 'Accept: application/json, text/event-stream' --header 'Content-Type: application/json' --data-binary @/tmp/pr551-initialize.json http://127.0.0.1:14766/mcp)" = "200"
-      - name: Publish clean target commit
+      - name: Publish clean integration commit
         working-directory: target
-        env:
-          EXPECTED_TARGET_HEAD: 7c8ff6ae27c69e33cc84f73638b9b2056c5af296
-          TARGET_BRANCH: chatgpt/local-edge-hardening-v2-20260804
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
@@ -124,20 +124,13 @@ jobs:
           git add src/unigrok_public/server.py tests/test_transport_security.py
           git commit -m "fix: validate hosted MCP transport authority" -m "Keep FastMCP DNS-rebinding protection enabled locally and in Cloud Run. Hosted Host and Origin values are derived only from the validated public MCP resource. Independently implemented from public Core; no donor code was copied or merged. Verified in GitHub Actions run $GITHUB_RUN_ID."
           published="$(git rev-parse HEAD)"
-          git push --force-with-lease="refs/heads/$TARGET_BRANCH:$EXPECTED_TARGET_HEAD" origin "$published:refs/heads/$TARGET_BRANCH"
-          printf '%s\n' "$published" > /tmp/pr551-published-commit
-      - name: Record verification evidence
+          git push --force-with-lease="refs/heads/chatgpt/pr551-integration-20260805:c346ec517578d8d7f66b6d268fd904a2b8f3327d" origin "$published:refs/heads/chatgpt/pr551-integration-20260805"
+          printf '%s\n' "$published" > /tmp/pr551-integration-transport-head
+      - name: Record published integration head
         run: |
-          set -euo pipefail
-          {
-            printf 'run_id=%s\n' "$GITHUB_RUN_ID"
-            printf 'base_head=%s\n' 'c346ec517578d8d7f66b6d268fd904a2b8f3327d'
-            printf 'replaced_head=%s\n' '7c8ff6ae27c69e33cc84f73638b9b2056c5af296'
-            printf 'published_head=%s\n' "$(cat /tmp/pr551-published-commit)"
-            printf 'patch_sha256=%s\n' '83432293539c7f2d54bb6cb8183cb15581faf16b80894d97727904657c0ce309'
-          } > .pr551-hosted-transport-verification
+          printf '%s\n' "$(cat /tmp/pr551-integration-transport-head)" > .pr551-integration-transport-head
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add .pr551-hosted-transport-verification
-          git commit -m "chore: record PR551 hosted transport verification"
+          git add .pr551-integration-transport-head
+          git commit -m "chore: record PR551 integration transport head"
           git push
