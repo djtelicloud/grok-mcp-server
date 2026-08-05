@@ -96,8 +96,8 @@ def test_preauthenticated_local_claims_are_rebuilt_from_constants() -> None:
         "active": True,
         "token_type": "local",
         "scope": (
-            "unigrok:chat unigrok:status unigrok:review "
-            "unigrok:invoke unigrok:connect"
+            "unigrok:connect unigrok:invoke unigrok:review "
+            "unigrok:status unigrok:chat"
         ),
         "iss": "unigrok:local-token",
         "sub": "operator",
@@ -124,6 +124,39 @@ def test_preauthenticated_local_claims_are_rebuilt_from_constants() -> None:
     }
     assert claims is not raw
     assert "provider_metadata" not in claims
+
+
+@pytest.mark.parametrize(
+    "scope_value",
+    [
+        (
+            "unigrok:chat unigrok:status unigrok:review "
+            "unigrok:invoke unigrok:connect"
+        ),
+        (
+            "unigrok:connect unigrok:invoke unigrok:review "
+            "unigrok:status unigrok:chat unigrok:chat"
+        ),
+    ],
+)
+def test_preauthenticated_local_claims_require_exact_scope(
+    scope_value: str,
+) -> None:
+    raw = {
+        "active": True,
+        "token_type": "local",
+        "scope": scope_value,
+        "iss": "unigrok:local-token",
+        "sub": "operator",
+        "aud": "local-mcp",
+        "unigrok_principal": "local:operator",
+        "unigrok_auth": "local_token",
+    }
+
+    assert (
+        remote_auth._preauthenticated_local_claims({"unigrok.oauth": raw})
+        is None
+    )
 
 
 @pytest.mark.asyncio

@@ -509,9 +509,6 @@ def _oauth_unavailable_response() -> JSONResponse:
 _LOCAL_PREAUTHENTICATED_SCOPE = (
     "unigrok:connect unigrok:invoke unigrok:review unigrok:status unigrok:chat"
 )
-_LOCAL_PREAUTHENTICATED_SCOPE_SET = frozenset(
-    _LOCAL_PREAUTHENTICATED_SCOPE.split()
-)
 
 
 def _preauthenticated_local_claims(
@@ -523,7 +520,7 @@ def _preauthenticated_local_claims(
     granted = raw.get("scope")
     if (
         not isinstance(granted, str)
-        or frozenset(granted.split()) != _LOCAL_PREAUTHENTICATED_SCOPE_SET
+        or granted != _LOCAL_PREAUTHENTICATED_SCOPE
         or raw.get("token_type") != "local"
         or raw.get("iss") != "unigrok:local-token"
         or raw.get("sub") != "operator"
