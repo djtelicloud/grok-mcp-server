@@ -17,11 +17,26 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 1
-      - run: tar --exclude=.git -czf /tmp/grok-mcp-source.tgz .
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --frozen --python 3.13
+      - run: |
+          tar --exclude=.git -czf /tmp/grok-mcp-source.tgz .
+          tar -czf /tmp/grok-mcp-venv.tgz .venv
       - uses: actions/upload-artifact@v4
         with:
           name: grok-mcp-source
           path: /tmp/grok-mcp-source.tgz
+          if-no-files-found: error
+          retention-days: 1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: grok-mcp-python-env
+          path: /tmp/grok-mcp-venv.tgz
           if-no-files-found: error
           retention-days: 1
       - run: |
