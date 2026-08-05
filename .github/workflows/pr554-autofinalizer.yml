@@ -1,0 +1,439 @@
+name: PR554 autonomous finalizer
+
+on:
+  push:
+    branches:
+      - chatgpt/pr554-autofinalizer-20260805
+
+permissions:
+  actions: read
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: pr554-autofinalizer
+  cancel-in-progress: false
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TARGET_BRANCH: chatgpt/usena-public-core-security-20260805
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Read target state
+        id: state
+        run: |
+          set -euo pipefail
+          draft="$(gh pr view 554 --json isDraft --jq .isDraft)"
+          head="$(gh pr view 554 --json headRefOid --jq .headRefOid)"
+          printf 'draft=%s\n' "$draft" >> "$GITHUB_OUTPUT"
+          printf 'head=%s\n' "$head" >> "$GITHUB_OUTPUT"
+      - name: Reconstruct final candidate
+        if: steps.state.outputs.draft == 'true'
+        run: |
+          set -euo pipefail
+          git fetch origin "$TARGET_BRANCH"
+          git switch --detach "origin/$TARGET_BRANCH"
+          trigger_head="$(git rev-parse HEAD)"
+          for name in chatgpt-publish-safe-onboarding.yml chatgpt-publish-local-budget.yml; do
+            path=".github/workflows/$name"
+            commit="$(git log --all --format=%H -- "$path" | head -n 1)"
+            if test -n "$commit"; then
+              git show "$commit:$path" > "/tmp/$name"
+            fi
+          done
+          base=""
+          while IFS= read -r commit; do
+            if ! git ls-tree -r --name-only "$commit" | grep -Eq '^\.github/workflows/chatgpt-'; then
+              base="$commit"
+              break
+            fi
+          done < <(git rev-list --first-parent HEAD)
+          test -n "$base"
+          git reset --hard "$base"
+          if git fetch origin chatgpt/pr554-cloudrun-transport-publication-20260805; then
+            candidate_ref="origin/chatgpt/pr554-cloudrun-transport-publication-20260805"
+            selected=""
+            while IFS= read -r commit; do
+              subject="$(git show -s --format=%s "$commit")"
+              files="$(git diff-tree --no-commit-id --name-only -r "$commit")"
+              count="$(printf '%s\n' "$files" | sed '/^$/d' | wc -l | tr -d ' ')"
+              if printf '%s' "$subject" | grep -Eiq '(cloud run|cloudrun).*(transport|authority)|(transport|authority).*(cloud run|cloudrun)' \
+                && test "$count" -ge 1 \
+                && test "$count" -le 3 \
+                && ! printf '%s\n' "$files" | grep -Eq '^(\.github/|docs/|README|SECURITY|compose|example\.env)' \
+                && printf '%s\n' "$files" | grep -Eq '^src/unigrok_public/' \
+                && printf '%s\n' "$files" | grep -Eq '^tests/'; then
+                selected="$commit"
+                break
+              fi
+            done < <(git rev-list "$candidate_ref" --not "$base")
+            if test -n "$selected"; then
+              selected_patch="$(git show "$selected" | git patch-id --stable | awk '{print $1}')"
+              existing="$(git log -p --format= HEAD | git patch-id --stable | awk '{print $1}')"
+              if ! printf '%s\n' "$existing" | grep -Fxq "$selected_patch"; then
+                git cherry-pick "$selected"
+              fi
+            fi
+          fi
+          printf '%s\n' "$trigger_head" > /tmp/target-trigger-head
+      - name: Recover safer onboarding
+        if: steps.state.outputs.draft == 'true'
+        run: |
+          set -euo pipefail
+          if test ! -f src/unigrok_public/onboarding_policy.py; then
+            test -s /tmp/chatgpt-publish-safe-onboarding.yml
+            python - <<'PY'
+          from __future__ import annotations
+
+          import textwrap
+          from pathlib import Path
+
+          workflow = Path("/tmp/chatgpt-publish-safe-onboarding.yml").read_text(
+              encoding="utf-8"
+          )
+          marker = "      - name: Apply safe onboarding implementation\n"
+          start = workflow.index(marker)
+          start = workflow.index("          python - <<'PY'\n", start)
+          start += len("          python - <<'PY'\n")
+          end = workflow.index("\n          PY", start)
+          exec(
+              compile(
+                  textwrap.dedent(workflow[start:end]),
+                  "safe-onboarding-recovery",
+                  "exec",
+              ),
+              {},
+          )
+          PY
+          fi
+      - name: Recover local budget admission
+        if: steps.state.outputs.draft == 'true'
+        run: |
+          set -euo pipefail
+          if test ! -f tests/test_local_daily_budget.py; then
+            test -s /tmp/chatgpt-publish-local-budget.yml
+            python - <<'PY'
+          from __future__ import annotations
+
+          import textwrap
+          from pathlib import Path
+
+          workflow = Path("/tmp/chatgpt-publish-local-budget.yml").read_text(
+              encoding="utf-8"
+          )
+          marker = "      - name: Apply local budget implementation\n"
+          start = workflow.index(marker)
+          start = workflow.index("          python - <<'PY'\n", start)
+          start += len("          python - <<'PY'\n")
+          end = workflow.index("\n          PY", start)
+          exec(
+              compile(
+                  textwrap.dedent(workflow[start:end]),
+                  "local-budget-recovery",
+                  "exec",
+              ),
+              {},
+          )
+          PY
+          fi
+      - name: Validate source and run focused security suite
+        if: steps.state.outputs.draft == 'true'
+        run: |
+          set -euo pipefail
+          test -f src/unigrok_public/local_auth.py
+          test -f src/unigrok_public/onboarding_policy.py
+          test -f tests/test_local_auth.py
+          test -f tests/test_safe_onboarding.py
+          test -f tests/test_local_daily_budget.py
+          ! find .github/workflows -maxdepth 1 -type f -name 'chatgpt-*' -print -quit | grep -q .
+          python -m compileall -q src tests
+          uv sync --frozen
+          uv run ruff check .
+          uv run pytest -q \
+            tests/test_local_auth.py \
+            tests/test_safe_onboarding.py \
+            tests/test_local_daily_budget.py \
+            tests/test_oauth_claim_isolation.py \
+            tests/test_oauth_introspection_control_status.py \
+            tests/test_remote_auth_cancelled_outage.py \
+            tests/test_remote_boundary.py
+          bash scripts/ci-insider-denylist.sh
+          uv run python scripts/check_release_contract.py
+          uv run python scripts/check_docs.py
+          uv run pytest -q | tee /tmp/pytest.log
+          git diff --check
+      - name: Build and smoke exact image
+        if: steps.state.outputs.draft == 'true'
+        run: |
+          set -euo pipefail
+          docker build --tag unigrok:pr554-final .
+          cleanup() {
+            docker rm -f pr554-open pr554-protected pr554-cloud >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          docker run -d --name pr554-open \
+            -p 127.0.0.1:4765:4765 \
+            -e UNIGROK_HOST=0.0.0.0 \
+            -e UNIGROK_PORT=4765 \
+            -e PORT=4765 \
+            unigrok:pr554-final
+          for _ in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:4765/healthz >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:4765/healthz >/dev/null
+          ready="$(curl -sS -o /tmp/ready.json -w '%{http_code}' http://127.0.0.1:4765/readyz)"
+          test "$ready" = 200 || test "$ready" = 503
+          uv run python - <<'PY'
+          from __future__ import annotations
+
+          import json
+
+          import httpx
+
+
+          def payload(response: httpx.Response) -> dict:
+              content_type = response.headers.get("content-type", "")
+              if "text/event-stream" not in content_type:
+                  return response.json()
+              for line in response.text.splitlines():
+                  if line.startswith("data:"):
+                      value = json.loads(line[5:].strip())
+                      if isinstance(value, dict):
+                          return value
+              raise RuntimeError("MCP response contained no data event")
+
+
+          def catalog(port: int, token: str | None = None) -> int:
+              headers = {"Accept": "application/json, text/event-stream"}
+              if token:
+                  headers["Authorization"] = f"Bearer {token}"
+              with httpx.Client(timeout=20, headers=headers) as client:
+                  initialized = client.post(
+                      f"http://127.0.0.1:{port}/mcp",
+                      json={
+                          "jsonrpc": "2.0",
+                          "id": 1,
+                          "method": "initialize",
+                          "params": {
+                              "protocolVersion": "2025-06-18",
+                              "capabilities": {},
+                              "clientInfo": {"name": "gate", "version": "1"},
+                          },
+                      },
+                  )
+                  initialized.raise_for_status()
+                  session = initialized.headers.get("mcp-session-id")
+                  request_headers = dict(headers)
+                  if session:
+                      request_headers["Mcp-Session-Id"] = session
+                  client.post(
+                      f"http://127.0.0.1:{port}/mcp",
+                      headers=request_headers,
+                      json={"jsonrpc": "2.0", "method": "notifications/initialized"},
+                  )
+                  listed = client.post(
+                      f"http://127.0.0.1:{port}/mcp",
+                      headers=request_headers,
+                      json={"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+                  )
+                  listed.raise_for_status()
+                  tools = payload(listed).get("result", {}).get("tools", [])
+                  if len(tools) < 20:
+                      raise RuntimeError(f"unexpected tool count: {len(tools)}")
+                  return len(tools)
+
+
+          count = catalog(4765)
+          runtime = httpx.get("http://127.0.0.1:4765/runtimez", timeout=20).json()
+          expected = runtime.get("tool_count")
+          if isinstance(expected, int) and expected != count:
+              raise RuntimeError(f"runtime/catalog mismatch: {expected} != {count}")
+          PY
+          token='local-security-test-token-0123456789abcdef'
+          docker run -d --name pr554-protected \
+            -p 127.0.0.1:4766:4765 \
+            -e UNIGROK_HOST=0.0.0.0 \
+            -e UNIGROK_PORT=4765 \
+            -e PORT=4765 \
+            -e UNIGROK_LOCAL_MCP_TOKEN="$token" \
+            unigrok:pr554-final
+          for _ in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:4766/healthz >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:4766/healthz >/dev/null
+          anonymous="$(curl -sS -o /tmp/anonymous.json -w '%{http_code}' \
+            -X POST http://127.0.0.1:4766/mcp \
+            -H 'content-type: application/json' \
+            -H 'accept: application/json, text/event-stream' \
+            --data '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"gate","version":"1"}}}')"
+          test "$anonymous" = 401
+          forwarded="$(curl -sS -o /tmp/forwarded.json -w '%{http_code}' \
+            -X POST http://127.0.0.1:4766/mcp \
+            -H "authorization: Bearer $token" \
+            -H 'x-forwarded-for: 127.0.0.1' \
+            -H 'content-type: application/json' \
+            -H 'accept: application/json, text/event-stream' \
+            --data '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"gate","version":"1"}}}')"
+          test "$forwarded" = 403
+          TOKEN="$token" uv run python - <<'PY'
+          from __future__ import annotations
+
+          import json
+          import os
+
+          import httpx
+
+
+          headers = {
+              "Accept": "application/json, text/event-stream",
+              "Authorization": f"Bearer {os.environ['TOKEN']}",
+          }
+          with httpx.Client(timeout=20, headers=headers) as client:
+              initialized = client.post(
+                  "http://127.0.0.1:4766/mcp",
+                  json={
+                      "jsonrpc": "2.0",
+                      "id": 1,
+                      "method": "initialize",
+                      "params": {
+                          "protocolVersion": "2025-06-18",
+                          "capabilities": {},
+                          "clientInfo": {"name": "gate", "version": "1"},
+                      },
+                  },
+              )
+              initialized.raise_for_status()
+              session = initialized.headers.get("mcp-session-id")
+              request_headers = dict(headers)
+              if session:
+                  request_headers["Mcp-Session-Id"] = session
+              client.post(
+                  "http://127.0.0.1:4766/mcp",
+                  headers=request_headers,
+                  json={"jsonrpc": "2.0", "method": "notifications/initialized"},
+              )
+              listed = client.post(
+                  "http://127.0.0.1:4766/mcp",
+                  headers=request_headers,
+                  json={"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+              )
+              listed.raise_for_status()
+              body = listed.text
+              if "text/event-stream" in listed.headers.get("content-type", ""):
+                  body = next(
+                      line[5:].strip()
+                      for line in body.splitlines()
+                      if line.startswith("data:")
+                  )
+              tools = json.loads(body).get("result", {}).get("tools", [])
+              if len(tools) < 20:
+                  raise RuntimeError("protected MCP catalog is incomplete")
+          PY
+          docker run -d --name pr554-cloud \
+            -p 127.0.0.1:4767:4765 \
+            -e UNIGROK_HOST=0.0.0.0 \
+            -e UNIGROK_PORT=4765 \
+            -e PORT=4765 \
+            -e UNIGROK_RUNTIME=cloudrun \
+            -e UNIGROK_PUBLIC_MCP_URL=https://mcp.example.test/mcp \
+            -e UNIGROK_OAUTH_AUTHORIZATION_SERVERS=https://auth.example.test \
+            -e UNIGROK_OAUTH_INTROSPECTION_URL=https://auth.example.test/oauth/introspect \
+            -e UNIGROK_OAUTH_SCOPES=unigrok:connect,unigrok:invoke,unigrok:review,unigrok:status,unigrok:chat \
+            -e XAI_API_KEY=xai-test-not-a-real-key \
+            unigrok:pr554-final
+          for _ in $(seq 1 60); do
+            cloud_health="$(curl -sS -o /tmp/cloud-health.json -w '%{http_code}' \
+              -H 'host: mcp.example.test' http://127.0.0.1:4767/healthz || true)"
+            if test "$cloud_health" = 200; then
+              break
+            fi
+            sleep 1
+          done
+          test "$cloud_health" = 200
+          allowed="$(curl -sS -o /tmp/cloud-allowed.json -w '%{http_code}' \
+            -X POST http://127.0.0.1:4767/mcp \
+            -H 'host: mcp.example.test' \
+            -H 'origin: https://mcp.example.test' \
+            -H 'authorization: Bearer synthetic-token' \
+            -H 'content-type: application/json' \
+            -H 'accept: application/json, text/event-stream' \
+            --data '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"gate","version":"1"}}}')"
+          test "$allowed" != 403
+          test "$allowed" != 421
+          denied="$(curl -sS -o /tmp/cloud-denied.json -w '%{http_code}' \
+            -X POST http://127.0.0.1:4767/mcp \
+            -H 'host: mcp.example.test' \
+            -H 'origin: https://attacker.example' \
+            -H 'authorization: Bearer synthetic-token' \
+            -H 'content-type: application/json' \
+            -H 'accept: application/json, text/event-stream' \
+            --data '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"gate","version":"1"}}}')"
+          test "$denied" = 403
+      - name: Publish target and request human review
+        if: steps.state.outputs.draft == 'true'
+        run: |
+          set -euo pipefail
+          trigger_head="$(cat /tmp/target-trigger-head)"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if ! git diff --cached --quiet; then
+            git commit -m "Complete public Core security boundary"
+          fi
+          final_head="$(git rev-parse HEAD)"
+          test -z "$(git ls-tree -r --name-only HEAD | grep -E '^\.github/workflows/chatgpt-' || true)"
+          git push --force-with-lease=refs/heads/$TARGET_BRANCH:"$trigger_head" origin HEAD:refs/heads/$TARGET_BRANCH
+          summary="$(grep -E '[0-9]+ passed' /tmp/pytest.log | tail -n 1 | sed 's/^[[:space:]]*//')"
+          cat > /tmp/body.md <<EOF
+          ## Final security scope
+
+          PR #554 contains the independently authored OAuth resilience, local bearer boundary, bounded abuse controls, Host/Origin rebinding protection, bounded media DNS validation, safe onboarding mode, and fail-closed local daily metered-spend admission.
+
+          ## Exact-tree verification
+
+          Autonomous gate ${GITHUB_RUN_ID} verified head \`${final_head}\` with frozen dependency sync, Ruff, focused security regressions, repository contracts, the complete suite (**${summary}**), Docker, live no-token and bearer-protected MCP catalog checks, forwarded-header denial, and configured Cloud Run Host/Origin checks.
+
+          ## Provenance
+
+          Thanks to Curtis (\`cfrat33\`). PR #544 supplied donor security ideas. No donor commits, files, patches, or branch code were merged, copied, cherry-picked, or approved.
+
+          ## Merge state
+
+          Ready for independent human approval. Do not merge until the required reviewer and protected-branch checks are satisfied.
+          EOF
+          sed -i 's/^          //' /tmp/body.md
+          gh pr edit 554 --body-file /tmp/body.md
+          gh pr ready 554
+          gh pr comment 554 --body "Exact-head security gate passed on \\`${final_head}\\`. Human approval is now required before merge."
+          gh pr edit 554 --add-reviewer Copilot || true
+      - name: Close superseded drafts
+        if: success()
+        run: |
+          set -euo pipefail
+          for pr in 548 549 550 551 552 553 555; do
+            state="$(gh pr view "$pr" --json state --jq .state 2>/dev/null || true)"
+            if test "$state" = OPEN; then
+              gh pr comment "$pr" --body "Superseded by finalized security candidate PR #554. Closing without merge."
+              gh pr close "$pr"
+            fi
+          done
+          gh pr comment 544 --body "Thanks, Curtis. The independent reconstruction is ready for human review in PR #554. PR #544 remains credited as donor research; no donor branch code was merged, copied, or cherry-picked."
+      - name: Record autonomous failure
+        if: failure()
+        run: |
+          gh pr comment 554 --body "Autonomous final gate did not complete in run ${GITHUB_RUN_ID}. The PR remains draft and must not be merged."
