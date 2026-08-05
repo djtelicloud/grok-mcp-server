@@ -1631,15 +1631,42 @@ PROJECT_ONBOARDING = {
     },
 }
 
-_TRANSPORT_SECURITY = TransportSecuritySettings(
-    enable_dns_rebinding_protection=True,
-    allowed_hosts=["127.0.0.1:*", "localhost:*", "[::1]:*"],
-    allowed_origins=[
-        "http://127.0.0.1:*",
-        "http://localhost:*",
-        "http://[::1]:*",
-    ],
-)
+_LOOPBACK_TRANSPORT_HOSTS = ["127.0.0.1:*", "localhost:*", "[::1]:*"]
+_LOOPBACK_TRANSPORT_ORIGINS = [
+    "http://127.0.0.1:*",
+    "http://localhost:*",
+    "http://[::1]:*",
+]
+
+
+def _transport_security_settings() -> TransportSecuritySettings:
+    allowed_hosts = list(_LOOPBACK_TRANSPORT_HOSTS)
+    allowed_origins = list(_LOOPBACK_TRANSPORT_ORIGINS)
+    if is_cloudrun_runtime():
+        resource = public_mcp_resource()
+        if resource:
+            parsed = urlsplit(resource)
+            host = str(parsed.hostname or "").lower().rstrip(".")
+            if host:
+                authority_host = f"[{host}]" if ":" in host else host
+                port = parsed.port
+                if port in (None, 443):
+                    allowed_hosts.extend([authority_host, f"{authority_host}:443"])
+                    allowed_origins.extend(
+                        [f"https://{authority_host}", f"https://{authority_host}:443"]
+                    )
+                else:
+                    authority = f"{authority_host}:{port}"
+                    allowed_hosts.append(authority)
+                    allowed_origins.append(f"https://{authority}")
+    return TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=allowed_hosts,
+        allowed_origins=allowed_origins,
+    )
+
+
+_TRANSPORT_SECURITY = _transport_security_settings()
 
 
 mcp = FastMCP(

@@ -632,12 +632,33 @@ class RemoteOAuthMiddleware:
         await response(scope, receive, send)
 
 
+def _public_resource_origins() -> set[str]:
+    if not is_cloudrun_runtime():
+        return set()
+    resource = public_mcp_resource()
+    if not resource:
+        return set()
+    parsed = urlsplit(resource)
+    host = str(parsed.hostname or "").lower().rstrip(".")
+    if not host:
+        return set()
+    authority_host = f"[{host}]" if ":" in host else host
+    if parsed.port in (None, 443):
+        return {
+            f"https://{authority_host}",
+            f"https://{authority_host}:443",
+        }
+    return {f"https://{authority_host}:{parsed.port}"}
+
+
 def _allowed_origins() -> set[str]:
-    return {
+    allowed = {
         item.strip().rstrip("/")
         for item in os.environ.get("UNIGROK_ALLOWED_ORIGINS", "").split(",")
         if item.strip()
     }
+    allowed.update(_public_resource_origins())
+    return allowed
 
 
 def _origin_allowed(origin: str | None) -> bool:
