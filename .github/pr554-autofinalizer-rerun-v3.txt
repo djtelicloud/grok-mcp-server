@@ -1,0 +1,1 @@
+rerun with installed-image boundary smoke
