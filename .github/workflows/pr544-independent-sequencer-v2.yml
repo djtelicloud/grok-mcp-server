@@ -1,0 +1,140 @@
+name: PR544 independent sequencer v2
+
+on:
+  push:
+    branches:
+      - chatgpt/pr544-finalizer-20260804-v4
+    paths:
+      - .github/workflows/pr544-independent-sequencer-v2.yml
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: pr544-independent-sequencer-v2
+  cancel-in-progress: false
+
+env:
+  RUNNER_BRANCH: chatgpt/pr544-finalizer-20260804-v4
+  RECOVERY_WORKFLOW: pr544-independent-oauth-recovery-v2.yml
+  SUPERVISOR_WORKFLOW: pr544-independent-final-supervisor.yml
+
+jobs:
+  sequence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - name: Ensure OAuth recovery succeeds
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          run_id="$(
+            gh run list \
+              --repo "$GITHUB_REPOSITORY" \
+              --workflow "$RECOVERY_WORKFLOW" \
+              --branch "$RUNNER_BRANCH" \
+              --limit 1 \
+              --json databaseId \
+              --jq '.[0].databaseId // empty'
+          )"
+          if [ -z "$run_id" ]; then
+            printf '%s\n' "OAuth recovery workflow run not found" >&2
+            exit 1
+          fi
+          status="$(gh run view "$run_id" --repo "$GITHUB_REPOSITORY" --json status --jq '.status')"
+          conclusion="$(gh run view "$run_id" --repo "$GITHUB_REPOSITORY" --json conclusion --jq '.conclusion // ""')"
+          if [ "$status" != completed ]; then
+            set +e
+            gh run watch "$run_id" --repo "$GITHUB_REPOSITORY" --exit-status --interval 10
+            watch_exit=$?
+            set -e
+            conclusion="$(gh run view "$run_id" --repo "$GITHUB_REPOSITORY" --json conclusion --jq '.conclusion // ""')"
+            if [ "$watch_exit" -eq 0 ] && [ "$conclusion" = success ]; then
+              printf 'RECOVERY_RUN_ID=%s\n' "$run_id" >> "$GITHUB_ENV"
+              exit 0
+            fi
+          elif [ "$conclusion" = success ]; then
+            printf 'RECOVERY_RUN_ID=%s\n' "$run_id" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          previous_attempt="$(gh run view "$run_id" --repo "$GITHUB_REPOSITORY" --json attempt --jq '.attempt')"
+          gh run rerun "$run_id" --repo "$GITHUB_REPOSITORY"
+          deadline=$((SECONDS + 10800))
+          while true; do
+            current_json="$(gh run view "$run_id" --repo "$GITHUB_REPOSITORY" --json attempt,status,conclusion)"
+            current_attempt="$(printf '%s' "$current_json" | jq -r '.attempt')"
+            current_status="$(printf '%s' "$current_json" | jq -r '.status')"
+            current_conclusion="$(printf '%s' "$current_json" | jq -r '.conclusion // ""')"
+            if [ "$current_attempt" -gt "$previous_attempt" ] && [ "$current_status" = completed ]; then
+              if [ "$current_conclusion" != success ]; then
+                printf 'OAuth recovery attempt %s concluded %s\n' "$current_attempt" "$current_conclusion" >&2
+                exit 1
+              fi
+              break
+            fi
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              printf '%s\n' "OAuth recovery rerun timed out" >&2
+              exit 1
+            fi
+            sleep 10
+          done
+          printf 'RECOVERY_RUN_ID=%s\n' "$run_id" >> "$GITHUB_ENV"
+
+      - name: Ensure final supervisor succeeds after recovery
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          run_id="$(
+            gh run list \
+              --repo "$GITHUB_REPOSITORY" \
+              --workflow "$SUPERVISOR_WORKFLOW" \
+              --branch "$RUNNER_BRANCH" \
+              --limit 1 \
+              --json databaseId \
+              --jq '.[0].databaseId // empty'
+          )"
+          if [ -z "$run_id" ]; then
+            printf '%s\n' "final supervisor workflow run not found" >&2
+            exit 1
+          fi
+          previous_attempt="$(gh run view "$run_id" --repo "$GITHUB_REPOSITORY" --json attempt --jq '.attempt')"
+          status="$(gh run view "$run_id" --repo "$GITHUB_REPOSITORY" --json status --jq '.status')"
+          if [ "$status" != completed ]; then
+            set +e
+            gh run watch "$run_id" --repo "$GITHUB_REPOSITORY" --exit-status --interval 10
+            set -e
+            previous_attempt="$(gh run view "$run_id" --repo "$GITHUB_REPOSITORY" --json attempt --jq '.attempt')"
+          fi
+          gh run rerun "$run_id" --repo "$GITHUB_REPOSITORY"
+          deadline=$((SECONDS + 7200))
+          while true; do
+            current_json="$(gh run view "$run_id" --repo "$GITHUB_REPOSITORY" --json attempt,status,conclusion)"
+            current_attempt="$(printf '%s' "$current_json" | jq -r '.attempt')"
+            current_status="$(printf '%s' "$current_json" | jq -r '.status')"
+            current_conclusion="$(printf '%s' "$current_json" | jq -r '.conclusion // ""')"
+            if [ "$current_attempt" -gt "$previous_attempt" ] && [ "$current_status" = completed ]; then
+              if [ "$current_conclusion" != success ]; then
+                printf 'final supervisor attempt %s concluded %s\n' "$current_attempt" "$current_conclusion" >&2
+                exit 1
+              fi
+              break
+            fi
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              printf '%s\n' "final supervisor rerun timed out" >&2
+              exit 1
+            fi
+            sleep 10
+          done
+          printf 'SUPERVISOR_RUN_ID=%s\n' "$run_id" >> "$GITHUB_ENV"
+
+      - name: Write sequencing summary
+        run: |
+          set -euo pipefail
+          {
+            printf '## PR544 independent sequencing complete\n\n'
+            printf -- '- OAuth recovery run: %s\n' "$RECOVERY_RUN_ID"
+            printf -- '- Final supervisor run: %s\n' "$SUPERVISOR_RUN_ID"
+          } >> "$GITHUB_STEP_SUMMARY"
