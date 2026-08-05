@@ -36,5 +36,7 @@ complete = complete[:exception_start] + new_exception + complete[exception_end:]
 if source.count(old_exception_block) != 1:
     raise SystemExit("unexpected durable-job exception applicator block")
 source = source.replace(old_exception_block, new_exception_block)
+source = source.replace('                "INSERT INTO local_budget_days(" \n', '                "INSERT INTO local_budget_days("\n')
+source = source.replace('                "day, spent_usd, limit_usd, updated_at" \n', '                "day, spent_usd, limit_usd, updated_at"\n')
 
 path.write_text(source, encoding="utf-8")
