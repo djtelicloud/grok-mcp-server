@@ -1,0 +1,245 @@
+name: PR544 independent final supervisor
+
+on:
+  push:
+    branches:
+      - chatgpt/pr544-finalizer-20260804-v4
+    paths:
+      - .github/workflows/pr544-independent-final-supervisor.yml
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  statuses: write
+  checks: read
+  actions: read
+
+concurrency:
+  group: pr544-independent-unicode-finalizer
+  cancel-in-progress: false
+
+env:
+  TARGET_BRANCH: chatgpt/pr544-independent-hardening-20260804
+  RUNNER_BRANCH: chatgpt/pr544-finalizer-20260804-v4
+  DONOR_PR: "544"
+
+jobs:
+  supervise:
+    runs-on: ubuntu-latest
+    timeout-minutes: 70
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: chatgpt/pr544-finalizer-20260804-v4
+          fetch-depth: 0
+
+      - name: Verify publication state
+        id: verify
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          status=success
+          reasons=()
+          target_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$TARGET_BRANCH" --jq '.object.sha' 2>/dev/null || true)"
+          main_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')"
+          pr_json="$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --head "$TARGET_BRANCH" --json number,url,title,isDraft,body,headRefOid,baseRefName --jq '.[0] // {}')"
+          pr_number="$(printf '%s' "$pr_json" | jq -r '.number // empty')"
+          pr_url="$(printf '%s' "$pr_json" | jq -r '.url // empty')"
+          pr_head="$(printf '%s' "$pr_json" | jq -r '.headRefOid // empty')"
+          pr_draft="$(printf '%s' "$pr_json" | jq -r '.isDraft // false')"
+          pr_body="$(printf '%s' "$pr_json" | jq -r '.body // ""')"
+          if [ -z "$target_sha" ]; then
+            status=failure
+            reasons+=("publication branch missing")
+          fi
+          if [ -z "$pr_number" ]; then
+            status=failure
+            reasons+=("draft pull request missing")
+          fi
+          if [ -n "$pr_number" ] && [ "$pr_draft" != true ]; then
+            status=failure
+            reasons+=("pull request is not draft")
+          fi
+          if [ -n "$target_sha" ] && [ -n "$pr_head" ] && [ "$target_sha" != "$pr_head" ]; then
+            status=failure
+            reasons+=("pull request head does not match publication branch")
+          fi
+          if [ -n "$pr_number" ] && [ "$(printf '%s' "$pr_json" | jq -r '.baseRefName')" != main ]; then
+            status=failure
+            reasons+=("pull request base is not main")
+          fi
+          if ! grep -Fq 'No donor-branch code was merged, copied, or cherry-picked.' <<<"$pr_body"; then
+            status=failure
+            reasons+=("independent provenance statement missing")
+          fi
+          if ! grep -Fq 'Thanks to Curtis' <<<"$pr_body"; then
+            status=failure
+            reasons+=("Curtis credit missing")
+          fi
+
+          compare_json='{}'
+          changed_files='[]'
+          if [ -n "$target_sha" ]; then
+            compare_json="$(gh api "repos/$GITHUB_REPOSITORY/compare/main...$TARGET_BRANCH")"
+            changed_files="$(printf '%s' "$compare_json" | jq '[.files[].filename]')"
+            changed_count="$(printf '%s' "$changed_files" | jq 'length')"
+            if [ "$changed_count" -lt 2 ] || [ "$changed_count" -gt 3 ]; then
+              status=failure
+              reasons+=("unexpected changed-file count: $changed_count")
+            fi
+            while IFS= read -r path; do
+              case "$path" in
+                tests/test_oauth_control_state.py|tests/test_oauth_unicode_concurrency.py)
+                  ;;
+                *.py)
+                  encoded="$(gh api "repos/$GITHUB_REPOSITORY/contents/$path?ref=$TARGET_BRANCH" --jq '.content' | tr -d '\n')"
+                  decoded="$(printf '%s' "$encoded" | base64 --decode)"
+                  if ! grep -Fq 'def canonical_oauth_principal(' <<<"$decoded" || ! grep -Fq 'class RemoteOAuthMiddleware' <<<"$decoded"; then
+                    status=failure
+                    reasons+=("unexpected production Python file: $path")
+                  fi
+                  ;;
+                *)
+                  status=failure
+                  reasons+=("unexpected changed file: $path")
+                  ;;
+              esac
+            done < <(printf '%s' "$changed_files" | jq -r '.[]')
+          fi
+
+          donor_json="$(gh pr view "$DONOR_PR" --repo "$GITHUB_REPOSITORY" --json number,state,headRefOid,url,title,comments)"
+          donor_head="$(printf '%s' "$donor_json" | jq -r '.headRefOid')"
+          donor_state="$(printf '%s' "$donor_json" | jq -r '.state')"
+          credit_present="$(printf '%s' "$donor_json" | jq '[.comments[].body | contains("pr544-independent-credit-recorded")] | any')"
+          if [ "$credit_present" != true ]; then
+            status=failure
+            reasons+=("donor credit comment missing")
+          fi
+
+          checks_state=not_available
+          checks_json='[]'
+          if [ -n "$pr_number" ]; then
+            set +e
+            timeout 3600 gh pr checks "$pr_number" --repo "$GITHUB_REPOSITORY" --watch --interval 10 >/tmp/pr544-pr-checks.txt 2>&1
+            checks_exit=$?
+            set -e
+            checks_json="$(gh pr view "$pr_number" --repo "$GITHUB_REPOSITORY" --json statusCheckRollup --jq '.statusCheckRollup')"
+            check_count="$(printf '%s' "$checks_json" | jq 'length')"
+            if [ "$check_count" -eq 0 ]; then
+              checks_state=not_configured
+            elif [ "$checks_exit" -eq 0 ]; then
+              checks_state=success
+            else
+              checks_state=failure
+              status=failure
+              reasons+=("pull-request checks did not complete successfully")
+            fi
+          fi
+
+          reasons_json="$(printf '%s\n' "${reasons[@]:-}" | jq -Rsc 'split("\n") | map(select(length > 0))')"
+          jq -n \
+            --arg status "$status" \
+            --arg repository "$GITHUB_REPOSITORY" \
+            --arg target_branch "$TARGET_BRANCH" \
+            --arg target_sha "$target_sha" \
+            --arg main_sha "$main_sha" \
+            --arg pr_number "$pr_number" \
+            --arg pr_url "$pr_url" \
+            --arg donor_pr "$DONOR_PR" \
+            --arg donor_head "$donor_head" \
+            --arg donor_state "$donor_state" \
+            --arg checks_state "$checks_state" \
+            --argjson reasons "$reasons_json" \
+            --argjson changed_files "$changed_files" \
+            --argjson checks "$checks_json" \
+            '{
+              status: $status,
+              repository: $repository,
+              target_branch: $target_branch,
+              target_sha: $target_sha,
+              main_sha: $main_sha,
+              pull_request: {
+                number: ($pr_number | if length == 0 then null else tonumber end),
+                url: ($pr_url | if length == 0 then null else . end)
+              },
+              donor: {
+                number: ($donor_pr | tonumber),
+                head_sha: $donor_head,
+                state: $donor_state
+              },
+              changed_files: $changed_files,
+              checks_state: $checks_state,
+              checks: $checks,
+              reasons: $reasons,
+              supervised_at: now | todateiso8601
+            }' > /tmp/pr544-independent-final-status.json
+          printf 'FINAL_STATUS=%s\n' "$status" >> "$GITHUB_ENV"
+          printf 'TARGET_SHA=%s\n' "$target_sha" >> "$GITHUB_ENV"
+          printf 'PR_NUMBER=%s\n' "$pr_number" >> "$GITHUB_ENV"
+          printf 'PR_URL=%s\n' "$pr_url" >> "$GITHUB_ENV"
+          cat /tmp/pr544-independent-final-status.json
+
+      - name: Persist the durable status record
+        run: |
+          set -euo pipefail
+          git switch "$RUNNER_BRANCH"
+          git pull --ff-only origin "$RUNNER_BRANCH"
+          mkdir -p .github/status
+          cp /tmp/pr544-independent-final-status.json .github/status/pr544-independent-final-status.json
+          git config user.name "ChatGPT"
+          git config user.email "chatgpt@users.noreply.github.com"
+          git add .github/status/pr544-independent-final-status.json
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: record PR544 independent final status"
+            git push origin "$RUNNER_BRANCH"
+          fi
+
+      - name: Publish target commit status and PR summary
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          description="Independent final confirmation failed"
+          state=failure
+          if [ "$FINAL_STATUS" = success ]; then
+            description="Independent final confirmation passed"
+            state=success
+          fi
+          if [ -n "$TARGET_SHA" ]; then
+            gh api --method POST "repos/$GITHUB_REPOSITORY/statuses/$TARGET_SHA" \
+              -f state="$state" \
+              -f context='ChatGPT / independent final confirmation' \
+              -f description="$description" \
+              -f target_url="https://github.com/$GITHUB_REPOSITORY/blob/$RUNNER_BRANCH/.github/status/pr544-independent-final-status.json"
+          fi
+          if [ -n "$PR_NUMBER" ]; then
+            marker='<!-- pr544-independent-final-supervisor -->'
+            body="$marker
+          Final independent confirmation: **$FINAL_STATUS**.
+
+          Durable record: https://github.com/$GITHUB_REPOSITORY/blob/$RUNNER_BRANCH/.github/status/pr544-independent-final-status.json"
+            comments="$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json comments --jq '[.comments[].body] | join("\n")')"
+            if grep -Fq "$marker" <<<"$comments"; then
+              comment_id="$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" --paginate --jq '.[] | select(.body | contains("pr544-independent-final-supervisor")) | .id' | tail -n 1)"
+              gh api --method PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$comment_id" -f body="$body"
+            else
+              gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body "$body"
+            fi
+          fi
+
+      - name: Upload supervisor evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr544-independent-final-supervisor
+          path: |
+            /tmp/pr544-independent-final-status.json
+            /tmp/pr544-pr-checks.txt
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Enforce final result
+        run: |
+          set -euo pipefail
+          test "$FINAL_STATUS" = success
