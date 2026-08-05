@@ -1,15 +1,16 @@
 name: Export PR554 budget source v2
 
 on:
-  push:
+  pull_request:
     branches:
-      - chatgpt/pr554-budget-source-export-v2-20260805
+      - main
 
 permissions:
   contents: read
 
 jobs:
   export:
+    if: github.head_ref == 'chatgpt/pr554-budget-source-export-v2-20260805'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
