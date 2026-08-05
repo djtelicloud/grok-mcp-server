@@ -28,6 +28,25 @@ def test_continue_cream_is_host_visible_but_not_committed() -> None:
     )
 
 
+def test_existing_status_text_remains_authoritative() -> None:
+    envelope = {
+        "status": "continue",
+        "text": "Fallback status.",
+        "status_text": "Canonical status.",
+        "autonomy": {
+            "protocol": "unigrok_continue_v1",
+            "committed": False,
+        },
+    }
+
+    result = autonomy.apply_continue_cream(envelope, "Draft answer")
+
+    assert result["status_text"] == "Canonical status."
+    assert result["text"] == (
+        "Draft answer\n\n[continue · not committed]\nCanonical status."
+    )
+
+
 def test_continue_cream_does_not_relabel_terminal_payloads() -> None:
     payload = {
         "status": "error",
