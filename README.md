@@ -1,3 +1,5 @@
+[![MCP Toplist](https://mcptoplist.com/badge/glama%2Fdjtelicloud%2Fgrok-mcp-server.svg)](https://mcptoplist.com/server/glama%2Fdjtelicloud%2Fgrok-mcp-server)
+
 <div align="center">
 
 <img src="assets/hero.svg" alt="UniGrok — one Grok teammate for every coding agent" width="100%" />
