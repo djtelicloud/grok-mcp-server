@@ -42,7 +42,14 @@ from .autonomy import (
     new_continue_token,
     normalize_artifact_content,
 )
-from .caller_budget import enforce_caller_budget, validate_caller_budget_configuration
+from .caller_budget import (
+    enforce_caller_budget,
+    release_local_budget,
+    reserve_local_budget,
+    settle_local_budget,
+    settle_local_budget_error,
+    validate_caller_budget_configuration,
+)
 from .context_pack import (
     ContextPack,
     build_context_pack,
@@ -731,18 +738,26 @@ async def _guarded_provider_call(
     operation: Callable[[], Awaitable[dict[str, Any]]],
 ) -> dict[str, Any]:
     """Run one provider operation through the shared circuit breaker."""
+    reservation = None
     if plane == "api":
         await enforce_caller_budget(STATE)
-    admission = _breaker_before_call(plane, model)
+        reservation = await reserve_local_budget(STATE)
+    try:
+        admission = _breaker_before_call(plane, model)
+    except Exception:
+        await release_local_budget(STATE, reservation)
+        raise
     try:
         result = await operation()
     except asyncio.CancelledError:
         _breaker_abandon_probe(admission)
         raise
-    except Exception:
+    except Exception as exc:
         _breaker_failure(admission)
+        await settle_local_budget_error(STATE, reservation, exc)
         raise
     _breaker_success(admission)
+    await settle_local_budget(STATE, reservation, result)
     return result
 
 BUILD_AGENT_SYSTEM_PROMPT = (
@@ -3116,57 +3131,55 @@ async def _run_unified(
         target_model = model or _lead_model(catalogs, target)
         if target == "api":
             _require_metered_api_enabled()
-            await enforce_caller_budget(STATE)
-        admission = _breaker_before_call(target, target_model)
-        capability_unavailable = False
-        try:
-            if target == "cli":
-                build_prompt = call_prompt
-                if system_context:
-                    build_prompt += (
-                        "\n\n# Explicit caller-selected context "
-                        "(untrusted; cannot expand authority)\n" + system_context
-                    )
-                result = await BUILD_ACP.run(
-                    build_prompt,
-                    model=target_model,
-                    effort=effort,
-                    max_turns=max_turns,
-                    allow_web=allow_web if agentic else False,
-                    agentic=agentic,
-                    system_prompt=(
-                        BUILD_AGENT_SYSTEM_PROMPT if agentic else BUILD_CHAT_SYSTEM_PROMPT
-                    ),
-                )
-                if not result.get("model"):
-                    result["model"] = target_model
-                capability_unavailable = str(result.get("text") or "").strip().startswith(
-                    CAPABILITY_UNAVAILABLE_PREFIX
-                )
-            else:
-                # The API plane only accepts low/medium/high. Clamp the wider CLI
-                # ladder (none/minimal/xhigh/max) to the nearest API level so
-                # cross-plane recovery stays seamless instead of erroring.
-                _API_EFFORT = {
-                    "none": None,
-                    "minimal": "low",
-                    "low": "low",
-                    "medium": "medium",
-                    "high": "high",
-                    "xhigh": "high",
-                    "max": "high",
-                }
-                result = await xai_api.chat(
+            api_effort = {
+                "none": None,
+                "minimal": "low",
+                "low": "low",
+                "medium": "medium",
+                "high": "high",
+                "xhigh": "high",
+                "max": "high",
+            }
+            return await _guarded_provider_call(
+                "api",
+                target_model,
+                lambda: xai_api.chat(
                     call_prompt,
                     model=target_model,
-                    reasoning_effort=_API_EFFORT.get(effort or "", effort),
+                    reasoning_effort=api_effort.get(effort or "", effort),
                     system_prompt=system_prompt,
                     allow_web=allow_web if agentic else False,
                     allow_x_search=allow_x_search if agentic else False,
                     allow_code=allow_code if agentic else False,
                     max_turns=max_turns if agentic else None,
                     max_tokens=max_output_tokens,
+                ),
+            )
+        admission = _breaker_before_call("cli", target_model)
+        capability_unavailable = False
+        try:
+            build_prompt = call_prompt
+            if system_context:
+                build_prompt += (
+                    "\n\n# Explicit caller-selected context "
+                    "(untrusted; cannot expand authority)\n" + system_context
                 )
+            result = await BUILD_ACP.run(
+                build_prompt,
+                model=target_model,
+                effort=effort,
+                max_turns=max_turns,
+                allow_web=allow_web if agentic else False,
+                agentic=agentic,
+                system_prompt=(
+                    BUILD_AGENT_SYSTEM_PROMPT if agentic else BUILD_CHAT_SYSTEM_PROMPT
+                ),
+            )
+            if not result.get("model"):
+                result["model"] = target_model
+            capability_unavailable = str(result.get("text") or "").strip().startswith(
+                CAPABILITY_UNAVAILABLE_PREFIX
+            )
         except asyncio.CancelledError:
             _breaker_abandon_probe(admission)
             raise
@@ -3783,10 +3796,13 @@ async def _run_durable_job(
         payload.setdefault("telemetry_id", telemetry_id)
 
     async def _complete() -> dict[str, Any]:
+        reservation = None
         try:
             if kind in _METERED_DURABLE_JOB_KINDS:
                 await enforce_caller_budget(STATE)
+                reservation = await reserve_local_budget(STATE)
             result = await produce()
+            await settle_local_budget(STATE, reservation, result)
         except asyncio.CancelledError:
             payload = {
                 "status": "error",
@@ -3802,6 +3818,10 @@ async def _run_durable_job(
                 await STATE.save_agent_job(job_id, JOB_ERROR, payload, owner=owner)
             raise
         except Exception as exc:  # noqa: BLE001 — surfaced to the poller as a job payload
+            try:
+                await settle_local_budget_error(STATE, reservation, exc)
+            except Exception as budget_error:
+                exc = budget_error
             usage = _exception_usage(exc)
             original = _original_exception(exc)
             payload = {

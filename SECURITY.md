@@ -30,6 +30,15 @@ execution. Failed/rejected attempt receipts contain only bounded billing metadat
 Mission V2 checkpoints them by fenced lease generation so retries and restarts neither
 erase nor double-count known spend.
 
+Local operators may set `UNIGROK_LOCAL_DAILY_BUDGET_USD` to serialize metered
+admission and settlement through the persistent SQLite state. The gate blocks new
+metered work once recorded UTC-day spend reaches the configured amount. Provider cost
+is available only after a call completes, so one admitted call can finish above the
+remaining amount. A cancellation, process loss, expired reservation, or missing exact
+receipt keeps the ledger fail-closed and can exhaust the rest of that day rather than
+silently reopening provider spend. The setting is ignored by the separate hosted
+Cloud Run boundary.
+
 Before SQLite persistence, structured payloads are recursively secret-redacted and
 Mission V2 answer projections are bounded. Session turns are written only after
 CommitDone. In persistent local Compose, terminal runtime rows expire under
