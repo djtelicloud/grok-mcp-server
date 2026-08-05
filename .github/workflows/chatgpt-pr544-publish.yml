@@ -1,4 +1,4 @@
-name: ChatGPT PR 544 independent hardening publication
+name: ChatGPT PR 544 comprehensive hardening publication
 
 on:
   push:
@@ -11,12 +11,12 @@ permissions:
   contents: write
 
 concurrency:
-  group: chatgpt-pr544-independent-hardening-publication
+  group: chatgpt-pr544-comprehensive-hardening-publication
   cancel-in-progress: false
 
 env:
   BASE_SHA: 517372387f40bd8246215e793a21195516623ea5
-  TARGET_BRANCH: chatgpt/pr544-independent-hardening-20260804
+  TARGET_BRANCH: chatgpt/pr544-comprehensive-hardening-20260804
   PUBLISH_BRANCH: chatgpt/pr544-publish-20260804
   PATCH_B64_SHA256: 08a110029b89194fe3b484183171e49c24524670b7a2741b0dae3969bf58ebc8
   PATCH_SHA256: b0b4023fa2af458be1322c715fa06efd8010ec654406c9359c951ee79e19f5e2
@@ -47,9 +47,8 @@ jobs:
       - name: Verify immutable baseline and reconstruct patch
         run: |
           set -euo pipefail
-          git fetch origin main "$TARGET_BRANCH"
-          test "$(git rev-parse origin/main)" = "$BASE_SHA"
-          test "$(git rev-parse "origin/$TARGET_BRANCH")" = "$BASE_SHA"
+          test "$(git ls-remote origin refs/heads/main | cut -f1)" = "$BASE_SHA"
+          test "$(git ls-remote origin "refs/heads/$TARGET_BRANCH" | cut -f1)" = "$BASE_SHA"
           cat .github/chatgpt-pr544-patch/part-*.b64 > /tmp/pr544.patch.b64
           printf '%s  %s\n' "$PATCH_B64_SHA256" /tmp/pr544.patch.b64 | sha256sum --check --strict
           base64 --decode /tmp/pr544.patch.b64 | gzip -dc > /tmp/pr544.patch
