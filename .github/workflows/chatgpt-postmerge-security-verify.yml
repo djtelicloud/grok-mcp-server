@@ -1,0 +1,55 @@
+name: Verify merged public Core security tree
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: chatgpt-postmerge-security-verify-20260805
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    if: github.head_ref == 'chatgpt/postmerge-security-verify-20260805'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: b142d5fa2713ca11c850a7113ce82a3e90df1d73
+          fetch-depth: 0
+      - name: Prove merged tree equals the independently verified final tree
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin chatgpt/public-core-security-final-20260805:refs/remotes/origin/security-final
+          test "$(git rev-parse HEAD)" = 'b142d5fa2713ca11c850a7113ce82a3e90df1d73'
+          test "$(git rev-parse origin/security-final)" = 'ee228bc393ae70c5e400414531a4e2f50ec76b10'
+          git diff --exit-code HEAD origin/security-final
+          test "$(git rev-parse HEAD^{tree})" = "$(git rev-parse origin/security-final^{tree})"
+          printf 'MERGED_TREE=%s\n' "$(git rev-parse HEAD^{tree})"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --frozen --python 3.12
+      - run: uv run ruff check .
+      - run: bash scripts/ci-insider-denylist.sh
+      - run: uv run python scripts/check_release_contract.py
+      - run: uv run python scripts/check_docs.py
+      - run: uv run pytest -q
+      - run: docker build --tag unigrok:postmerge-security .
+      - name: Verify installed merged image
+        run: |
+          set -euo pipefail
+          docker run --rm --entrypoint /app/.venv/bin/python unigrok:postmerge-security -c '
+          from unigrok_public import server
+          from unigrok_public.caller_budget import load_local_daily_budget
+          assert len(server.mcp._tool_manager._tools) == 29
+          assert load_local_daily_budget() is None
+          '
