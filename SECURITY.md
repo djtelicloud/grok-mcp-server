@@ -2,8 +2,12 @@
 
 ## Public runtime boundary
 
-The default Docker deployment binds to `127.0.0.1`. Grok Build ACP runs inside a
-disposable, empty directory with a temporary home. Project discovery, user
+The default Docker deployment binds to `127.0.0.1`. Operators may additionally enable
+`UNIGROK_LOCAL_MCP_TOKEN` or `UNIGROK_LOCAL_MCP_TOKEN_SHA256` for `/mcp` and `/v1`.
+That local boundary accepts only direct loopback/private-container peers, rejects
+forwarding headers, compares token digests in constant time, and keeps authentication
+failure tracking bounded. Health and readiness probes remain public. Grok Build ACP
+runs inside a disposable, empty directory with a temporary home. Project discovery, user
 configuration, local files, Git, shell commands, edits, external MCP servers, memory,
 subagents, and private intelligence are outside the public contract.
 
@@ -25,6 +29,15 @@ and recovery. Every attempt is receipted; set the kill switch false to prevent m
 execution. Failed/rejected attempt receipts contain only bounded billing metadata, and
 Mission V2 checkpoints them by fenced lease generation so retries and restarts neither
 erase nor double-count known spend.
+
+Local operators may set `UNIGROK_LOCAL_DAILY_BUDGET_USD` to serialize metered
+admission and settlement through the persistent SQLite state. The gate blocks new
+metered work once recorded UTC-day spend reaches the configured amount. Provider cost
+is available only after a call completes, so one admitted call can finish above the
+remaining amount. A cancellation, process loss, expired reservation, or missing exact
+receipt keeps the ledger fail-closed and can exhaust the rest of that day rather than
+silently reopening provider spend. The setting is ignored by the separate hosted
+Cloud Run boundary.
 
 Before SQLite persistence, structured payloads are recursively secret-redacted and
 Mission V2 answer projections are bounded. Session turns are written only after

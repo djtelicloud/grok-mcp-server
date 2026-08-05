@@ -15,6 +15,8 @@ this public MCP resource.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import hashlib
 import ipaddress
 import json
@@ -51,6 +53,15 @@ _STATUS_TOOLS = frozenset(
     }
 )
 _OAUTH_SCOPE_RE = re.compile(r"^[\x21\x23-\x5B\x5D-\x7E]{1,128}$")
+_OAUTH_INTROSPECTION_MAX_INFLIGHT = 256
+_OAUTH_RETRY_AFTER_SECONDS = "1"
+_oauth_introspection_tasks: dict[
+    tuple[bytes, str], asyncio.Task[dict[str, Any] | None]
+] = {}
+
+
+class OAuthIntrospectionUnavailable(RuntimeError):
+    pass
 
 
 def is_cloudrun_runtime() -> bool:
@@ -238,6 +249,11 @@ def canonical_oauth_principal(issuer: Any, subject: Any) -> str | None:
         return None
     if any(ord(char) <= 31 or ord(char) == 127 for char in subject):
         return None
+    try:
+        issuer.encode("utf-8", "strict")
+        subject.encode("utf-8", "strict")
+    except UnicodeEncodeError:
+        return None
     return (
         "oauth:"
         f"{quote(issuer, safe='-._~')}:"
@@ -357,7 +373,24 @@ def required_scope(path: str, body: bytes = b"") -> str:
     return " ".join(sorted(required))
 
 
-async def introspect_oauth_token(token: str, required: str) -> dict[str, Any] | None:
+def _oauth_introspection_key(token: str, required: str) -> tuple[bytes, str]:
+    return hashlib.sha256(token.encode("utf-8", "strict")).digest(), required
+
+
+def _finish_oauth_introspection_task(
+    key: tuple[bytes, str], task: asyncio.Task[dict[str, Any] | None]
+) -> None:
+    if _oauth_introspection_tasks.get(key) is task:
+        _oauth_introspection_tasks.pop(key, None)
+    if task.cancelled():
+        return
+    with contextlib.suppress(Exception):
+        task.exception()
+
+
+async def _perform_oauth_introspection(
+    token: str, required: str
+) -> dict[str, Any] | None:
     url = introspection_url()
     if not url or not token or len(token) > 8_192:
         return None
@@ -373,13 +406,23 @@ async def introspect_oauth_token(token: str, required: str) -> dict[str, Any] | 
                 },
                 data={"required_scope": required},
             )
-        if response.status_code != 200 or len(response.content) > 16_384:
-            return None
+    except (httpx.HTTPError, TypeError, ValueError) as exc:
+        raise OAuthIntrospectionUnavailable("oauth_control_unreachable") from exc
+    if response.status_code != 200:
+        raise OAuthIntrospectionUnavailable("oauth_control_status")
+    if len(response.content) > 16_384:
+        raise OAuthIntrospectionUnavailable("oauth_control_response_too_large")
+    try:
         payload = response.json()
-    except (httpx.HTTPError, TypeError, ValueError):
+    except (TypeError, ValueError) as exc:
+        raise OAuthIntrospectionUnavailable("oauth_control_invalid_json") from exc
+    if not isinstance(payload, dict):
+        raise OAuthIntrospectionUnavailable("oauth_control_invalid_payload")
+    active = payload.get("active")
+    if active is False:
         return None
-    if not isinstance(payload, dict) or payload.get("active") is not True:
-        return None
+    if active is not True:
+        raise OAuthIntrospectionUnavailable("oauth_control_missing_active")
     scopes = payload.get("scope")
     granted = set(scopes.split()) if isinstance(scopes, str) else set()
     if not set(required.split()).issubset(granted):
@@ -400,15 +443,38 @@ async def introspect_oauth_token(token: str, required: str) -> dict[str, Any] | 
         return None
     if public_mcp_resource() not in audiences:
         return None
-    # Treat the introspection response as untrusted boundary data.  Only the
-    # fields required by the public gateway survive validation; arbitrary
-    # provider metadata must not flow into request state or logs.
     return {
         "active": True,
         "scope": scopes,
         "unigrok_principal": principal,
         "unigrok_auth": "oauth",
     }
+
+
+async def introspect_oauth_token(token: str, required: str) -> dict[str, Any] | None:
+    if not token or len(token) > 8_192:
+        return None
+    key = _oauth_introspection_key(token, required)
+    task = _oauth_introspection_tasks.get(key)
+    if task is None:
+        if len(_oauth_introspection_tasks) >= _OAUTH_INTROSPECTION_MAX_INFLIGHT:
+            raise OAuthIntrospectionUnavailable("oauth_control_capacity")
+        task = asyncio.create_task(_perform_oauth_introspection(token, required))
+        _oauth_introspection_tasks[key] = task
+        task.add_done_callback(
+            lambda completed, task_key=key: _finish_oauth_introspection_task(
+                task_key, completed
+            )
+        )
+    try:
+        claims = await asyncio.shield(task)
+        return dict(claims) if claims is not None else None
+    except asyncio.CancelledError:
+        raise
+    except OAuthIntrospectionUnavailable:
+        raise
+    except Exception as exc:
+        raise OAuthIntrospectionUnavailable("oauth_control_failure") from exc
 
 
 def _metadata_url(path: str, query_string: bytes) -> str | None:
@@ -427,6 +493,17 @@ def _body_limit() -> int:
     except ValueError:
         configured = 28_000_000
     return max(64_000, min(configured, 32_000_000))
+
+
+def _oauth_unavailable_response() -> JSONResponse:
+    return JSONResponse(
+        {"error": "authorization_service_unavailable"},
+        status_code=503,
+        headers={
+            "Cache-Control": "no-store",
+            "Retry-After": _OAUTH_RETRY_AFTER_SECONDS,
+        },
+    )
 
 
 class RemoteOAuthMiddleware:
@@ -454,7 +531,18 @@ class RemoteOAuthMiddleware:
             # base64 file request. Service tokens resolve locally; OAuth uses
             # Control introspection. Scope is re-checked once tools/call is known.
             if claims is None:
-                claims = await introspect_oauth_token(token or "", "unigrok:connect")
+                try:
+                    claims = await introspect_oauth_token(
+                        token or "", "unigrok:connect"
+                    )
+                except OAuthIntrospectionUnavailable:
+                    logger.warning(
+                        "oauth control_unavailable path=%s scope=%s",
+                        path,
+                        "unigrok:connect",
+                    )
+                    await _oauth_unavailable_response()(scope, receive, send)
+                    return
             if claims is None:
                 required = "unigrok:connect"
                 logger.warning("oauth access_denied path=%s scope=%s", path, required)
@@ -512,7 +600,14 @@ class RemoteOAuthMiddleware:
                     claims = None
             else:
                 auth_kind = "oauth"
-                claims = await introspect_oauth_token(token or "", required)
+                try:
+                    claims = await introspect_oauth_token(token or "", required)
+                except OAuthIntrospectionUnavailable:
+                    logger.warning(
+                        "oauth control_unavailable path=%s scope=%s", path, required
+                    )
+                    await _oauth_unavailable_response()(scope, receive, send)
+                    return
         if claims is not None:
             scope["unigrok.oauth"] = claims
             logger.info(
@@ -537,12 +632,33 @@ class RemoteOAuthMiddleware:
         await response(scope, receive, send)
 
 
+def _public_resource_origins() -> set[str]:
+    if not is_cloudrun_runtime():
+        return set()
+    resource = public_mcp_resource()
+    if not resource:
+        return set()
+    parsed = urlsplit(resource)
+    host = str(parsed.hostname or "").lower().rstrip(".")
+    if not host:
+        return set()
+    authority_host = f"[{host}]" if ":" in host else host
+    if parsed.port in (None, 443):
+        return {
+            f"https://{authority_host}",
+            f"https://{authority_host}:443",
+        }
+    return {f"https://{authority_host}:{parsed.port}"}
+
+
 def _allowed_origins() -> set[str]:
-    return {
+    allowed = {
         item.strip().rstrip("/")
         for item in os.environ.get("UNIGROK_ALLOWED_ORIGINS", "").split(",")
         if item.strip()
     }
+    allowed.update(_public_resource_origins())
+    return allowed
 
 
 def _origin_allowed(origin: str | None) -> bool:

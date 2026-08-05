@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import sqlite3
@@ -877,3 +878,181 @@ async def test_service_token_works_alongside_oauth(
     payload = json.loads(response_body)
     assert payload["auth"] == "service_token"
     assert payload["principal"] == "service:github-copilot"
+
+
+@pytest.mark.asyncio
+async def test_oauth_control_outage_is_retryable_and_coalesced(
+    remote_oauth_env: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    started = asyncio.Event()
+    release = asyncio.Event()
+    calls = 0
+
+    class Client:
+        async def __aenter__(self) -> Client:
+            return self
+
+        async def __aexit__(self, *_args: Any) -> None:
+            return None
+
+        async def post(self, *_args: Any, **_kwargs: Any) -> Any:
+            nonlocal calls
+            calls += 1
+            started.set()
+            await release.wait()
+            raise remote_auth.httpx.ConnectError("control unavailable")
+
+    monkeypatch.setattr(remote_auth.httpx, "AsyncClient", lambda **_kwargs: Client())
+    remote_auth._oauth_introspection_tasks.clear()
+
+    async def request() -> tuple[int, dict[str, str], bytes]:
+        return await _asgi_exchange(
+            remote_auth.RemoteOAuthMiddleware(
+                lambda scope, receive, send: JSONResponse({"ok": True})(
+                    scope, receive, send
+                )
+            ),
+            path="/v1/models",
+            headers=((b"authorization", b"Bearer coalesced-outage-token"),),
+        )
+
+    first = asyncio.create_task(request())
+    await started.wait()
+    second = asyncio.create_task(request())
+    await asyncio.sleep(0)
+    release.set()
+    results = await asyncio.gather(first, second)
+
+    assert calls == 1
+    assert [result[0] for result in results] == [503, 503]
+    for status, headers, body in results:
+        assert status == 503
+        assert headers["retry-after"] == "1"
+        assert headers["cache-control"] == "no-store"
+        assert json.loads(body) == {"error": "authorization_service_unavailable"}
+
+
+@pytest.mark.asyncio
+async def test_cancelled_oauth_leader_does_not_cancel_shared_introspection(
+    remote_oauth_env: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    started = asyncio.Event()
+    release = asyncio.Event()
+    calls = 0
+
+    class Response:
+        status_code = 200
+        content = b"{}"
+
+        def json(self) -> dict[str, Any]:
+            return {
+                "active": True,
+                "scope": "unigrok:connect",
+                "iss": AUTHORIZATION_SERVER,
+                "sub": "shared-reviewer",
+                "aud": PUBLIC_RESOURCE,
+            }
+
+    class Client:
+        async def __aenter__(self) -> Client:
+            return self
+
+        async def __aexit__(self, *_args: Any) -> None:
+            return None
+
+        async def post(self, *_args: Any, **_kwargs: Any) -> Response:
+            nonlocal calls
+            calls += 1
+            started.set()
+            await release.wait()
+            return Response()
+
+    monkeypatch.setattr(remote_auth.httpx, "AsyncClient", lambda **_kwargs: Client())
+    remote_auth._oauth_introspection_tasks.clear()
+    leader = asyncio.create_task(
+        remote_auth.introspect_oauth_token("shared-token", "unigrok:connect")
+    )
+    await started.wait()
+    follower = asyncio.create_task(
+        remote_auth.introspect_oauth_token("shared-token", "unigrok:connect")
+    )
+    await asyncio.sleep(0)
+    leader.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await leader
+    release.set()
+    claims = await follower
+
+    assert calls == 1
+    assert claims is not None
+    assert claims["unigrok_principal"] == _canonical_principal("shared-reviewer")
+
+
+@pytest.mark.asyncio
+async def test_malformed_unicode_identity_is_consistently_denied_when_coalesced(
+    remote_oauth_env: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    started = asyncio.Event()
+    release = asyncio.Event()
+    calls = 0
+
+    class Response:
+        status_code = 200
+        content = b"{}"
+
+        def json(self) -> dict[str, Any]:
+            return {
+                "active": True,
+                "scope": "unigrok:chat",
+                "iss": AUTHORIZATION_SERVER,
+                "sub": "\ud800",
+                "aud": PUBLIC_RESOURCE,
+            }
+
+    class Client:
+        async def __aenter__(self) -> Client:
+            return self
+
+        async def __aexit__(self, *_args: Any) -> None:
+            return None
+
+        async def post(self, *_args: Any, **_kwargs: Any) -> Response:
+            nonlocal calls
+            calls += 1
+            started.set()
+            await release.wait()
+            return Response()
+
+    monkeypatch.setattr(remote_auth.httpx, "AsyncClient", lambda **_kwargs: Client())
+    remote_auth._oauth_introspection_tasks.clear()
+
+    async def request() -> tuple[int, dict[str, str], bytes]:
+        return await _asgi_exchange(
+            remote_auth.RemoteOAuthMiddleware(
+                lambda scope, receive, send: JSONResponse({"ok": True})(
+                    scope, receive, send
+                )
+            ),
+            path="/v1/models",
+            headers=((b"authorization", b"Bearer malformed-unicode-token"),),
+        )
+
+    first = asyncio.create_task(request())
+    await started.wait()
+    second = asyncio.create_task(request())
+    await asyncio.sleep(0)
+    release.set()
+    results = await asyncio.gather(first, second)
+
+    assert calls == 1
+    assert [result[0] for result in results] == [401, 401]
+    assert [json.loads(result[2]) for result in results] == [
+        {"error": "unauthorized"},
+        {"error": "unauthorized"},
+    ]
+
+
+def test_canonical_oauth_principal_rejects_unpaired_surrogates(
+    remote_oauth_env: None,
+) -> None:
+    assert remote_auth.canonical_oauth_principal(AUTHORIZATION_SERVER, "\ud800") is None
