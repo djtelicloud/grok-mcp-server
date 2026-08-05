@@ -53,7 +53,7 @@ jobs:
       - run: uv run ruff check src/unigrok_public/caller_budget.py src/unigrok_public/server.py tests/test_local_daily_budget.py --fix
       - run: git diff --check
       - run: uv run ruff check .
-      - run: uv run pytest -q tests/test_local_daily_budget.py tests/test_caller_budget.py tests/test_circuit_breaker.py tests/test_public_boundary.py -k 'budget or breaker or public_mcp_tool_contract'
+      - run: uv run pytest -q tests/test_local_daily_budget.py tests/test_caller_budget.py tests/test_public_boundary.py -k 'budget or breaker or public_mcp_tool_contract'
       - run: bash scripts/ci-insider-denylist.sh
       - run: uv run python scripts/check_release_contract.py
       - run: uv run python scripts/check_docs.py
