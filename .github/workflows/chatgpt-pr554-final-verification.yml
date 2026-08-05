@@ -36,7 +36,7 @@ jobs:
       - run: uv run python scripts/check_docs.py
       - run: uv run pytest -q
       - run: docker build --tag unigrok:pr554-final .
-      - name: Verify local container and MCP catalog
+      - name: Start hardened local container
         run: |
           set -euo pipefail
           docker run --detach \
@@ -51,7 +51,6 @@ jobs:
             --env UNIGROK_LOCAL_AUTO=off \
             --publish 127.0.0.1:14765:8080 \
             unigrok:pr554-final
-          trap 'docker logs unigrok-pr554-local || true; docker logs unigrok-pr554-cloudrun || true; docker rm --force unigrok-pr554-local unigrok-pr554-cloudrun >/dev/null 2>&1 || true' EXIT
           ready=0
           for _ in $(seq 1 60); do
             if curl --fail --silent --show-error http://127.0.0.1:14765/healthz >/tmp/pr554-health.json; then
@@ -61,20 +60,31 @@ jobs:
             sleep 1
           done
           test "$ready" -eq 1
-          test "$(curl --silent --output /tmp/pr554-ready.json --write-out '%{http_code}' http://127.0.0.1:14765/readyz)" = "503"
+      - name: Verify local health, readiness, and runtime truth
+        run: |
+          set -euo pipefail
+          ready_status="$(curl --silent --output /tmp/pr554-ready.json --write-out '%{http_code}' http://127.0.0.1:14765/readyz)"
+          test "$ready_status" = "503"
           curl --fail --silent --show-error http://127.0.0.1:14765/runtimez >/tmp/pr554-runtime.json
           python - <<'PY'
           import json
 
-          health = json.load(open('/tmp/pr554-health.json', encoding='utf-8'))
-          ready = json.load(open('/tmp/pr554-ready.json', encoding='utf-8'))
-          runtime = json.load(open('/tmp/pr554-runtime.json', encoding='utf-8'))
-          assert health['status'] == 'ok'
-          assert ready['status'] == 'not_ready'
-          assert ready['bootstrap']['can_chat'] is False
-          assert runtime['version'] == '1.1.0'
-          assert runtime['tool_count'] == 29
+          with open('/tmp/pr554-health.json', encoding='utf-8') as stream:
+              health = json.load(stream)
+          with open('/tmp/pr554-ready.json', encoding='utf-8') as stream:
+              ready = json.load(stream)
+          with open('/tmp/pr554-runtime.json', encoding='utf-8') as stream:
+              runtime = json.load(stream)
+          assert health['status'] == 'ok', health
+          assert ready['status'] == 'not_ready', ready
+          assert ready['bootstrap']['can_chat'] is False, ready
+          assert runtime['version'] == '1.1.0', runtime
+          assert runtime['tool_count'] == 29, runtime
+          print('local_http=ok version=1.1.0 tools=29 ready=not_ready')
           PY
+      - name: Verify MCP handshake, catalog, discovery, and confirmation gate
+        run: |
+          set -euo pipefail
           uv run python - <<'PY'
           import asyncio
           import json
@@ -141,34 +151,40 @@ jobs:
               ) as (read, write, _):
                   async with ClientSession(read, write) as session:
                       initialized = await session.initialize()
-                      assert initialized.serverInfo.version == '1.1.0'
+                      assert initialized.serverInfo.version == '1.1.0', initialized
                       listed = await session.list_tools()
                       names = [tool.name for tool in listed.tools]
-                      assert names == EXPECTED_TOOLS
+                      assert names == EXPECTED_TOOLS, names
                       status_result = await session.call_tool(
                           'grok_mcp_status', {'refresh': True}
                       )
-                      assert not status_result.isError
+                      assert not status_result.isError, status_result
                       status = structured(status_result)
-                      assert status['tool_count'] == 29
+                      assert status.get('tool_count') == 29, status
                       discover_result = await session.call_tool(
                           'grok_mcp_discover_self', {}
                       )
-                      assert not discover_result.isError
+                      assert not discover_result.isError, discover_result
                       discover = structured(discover_result)
-                      assert [tool['name'] for tool in discover['tools']] == EXPECTED_TOOLS
+                      discovered = [
+                          tool.get('name') for tool in discover.get('tools', [])
+                      ]
+                      assert discovered == EXPECTED_TOOLS, discovered
                       destructive = await session.call_tool(
-                          'forget_session', {'session': 'pr554-final-confirmation-probe'}
+                          'forget_session',
+                          {'session': 'pr554-final-confirmation-probe'},
                       )
-                      assert destructive.isError
+                      assert destructive.isError, destructive
+                      print('mcp_catalog=ok version=1.1.0 tools=29 confirmation=blocked')
 
 
           asyncio.run(main())
           PY
-      - name: Verify hosted authority boundary on final image
+      - name: Start hardened hosted container
         run: |
           set -euo pipefail
           SERVICE_TOKEN="$(python -c 'print("s" * 48)')"
+          printf '%s' "$SERVICE_TOKEN" >/tmp/pr554-service-token
           docker run --detach \
             --name unigrok-pr554-cloudrun \
             --init \
@@ -195,6 +211,10 @@ jobs:
             sleep 1
           done
           test "$ready" -eq 1
+      - name: Verify hosted authority boundary on final image
+        run: |
+          set -euo pipefail
+          SERVICE_TOKEN="$(cat /tmp/pr554-service-token)"
           cat >/tmp/pr554-initialize.json <<'JSON'
           {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"pr554-final-boundary","version":"1"}}}
           JSON
@@ -212,9 +232,22 @@ jobs:
               --data-binary @/tmp/pr554-initialize.json \
               http://127.0.0.1:14768/mcp
           }
-          case "$(request mcp.example.test https://mcp.example.test /tmp/pr554-public.txt)" in
+          public_status="$(request mcp.example.test https://mcp.example.test /tmp/pr554-public.txt)"
+          case "$public_status" in
             200|406) ;;
-            *) exit 1 ;;
+            *) cat /tmp/pr554-public.txt; exit 1 ;;
           esac
-          test "$(request attacker.invalid https://mcp.example.test /tmp/pr554-hostile-host.txt)" = "421"
-          test "$(request mcp.example.test https://attacker.invalid /tmp/pr554-hostile-origin.txt)" = "403"
+          hostile_host_status="$(request attacker.invalid https://mcp.example.test /tmp/pr554-hostile-host.txt)"
+          hostile_origin_status="$(request mcp.example.test https://attacker.invalid /tmp/pr554-hostile-origin.txt)"
+          test "$hostile_host_status" = "421"
+          test "$hostile_origin_status" = "403"
+          echo "hosted_boundary=ok public=$public_status hostile_host=$hostile_host_status hostile_origin=$hostile_origin_status"
+      - name: Show container logs
+        if: always()
+        run: |
+          docker logs unigrok-pr554-local || true
+          docker logs unigrok-pr554-cloudrun || true
+      - name: Remove verification containers
+        if: always()
+        run: |
+          docker rm --force unigrok-pr554-local unigrok-pr554-cloudrun >/dev/null 2>&1 || true
