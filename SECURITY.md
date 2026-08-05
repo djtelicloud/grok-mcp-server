@@ -2,8 +2,12 @@
 
 ## Public runtime boundary
 
-The default Docker deployment binds to `127.0.0.1`. Grok Build ACP runs inside a
-disposable, empty directory with a temporary home. Project discovery, user
+The default Docker deployment binds to `127.0.0.1`. Operators may additionally enable
+`UNIGROK_LOCAL_MCP_TOKEN` or `UNIGROK_LOCAL_MCP_TOKEN_SHA256` for `/mcp` and `/v1`.
+That local boundary accepts only direct loopback/private-container peers, rejects
+forwarding headers, compares token digests in constant time, and keeps authentication
+failure tracking bounded. Health and readiness probes remain public. Grok Build ACP
+runs inside a disposable, empty directory with a temporary home. Project discovery, user
 configuration, local files, Git, shell commands, edits, external MCP servers, memory,
 subagents, and private intelligence are outside the public contract.
 

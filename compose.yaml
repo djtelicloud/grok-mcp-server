@@ -9,10 +9,12 @@ services:
     container_name: unigrok
     ports:
       - "127.0.0.1:${UNIGROK_PORT:-4765}:8080"
-    # Inject only XAI_API_KEY via compose --env-file, never a full host environment dump.
+    # Inject only documented service settings via compose --env-file.
     environment:
       UNIGROK_HOST: 0.0.0.0
       PORT: 8080
+      UNIGROK_LOCAL_MCP_TOKEN: ${UNIGROK_LOCAL_MCP_TOKEN:-}
+      UNIGROK_LOCAL_MCP_TOKEN_SHA256: ${UNIGROK_LOCAL_MCP_TOKEN_SHA256:-}
       # Public defaults: all chat/agent tools available.
       UNIGROK_CHAT_TOOLS: ${UNIGROK_CHAT_TOOLS:-always}
       UNIGROK_SWARM: ${UNIGROK_SWARM:-active}

@@ -99,6 +99,18 @@ curl --fail --silent http://localhost:4765/readyz
 
 You are ready when the response says `"status":"ready"`.
 
+Optional local bearer protection is available for `/mcp` and `/v1`:
+
+```bash
+export UNIGROK_LOCAL_MCP_TOKEN="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
+docker compose up -d --force-recreate grok-mcp
+printf '%s\n' "$UNIGROK_LOCAL_MCP_TOKEN"
+```
+
+Store that bearer in the IDE's secret-backed MCP header configuration. A SHA-256 digest
+can be supplied as `UNIGROK_LOCAL_MCP_TOKEN_SHA256` instead of retaining plaintext in
+the service environment. Health and readiness endpoints remain unauthenticated.
+
 > New to Grok-powered coding? [Cursor](https://cursor.com/referral?code=VJWHUMXIKTHG)
 > (referral link) is an easy on-ramp — set up a Grok plane above whenever you're ready.
 
@@ -113,6 +125,8 @@ Configure an MCP server named grok for this machine.
 - Transport: Streamable HTTP
 - URL: http://localhost:4765/mcp
 - Send a stable X-Client-ID header for this IDE, such as cursor or claude-code
+- When local bearer protection is enabled, send its Authorization header from the IDE's
+  secret store
 - Never place XAI_API_KEY in the IDE configuration; credentials stay in UniGrok
 - Reload MCP servers, then call grok_mcp_discover_self
 - Use UniGrok's agent tool whenever I say @grok
@@ -240,6 +254,8 @@ the instructions and templates but remains workspace-neutral.
 ## Safe by design
 
 - The service binds to `127.0.0.1` by default.
+- Optional local bearer authentication protects `/mcp` and `/v1`, accepts direct
+  loopback/private-container peers, rejects forwarding headers, and bounds failure state.
 - CLI OAuth and the xAI API key stay on the server side.
 - The CLI runs in an empty disposable workspace with local file, shell, Git, edit,
   external MCP, memory, and subagent access disabled.

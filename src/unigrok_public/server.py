@@ -80,6 +80,7 @@ from .identity import (
     set_active_principal,
     tenant_prefix,
 )
+from .local_auth import LocalMcpAuthMiddleware, validate_local_auth_configuration
 from .principal_xai import active_credential_source, validate_principal_key_configuration
 from .remote_auth import (
     RemoteOAuthMiddleware,
@@ -7167,10 +7168,12 @@ def main() -> None:
     import uvicorn
 
     validate_remote_configuration()
+    validate_local_auth_configuration()
     validate_principal_key_configuration()
     validate_caller_budget_configuration()
     app = mcp.streamable_http_app()
     app.add_middleware(CallerIdentityMiddleware)
+    app.add_middleware(LocalMcpAuthMiddleware)
     app.add_middleware(RemoteOAuthMiddleware)
     app.add_middleware(RemoteOriginMiddleware)
     app.add_middleware(SecurityHeadersMiddleware)
