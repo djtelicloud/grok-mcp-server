@@ -1,0 +1,220 @@
+name: Final public Core security verification
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: chatgpt-pr554-final-verification-20260805
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    if: github.head_ref == 'chatgpt/pr554-final-verification-20260805'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 7f0670bdb63d64fe06d8f4a0d1374769dcbcca29
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: test "$(git rev-parse HEAD)" = "7f0670bdb63d64fe06d8f4a0d1374769dcbcca29"
+      - run: uv sync --frozen --python 3.12
+      - run: uv run ruff check .
+      - run: bash scripts/ci-insider-denylist.sh
+      - run: uv run python scripts/check_release_contract.py
+      - run: uv run python scripts/check_docs.py
+      - run: uv run pytest -q
+      - run: docker build --tag unigrok:pr554-final .
+      - name: Verify local container and MCP catalog
+        run: |
+          set -euo pipefail
+          docker run --detach \
+            --name unigrok-pr554-local \
+            --init \
+            --read-only \
+            --cap-drop ALL \
+            --security-opt no-new-privileges:true \
+            --tmpfs /home/appuser/.grok:rw,noexec,nosuid,nodev,size=16m,uid=1000,gid=1000,mode=0700 \
+            --tmpfs /state:rw,noexec,nosuid,nodev,size=64m,uid=1000,gid=1000,mode=0700 \
+            --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m,uid=1000,gid=1000,mode=0700 \
+            --env UNIGROK_LOCAL_AUTO=off \
+            --publish 127.0.0.1:14765:8080 \
+            unigrok:pr554-final
+          trap 'docker logs unigrok-pr554-local || true; docker logs unigrok-pr554-cloudrun || true; docker rm --force unigrok-pr554-local unigrok-pr554-cloudrun >/dev/null 2>&1 || true' EXIT
+          ready=0
+          for _ in $(seq 1 60); do
+            if curl --fail --silent --show-error http://127.0.0.1:14765/healthz >/tmp/pr554-health.json; then
+              ready=1
+              break
+            fi
+            sleep 1
+          done
+          test "$ready" -eq 1
+          test "$(curl --silent --output /tmp/pr554-ready.json --write-out '%{http_code}' http://127.0.0.1:14765/readyz)" = "503"
+          curl --fail --silent --show-error http://127.0.0.1:14765/runtimez >/tmp/pr554-runtime.json
+          python - <<'PY'
+          import json
+
+          health = json.load(open('/tmp/pr554-health.json', encoding='utf-8'))
+          ready = json.load(open('/tmp/pr554-ready.json', encoding='utf-8'))
+          runtime = json.load(open('/tmp/pr554-runtime.json', encoding='utf-8'))
+          assert health['status'] == 'ok'
+          assert ready['status'] == 'not_ready'
+          assert ready['bootstrap']['can_chat'] is False
+          assert runtime['version'] == '1.1.0'
+          assert runtime['tool_count'] == 29
+          PY
+          uv run python - <<'PY'
+          import asyncio
+          import json
+          from typing import Any
+
+          from mcp import ClientSession
+          from mcp.client.streamable_http import streamablehttp_client
+
+          EXPECTED_TOOLS = [
+              'agent',
+              'agent_result',
+              'review_pull_request',
+              'chat',
+              'grok_mcp_discover_self',
+              'grok_mcp_onboard_client',
+              'grok_mcp_status',
+              'benchmark_status',
+              'record_benchmark_result',
+              'list_models',
+              'list_sessions',
+              'session_history',
+              'forget_session',
+              'remember_fact',
+              'search_knowledge',
+              'forget_fact',
+              'web_search',
+              'x_search',
+              'remote_code_execution',
+              'chat_with_vision',
+              'chat_with_files',
+              'generate_image',
+              'generate_video',
+              'extend_video',
+              'xai_upload_file',
+              'xai_list_files',
+              'xai_get_file',
+              'xai_get_file_content',
+              'xai_delete_file',
+          ]
+
+
+          def structured(result: Any) -> dict[str, Any]:
+              value = getattr(result, 'structuredContent', None)
+              if isinstance(value, dict):
+                  nested = value.get('result', value)
+                  return nested if isinstance(nested, dict) else {}
+              for item in getattr(result, 'content', []):
+                  raw = getattr(item, 'text', None)
+                  if not isinstance(raw, str):
+                      continue
+                  try:
+                      payload = json.loads(raw)
+                  except json.JSONDecodeError:
+                      continue
+                  if isinstance(payload, dict):
+                      return payload
+              return {}
+
+
+          async def main() -> None:
+              async with streamablehttp_client(
+                  'http://127.0.0.1:14765/mcp',
+                  headers={'X-Client-ID': 'pr554-final-gate'},
+              ) as (read, write, _):
+                  async with ClientSession(read, write) as session:
+                      initialized = await session.initialize()
+                      assert initialized.serverInfo.version == '1.1.0'
+                      listed = await session.list_tools()
+                      names = [tool.name for tool in listed.tools]
+                      assert names == EXPECTED_TOOLS
+                      status_result = await session.call_tool(
+                          'grok_mcp_status', {'refresh': True}
+                      )
+                      assert not status_result.isError
+                      status = structured(status_result)
+                      assert status['tool_count'] == 29
+                      discover_result = await session.call_tool(
+                          'grok_mcp_discover_self', {}
+                      )
+                      assert not discover_result.isError
+                      discover = structured(discover_result)
+                      assert [tool['name'] for tool in discover['tools']] == EXPECTED_TOOLS
+                      destructive = await session.call_tool(
+                          'forget_session', {'session': 'pr554-final-confirmation-probe'}
+                      )
+                      assert destructive.isError
+
+
+          asyncio.run(main())
+          PY
+      - name: Verify hosted authority boundary on final image
+        run: |
+          set -euo pipefail
+          SERVICE_TOKEN="$(python -c 'print("s" * 48)')"
+          docker run --detach \
+            --name unigrok-pr554-cloudrun \
+            --init \
+            --read-only \
+            --cap-drop ALL \
+            --security-opt no-new-privileges:true \
+            --tmpfs /home/appuser/.grok:rw,noexec,nosuid,nodev,size=16m,uid=1000,gid=1000,mode=0700 \
+            --tmpfs /state:rw,noexec,nosuid,nodev,size=64m,uid=1000,gid=1000,mode=0700 \
+            --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m,uid=1000,gid=1000,mode=0700 \
+            --env UNIGROK_RUNTIME=cloudrun \
+            --env UNIGROK_PUBLIC_MCP_URL=https://mcp.example.test/mcp \
+            --env UNIGROK_OAUTH_AUTHORIZATION_SERVERS=https://auth.example.test \
+            --env UNIGROK_OAUTH_INTROSPECTION_URL=https://auth.example.test/oauth/introspect \
+            --env UNIGROK_OAUTH_SCOPES=unigrok:connect,unigrok:invoke,unigrok:review,unigrok:status \
+            --env UNIGROK_SERVICE_TOKENS="$SERVICE_TOKEN" \
+            --publish 127.0.0.1:14768:8080 \
+            unigrok:pr554-final
+          ready=0
+          for _ in $(seq 1 60); do
+            if curl --fail --silent --show-error http://127.0.0.1:14768/healthz >/dev/null; then
+              ready=1
+              break
+            fi
+            sleep 1
+          done
+          test "$ready" -eq 1
+          cat >/tmp/pr554-initialize.json <<'JSON'
+          {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"pr554-final-boundary","version":"1"}}}
+          JSON
+          request() {
+            local host="$1"
+            local origin="$2"
+            local output="$3"
+            curl --silent --output "$output" --write-out '%{http_code}' \
+              --request POST \
+              --header 'Accept: application/json, text/event-stream' \
+              --header 'Content-Type: application/json' \
+              --header "Authorization: Bearer $SERVICE_TOKEN" \
+              --header "Host: $host" \
+              --header "Origin: $origin" \
+              --data-binary @/tmp/pr554-initialize.json \
+              http://127.0.0.1:14768/mcp
+          }
+          case "$(request mcp.example.test https://mcp.example.test /tmp/pr554-public.txt)" in
+            200|406) ;;
+            *) exit 1 ;;
+          esac
+          test "$(request attacker.invalid https://mcp.example.test /tmp/pr554-hostile-host.txt)" = "421"
+          test "$(request mcp.example.test https://attacker.invalid /tmp/pr554-hostile-origin.txt)" = "403"
