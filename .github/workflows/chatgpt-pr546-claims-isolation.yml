@@ -1,0 +1,135 @@
+name: ChatGPT PR546 OAuth claims isolation
+
+on:
+  push:
+    branches:
+      - chatgpt/pr544-independent-hardening-20260804
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: chatgpt/pr544-independent-hardening-20260804
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Isolate coalesced claims
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          source_path = Path("src/unigrok_public/remote_auth.py")
+          source = source_path.read_text()
+          old = '''    try:
+              return await asyncio.shield(task)
+          except asyncio.CancelledError:
+              raise
+          except OAuthIntrospectionUnavailable:
+              raise
+          except Exception as exc:
+              raise OAuthIntrospectionUnavailable("oauth_control_failure") from exc
+          '''
+          new = '''    try:
+              claims = await asyncio.shield(task)
+          except asyncio.CancelledError:
+              raise
+          except OAuthIntrospectionUnavailable:
+              raise
+          except Exception as exc:
+              raise OAuthIntrospectionUnavailable("oauth_control_failure") from exc
+              return dict(claims) if claims is not None else None
+          '''
+          if source.count(old) != 1:
+              raise RuntimeError("OAuth await block changed")
+          source_path.write_text(source.replace(old, new, 1))
+
+          test_path = Path("tests/test_remote_boundary.py")
+          tests = test_path.read_text()
+          tests += '''
+
+
+          async def test_coalesced_oauth_claims_are_isolated_per_caller(
+              remote_oauth_env: None, monkeypatch: pytest.MonkeyPatch
+          ) -> None:
+              started = asyncio.Event()
+              release = asyncio.Event()
+              calls = 0
+
+              class Response:
+                  status_code = 200
+                  content = b"{}"
+
+                  def json(self) -> dict[str, Any]:
+                      return {
+                          "active": True,
+                          "scope": "unigrok:chat",
+                          "iss": AUTHORIZATION_SERVER,
+                          "sub": "isolated-reviewer",
+                          "aud": PUBLIC_RESOURCE,
+                      }
+
+              class Client:
+                  async def __aenter__(self) -> Client:
+                      return self
+
+                  async def __aexit__(self, *_args: Any) -> None:
+                      return None
+
+                  async def post(self, *_args: Any, **_kwargs: Any) -> Response:
+                      nonlocal calls
+                      calls += 1
+                      started.set()
+                      await release.wait()
+                      return Response()
+
+              monkeypatch.setattr(remote_auth.httpx, "AsyncClient", lambda **_kwargs: Client())
+              remote_auth._oauth_introspection_tasks.clear()
+              first = asyncio.create_task(
+                  remote_auth.introspect_oauth_token("isolated-token", "unigrok:chat")
+              )
+              await started.wait()
+              second = asyncio.create_task(
+                  remote_auth.introspect_oauth_token("isolated-token", "unigrok:chat")
+              )
+              await asyncio.sleep(0)
+              release.set()
+              first_claims, second_claims = await asyncio.gather(first, second)
+
+              assert calls == 1
+              assert first_claims is not None
+              assert second_claims is not None
+              assert first_claims == second_claims
+              assert first_claims is not second_claims
+              first_claims["scope"] = "mutated"
+              assert second_claims["scope"] == "unigrok:chat"
+          '''
+          test_path.write_text(tests)
+          PY
+      - name: Sync dependencies
+        run: uv sync --frozen
+      - name: Lint
+        run: uv run ruff check .
+      - name: Focused regression
+        run: uv run pytest -q tests/test_remote_boundary.py -k 'coalesced_oauth_claims'
+      - name: Repository policy checks
+        run: |
+          bash scripts/ci-insider-denylist.sh
+          uv run python scripts/check_release_contract.py
+          uv run python scripts/check_docs.py
+      - name: Full suite
+        run: uv run pytest -q
+      - name: Commit verified source
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/chatgpt-pr546-claims-isolation.yml
+          git add src/unigrok_public/remote_auth.py tests/test_remote_boundary.py
+          git commit -m "fix: isolate coalesced OAuth claims"
+          git push origin HEAD:chatgpt/pr544-independent-hardening-20260804
