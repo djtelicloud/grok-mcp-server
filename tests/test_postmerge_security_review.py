@@ -91,6 +91,41 @@ async def test_local_auth_claims_bypass_remote_introspection(
     assert observed["unigrok_principal"] == "local:operator"
 
 
+def test_preauthenticated_local_claims_are_rebuilt_from_constants() -> None:
+    raw = {
+        "active": True,
+        "token_type": "local",
+        "scope": (
+            "unigrok:chat unigrok:status unigrok:review "
+            "unigrok:invoke unigrok:connect"
+        ),
+        "iss": "unigrok:local-token",
+        "sub": "operator",
+        "aud": "local-mcp",
+        "unigrok_principal": "local:operator",
+        "unigrok_auth": "local_token",
+        "provider_metadata": "must-not-propagate",
+    }
+
+    claims = remote_auth._preauthenticated_local_claims({"unigrok.oauth": raw})
+
+    assert claims == {
+        "active": True,
+        "token_type": "local",
+        "scope": (
+            "unigrok:connect unigrok:invoke unigrok:review "
+            "unigrok:status unigrok:chat"
+        ),
+        "iss": "unigrok:local-token",
+        "sub": "operator",
+        "aud": "local-mcp",
+        "unigrok_principal": "local:operator",
+        "unigrok_auth": "local_token",
+    }
+    assert claims is not raw
+    assert "provider_metadata" not in claims
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "forged",
