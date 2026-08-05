@@ -1,0 +1,24 @@
+name: ChatGPT source export
+
+on:
+  push:
+    branches:
+      - chatgpt/pr544-source-export-20260804
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - run: tar --exclude=.git -czf /tmp/grok-mcp-source.tgz .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: grok-mcp-source
+          path: /tmp/grok-mcp-source.tgz
+          if-no-files-found: error
+          retention-days: 1
