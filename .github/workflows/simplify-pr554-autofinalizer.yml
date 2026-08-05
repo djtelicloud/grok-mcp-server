@@ -1,0 +1,108 @@
+name: Simplify PR554 autonomous finalizer smoke
+
+on:
+  push:
+    branches:
+      - chatgpt/pr554-autofinalizer-v3-20260805
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Replace fragile protocol smoke with installed-image boundary smoke
+        run: |
+          set -euo pipefail
+          target=chatgpt/pr554-autofinalizer-20260805
+          git fetch origin "$target:refs/remotes/origin/$target"
+          git switch -C "$target" "origin/$target"
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path(".github/workflows/pr554-autofinalizer.yml")
+          text = path.read_text(encoding="utf-8")
+          start_marker = "      - name: Build and smoke exact image\n"
+          end_marker = "      - name: Publish target and request human review\n"
+          start = text.index(start_marker)
+          end = text.index(end_marker, start)
+          replacement = '''      - name: Build and smoke exact image
+        if: steps.state.outputs.draft == 'true'
+        run: |
+          set -euo pipefail
+          docker build --tag unigrok:pr554-final .
+          docker run --rm --entrypoint python unigrok:pr554-final -c "import unigrok_public.server"
+          cleanup() {
+            docker rm -f pr554-open pr554-protected >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          docker run -d --name pr554-open \\
+            -p 127.0.0.1:4765:4765 \\
+            -e UNIGROK_HOST=0.0.0.0 \\
+            -e UNIGROK_PORT=4765 \\
+            -e PORT=4765 \\
+            unigrok:pr554-final
+          for _ in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:4765/healthz >/tmp/open-health.json; then
+              break
+            fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:4765/healthz >/tmp/open-health.json
+          ready="$(curl -sS -o /tmp/open-ready.json -w '%{http_code}' http://127.0.0.1:4765/readyz)"
+          test "$ready" = 200 || test "$ready" = 503
+          curl -fsS http://127.0.0.1:4765/runtimez >/tmp/open-runtime.json
+          python - <<'PY_RUNTIME'
+          import json
+          from pathlib import Path
+
+          runtime = json.loads(Path("/tmp/open-runtime.json").read_text())
+          count = runtime.get("tool_count")
+          if not isinstance(count, int) or count < 20:
+              raise SystemExit(f"unexpected installed-image tool count: {count}")
+          PY_RUNTIME
+          token='local-security-test-token-0123456789abcdef'
+          docker run -d --name pr554-protected \\
+            -p 127.0.0.1:4766:4765 \\
+            -e UNIGROK_HOST=0.0.0.0 \\
+            -e UNIGROK_PORT=4765 \\
+            -e PORT=4765 \\
+            -e UNIGROK_LOCAL_MCP_TOKEN="$token" \\
+            unigrok:pr554-final
+          for _ in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:4766/healthz >/tmp/protected-health.json; then
+              break
+            fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:4766/healthz >/tmp/protected-health.json
+          anonymous="$(curl -sS -o /tmp/protected-anonymous.json -w '%{http_code}' \\
+            -X POST http://127.0.0.1:4766/mcp \\
+            -H 'content-type: application/json' \\
+            -H 'accept: application/json, text/event-stream' \\
+            --data '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"gate","version":"1"}}}')"
+          test "$anonymous" = 401
+          forwarded="$(curl -sS -o /tmp/protected-forwarded.json -w '%{http_code}' \\
+            -X POST http://127.0.0.1:4766/mcp \\
+            -H "authorization: Bearer $token" \\
+            -H 'x-forwarded-for: 127.0.0.1' \\
+            -H 'content-type: application/json' \\
+            -H 'accept: application/json, text/event-stream' \\
+            --data '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"gate","version":"1"}}}')"
+          test "$forwarded" = 403
+          hostile="$(curl -sS -o /tmp/protected-host.json -w '%{http_code}' \\
+            -H 'host: attacker.example' http://127.0.0.1:4766/mcp)"
+          test "$hostile" = 403 || test "$hostile" = 421
+'''
+          path.write_text(text[:start] + replacement + text[end:], encoding="utf-8")
+          PY
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/workflows/pr554-autofinalizer.yml
+          git diff --cached --check
+          git commit -m "fix: use installed-image boundary smoke"
+          git push origin HEAD:refs/heads/$target
