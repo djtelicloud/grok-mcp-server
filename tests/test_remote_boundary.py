@@ -880,6 +880,7 @@ async def test_service_token_works_alongside_oauth(
     assert payload["principal"] == "service:github-copilot"
 
 
+@pytest.mark.asyncio
 async def test_oauth_control_outage_is_retryable_and_coalesced(
     remote_oauth_env: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -931,6 +932,7 @@ async def test_oauth_control_outage_is_retryable_and_coalesced(
         assert json.loads(body) == {"error": "authorization_service_unavailable"}
 
 
+@pytest.mark.asyncio
 async def test_cancelled_oauth_leader_does_not_cancel_shared_introspection(
     remote_oauth_env: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -986,6 +988,7 @@ async def test_cancelled_oauth_leader_does_not_cancel_shared_introspection(
     assert claims["unigrok_principal"] == _canonical_principal("shared-reviewer")
 
 
+@pytest.mark.asyncio
 async def test_malformed_unicode_identity_is_consistently_denied_when_coalesced(
     remote_oauth_env: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
