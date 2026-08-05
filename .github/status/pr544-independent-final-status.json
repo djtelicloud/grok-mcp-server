@@ -1,0 +1,98 @@
+{
+  "status": "failure",
+  "repository": "djtelicloud/grok-mcp-server",
+  "target_branch": "chatgpt/pr544-independent-hardening-20260804",
+  "target_sha": "e4c123267944ff6841c606d973a24e7cade13343",
+  "main_sha": "517372387f40bd8246215e793a21195516623ea5",
+  "pull_request": {
+    "number": 550,
+    "url": "https://github.com/djtelicloud/grok-mcp-server/pull/550"
+  },
+  "donor": {
+    "number": 544,
+    "head_sha": "d1426ebc24e2dae508065d67cb911d60b7f7bc88",
+    "state": "OPEN"
+  },
+  "changed_files": [
+    ".github/workflows/chatgpt-oauth-unicode.yml",
+    ".github/workflows/chatgpt-pr546-claims-isolation.yml",
+    ".github/workflows/chatgpt-publish-oauth.yml",
+    "src/unigrok_public/remote_auth.py",
+    "tests/test_remote_boundary.py"
+  ],
+  "checks_state": "failure",
+  "checks": [
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-08-05T03:21:10Z",
+      "conclusion": "FAILURE",
+      "detailsUrl": "https://github.com/djtelicloud/grok-mcp-server/actions/runs/30971999722/job/92198166981",
+      "name": "verify",
+      "startedAt": "2026-08-05T03:21:04Z",
+      "status": "COMPLETED",
+      "workflowName": "ChatGPT PR546 OAuth claims isolation"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-08-05T03:21:31Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/djtelicloud/grok-mcp-server/actions/runs/30972002132/job/92198174013",
+      "name": "test",
+      "startedAt": "2026-08-05T03:21:08Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-08-05T03:21:30Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/djtelicloud/grok-mcp-server/actions/runs/30971999731/job/92198166913",
+      "name": "test",
+      "startedAt": "2026-08-05T03:21:04Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-08-05T03:21:43Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/djtelicloud/grok-mcp-server/actions/runs/30972000361/job/92198170539",
+      "name": "Analyze (actions)",
+      "startedAt": "2026-08-05T03:21:06Z",
+      "status": "COMPLETED",
+      "workflowName": "CodeQL"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-08-05T03:21:55Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/djtelicloud/grok-mcp-server/actions/runs/30972000361/job/92198170510",
+      "name": "Analyze (python)",
+      "startedAt": "2026-08-05T03:21:06Z",
+      "status": "COMPLETED",
+      "workflowName": "CodeQL"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-08-05T03:21:38Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/djtelicloud/grok-mcp-server/runs/92198245137",
+      "name": "CodeQL",
+      "startedAt": "2026-08-05T03:21:35Z",
+      "status": "COMPLETED",
+      "workflowName": ""
+    }
+  ],
+  "reasons": [
+    "independent provenance statement missing",
+    "Curtis credit missing",
+    "unexpected changed-file count: 5",
+    "unexpected changed file: .github/workflows/chatgpt-oauth-unicode.yml",
+    "unexpected changed file: .github/workflows/chatgpt-pr546-claims-isolation.yml",
+    "unexpected changed file: .github/workflows/chatgpt-publish-oauth.yml",
+    "unexpected production Python file: tests/test_remote_boundary.py",
+    "donor credit comment missing",
+    "pull-request checks did not complete successfully"
+  ],
+  "supervised_at": "2026-08-05T03:27:54Z"
+}
