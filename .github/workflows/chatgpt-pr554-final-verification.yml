@@ -49,6 +49,7 @@ jobs:
             --tmpfs /state:rw,noexec,nosuid,nodev,size=64m,uid=1000,gid=1000,mode=0700 \
             --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m,uid=1000,gid=1000,mode=0700 \
             --env UNIGROK_LOCAL_AUTO=off \
+            --env UNIGROK_STATE_PATH=/state/unigrok-public.db \
             --publish 127.0.0.1:14765:8080 \
             unigrok:pr554-final
           ready=0
@@ -195,6 +196,7 @@ jobs:
             --tmpfs /state:rw,noexec,nosuid,nodev,size=64m,uid=1000,gid=1000,mode=0700 \
             --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m,uid=1000,gid=1000,mode=0700 \
             --env UNIGROK_RUNTIME=cloudrun \
+            --env UNIGROK_STATE_PATH=/state/unigrok-public.db \
             --env UNIGROK_PUBLIC_MCP_URL=https://mcp.example.test/mcp \
             --env UNIGROK_OAUTH_AUTHORIZATION_SERVERS=https://auth.example.test \
             --env UNIGROK_OAUTH_INTROSPECTION_URL=https://auth.example.test/oauth/introspect \
