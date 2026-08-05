@@ -1,0 +1,14 @@
+status=failed
+run_id=30974660595
+prepare=success
+install=success
+lint=failure
+targeted_outcome=skipped
+targeted_result=not_run
+full_outcome=skipped
+full_result=not_run
+docker=skipped
+publish=skipped
+patch_sha=
+pr=skipped
+pr_url=
