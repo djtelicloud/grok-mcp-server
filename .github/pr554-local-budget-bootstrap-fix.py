@@ -15,14 +15,26 @@ if source.count(old_boundary) != 1:
     raise SystemExit("unexpected durable-job boundary anchor")
 source = source.replace(old_boundary, new_boundary)
 
-old_exception = """old_exception = '''        except Exception as exc:
+old_exception_block = """old_exception = '''        except Exception as exc:
             payload = {
-'''"""
-new_exception = """old_exception = '''        except Exception as exc:  # noqa: BLE001 — surfaced to the poller as a job payload
+'''
+new_exception = '''        except Exception as exc:
+            await _settle_budget_failure(reservation, exc)
             payload = {
-'''"""
-if source.count(old_exception) != 1:
-    raise SystemExit("unexpected durable-job exception literal")
-source = source.replace(old_exception, new_exception)
+'''
+if complete.count(old_exception) != 1:
+    raise SystemExit("unexpected durable job exception anchor")
+complete = complete.replace(old_exception, new_exception)"""
+new_exception_block = """exception_start = complete.index("        except Exception as exc:")
+payload_start = complete.index("            payload = {\\n", exception_start)
+exception_end = payload_start + len("            payload = {\\n")
+new_exception = '''        except Exception as exc:  # noqa: BLE001 — surfaced to the poller as a job payload
+            await _settle_budget_failure(reservation, exc)
+            payload = {
+'''
+complete = complete[:exception_start] + new_exception + complete[exception_end:]"""
+if source.count(old_exception_block) != 1:
+    raise SystemExit("unexpected durable-job exception applicator block")
+source = source.replace(old_exception_block, new_exception_block)
 
 path.write_text(source, encoding="utf-8")
