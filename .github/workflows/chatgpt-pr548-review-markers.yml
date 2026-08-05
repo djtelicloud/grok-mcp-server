@@ -1,0 +1,51 @@
+name: ChatGPT PR548 review markers
+
+on:
+  push:
+    branches:
+      - chatgpt/oauth-resilience-20260804
+    paths:
+      - .github/workflows/chatgpt-pr548-review-markers.yml
+
+permissions:
+  contents: write
+
+jobs:
+  verify-and-publish:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: chatgpt/oauth-resilience-20260804
+          fetch-depth: 0
+      - name: Verify branch cursor
+        env:
+          BASE_CODE_HEAD: c2be10d7f4b590a577fcf7877d17b0b31cadffd0
+        run: |
+          test "$(git diff --name-only "$BASE_CODE_HEAD" HEAD)" = ".github/workflows/chatgpt-pr548-review-markers.yml"
+      - name: Apply exact locally verified patch
+        run: |
+          printf '%s' 'H4sICEqbcmoAA3ByNTQ4LWFzeW5jLW1hcmtlcnMucGF0Y2gAtZPbitswEIbv/RSDrhKydnMiyQa25AVaer8UMZEmiRpZYyQ5qVv67pW87rYsS5ftwQYLZkbz//o80uZwgLI8mgj4JlKIof9KTzVHkntunUbfVU0H+9/nC+M0fYb14rCk+bSq5qRma1rAbDpdLZdFWZYvKRSTyeRFld0Oys1merOCSV7WkAIYOqdA0wH6XYH8xSiSkc/k5JX9OUi07I7BaJKMbTyNCsgPhlQbocHOMup70XjjlGnQio9wdwdi6LRNeE7tvlTcGMtRFJDeya7pslxVoz9XvQXDxVMvvZpU7KJnK7mNeCRpQjpZ9B3uLUl0OuXRUlCkB1/DuR82k7ts4T07uoGa3Zm6BqM6bWGQf9fHPuRYAWMo3/a12x7U7WKWQd0u5s+C+jNzv4D7FNhVGV0Y7Vl34wztqyDv2YstiNyevfmC0bB7/C2twwsam/uLb69AqdApspb04NsSavJSMwXp+EdehhP6VGPyoUJDKmv/a6ybVY91s3kW698bHfAqi6YO96J15uj5LJ+MZ27Ezii0PzMj8dC29HQxdCUvxq9AXKM9sK+TqySpON2WdGNcNLHLY5EGJZgQU8B2MsVNqrue0hX7H+P7HSwa9YWZBAAA' | base64 --decode | gzip --decompress > /tmp/pr548-async-markers.patch
+          printf '%s  %s\n' '8e51f0ec53970dae29c27135863466abca849b0f6bb0f98ccae7f4c23fbb136e' '/tmp/pr548-async-markers.patch' | sha256sum --check
+          git apply --check /tmp/pr548-async-markers.patch
+          git apply /tmp/pr548-async-markers.patch
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --frozen
+      - run: uv run ruff check .
+      - run: uv run pytest -q tests/test_remote_boundary.py -k 'oauth_control_outage_is_retryable_and_coalesced or cancelled_oauth_leader_does_not_cancel_shared_introspection or malformed_unicode_identity_is_consistently_denied_when_coalesced'
+      - run: bash scripts/ci-insider-denylist.sh
+      - run: uv run python scripts/check_release_contract.py
+      - run: uv run python scripts/check_docs.py
+      - run: uv run pytest -q
+      - run: docker build -t unigrok-pr548-review-markers .
+      - name: Commit verified test markers
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/chatgpt-pr548-review-markers.yml
+          git add tests/test_remote_boundary.py
+          git commit -m "test: mark OAuth concurrency regressions async" -m "Verified in GitHub Actions run $GITHUB_RUN_ID."
+          git push origin HEAD:chatgpt/oauth-resilience-20260804
