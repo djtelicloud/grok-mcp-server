@@ -1,0 +1,770 @@
+name: PR544 independent OAuth recovery
+
+on:
+  push:
+    branches:
+      - chatgpt/pr544-finalizer-20260804-v4
+    paths:
+      - .github/workflows/pr544-independent-oauth-recovery.yml
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  actions: read
+
+concurrency:
+  group: pr544-independent-unicode-finalizer
+  cancel-in-progress: false
+
+env:
+  TARGET_BRANCH: chatgpt/pr544-independent-hardening-20260804
+  DONOR_PR: "544"
+  REVIEWED_DONOR_CURSOR: d1426ebc24e2dae508065d67cb911d60b7f7bc88
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Read repository governance
+        run: |
+          set -euo pipefail
+          mapfile -t instruction_files < <(find .. -name AGENTS.md -type f -print | sort)
+          if [ "${#instruction_files[@]}" -eq 0 ]; then
+            printf '%s\n' "AGENTS.md not found" >&2
+            exit 1
+          fi
+          for file in "${instruction_files[@]}"; do
+            printf '\n===== %s =====\n' "$file"
+            cat "$file"
+          done
+          mapfile -t usena_files < <(grep -RIl --exclude-dir=.git -E 'USENA|Usena|usena' . | sort || true)
+          if [ "${#usena_files[@]}" -eq 0 ]; then
+            printf '%s\n' "USENA policy not found" >&2
+            exit 1
+          fi
+          for file in "${usena_files[@]}"; do
+            printf '\n===== %s =====\n' "$file"
+            cat "$file"
+          done
+
+      - name: Select the isolated publication head
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          if git fetch origin "$TARGET_BRANCH"; then
+            git merge-base --is-ancestor origin/main "origin/$TARGET_BRANCH"
+            git switch -C "$TARGET_BRANCH" "origin/$TARGET_BRANCH"
+          else
+            git switch -C "$TARGET_BRANCH" origin/main
+          fi
+          donor_json="$(gh pr view "$DONOR_PR" --repo "$GITHUB_REPOSITORY" --json number,state,headRefOid,headRefName,author,url,title)"
+          printf '%s\n' "$donor_json" > /tmp/pr544-donor-metadata.json
+          printf 'DONOR_HEAD=%s\n' "$(printf '%s' "$donor_json" | jq -r '.headRefOid')" >> "$GITHUB_ENV"
+          printf 'DONOR_STATE=%s\n' "$(printf '%s' "$donor_json" | jq -r '.state')" >> "$GITHUB_ENV"
+          printf 'BASE_SHA=%s\n' "$(git merge-base origin/main HEAD)" >> "$GITHUB_ENV"
+          printf 'START_SHA=%s\n' "$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+
+      - name: Install repository test dependencies
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          if [ -f requirements-dev.txt ]; then
+            python -m pip install -r requirements-dev.txt
+          fi
+          extra="$(python - <<'PY'
+          from pathlib import Path
+          import tomllib
+
+          path = Path("pyproject.toml")
+          if not path.exists():
+              print("")
+              raise SystemExit
+          data = tomllib.loads(path.read_text(encoding="utf-8"))
+          extras = data.get("project", {}).get("optional-dependencies", {})
+          selected = [name for name in ("dev", "test", "tests") if name in extras]
+          print(f".[{','.join(selected)}]" if selected else ".")
+          PY
+          )"
+          python -m pip install -e "$extra"
+          python -m pip install pytest pytest-asyncio
+
+      - name: Generate independent OAuth behavior regressions
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from __future__ import annotations
+
+          import ast
+          import json
+          from pathlib import Path
+
+          candidates = []
+          for path in Path(".").rglob("*.py"):
+              if any(part in {".git", ".venv", "venv", "site-packages"} for part in path.parts):
+                  continue
+              text = path.read_text(encoding="utf-8")
+              if "def canonical_oauth_principal(" in text and "class RemoteOAuthMiddleware" in text:
+                  candidates.append((path, text))
+          if len(candidates) != 1:
+              raise SystemExit(f"expected one remote OAuth module, found {len(candidates)}")
+          auth_path, source = candidates[0]
+          ast.parse(source)
+          module_parts = list(auth_path.with_suffix("").parts)
+          if module_parts and module_parts[0] == "src":
+              module_parts = module_parts[1:]
+          module_name = ".".join(module_parts)
+          test_path = Path("tests/test_oauth_control_state.py")
+          test_source = f'''from __future__ import annotations
+
+import asyncio
+import importlib
+import json
+from typing import Any
+
+import pytest
+
+
+auth = importlib.import_module({module_name!r})
+
+
+class _ControlResponse:
+    status_code = 200
+    headers: dict[str, str] = {{}}
+
+    def __init__(self, payload: dict[str, Any]) -> None:
+        self._payload = payload
+        self.content = json.dumps(payload).encode("utf-8")
+        self.text = self.content.decode("utf-8")
+
+    def json(self) -> dict[str, Any]:
+        return self._payload
+
+    def raise_for_status(self) -> None:
+        return None
+
+
+class _ControlClient:
+    calls = 0
+    mode = ""
+    issuer = ""
+    audience = ""
+    started: asyncio.Event
+    release: asyncio.Event
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        return None
+
+    async def __aenter__(self) -> _ControlClient:
+        return self
+
+    async def __aexit__(self, *args: Any) -> bool:
+        return False
+
+    async def post(self, *args: Any, **kwargs: Any) -> _ControlResponse:
+        type(self).calls += 1
+        type(self).started.set()
+        await type(self).release.wait()
+        if type(self).mode == "outage":
+            request = auth.httpx.Request("POST", "https://control.example.test/introspect")
+            raise auth.httpx.ConnectError("temporary OAuth control outage", request=request)
+        payload: dict[str, Any] = {{"active": False}}
+        if type(self).mode == "unicode":
+            payload = {{
+                "active": True,
+                "scope": "unigrok:connect",
+                "iss": type(self).issuer,
+                "sub": chr(0xD800),
+                "aud": type(self).audience,
+            }}
+        return _ControlResponse(payload)
+
+
+def _clear_introspection_state() -> None:
+    for name, value in vars(auth).items():
+        upper = name.upper()
+        if isinstance(value, dict) and "OAUTH" in upper and "INTROSPECTION" in upper:
+            value.clear()
+
+
+def _configure(monkeypatch: pytest.MonkeyPatch) -> tuple[str, str]:
+    issuer = "https://auth.example.test"
+    audience = "https://mcp.example.test/mcp"
+    monkeypatch.setenv("UNIGROK_RUNTIME", "cloudrun")
+    monkeypatch.setenv("UNIGROK_PUBLIC_MCP_URL", audience)
+    monkeypatch.setenv("UNIGROK_OAUTH_AUTHORIZATION_SERVERS", issuer)
+    monkeypatch.setenv(
+        "UNIGROK_OAUTH_INTROSPECTION_URL",
+        "https://control.example.test/introspect",
+    )
+    monkeypatch.setenv(
+        "UNIGROK_OAUTH_SCOPES",
+        "unigrok:connect,unigrok:invoke,unigrok:review,unigrok:status,unigrok:chat",
+    )
+    monkeypatch.delenv("UNIGROK_SERVICE_TOKENS", raising=False)
+    monkeypatch.delenv("UNIGROK_SERVICE_TOKEN_SHA256", raising=False)
+    monkeypatch.setattr(auth.httpx, "AsyncClient", _ControlClient)
+    _clear_introspection_state()
+    return issuer, audience
+
+
+async def _request(middleware: Any, token: str) -> int:
+    body = json.dumps(
+        {{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {{}}}},
+        separators=(",", ":"),
+    ).encode("utf-8")
+    delivered = False
+    messages: list[dict[str, Any]] = []
+
+    async def receive() -> dict[str, Any]:
+        nonlocal delivered
+        if not delivered:
+            delivered = True
+            return {{"type": "http.request", "body": body, "more_body": False}}
+        await asyncio.sleep(0)
+        return {{"type": "http.disconnect"}}
+
+    async def send(message: dict[str, Any]) -> None:
+        messages.append(message)
+
+    scope = {{
+        "type": "http",
+        "asgi": {{"version": "3.0", "spec_version": "2.3"}},
+        "http_version": "1.1",
+        "method": "POST",
+        "scheme": "https",
+        "path": "/mcp",
+        "raw_path": b"/mcp",
+        "query_string": b"",
+        "root_path": "",
+        "headers": [
+            (b"host", b"mcp.example.test"),
+            (b"authorization", f"Bearer {{token}}".encode("latin-1")),
+            (b"content-type", b"application/json"),
+            (b"content-length", str(len(body)).encode("ascii")),
+        ],
+        "client": ("8.8.8.8", 43100),
+        "server": ("mcp.example.test", 443),
+        "state": {{}},
+    }}
+    await middleware(scope, receive, send)
+    starts = [message for message in messages if message.get("type") == "http.response.start"]
+    assert len(starts) == 1
+    return int(starts[0]["status"])
+
+
+async def _batch(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    mode: str,
+    token: str,
+    count: int,
+) -> tuple[list[int | BaseException], int, int]:
+    issuer, audience = _configure(monkeypatch)
+    _ControlClient.calls = 0
+    _ControlClient.mode = mode
+    _ControlClient.issuer = issuer
+    _ControlClient.audience = audience
+    _ControlClient.started = asyncio.Event()
+    _ControlClient.release = asyncio.Event()
+    inner_calls = 0
+
+    async def inner_app(scope: dict[str, Any], receive: Any, send: Any) -> None:
+        nonlocal inner_calls
+        inner_calls += 1
+        await send({{"type": "http.response.start", "status": 204, "headers": []}})
+        await send({{"type": "http.response.body", "body": b""}})
+
+    middleware = auth.RemoteOAuthMiddleware(inner_app)
+    tasks = [asyncio.create_task(_request(middleware, token)) for _ in range(count)]
+    await asyncio.wait_for(_ControlClient.started.wait(), timeout=2.0)
+    await asyncio.sleep(0.02)
+    _ControlClient.release.set()
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    return results, _ControlClient.calls, inner_calls
+
+
+@pytest.mark.asyncio
+async def test_temporary_oauth_control_outage_is_one_retryable_result_for_all_callers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    results, calls, inner_calls = await _batch(
+        monkeypatch,
+        mode="outage",
+        token="coalesced-control-outage-token",
+        count=32,
+    )
+    assert results == [503] * 32
+    assert calls == 1
+    assert inner_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_explicit_oauth_token_denial_is_one_unauthorized_result_for_all_callers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    results, calls, inner_calls = await _batch(
+        monkeypatch,
+        mode="denial",
+        token="coalesced-explicit-denial-token",
+        count=32,
+    )
+    assert results == [401] * 32
+    assert calls == 1
+    assert inner_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_malformed_unicode_identity_is_one_unauthorized_result_for_all_callers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    results, calls, inner_calls = await _batch(
+        monkeypatch,
+        mode="unicode",
+        token="coalesced-malformed-unicode-token",
+        count=32,
+    )
+    assert results == [401] * 32
+    assert calls == 1
+    assert inner_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_cancelled_first_oauth_waiter_does_not_cancel_shared_control_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    issuer, audience = _configure(monkeypatch)
+    _ControlClient.calls = 0
+    _ControlClient.mode = "outage"
+    _ControlClient.issuer = issuer
+    _ControlClient.audience = audience
+    _ControlClient.started = asyncio.Event()
+    _ControlClient.release = asyncio.Event()
+    inner_calls = 0
+
+    async def inner_app(scope: dict[str, Any], receive: Any, send: Any) -> None:
+        nonlocal inner_calls
+        inner_calls += 1
+        await send({{"type": "http.response.start", "status": 204, "headers": []}})
+        await send({{"type": "http.response.body", "body": b""}})
+
+    middleware = auth.RemoteOAuthMiddleware(inner_app)
+    leader = asyncio.create_task(_request(middleware, "cancelled-control-outage-token"))
+    await asyncio.wait_for(_ControlClient.started.wait(), timeout=2.0)
+    follower = asyncio.create_task(_request(middleware, "cancelled-control-outage-token"))
+    await asyncio.sleep(0.02)
+    leader.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await leader
+    _ControlClient.release.set()
+    assert await follower == 503
+    assert _ControlClient.calls == 1
+    assert inner_calls == 0
+'''
+          test_path.write_text(test_source, encoding="utf-8")
+          old_test = Path("tests/test_oauth_unicode_concurrency.py")
+          if old_test.exists():
+              old_test.unlink()
+          Path("/tmp/pr544-oauth-paths.json").write_text(
+              json.dumps(
+                  {
+                      "auth_path": str(auth_path),
+                      "test_path": str(test_path),
+                      "module": module_name,
+                  },
+                  indent=2,
+              )
+              + "\n",
+              encoding="utf-8",
+          )
+          PY
+          printf 'AUTH_PATH=%s\n' "$(jq -r '.auth_path' /tmp/pr544-oauth-paths.json)" >> "$GITHUB_ENV"
+          printf 'TEST_PATH=%s\n' "$(jq -r '.test_path' /tmp/pr544-oauth-paths.json)" >> "$GITHUB_ENV"
+          git diff --check
+
+      - name: Probe current OAuth behavior
+        id: probe
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          python -m pytest -q "$TEST_PATH" | tee /tmp/pr544-oauth-probe.txt
+
+      - name: Independently rebuild retryable OAuth control semantics when absent
+        if: steps.probe.outcome != 'success'
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from __future__ import annotations
+
+          import ast
+          import re
+          from pathlib import Path
+
+          path = Path(__import__("os").environ["AUTH_PATH"])
+          source = path.read_text(encoding="utf-8")
+          if "import asyncio\n" not in source:
+              marker = "from __future__ import annotations\n\n"
+              if marker not in source:
+                  raise SystemExit("future import boundary not found")
+              source = source.replace(marker, marker + "import asyncio\n", 1)
+
+          source_tree = ast.parse(source)
+          canonical = next(
+              node
+              for node in ast.walk(source_tree)
+              if isinstance(node, ast.FunctionDef) and node.name == "canonical_oauth_principal"
+          )
+          canonical_text = "\n".join(source.splitlines()[canonical.lineno - 1 : canonical.end_lineno])
+          if "UnicodeEncodeError" not in canonical_text:
+              pattern = re.compile(
+                  r"(    if any\(ord\(char\) <= 31 or ord\(char\) == 127 for char in subject\):\n"
+                  r"        return None\n)"
+                  r"(    return \(\n)"
+              )
+              replacement = (
+                  r"\1"
+                  "    try:\n"
+                  "        issuer.encode(\"utf-8\")\n"
+                  "        subject.encode(\"utf-8\")\n"
+                  "    except UnicodeEncodeError:\n"
+                  "        return None\n"
+                  r"\2"
+              )
+              source, count = pattern.subn(replacement, source, count=1)
+              if count != 1:
+                  raise SystemExit("canonical OAuth principal boundary no longer matches")
+
+          if "_OAUTH_INTROSPECTION_INFLIGHT" not in source:
+              tree = ast.parse(source)
+              introspect = next(
+                  node
+                  for node in ast.walk(tree)
+                  if isinstance(node, ast.AsyncFunctionDef) and node.name == "introspect_oauth_token"
+              )
+              lines = source.splitlines(keepends=True)
+              replacement = '''class _OAuthControlUnavailable(RuntimeError):
+    pass
+
+
+_OAUTH_INTROSPECTION_INFLIGHT_LIMIT = 1_024
+_OAUTH_INTROSPECTION_INFLIGHT: dict[
+    tuple[bytes, str], asyncio.Task[dict[str, Any] | None]
+] = {}
+
+
+def _discard_oauth_introspection(
+    key: tuple[bytes, str],
+    task: asyncio.Task[dict[str, Any] | None],
+) -> None:
+    if _OAUTH_INTROSPECTION_INFLIGHT.get(key) is task:
+        _OAUTH_INTROSPECTION_INFLIGHT.pop(key, None)
+    if not task.cancelled():
+        task.exception()
+
+
+async def _introspect_oauth_token_once(
+    token: str,
+    required: str,
+) -> dict[str, Any] | None:
+    url = introspection_url()
+    if not url:
+        raise _OAuthControlUnavailable("OAuth introspection is not configured")
+    try:
+        async with httpx.AsyncClient(
+            timeout=5.0,
+            follow_redirects=False,
+            trust_env=False,
+        ) as client:
+            response = await client.post(
+                url,
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "User-Agent": "unigrok-public-remote-mcp/1",
+                },
+                data={"required_scope": required},
+            )
+    except httpx.HTTPError as exc:
+        raise _OAuthControlUnavailable("OAuth introspection request failed") from exc
+    if response.status_code != 200 or len(response.content) > 16_384:
+        raise _OAuthControlUnavailable("OAuth introspection returned an unusable response")
+    try:
+        payload = response.json()
+    except (TypeError, ValueError, UnicodeError) as exc:
+        raise _OAuthControlUnavailable("OAuth introspection returned invalid JSON") from exc
+    if not isinstance(payload, dict):
+        raise _OAuthControlUnavailable("OAuth introspection returned a non-object payload")
+    if payload.get("active") is False:
+        return None
+    if payload.get("active") is not True:
+        raise _OAuthControlUnavailable("OAuth introspection omitted an explicit token state")
+    scopes = payload.get("scope")
+    granted = set(scopes.split()) if isinstance(scopes, str) else set()
+    if not set(required.split()).issubset(granted):
+        return None
+    principal = canonical_oauth_principal(payload.get("iss"), payload.get("sub"))
+    if principal is None:
+        return None
+    audience = payload.get("aud")
+    if isinstance(audience, str):
+        audiences = (audience,)
+    elif (
+        isinstance(audience, list)
+        and len(audience) <= 16
+        and all(isinstance(item, str) and len(item) <= 2_048 for item in audience)
+    ):
+        audiences = tuple(audience)
+    else:
+        return None
+    if public_mcp_resource() not in audiences:
+        return None
+    return {
+        "active": True,
+        "scope": scopes,
+        "unigrok_principal": principal,
+        "unigrok_auth": "oauth",
+    }
+
+
+async def introspect_oauth_token(token: str, required: str) -> dict[str, Any] | None:
+    if not token or len(token) > 8_192:
+        return None
+    key = (hashlib.sha256(token.encode("utf-8")).digest(), required)
+    task = _OAUTH_INTROSPECTION_INFLIGHT.get(key)
+    if task is None:
+        for existing_key, existing_task in tuple(_OAUTH_INTROSPECTION_INFLIGHT.items()):
+            if existing_task.done():
+                _discard_oauth_introspection(existing_key, existing_task)
+        if len(_OAUTH_INTROSPECTION_INFLIGHT) >= _OAUTH_INTROSPECTION_INFLIGHT_LIMIT:
+            raise _OAuthControlUnavailable("OAuth introspection capacity is temporarily exhausted")
+        task = asyncio.create_task(_introspect_oauth_token_once(token, required))
+        _OAUTH_INTROSPECTION_INFLIGHT[key] = task
+        task.add_done_callback(
+            lambda completed, task_key=key: _discard_oauth_introspection(
+                task_key,
+                completed,
+            )
+        )
+    return await asyncio.shield(task)
+'''
+              start = introspect.lineno - 1
+              end = introspect.end_lineno
+              lines[start:end] = [replacement]
+              source = "".join(lines)
+
+          if "async def _send_oauth_control_unavailable(" not in source:
+              class_marker = "class RemoteOAuthMiddleware:"
+              if class_marker not in source:
+                  raise SystemExit("RemoteOAuthMiddleware class boundary not found")
+              helper = '''async def _send_oauth_control_unavailable(
+    scope: dict[str, Any],
+    receive: Any,
+    send: Any,
+) -> None:
+    response = JSONResponse(
+        {
+            "status": "unavailable",
+            "code": "oauth_control_unavailable",
+            "detail": "OAuth token validation is temporarily unavailable.",
+        },
+        status_code=503,
+        headers={"Cache-Control": "no-store", "Retry-After": "1"},
+    )
+    await response(scope, receive, send)
+
+
+'''
+              source = source.replace(class_marker, helper + class_marker, 1)
+
+          if "except _OAuthControlUnavailable:" not in source:
+              tree = ast.parse(source)
+              class_node = next(
+                  node
+                  for node in tree.body
+                  if isinstance(node, ast.ClassDef) and node.name == "RemoteOAuthMiddleware"
+              )
+              call_method = next(
+                  node
+                  for node in class_node.body
+                  if isinstance(node, ast.AsyncFunctionDef) and node.name == "__call__"
+              )
+              parent: dict[ast.AST, ast.AST] = {}
+              for node in ast.walk(call_method):
+                  for child in ast.iter_child_nodes(node):
+                      parent[child] = node
+              awaits = []
+              for node in ast.walk(call_method):
+                  if not isinstance(node, ast.Await) or not isinstance(node.value, ast.Call):
+                      continue
+                  function = node.value.func
+                  if isinstance(function, ast.Name):
+                      name = function.id
+                  elif isinstance(function, ast.Attribute):
+                      name = function.attr
+                  else:
+                      continue
+                  if "introspect" in name.lower():
+                      awaits.append(node)
+              if len(awaits) != 1:
+                  raise SystemExit(f"expected one OAuth introspection await in middleware, found {len(awaits)}")
+              statement: ast.AST = awaits[0]
+              while not isinstance(statement, (ast.Assign, ast.AnnAssign, ast.Expr)):
+                  statement = parent[statement]
+              lines = source.splitlines(keepends=True)
+              start = statement.lineno - 1
+              end = statement.end_lineno
+              original = lines[start:end]
+              indent = original[0][: len(original[0]) - len(original[0].lstrip())]
+              wrapped = [f"{indent}try:\n"]
+              for line in original:
+                  content = line[len(indent) :] if line.startswith(indent) else line.lstrip()
+                  wrapped.append(f"{indent}    {content}")
+              wrapped.extend(
+                  [
+                      f"{indent}except _OAuthControlUnavailable:\n",
+                      f"{indent}    await _send_oauth_control_unavailable(scope, receive, send)\n",
+                      f"{indent}    return\n",
+                  ]
+              )
+              lines[start:end] = wrapped
+              source = "".join(lines)
+
+          ast.parse(source)
+          path.write_text(source, encoding="utf-8")
+          PY
+          git diff --check
+          git diff -- "$AUTH_PATH" "$TEST_PATH"
+
+      - name: Run focused OAuth state regressions after recovery
+        run: |
+          set -euo pipefail
+          python -m pytest -q "$TEST_PATH" | tee /tmp/pr544-focused-tests.txt
+
+      - name: Run isolated lint gates
+        run: |
+          set -euo pipefail
+          if python -c 'import ruff' >/dev/null 2>&1; then
+            python -m ruff check "$AUTH_PATH" "$TEST_PATH"
+            python -m ruff format --check "$AUTH_PATH" "$TEST_PATH"
+          fi
+          python -m compileall -q "$AUTH_PATH" "$TEST_PATH"
+
+      - name: Run full repository suite
+        run: |
+          set -euo pipefail
+          python -m pytest -q | tee /tmp/pr544-full-tests.txt
+
+      - name: Build repository container
+        run: |
+          set -euo pipefail
+          if [ -f Dockerfile ]; then
+            docker build --tag grok-mcp-server:pr544-independent . | tee /tmp/pr544-docker-build.txt
+          else
+            printf '%s\n' "No root Dockerfile; container build not applicable." | tee /tmp/pr544-docker-build.txt
+          fi
+
+      - name: Commit and push verified recovery
+        run: |
+          set -euo pipefail
+          git config user.name "ChatGPT"
+          git config user.email "chatgpt@users.noreply.github.com"
+          git add "$AUTH_PATH" "$TEST_PATH"
+          if [ -e tests/test_oauth_unicode_concurrency.py ]; then
+            git add tests/test_oauth_unicode_concurrency.py
+          fi
+          git diff --cached --check
+          if ! git diff --cached --quiet; then
+            git commit -m "security: preserve OAuth control failure semantics"
+            git push origin "HEAD:$TARGET_BRANCH"
+          fi
+          printf 'FIX_SHA=%s\n' "$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+
+      - name: Create or refresh draft and donor credit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          focused_result="$(tail -n 1 /tmp/pr544-focused-tests.txt)"
+          full_result="$(tail -n 1 /tmp/pr544-full-tests.txt)"
+          docker_result="$(tail -n 1 /tmp/pr544-docker-build.txt)"
+          cat > /tmp/pr544-pr-body.md <<EOF
+          ## Summary
+
+          - Distinguishes retryable OAuth-control failures from explicit token denial.
+          - Coalesces simultaneous validation for the same token and scope without retaining raw bearer tokens.
+          - Shields shared validation work so cancellation of the first waiter does not cancel the result for other callers.
+          - Rejects malformed non-UTF-8 OAuth identity claims without allowing an exception to escape.
+          - Bounds in-flight OAuth validation state and returns retryable HTTP 503 only for control-plane failure; explicit denial and invalid claims remain HTTP 401.
+
+          ## Verification
+
+          - Focused state regressions: \`$focused_result\`
+          - Full repository suite: \`$full_result\`
+          - Container verification: \`$docker_result\`
+          - Public-main merge base: \`$BASE_SHA\`
+          - Starting isolated head: \`$START_SHA\`
+          - Verified fix head: \`$FIX_SHA\`
+
+          ## Provenance
+
+          This implementation was rebuilt independently from public \`main\`. PR #544 by @cfrat33 was used only as donor research for security behaviors. No donor-branch code was merged, copied, or cherry-picked.
+
+          Thanks to Curtis (@cfrat33) for the security ideas and evidence contributed through PR #544. The donor PR head observed at publication was \`$DONOR_HEAD\` with state \`$DONOR_STATE\`; the task's initial reviewed cursor was \`$REVIEWED_DONOR_CURSOR\`.
+          EOF
+          pr_number="$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --head "$TARGET_BRANCH" --json number --jq '.[0].number // empty')"
+          if [ -z "$pr_number" ]; then
+            pr_url="$(gh pr create --repo "$GITHUB_REPOSITORY" --draft --base main --head "$TARGET_BRANCH" --title "security: preserve OAuth control failure semantics" --body-file /tmp/pr544-pr-body.md)"
+            pr_number="${pr_url##*/}"
+          else
+            gh pr edit "$pr_number" --repo "$GITHUB_REPOSITORY" --title "security: preserve OAuth control failure semantics" --body-file /tmp/pr544-pr-body.md
+          fi
+          marker='<!-- pr544-independent-credit-recorded -->'
+          existing_comments="$(gh pr view "$DONOR_PR" --repo "$GITHUB_REPOSITORY" --json comments --jq '[.comments[].body] | join("\n")')"
+          if ! grep -Fq "$marker" <<<"$existing_comments"; then
+            gh pr comment "$DONOR_PR" --repo "$GITHUB_REPOSITORY" --body "$marker
+          Thanks @cfrat33 (Curtis) for the security ideas and evidence in this donor PR. The OAuth control-state and malformed-Unicode fixes have now been implemented independently from public main, with no donor code merged, copied, or cherry-picked. The independent draft is #$pr_number."
+          fi
+          printf 'PR_NUMBER=%s\n' "$pr_number" >> "$GITHUB_ENV"
+          printf 'PR_URL=https://github.com/%s/pull/%s\n' "$GITHUB_REPOSITORY" "$pr_number" >> "$GITHUB_ENV"
+
+      - name: Upload verification evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr544-independent-oauth-recovery
+          path: |
+            /tmp/pr544-donor-metadata.json
+            /tmp/pr544-oauth-paths.json
+            /tmp/pr544-oauth-probe.txt
+            /tmp/pr544-focused-tests.txt
+            /tmp/pr544-full-tests.txt
+            /tmp/pr544-docker-build.txt
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Write workflow summary
+        run: |
+          set -euo pipefail
+          {
+            printf '## Independent OAuth recovery\n\n'
+            printf -- '- Draft PR: %s\n' "$PR_URL"
+            printf -- '- Merge base: `%s`\n' "$BASE_SHA"
+            printf -- '- Start SHA: `%s`\n' "$START_SHA"
+            printf -- '- Fix SHA: `%s`\n' "$FIX_SHA"
+            printf -- '- Donor head: `%s`\n' "$DONOR_HEAD"
+            printf -- '- Donor state: `%s`\n' "$DONOR_STATE"
+            printf -- '- Focused tests: `%s`\n' "$(tail -n 1 /tmp/pr544-focused-tests.txt)"
+            printf -- '- Full tests: `%s`\n' "$(tail -n 1 /tmp/pr544-full-tests.txt)"
+            printf -- '- Container: `%s`\n' "$(tail -n 1 /tmp/pr544-docker-build.txt)"
+          } >> "$GITHUB_STEP_SUMMARY"
