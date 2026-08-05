@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pytest
 from starlette.testclient import TestClient
 
 from unigrok_public import server
@@ -61,3 +62,56 @@ def test_mcp_transport_rejects_host_and_origin_rebinding() -> None:
     assert hostile_origin.status_code == 403
     assert local.status_code == 200
     assert f'"version":"{server.__version__}"' in local.text
+
+
+def test_cloudrun_transport_allows_validated_public_resource(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("UNIGROK_RUNTIME", "cloudrun")
+    monkeypatch.setenv(
+        "UNIGROK_PUBLIC_MCP_URL",
+        "https://mcp.example.test/mcp",
+    )
+
+    assert server._transport_security_settings().model_dump() == {
+        "enable_dns_rebinding_protection": True,
+        "allowed_hosts": [
+            "127.0.0.1:*",
+            "localhost:*",
+            "[::1]:*",
+            "mcp.example.test",
+        ],
+        "allowed_origins": [
+            "http://127.0.0.1:*",
+            "http://localhost:*",
+            "http://[::1]:*",
+            "https://mcp.example.test",
+        ],
+    }
+
+
+@pytest.mark.parametrize(
+    "resource",
+    (
+        "http://mcp.example.test/mcp",
+        "https://localhost/mcp",
+        "https://service.internal/mcp",
+        "https://mcp.example.test/not-mcp",
+    ),
+)
+def test_cloudrun_transport_rejects_unsafe_public_resource(
+    monkeypatch: pytest.MonkeyPatch,
+    resource: str,
+) -> None:
+    monkeypatch.setenv("UNIGROK_RUNTIME", "cloudrun")
+    monkeypatch.setenv("UNIGROK_PUBLIC_MCP_URL", resource)
+
+    assert server._transport_security_settings().model_dump() == {
+        "enable_dns_rebinding_protection": True,
+        "allowed_hosts": ["127.0.0.1:*", "localhost:*", "[::1]:*"],
+        "allowed_origins": [
+            "http://127.0.0.1:*",
+            "http://localhost:*",
+            "http://[::1]:*",
+        ],
+    }

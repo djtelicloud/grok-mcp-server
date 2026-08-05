@@ -1631,15 +1631,24 @@ PROJECT_ONBOARDING = {
     },
 }
 
-_TRANSPORT_SECURITY = TransportSecuritySettings(
-    enable_dns_rebinding_protection=True,
-    allowed_hosts=["127.0.0.1:*", "localhost:*", "[::1]:*"],
-    allowed_origins=[
+def _transport_security_settings() -> TransportSecuritySettings:
+    allowed_hosts = ["127.0.0.1:*", "localhost:*", "[::1]:*"]
+    allowed_origins = [
         "http://127.0.0.1:*",
         "http://localhost:*",
         "http://[::1]:*",
-    ],
-)
+    ]
+    if is_cloudrun_runtime():
+        resource = public_mcp_resource()
+        if resource:
+            authority = urlsplit(resource).netloc.lower()
+            allowed_hosts.append(authority)
+            allowed_origins.append(f"https://{authority}")
+    return TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=allowed_hosts,
+        allowed_origins=allowed_origins,
+    )
 
 
 mcp = FastMCP(
@@ -1650,7 +1659,7 @@ mcp = FastMCP(
     streamable_http_path="/mcp",
     stateless_http=stateless_http_enabled(),
     json_response=False,
-    transport_security=_TRANSPORT_SECURITY,
+    transport_security=_transport_security_settings(),
 )
 # FastMCP 1.28 does not forward a product version to its low-level server,
 # so set the protocol handshake value explicitly until the SDK exposes it.
