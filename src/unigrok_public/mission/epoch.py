@@ -6,7 +6,7 @@ import contextlib
 import math
 from typing import Any
 
-from unigrok_public.autonomy import continue_envelope
+from unigrok_public.autonomy import apply_continue_cream, continue_envelope
 
 from .artifacts import artifact_projection, sealed_content_hash
 from .evidence import default_agent_policy
@@ -653,7 +653,7 @@ async def seal_mission_epoch(
             text="Mission lease lost before verifying; re-invoke continue_token.",
             poll=False,
         )
-        sealed["proposed_text"] = projection
+        sealed = apply_continue_cream(sealed, projection)
         sealed["mission"] = {"status": fresh.get("status"), "lease_lost": True}
         return _apply_mission_billing(sealed, fresh_billing)
 
@@ -681,7 +681,7 @@ async def seal_mission_epoch(
             text="Mission lease lost while binding the envelope; re-invoke continue_token.",
             poll=False,
         )
-        sealed["proposed_text"] = projection
+        sealed = apply_continue_cream(sealed, projection)
         sealed["mission"] = {
             "status": current.get("status"),
             "lease_lost": True,
@@ -723,7 +723,7 @@ async def seal_mission_epoch(
             artifact_refs=[projection_digest],
             poll=False,
         )
-        sealed["proposed_text"] = projection
+        sealed = apply_continue_cream(sealed, projection)
         sealed["mission"] = {
             "protocol": "unigrok_mission_v2",
             "status": refreshed.get("status"),
@@ -793,7 +793,7 @@ async def seal_mission_epoch(
             text="Mission lease lost during verifying; re-invoke continue_token.",
             poll=False,
         )
-        sealed["proposed_text"] = projection
+        sealed = apply_continue_cream(sealed, projection)
         sealed["mission"] = {
             "status": pre_commit.get("status"),
             "lease_lost": True,
@@ -913,7 +913,7 @@ async def seal_mission_epoch(
                 ),
                 poll=False,
             )
-            sealed["proposed_text"] = projection
+            sealed = apply_continue_cream(sealed, projection)
             sealed["mission"] = {
                 "protocol": "unigrok_mission_v2",
                 "status": str(current.get("status") or ""),
@@ -1018,7 +1018,7 @@ async def seal_mission_epoch(
     ):
         if key in result:
             sealed[key] = result[key]
-    sealed["proposed_text"] = projection
+    sealed = apply_continue_cream(sealed, projection)
     sealed["mission"] = {
         "protocol": "unigrok_mission_v2",
         "status": str((cursor_row or {}).get("status") or MissionStatus.WAITING_EVENT.value),

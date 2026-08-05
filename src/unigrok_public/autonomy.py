@@ -208,6 +208,36 @@ def ledger_summary(events: list[dict[str, Any]], *, limit: int = 12) -> str:
     return "\n".join(lines)
 
 
+_CONTINUE_DRAFT_MARKER = "[continue · not committed]"
+
+
+def host_visible_continue_text(proposed_text: object, status_text: object) -> str:
+    cream = str(proposed_text or "").strip()
+    status = str(status_text or "").strip()
+    if not cream:
+        return status
+    footer = _CONTINUE_DRAFT_MARKER
+    if status:
+        footer = f"{footer}\n{status}"
+    return f"{cream}\n\n{footer}"
+
+
+def apply_continue_cream(
+    envelope: dict[str, object], proposed_text: object
+) -> dict[str, object]:
+    result = dict(envelope)
+    if str(result.get("status") or "").strip().casefold() != "continue":
+        return result
+    cream = str(proposed_text or "").strip()
+    if not cream:
+        return result
+    status_text = str(result.get("status_text") or result.get("text") or "").strip()
+    result["proposed_text"] = cream
+    result["status_text"] = status_text
+    result["text"] = host_visible_continue_text(cream, status_text)
+    return result
+
+
 def continue_envelope(
     *,
     job_id: str,
