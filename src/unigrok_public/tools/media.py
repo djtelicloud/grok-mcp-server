@@ -1,16 +1,31 @@
 """Media domain — validation + generation/upload plans (Phase 3 SRP)."""
 from __future__ import annotations
 
+import asyncio
 import base64
 import ipaddress
 import re
-from collections.abc import Callable, Sequence
+import socket
+import threading
+import weakref
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
 FILE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$")
+MEDIA_URL_MAX_CHARS = 4_096
+MEDIA_DNS_TIMEOUT_SECONDS = 2.0
+MEDIA_DNS_TOTAL_TIMEOUT_SECONDS = 5.0
+MEDIA_DNS_CONCURRENCY = 4
+_MEDIA_INTERNAL_SUFFIXES = ("localhost", "local", "internal", "home.arpa")
+_MEDIA_DNS_LIMITER_LOCK = threading.Lock()
+_MEDIA_DNS_LIMITERS: weakref.WeakKeyDictionary[
+    asyncio.AbstractEventLoop, asyncio.Semaphore
+] = weakref.WeakKeyDictionary()
+
+MediaResolver = Callable[[str, int], Awaitable[Sequence[str]]]
 
 
 def validated_file_id(value: str) -> str:
@@ -20,21 +35,72 @@ def validated_file_id(value: str) -> str:
     return file_id
 
 
-def validated_media_url(value: str, field: str) -> str:
+@dataclass(frozen=True)
+class _MediaTarget:
+    url: str
+    host: str
+    port: int
+    literal_address: ipaddress.IPv4Address | ipaddress.IPv6Address | None
+
+
+def _is_public_address(
+    address: ipaddress.IPv4Address | ipaddress.IPv6Address,
+) -> bool:
+    return address.is_global and not address.is_multicast
+
+
+def _validated_media_target(value: str, field: str) -> _MediaTarget:
     url = str(value or "").strip()
-    parts = urlsplit(url)
-    if parts.scheme != "https" or not parts.netloc or parts.username or parts.password:
+    if not url or len(url) > MEDIA_URL_MAX_CHARS or "\\" in url or any(
+        character.isspace() or ord(character) < 32 or ord(character) == 127
+        for character in url
+    ):
         raise ValueError(f"{field} must be a public https URL")
-    host = parts.hostname or ""
+    try:
+        url.encode("utf-8")
+        parts = urlsplit(url)
+        host = str(parts.hostname or "").rstrip(".")
+        parsed_port = parts.port
+        port = 443 if parsed_port is None else parsed_port
+        username = parts.username
+        password = parts.password
+    except (UnicodeError, ValueError) as exc:
+        raise ValueError(f"{field} must be a public https URL") from exc
+    if (
+        parts.scheme.lower() != "https"
+        or not parts.netloc
+        or username is not None
+        or password is not None
+        or not host
+        or "%" in host
+        or not 1 <= port <= 65_535
+    ):
+        raise ValueError(f"{field} must be a public https URL")
     try:
         address = ipaddress.ip_address(host)
-    except ValueError as exc:
-        if host == "localhost" or host.endswith((".localhost", ".local")):
+    except ValueError:
+        try:
+            normalized_host = host.encode("idna").decode("ascii").lower()
+        except UnicodeError as exc:
             raise ValueError(f"{field} must be a public https URL") from exc
-    else:
-        if not address.is_global:
-            raise ValueError(f"{field} must be a public https URL")
-    return url
+        if (
+            not normalized_host
+            or len(normalized_host) > 253
+            or "." not in normalized_host
+            or any(
+                normalized_host == suffix or normalized_host.endswith(f".{suffix}")
+                for suffix in _MEDIA_INTERNAL_SUFFIXES
+            )
+        ):
+            raise ValueError(f"{field} must be a public https URL") from None
+        return _MediaTarget(url, normalized_host, port, None)
+    if not _is_public_address(address):
+        raise ValueError(f"{field} must be a public https URL")
+    return _MediaTarget(url, address.compressed, port, address)
+
+
+def validated_media_url(value: str, field: str) -> str:
+    return _validated_media_target(value, field).url
 
 
 def validated_media_urls(
@@ -44,6 +110,120 @@ def validated_media_urls(
     if len(items) > maximum:
         raise ValueError(f"{field} accepts at most {maximum} URLs")
     return [validated_media_url(value, field) for value in items]
+
+
+def _media_dns_limiter() -> asyncio.Semaphore:
+    loop = asyncio.get_running_loop()
+    with _MEDIA_DNS_LIMITER_LOCK:
+        limiter = _MEDIA_DNS_LIMITERS.get(loop)
+        if limiter is None:
+            limiter = asyncio.Semaphore(MEDIA_DNS_CONCURRENCY)
+            _MEDIA_DNS_LIMITERS[loop] = limiter
+    return limiter
+
+
+async def _resolve_media_host(host: str, port: int) -> Sequence[str]:
+    loop = asyncio.get_running_loop()
+    answers = await loop.getaddrinfo(
+        host,
+        port,
+        family=socket.AF_UNSPEC,
+        type=socket.SOCK_STREAM,
+        proto=socket.IPPROTO_TCP,
+    )
+    return tuple(str(answer[4][0]) for answer in answers)
+
+
+async def _validate_resolved_target(
+    target: _MediaTarget,
+    field: str,
+    resolver: MediaResolver,
+    timeout_seconds: float,
+) -> None:
+    if target.literal_address is not None:
+        return
+    try:
+        answers = await asyncio.wait_for(
+            resolver(target.host, target.port), timeout=timeout_seconds
+        )
+    except (OSError, TimeoutError, UnicodeError) as exc:
+        raise ValueError(f"{field} must be a public https URL") from exc
+    if not answers:
+        raise ValueError(f"{field} must be a public https URL")
+    try:
+        addresses = tuple(ipaddress.ip_address(str(answer)) for answer in answers)
+    except ValueError as exc:
+        raise ValueError(f"{field} must be a public https URL") from exc
+    if any(not _is_public_address(address) for address in addresses):
+        raise ValueError(f"{field} must be a public https URL")
+
+
+async def validated_public_media_urls(
+    values: Sequence[str] | None,
+    field: str,
+    maximum: int,
+    *,
+    resolver: MediaResolver | None = None,
+    timeout_seconds: float = MEDIA_DNS_TIMEOUT_SECONDS,
+    total_timeout_seconds: float = MEDIA_DNS_TOTAL_TIMEOUT_SECONDS,
+) -> list[str]:
+    items = list(values or [])
+    if len(items) > maximum:
+        raise ValueError(f"{field} accepts at most {maximum} URLs")
+    targets = [_validated_media_target(value, field) for value in items]
+    unique_targets = {
+        (target.host, target.port): target
+        for target in targets
+        if target.literal_address is None
+    }
+    if unique_targets:
+        active_resolver = resolver or _resolve_media_host
+        limiter = _media_dns_limiter()
+
+        async def validate(target: _MediaTarget) -> None:
+            async with limiter:
+                await _validate_resolved_target(
+                    target, field, active_resolver, timeout_seconds
+                )
+
+        async def validate_all() -> None:
+            tasks = [
+                asyncio.create_task(validate(target))
+                for target in unique_targets.values()
+            ]
+            try:
+                await asyncio.gather(*tasks)
+            except BaseException:
+                for task in tasks:
+                    task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
+                raise
+
+        try:
+            await asyncio.wait_for(validate_all(), timeout=total_timeout_seconds)
+        except TimeoutError as exc:
+            raise ValueError(f"{field} must be a public https URL") from exc
+    return [target.url for target in targets]
+
+
+async def validated_public_media_url(
+    value: str,
+    field: str,
+    *,
+    resolver: MediaResolver | None = None,
+    timeout_seconds: float = MEDIA_DNS_TIMEOUT_SECONDS,
+    total_timeout_seconds: float = MEDIA_DNS_TOTAL_TIMEOUT_SECONDS,
+) -> str:
+    return (
+        await validated_public_media_urls(
+            [value],
+            field,
+            1,
+            resolver=resolver,
+            timeout_seconds=timeout_seconds,
+            total_timeout_seconds=total_timeout_seconds,
+        )
+    )[0]
 
 
 def validated_image_count(n: int) -> int:

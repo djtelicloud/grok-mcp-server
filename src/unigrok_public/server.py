@@ -6601,10 +6601,13 @@ async def chat_with_vision(
     Slow provider work returns status=pending with a job_id; poll agent_result.
     """
     _require_metered_api_enabled()
-    urls = _validated_media_urls(image_urls, "image_urls", 10)
-    if not urls:
+    lexical_urls = media_tools.validated_media_urls(image_urls, "image_urls", 10)
+    if not lexical_urls:
         raise ValueError("image_urls must contain at least one public HTTPS URL")
     safe_prompt = _validated_prompt(prompt, "prompt")
+    urls = await media_tools.validated_public_media_urls(
+        lexical_urls, "image_urls", 10
+    )
     model = _lead_model(await _catalogs(), "api")
     system_prompt = await _system_prompt("vision")
 
@@ -6661,11 +6664,19 @@ async def generate_image(
 ) -> dict[str, Any]:
     """Generate or edit images through the metered xAI API; returns hosted URLs."""
     _require_metered_api_enabled()
+    lexical_image_urls = media_tools.validated_media_urls(
+        image_urls, "image_urls", 10
+    )
+    safe_prompt = _validated_prompt(prompt, "prompt")
+    safe_count = media_tools.validated_image_count(n)
+    safe_image_urls = await media_tools.validated_public_media_urls(
+        lexical_image_urls, "image_urls", 10
+    )
     catalogs = await _catalogs()
     plan = media_tools.plan_generate_image(
-        prompt=prompt,
-        image_urls=image_urls,
-        n=n,
+        prompt=safe_prompt,
+        image_urls=safe_image_urls,
+        n=safe_count,
         aspect_ratio=aspect_ratio,
         resolution=resolution,
         catalogs=catalogs,
@@ -6698,12 +6709,38 @@ async def generate_video(
 ) -> dict[str, Any]:
     """Generate or edit video through the metered xAI API."""
     _require_metered_api_enabled()
+    if image_url and video_url:
+        raise ValueError("provide image_url or video_url, not both")
+    safe_prompt = _validated_prompt(prompt, "prompt")
+    lexical_image_url = (
+        media_tools.validated_media_url(image_url, "image_url") if image_url else None
+    )
+    lexical_video_url = (
+        media_tools.validated_media_url(video_url, "video_url") if video_url else None
+    )
+    lexical_reference_image_urls = media_tools.validated_media_urls(
+        reference_image_urls, "reference_image_urls", 10
+    )
+    safe_duration = media_tools.validated_video_duration(duration, lo=1, hi=15)
+    safe_image_url = (
+        await media_tools.validated_public_media_url(lexical_image_url, "image_url")
+        if lexical_image_url
+        else None
+    )
+    safe_video_url = (
+        await media_tools.validated_public_media_url(lexical_video_url, "video_url")
+        if lexical_video_url
+        else None
+    )
+    safe_reference_image_urls = await media_tools.validated_public_media_urls(
+        lexical_reference_image_urls, "reference_image_urls", 10
+    )
     plan = media_tools.plan_generate_video(
-        prompt=prompt,
-        image_url=image_url,
-        video_url=video_url,
-        reference_image_urls=reference_image_urls,
-        duration=duration,
+        prompt=safe_prompt,
+        image_url=safe_image_url,
+        video_url=safe_video_url,
+        reference_image_urls=safe_reference_image_urls,
+        duration=safe_duration,
         aspect_ratio=aspect_ratio,
         resolution=resolution,
         validate_prompt=_validated_prompt,
@@ -6733,10 +6770,16 @@ async def extend_video(
 ) -> dict[str, Any]:
     """Extend a public HTTPS video through the metered xAI API."""
     _require_metered_api_enabled()
+    safe_prompt = _validated_prompt(prompt, "prompt")
+    lexical_video_url = media_tools.validated_media_url(video_url, "video_url")
+    safe_duration = media_tools.validated_video_duration(duration, lo=2, hi=10)
+    safe_video_url = await media_tools.validated_public_media_url(
+        lexical_video_url, "video_url"
+    )
     plan = media_tools.plan_extend_video(
-        prompt=prompt,
-        video_url=video_url,
-        duration=duration,
+        prompt=safe_prompt,
+        video_url=safe_video_url,
+        duration=safe_duration,
         validate_prompt=_validated_prompt,
     )
 
