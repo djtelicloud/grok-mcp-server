@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import os
 import re
 import sqlite3
@@ -279,6 +280,17 @@ class PublicStateStore:
                     ON telemetry(created_at DESC);
                 CREATE INDEX IF NOT EXISTS telemetry_caller_created
                     ON telemetry(caller, created_at DESC);
+                CREATE TABLE IF NOT EXISTS local_budget_days (
+                    day TEXT PRIMARY KEY,
+                    spent_usd REAL NOT NULL DEFAULT 0,
+                    limit_usd REAL NOT NULL,
+                    reservation_token TEXT,
+                    reservation_expires_at TEXT,
+                    updated_at TEXT NOT NULL
+                );
+                CREATE UNIQUE INDEX IF NOT EXISTS local_budget_reservation_token
+                    ON local_budget_days(reservation_token)
+                    WHERE reservation_token IS NOT NULL;
                 CREATE TABLE IF NOT EXISTS agent_jobs (
                     job_id TEXT PRIMARY KEY,
                     created_at TEXT NOT NULL,
@@ -1054,6 +1066,210 @@ class PublicStateStore:
                 self._get_caller_cost_today_sync,
                 normalized,
                 day_start,
+            )
+        )
+
+    @staticmethod
+    def _ensure_local_budget_day_connection(
+        connection: sqlite3.Connection,
+        limit_usd: float,
+    ) -> tuple[datetime, sqlite3.Row]:
+        now = datetime.now(UTC)
+        day = now.date().isoformat()
+        day_start = now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+        cutoff = (now - timedelta(days=45)).date().isoformat()
+        connection.execute("DELETE FROM local_budget_days WHERE day < ?", (cutoff,))
+        row = connection.execute(
+            "SELECT * FROM local_budget_days WHERE day=?",
+            (day,),
+        ).fetchone()
+        if row is None:
+            telemetry = connection.execute(
+                "SELECT COALESCE(SUM(cost_usd), 0) FROM telemetry WHERE created_at>=?",
+                (day_start,),
+            ).fetchone()
+            try:
+                spent = max(0.0, float(telemetry[0] if telemetry else 0.0))
+            except (TypeError, ValueError, OverflowError):
+                spent = limit_usd
+            if not math.isfinite(spent):
+                spent = limit_usd
+            connection.execute(
+                "INSERT INTO local_budget_days("
+                "day, spent_usd, limit_usd, updated_at"
+                ") VALUES (?, ?, ?, ?)",
+                (day, spent, limit_usd, now.isoformat()),
+            )
+        else:
+            connection.execute(
+                "UPDATE local_budget_days SET limit_usd=?, updated_at=? WHERE day=?",
+                (limit_usd, now.isoformat(), day),
+            )
+        current = connection.execute(
+            "SELECT * FROM local_budget_days WHERE day=?",
+            (day,),
+        ).fetchone()
+        if current is None:
+            raise sqlite3.DatabaseError("local budget row was not persisted")
+        return now, current
+
+    @staticmethod
+    def _local_budget_status_connection(
+        connection: sqlite3.Connection,
+        limit_usd: float,
+    ) -> dict[str, Any]:
+        now, row = PublicStateStore._ensure_local_budget_day_connection(
+            connection,
+            limit_usd,
+        )
+        try:
+            spent = float(row["spent_usd"])
+        except (TypeError, ValueError, OverflowError):
+            spent = limit_usd
+        if not math.isfinite(spent) or spent < 0:
+            spent = limit_usd
+            connection.execute(
+                "UPDATE local_budget_days SET spent_usd=?, reservation_token=NULL, "
+                "reservation_expires_at=NULL, updated_at=? WHERE day=?",
+                (spent, now.isoformat(), str(row["day"])),
+            )
+        token = str(row["reservation_token"] or "")
+        if token:
+            try:
+                expires = datetime.fromisoformat(str(row["reservation_expires_at"] or ""))
+                if expires.tzinfo is None:
+                    expires = expires.replace(tzinfo=UTC)
+            except (TypeError, ValueError):
+                expires = now - timedelta(seconds=1)
+            if expires <= now:
+                spent = max(spent, limit_usd)
+                connection.execute(
+                    "UPDATE local_budget_days SET spent_usd=?, reservation_token=NULL, "
+                    "reservation_expires_at=NULL, updated_at=? WHERE day=?",
+                    (spent, now.isoformat(), str(row["day"])),
+                )
+                return {
+                    "status": "exceeded",
+                    "day": str(row["day"]),
+                    "spent_usd": spent,
+                    "limit_usd": limit_usd,
+                }
+            return {
+                "status": "busy",
+                "day": str(row["day"]),
+                "spent_usd": spent,
+                "limit_usd": limit_usd,
+            }
+        return {
+            "status": "exceeded" if spent >= limit_usd else "ready",
+            "day": str(row["day"]),
+            "spent_usd": spent,
+            "limit_usd": limit_usd,
+        }
+
+    def _get_local_budget_status_sync(self, limit_usd: float) -> dict[str, Any]:
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            status = self._local_budget_status_connection(connection, limit_usd)
+            connection.commit()
+        return status
+
+    async def get_local_budget_status(self, limit_usd: float) -> dict[str, Any]:
+        limit = float(limit_usd)
+        if not math.isfinite(limit) or limit < 0:
+            raise ValueError("limit_usd must be a finite nonnegative number")
+        return dict(await self._write(self._get_local_budget_status_sync, limit))
+
+    def _acquire_local_budget_reservation_sync(
+        self,
+        limit_usd: float,
+        token: str,
+        lease_seconds: int,
+    ) -> dict[str, Any]:
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            status = self._local_budget_status_connection(connection, limit_usd)
+            if status["status"] != "ready":
+                connection.commit()
+                return status
+            expires = datetime.now(UTC) + timedelta(seconds=lease_seconds)
+            connection.execute(
+                "UPDATE local_budget_days SET reservation_token=?, "
+                "reservation_expires_at=?, updated_at=? WHERE day=?",
+                (token, expires.isoformat(), utc_now(), status["day"]),
+            )
+            connection.commit()
+        return {**status, "status": "acquired"}
+
+    async def acquire_local_budget_reservation(
+        self,
+        *,
+        limit_usd: float,
+        token: str,
+        lease_seconds: int = 900,
+    ) -> dict[str, Any]:
+        limit = float(limit_usd)
+        reservation = str(token or "").strip()
+        if not math.isfinite(limit) or limit < 0:
+            raise ValueError("limit_usd must be a finite nonnegative number")
+        if not re.fullmatch(r"[0-9a-f]{32}", reservation):
+            raise ValueError("token must be 32 lowercase hexadecimal characters")
+        ttl = max(30, min(int(lease_seconds), 3600))
+        return dict(
+            await self._write(
+                self._acquire_local_budget_reservation_sync,
+                limit,
+                reservation,
+                ttl,
+            )
+        )
+
+    def _settle_local_budget_reservation_sync(
+        self,
+        token: str,
+        cost_usd: float,
+        exhaust: bool,
+    ) -> bool:
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT day, spent_usd, limit_usd FROM local_budget_days "
+                "WHERE reservation_token=?",
+                (token,),
+            ).fetchone()
+            if row is None:
+                connection.rollback()
+                return False
+            spent = float(row["spent_usd"])
+            limit = float(row["limit_usd"])
+            new_spent = max(spent, limit) if exhaust else spent + cost_usd
+            connection.execute(
+                "UPDATE local_budget_days SET spent_usd=?, reservation_token=NULL, "
+                "reservation_expires_at=NULL, updated_at=? WHERE day=?",
+                (new_spent, utc_now(), str(row["day"])),
+            )
+            connection.commit()
+        return True
+
+    async def settle_local_budget_reservation(
+        self,
+        token: str,
+        *,
+        cost_usd: float,
+        exhaust: bool = False,
+    ) -> bool:
+        reservation = str(token or "").strip()
+        cost = float(cost_usd)
+        if not re.fullmatch(r"[0-9a-f]{32}", reservation):
+            raise ValueError("token must be 32 lowercase hexadecimal characters")
+        if not math.isfinite(cost) or cost < 0:
+            raise ValueError("cost_usd must be a finite nonnegative number")
+        return bool(
+            await self._write(
+                self._settle_local_budget_reservation_sync,
+                reservation,
+                cost,
+                bool(exhaust),
             )
         )
 

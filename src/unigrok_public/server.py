@@ -42,7 +42,12 @@ from .autonomy import (
     new_continue_token,
     normalize_artifact_content,
 )
-from .caller_budget import enforce_caller_budget, validate_caller_budget_configuration
+from .caller_budget import (
+    CallerBudgetReservation,
+    enforce_caller_budget,
+    reserve_caller_budget,
+    validate_caller_budget_configuration,
+)
 from .context_pack import (
     ContextPack,
     build_context_pack,
@@ -731,18 +736,23 @@ async def _guarded_provider_call(
     operation: Callable[[], Awaitable[dict[str, Any]]],
 ) -> dict[str, Any]:
     """Run one provider operation through the shared circuit breaker."""
+    reservation = None
     if plane == "api":
         await enforce_caller_budget(STATE)
+        reservation = await reserve_caller_budget(STATE)
     admission = _breaker_before_call(plane, model)
     try:
         result = await operation()
     except asyncio.CancelledError:
         _breaker_abandon_probe(admission)
+        await _settle_budget_failure(reservation, None)
         raise
-    except Exception:
+    except Exception as exc:
         _breaker_failure(admission)
+        await _settle_budget_failure(reservation, exc)
         raise
     _breaker_success(admission)
+    await _settle_budget_success(reservation, result)
     return result
 
 BUILD_AGENT_SYSTEM_PROMPT = (
@@ -2813,6 +2823,29 @@ def _exception_usage_attempts(exc: Exception) -> list[dict[str, Any]]:
     return [dict(attempt) for attempt in exc.incurred_attempts]
 
 
+async def _settle_budget_success(
+    reservation: CallerBudgetReservation | None,
+    result: dict[str, Any],
+) -> None:
+    if reservation is not None:
+        await reservation.settle(_nonnegative_float(result.get("cost_usd")))
+
+
+async def _settle_budget_failure(
+    reservation: CallerBudgetReservation | None,
+    exc: Exception | None,
+) -> None:
+    if reservation is None:
+        return
+    attempts = _exception_usage_attempts(exc) if exc is not None else []
+    if attempts:
+        await reservation.settle(
+            _nonnegative_float(_usage_totals(attempts).get("cost_usd"))
+        )
+        return
+    await reservation.exhaust()
+
+
 def _original_exception(exc: Exception) -> Exception:
     return exc.original if isinstance(exc, _IncurredUsageError) else exc
 
@@ -3114,9 +3147,11 @@ async def _run_unified(
 
     async def _call(target: Literal["cli", "api"], call_prompt: str) -> dict[str, Any]:
         target_model = model or _lead_model(catalogs, target)
+        reservation = None
         if target == "api":
             _require_metered_api_enabled()
             await enforce_caller_budget(STATE)
+            reservation = await reserve_caller_budget(STATE)
         admission = _breaker_before_call(target, target_model)
         capability_unavailable = False
         try:
@@ -3144,10 +3179,7 @@ async def _run_unified(
                     CAPABILITY_UNAVAILABLE_PREFIX
                 )
             else:
-                # The API plane only accepts low/medium/high. Clamp the wider CLI
-                # ladder (none/minimal/xhigh/max) to the nearest API level so
-                # cross-plane recovery stays seamless instead of erroring.
-                _API_EFFORT = {
+                api_effort = {
                     "none": None,
                     "minimal": "low",
                     "low": "low",
@@ -3159,7 +3191,7 @@ async def _run_unified(
                 result = await xai_api.chat(
                     call_prompt,
                     model=target_model,
-                    reasoning_effort=_API_EFFORT.get(effort or "", effort),
+                    reasoning_effort=api_effort.get(effort or "", effort),
                     system_prompt=system_prompt,
                     allow_web=allow_web if agentic else False,
                     allow_x_search=allow_x_search if agentic else False,
@@ -3169,15 +3201,17 @@ async def _run_unified(
                 )
         except asyncio.CancelledError:
             _breaker_abandon_probe(admission)
+            await _settle_budget_failure(reservation, None)
             raise
-        except Exception:
+        except Exception as exc:
             _breaker_failure(admission)
+            await _settle_budget_failure(reservation, exc)
             raise
         _breaker_success(admission)
+        await _settle_budget_success(reservation, result)
         if capability_unavailable:
             raise RuntimeError("Grok Build reported a required capability unavailable")
         return result
-
     async def _call_with_recovery(target: Literal["cli", "api"]) -> dict[str, Any]:
         initial = await _call(target, prompt)
         # Non-answer detection guards every prose-producing path, fast or agentic;
@@ -3783,11 +3817,15 @@ async def _run_durable_job(
         payload.setdefault("telemetry_id", telemetry_id)
 
     async def _complete() -> dict[str, Any]:
+        reservation = None
         try:
             if kind in _METERED_DURABLE_JOB_KINDS:
                 await enforce_caller_budget(STATE)
+                reservation = await reserve_caller_budget(STATE)
             result = await produce()
+            await _settle_budget_success(reservation, result)
         except asyncio.CancelledError:
+            await _settle_budget_failure(reservation, None)
             payload = {
                 "status": "error",
                 "job_id": job_id,
@@ -3802,6 +3840,7 @@ async def _run_durable_job(
                 await STATE.save_agent_job(job_id, JOB_ERROR, payload, owner=owner)
             raise
         except Exception as exc:  # noqa: BLE001 — surfaced to the poller as a job payload
+            await _settle_budget_failure(reservation, exc)
             usage = _exception_usage(exc)
             original = _original_exception(exc)
             payload = {
