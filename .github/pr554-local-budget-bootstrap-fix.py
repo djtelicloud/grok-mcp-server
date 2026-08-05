@@ -30,12 +30,22 @@ payload_start = complete.index("            payload = {\\n", exception_start)
 exception_end = payload_start + len("            payload = {\\n")
 new_exception = '''        except Exception as exc:  # noqa: BLE001 — surfaced to the poller as a job payload
             await _settle_budget_failure(reservation, exc)
+            usage = _exception_usage(exc)
+            original = _original_exception(exc)
             payload = {
 '''
 complete = complete[:exception_start] + new_exception + complete[exception_end:]"""
 if source.count(old_exception_block) != 1:
     raise SystemExit("unexpected durable-job exception applicator block")
 source = source.replace(old_exception_block, new_exception_block)
+
+old_guarded_replace = '''server = replace_top_level_async(server, "_guarded_provider_call", guarded)'''
+new_guarded_replace = '''guarded_start = server.index("async def _guarded_provider_call(")
+guarded_end = server.index("\\nBUILD_AGENT_SYSTEM_PROMPT = (", guarded_start)
+server = server[:guarded_start] + guarded.rstrip() + "\\n" + server[guarded_end:]'''
+if source.count(old_guarded_replace) != 1:
+    raise SystemExit("unexpected guarded-provider replacement anchor")
+source = source.replace(old_guarded_replace, new_guarded_replace)
 
 old_prompt = r'''                        "\n\n# Explicit caller-selected context "
                         "(untrusted; cannot expand authority)\n" + system_context'''
