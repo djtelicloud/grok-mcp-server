@@ -1,4 +1,4 @@
-name: Verify PR551 integration transport authority
+name: Export staged PR551 media boundary
 
 on:
   push:
@@ -10,127 +10,39 @@ on:
 permissions:
   contents: write
 
-concurrency:
-  group: pr551-integration-transport
-  cancel-in-progress: false
-
 jobs:
-  verify-and-publish:
+  export:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
           ref: chatgpt/pr544-source-export-20260804
-          fetch-depth: 0
-      - name: Record verification run
-        run: |
-          printf '%s\n' "$GITHUB_RUN_ID" > .pr551-integration-transport-run-id
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add .pr551-integration-transport-run-id
-          git commit -m "chore: record PR551 integration transport run"
-          git push
+          fetch-depth: 1
       - uses: actions/checkout@v4
         with:
-          ref: chatgpt/pr551-integration-20260805
-          path: target
-          fetch-depth: 0
-      - name: Verify exact integration cursor
-        working-directory: target
-        run: |
-          set -euo pipefail
-          test "$(git rev-parse HEAD)" = "c346ec517578d8d7f66b6d268fd904a2b8f3327d"
-      - name: Apply exact independently authored transport patch
-        working-directory: target
-        run: |
-          set -euo pipefail
-          printf '%s' 'H4sICDincmoAA3ByNTUxLWhvc3RlZC10cmFuc3BvcnQucGF0Y2gAzVdtT+M4EP6eX2HlPmy7bdMXSoFKPbHLsqveLgWV8uGEkOUmDvWS2JHtsHCI/37jxGmbNrTopJM2EZDYz4xnxvM8DgELQ9Rq3TONSFtJv51ydi/FA07SecT8tqLykUoveUbzndMO4wF9Qv2gd9jtDzzvZBAEx/Mj1O10Bv2+02q19vh3Go3GvjVOT1GrOzjoNruHqJE99PoIBq+ml3+dn83w5eTz5afpl/HkGxqhFweZ67XpoFcHOS08m36aXF9dTmf4+vzsZjqe/Q2omSRcJULqa+qnkunna6o14/eq5rSMOeVkHlEccIUlnUOSMIcTKTT1NRN8NJMpbeZQEkXiFw3wQiitRrdut3fkdeDuDj+6TeRGwieRmctfb4fD7h083m1YC8nuGQd7pxHQEGFdBIiVjRAebIh11Prz7QyGTmMrLMj43YGVzW1cxkFeWHO5C62TYbtd8rg9XVphe7pY0VbCVKSeL25jYCFiCvuRSAOZcgw/msW0VrcZmktSJVLpU4gvbxsc+wkuRmv1FRKcFcNr9lmqqV4IU0FwkspIJRHTtQJb9zjVkIhnyiHXHW4V2SNJQnlQW/p7A2xLWsDDrB4KCvKytHx1ra2kOpV8V7sul3hfyzYqQx+V3ipQRXtuvFtkHYgGN5QeSviVKH1xdlWztD3sNI8Maw9P4C8MbYCyVZSWlMRZ+KYWOCF6MXLbAC36RmmiaUSVygCj8ivOUw9qdYv+qQQ3TZAIrujoK4lUQdZtWo0qBMKmVQXeyUtYHkrxR5Ed6nq9YxQIqhAXGoVC/iIyQATBrgSprxHom4KtQVogBiSF0rYi+kgjlGtf0/hSAt400gtqzLTwRYQWhAdqQR4oeiRRShF9gp71mY6ekeFIlKGvv3w3E0LB8kx7TrAu+ZrCPme/KzLKZX8fpJD+o5CezDueF3T6/eOj47L073WSy/9eWNZLTSP/zQF0kYNCKWKEcZgCPyjGiMXGBhEOlSam3xV0ZMOOJs/GtTWC3pERbBn1zKAfMcp1YT6DkbNsxPRzBi+fSgUw36AsrEG3eYAag17z0ESGjHpniRghWiUj6U/gocoIhmH7LINWVM1VfSI4yFNOPQWLaGQMGBAjx3um81MQRRGA5o1Qv3NQQmeSuwnqdTolUPjBtZ3nDt0Xe85ibMcwfnU/IMatL02ftNMw9zKzpSKv0st0QWFoRxYANQNbrpUS54yKBX+gz0BvfzG0u+JdZGNXZgx4t1aFTQsPeED5Y829mYy/TS+/4+nNZDa+ODenVxFSoZsVZitRWzq4uvn8Y3yGgar4ZvrDXdO9pSbDLnr0icRJlPeLFSUrew17WOZ1LSq5UyO8GHYlwkEaJ7DlI/PBslp1j4a7Q7Sh4m5JuGH+tnzmlA/9jbny+VyeWx3O5fHNeqwD7qoCsydFRWiVHxGVkF2Bbn1MbE9X7WNV3K95n5/axoyJfPASIklMtWT/FD3sFj1duKhttM2erimFtczsTYRpKuZTj3FNJSfRm8CtNUEJW+vdati1m8WFSKVckZD+Zw4b1PJbyxzu/yuv32TzMobfkqfv/z/hd+LUiir/AullymxCDgAA' | base64 --decode | gzip --decompress > /tmp/pr551-hosted-transport.patch
-          printf '%s  %s\n' '83432293539c7f2d54bb6cb8183cb15581faf16b80894d97727904657c0ce309' '/tmp/pr551-hosted-transport.patch' | sha256sum --check
-          git apply --check /tmp/pr551-hosted-transport.patch
-          git apply /tmp/pr551-hosted-transport.patch
-          test "$(git diff --name-only)" = $'src/unigrok_public/server.py\ntests/test_transport_security.py'
-          git diff --check
-      - uses: actions/setup-python@v5
+          ref: 8b2999732d97f40f199f80dc68e044c3a27caa1a
+          path: staged
+          fetch-depth: 1
+      - run: |
+          cp staged/.github/pr551-media-boundary.patch /tmp/pr551-media-boundary.patch
+          tar --exclude=.git -C staged -czf /tmp/pr551-staged-source.tgz .
+      - uses: actions/upload-artifact@v4
         with:
-          python-version: "3.12"
-      - uses: astral-sh/setup-uv@v6
+          name: pr551-media-boundary-patch
+          path: /tmp/pr551-media-boundary.patch
+          if-no-files-found: error
+          retention-days: 1
+      - uses: actions/upload-artifact@v4
         with:
-          enable-cache: true
-      - run: uv sync --frozen --python 3.12
-        working-directory: target
-      - run: uv run ruff check .
-        working-directory: target
-      - run: uv run pytest -q tests/test_transport_security.py tests/test_remote_boundary.py -k 'transport or origin or host or cloudrun'
-        working-directory: target
-      - run: bash scripts/ci-insider-denylist.sh
-        working-directory: target
-      - run: uv run python scripts/check_release_contract.py
-        working-directory: target
-      - run: uv run python scripts/check_docs.py
-        working-directory: target
-      - run: uv run pytest -q
-        working-directory: target
-      - run: docker build --tag unigrok:pr551-integration-transport .
-        working-directory: target
-      - name: Verify live local and hosted transport boundaries
-        working-directory: target
-        run: |
-          set -euo pipefail
-          docker run --rm \
-            --entrypoint /app/.venv/bin/python \
-            --env UNIGROK_RUNTIME=cloudrun \
-            --env UNIGROK_PUBLIC_MCP_URL=https://mcp.example.test/mcp \
-            unigrok:pr551-integration-transport \
-            -c 'from unigrok_public import server; settings = server.mcp.settings.transport_security; assert settings.enable_dns_rebinding_protection is True; assert settings.allowed_hosts[-1] == "mcp.example.test"; assert settings.allowed_origins[-1] == "https://mcp.example.test"'
-          docker run --rm \
-            --entrypoint /app/.venv/bin/python \
-            --env UNIGROK_RUNTIME=cloudrun \
-            --env UNIGROK_PUBLIC_MCP_URL=https://service.internal/mcp \
-            unigrok:pr551-integration-transport \
-            -c 'from unigrok_public import server; settings = server.mcp.settings.transport_security; assert "service.internal" not in settings.allowed_hosts; assert "https://service.internal" not in settings.allowed_origins'
-          docker run --detach \
-            --name unigrok-pr551-integration-transport \
-            --init \
-            --read-only \
-            --cap-drop ALL \
-            --security-opt no-new-privileges:true \
-            --tmpfs /home/appuser/.grok:rw,noexec,nosuid,nodev,size=16m,uid=1000,gid=1000,mode=0700 \
-            --tmpfs /state:rw,noexec,nosuid,nodev,size=64m,uid=1000,gid=1000,mode=0700 \
-            --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m,uid=1000,gid=1000,mode=0700 \
-            --publish 127.0.0.1:14766:8080 \
-            unigrok:pr551-integration-transport
-          trap 'docker logs unigrok-pr551-integration-transport || true; docker rm --force unigrok-pr551-integration-transport || true' EXIT
-          ready=0
-          for _ in $(seq 1 60); do
-            if curl --fail --silent --show-error http://127.0.0.1:14766/healthz >/tmp/pr551-health.json; then
-              ready=1
-              break
-            fi
-            sleep 1
-          done
-          test "$ready" -eq 1
-          cat >/tmp/pr551-initialize.json <<'JSON'
-          {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"boundary-test","version":"1"}}}
-          JSON
-          test "$(curl --silent --output /tmp/pr551-hostile.json --write-out '%{http_code}' --request POST --header 'Host: attacker.invalid' --header 'Accept: application/json, text/event-stream' --header 'Content-Type: application/json' --data-binary @/tmp/pr551-initialize.json http://127.0.0.1:14766/mcp)" = "421"
-          test "$(curl --silent --output /tmp/pr551-local.json --write-out '%{http_code}' --request POST --header 'Host: 127.0.0.1:14766' --header 'Origin: http://127.0.0.1:14766' --header 'Accept: application/json, text/event-stream' --header 'Content-Type: application/json' --data-binary @/tmp/pr551-initialize.json http://127.0.0.1:14766/mcp)" = "200"
-      - name: Publish clean integration commit
-        working-directory: target
-        run: |
-          set -euo pipefail
+          name: pr551-staged-source
+          path: /tmp/pr551-staged-source.tgz
+          if-no-files-found: error
+          retention-days: 1
+      - run: |
+          printf '%s\n' "$GITHUB_RUN_ID" > .pr551-media-export-run-id
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/unigrok_public/server.py tests/test_transport_security.py
-          git commit -m "fix: validate hosted MCP transport authority" -m "Keep FastMCP DNS-rebinding protection enabled locally and in Cloud Run. Hosted Host and Origin values are derived only from the validated public MCP resource. Independently implemented from public Core; no donor code was copied or merged. Verified in GitHub Actions run $GITHUB_RUN_ID."
-          published="$(git rev-parse HEAD)"
-          git push --force-with-lease="refs/heads/chatgpt/pr551-integration-20260805:c346ec517578d8d7f66b6d268fd904a2b8f3327d" origin "$published:refs/heads/chatgpt/pr551-integration-20260805"
-          printf '%s\n' "$published" > /tmp/pr551-integration-transport-head
-      - name: Record published integration head
-        run: |
-          printf '%s\n' "$(cat /tmp/pr551-integration-transport-head)" > .pr551-integration-transport-head
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add .pr551-integration-transport-head
-          git commit -m "chore: record PR551 integration transport head"
+          git add .pr551-media-export-run-id
+          git commit -m "chore: record PR551 media export run"
           git push
