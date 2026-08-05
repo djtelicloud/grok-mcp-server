@@ -1,0 +1,533 @@
+--- a/src/unigrok_public/remote_auth.py
++++ b/src/unigrok_public/remote_auth.py
+@@ -15,6 +15,7 @@
+ 
+ from __future__ import annotations
+ 
++import asyncio
+ import hashlib
+ import ipaddress
+ import json
+@@ -23,7 +24,8 @@
+ import re
+ import secrets
+ from collections.abc import Mapping
+-from typing import Any
++from dataclasses import dataclass
++from typing import Any, Literal
+ from urllib.parse import quote, urlsplit
+ 
+ import httpx
+@@ -53,6 +55,22 @@
+ _OAUTH_SCOPE_RE = re.compile(r"^[\x21\x23-\x5B\x5D-\x7E]{1,128}$")
+ 
+ 
++OAuthIntrospectionStatus = Literal["allowed", "denied", "unavailable"]
++
++
++@dataclass(frozen=True, slots=True)
++class OAuthIntrospectionResult:
++    status: OAuthIntrospectionStatus
++    claims: dict[str, Any] | None = None
++
++
++_OAUTH_DENIED = OAuthIntrospectionResult("denied")
++_OAUTH_UNAVAILABLE = OAuthIntrospectionResult("unavailable")
++_OAUTH_INTROSPECTION_INFLIGHT: dict[
++    tuple[int, str, bytes, str], asyncio.Task[OAuthIntrospectionResult]
++] = {}
++
++
+ def is_cloudrun_runtime() -> bool:
+     return os.environ.get("UNIGROK_RUNTIME", "").strip().lower() == "cloudrun"
+ 
+@@ -357,10 +375,9 @@
+     return " ".join(sorted(required))
+ 
+ 
+-async def introspect_oauth_token(token: str, required: str) -> dict[str, Any] | None:
+-    url = introspection_url()
+-    if not url or not token or len(token) > 8_192:
+-        return None
++async def _introspect_oauth_token_once(
++    url: str, token: str, required: str
++) -> OAuthIntrospectionResult:
+     try:
+         async with httpx.AsyncClient(
+             timeout=5.0, follow_redirects=False, trust_env=False
+@@ -373,20 +390,28 @@
+                 },
+                 data={"required_scope": required},
+             )
+-        if response.status_code != 200 or len(response.content) > 16_384:
+-            return None
++    except httpx.HTTPError:
++        return _OAUTH_UNAVAILABLE
++    if response.status_code != 200 or len(response.content) > 16_384:
++        return _OAUTH_UNAVAILABLE
++    try:
+         payload = response.json()
+-    except (httpx.HTTPError, TypeError, ValueError):
+-        return None
+-    if not isinstance(payload, dict) or payload.get("active") is not True:
+-        return None
++    except (TypeError, ValueError):
++        return _OAUTH_UNAVAILABLE
++    if not isinstance(payload, dict):
++        return _OAUTH_UNAVAILABLE
++    active = payload.get("active")
++    if active is not True:
++        return _OAUTH_DENIED if active is False else _OAUTH_UNAVAILABLE
+     scopes = payload.get("scope")
+-    granted = set(scopes.split()) if isinstance(scopes, str) else set()
++    if not isinstance(scopes, str):
++        return _OAUTH_UNAVAILABLE
++    granted = set(scopes.split())
+     if not set(required.split()).issubset(granted):
+-        return None
++        return _OAUTH_DENIED
+     principal = canonical_oauth_principal(payload.get("iss"), payload.get("sub"))
+     if principal is None:
+-        return None
++        return _OAUTH_DENIED
+     audience = payload.get("aud")
+     if isinstance(audience, str):
+         audiences = (audience,)
+@@ -397,18 +422,47 @@
+     ):
+         audiences = tuple(audience)
+     else:
+-        return None
++        return _OAUTH_DENIED
+     if public_mcp_resource() not in audiences:
+-        return None
+-    # Treat the introspection response as untrusted boundary data.  Only the
+-    # fields required by the public gateway survive validation; arbitrary
+-    # provider metadata must not flow into request state or logs.
+-    return {
+-        "active": True,
+-        "scope": scopes,
+-        "unigrok_principal": principal,
+-        "unigrok_auth": "oauth",
+-    }
++        return _OAUTH_DENIED
++    return OAuthIntrospectionResult(
++        "allowed",
++        {
++            "active": True,
++            "scope": scopes,
++            "unigrok_principal": principal,
++            "unigrok_auth": "oauth",
++        },
++    )
++
++
++def _release_oauth_introspection_task(
++    key: tuple[int, str, bytes, str], task: asyncio.Task[OAuthIntrospectionResult]
++) -> None:
++    if _OAUTH_INTROSPECTION_INFLIGHT.get(key) is task:
++        _OAUTH_INTROSPECTION_INFLIGHT.pop(key, None)
++    if not task.cancelled():
++        _ = task.exception()
++
++
++async def introspect_oauth_token(
++    token: str, required: str
++) -> OAuthIntrospectionResult:
++    url = introspection_url()
++    if not url or not token or len(token) > 8_192:
++        return _OAUTH_DENIED
++    loop = asyncio.get_running_loop()
++    key = (id(loop), url, hashlib.sha256(token.encode("utf-8")).digest(), required)
++    task = _OAUTH_INTROSPECTION_INFLIGHT.get(key)
++    if task is None:
++        task = loop.create_task(_introspect_oauth_token_once(url, token, required))
++        _OAUTH_INTROSPECTION_INFLIGHT[key] = task
++        task.add_done_callback(
++            lambda completed, current_key=key: _release_oauth_introspection_task(
++                current_key, completed
++            )
++        )
++    return await asyncio.shield(task)
+ 
+ 
+ def _metadata_url(path: str, query_string: bytes) -> str | None:
+@@ -429,6 +483,31 @@
+     return max(64_000, min(configured, 32_000_000))
+ 
+ 
++def _oauth_failure_response(
++    scope: dict[str, Any],
++    path: str,
++    required: str,
++    result: OAuthIntrospectionResult,
++) -> JSONResponse:
++    if result.status == "unavailable":
++        logger.warning("oauth control_unavailable path=%s scope=%s", path, required)
++        response = JSONResponse(
++            {"error": "oauth_temporarily_unavailable"}, status_code=503
++        )
++        response.headers["Retry-After"] = "1"
++        response.headers["Cache-Control"] = "no-store"
++        return response
++    logger.warning("oauth access_denied path=%s scope=%s", path, required)
++    response = JSONResponse({"error": "unauthorized"}, status_code=401)
++    metadata = _metadata_url(path, scope.get("query_string", b""))
++    response.headers["WWW-Authenticate"] = (
++        f'Bearer resource_metadata="{metadata}", scope="{required}"'
++        if metadata
++        else f'Bearer scope="{required}"'
++    )
++    return response
++
++
+ class RemoteOAuthMiddleware:
+     """Pure-ASGI OAuth enforcement that preserves MCP streaming semantics."""
+ 
+@@ -450,23 +529,15 @@
+         auth_kind = "service_token" if claims is not None else "oauth"
+         body = b""
+         if path == "/mcp" and scope.get("method") == "POST":
+-            # Authenticate the connection before buffering a potentially large
+-            # base64 file request. Service tokens resolve locally; OAuth uses
+-            # Control introspection. Scope is re-checked once tools/call is known.
+-            if claims is None:
+-                claims = await introspect_oauth_token(token or "", "unigrok:connect")
+             if claims is None:
+-                required = "unigrok:connect"
+-                logger.warning("oauth access_denied path=%s scope=%s", path, required)
+-                response = JSONResponse({"error": "unauthorized"}, status_code=401)
+-                metadata = _metadata_url(path, scope.get("query_string", b""))
+-                response.headers["WWW-Authenticate"] = (
+-                    f'Bearer resource_metadata="{metadata}", scope="{required}"'
+-                    if metadata
+-                    else f'Bearer scope="{required}"'
+-                )
+-                await response(scope, receive, send)
+-                return
++                result = await introspect_oauth_token(token or "", "unigrok:connect")
++                if result.status != "allowed" or result.claims is None:
++                    response = _oauth_failure_response(
++                        scope, path, "unigrok:connect", result
++                    )
++                    await response(scope, receive, send)
++                    return
++                claims = result.claims
+             original_receive = receive
+             messages: list[dict[str, Any]] = []
+             limit = _body_limit()
+@@ -496,12 +567,11 @@
+             receive = replay_receive
+ 
+         required = required_scope(path, body)
++        failure = _OAUTH_DENIED
+         if claims is not None:
+             granted = claims.get("scope")
+             granted_scopes = set(granted.split()) if isinstance(granted, str) else set()
+             if not set(required.split()).issubset(granted_scopes):
+-                # Token already authenticated (connect phase or service match) but
+-                # lacks the tool scope — hard deny, do not re-introspect.
+                 claims = None
+         else:
+             claims = match_service_token(token)
+@@ -512,7 +582,10 @@
+                     claims = None
+             else:
+                 auth_kind = "oauth"
+-                claims = await introspect_oauth_token(token or "", required)
++                result = await introspect_oauth_token(token or "", required)
++                failure = result
++                if result.status == "allowed":
++                    claims = result.claims
+         if claims is not None:
+             scope["unigrok.oauth"] = claims
+             logger.info(
+@@ -525,15 +598,7 @@
+             await self.app(scope, receive, send)
+             return
+ 
+-        logger.warning("oauth access_denied path=%s scope=%s", path, required)
+-        response = JSONResponse({"error": "unauthorized"}, status_code=401)
+-        metadata = _metadata_url(path, scope.get("query_string", b""))
+-        if metadata:
+-            response.headers["WWW-Authenticate"] = (
+-                f'Bearer resource_metadata="{metadata}", scope="{required}"'
+-            )
+-        else:
+-            response.headers["WWW-Authenticate"] = f'Bearer scope="{required}"'
++        response = _oauth_failure_response(scope, path, required, failure)
+         await response(scope, receive, send)
+ 
+ 
+--- a/tests/test_remote_boundary.py
++++ b/tests/test_remote_boundary.py
+@@ -1,5 +1,6 @@
+ from __future__ import annotations
+ 
++import asyncio
+ import json
+ import logging
+ import sqlite3
+@@ -7,6 +8,7 @@
+ from pathlib import Path
+ from typing import Any
+ 
++import httpx
+ import pytest
+ from starlette.responses import JSONResponse
+ 
+@@ -343,9 +345,11 @@
+ ) -> None:
+     observed: list[tuple[str, str]] = []
+ 
+-    async def deny(token: str, required: str) -> None:
++    async def deny(
++        token: str, required: str
++    ) -> remote_auth.OAuthIntrospectionResult:
+         observed.append((token, required))
+-        return None
++        return remote_auth.OAuthIntrospectionResult("denied")
+ 
+     monkeypatch.setattr(remote_auth, "introspect_oauth_token", deny)
+ 
+@@ -383,10 +387,15 @@
+ ) -> None:
+     principal = _canonical_principal("reviewer")
+ 
+-    async def connect_only(bearer: str, required: str) -> dict[str, Any]:
++    async def connect_only(
++        bearer: str, required: str
++    ) -> remote_auth.OAuthIntrospectionResult:
+         assert bearer == "opaque-value"
+         assert required == "unigrok:connect"
+-        return {"unigrok_principal": principal, "scope": "unigrok:connect"}
++        return remote_auth.OAuthIntrospectionResult(
++            "allowed",
++            {"unigrok_principal": principal, "scope": "unigrok:connect"},
++        )
+ 
+     monkeypatch.setattr(remote_auth, "introspect_oauth_token", connect_only)
+ 
+@@ -422,9 +431,13 @@
+     principal = _canonical_principal("reviewer:42")
+     observed: dict[str, Any] = {}
+ 
+-    async def allow(token: str, required: str) -> dict[str, Any]:
++    async def allow(
++        token: str, required: str
++    ) -> remote_auth.OAuthIntrospectionResult:
+         observed["introspection"] = (token, required)
+-        return {"unigrok_principal": principal, "scope": required}
++        return remote_auth.OAuthIntrospectionResult(
++            "allowed", {"unigrok_principal": principal, "scope": required}
++        )
+ 
+     monkeypatch.setattr(remote_auth, "introspect_oauth_token", allow)
+ 
+@@ -495,17 +508,177 @@
+ 
+     monkeypatch.setattr(remote_auth.httpx, "AsyncClient", lambda **_kwargs: Client())
+ 
+-    claims = await remote_auth.introspect_oauth_token(
++    result = await remote_auth.introspect_oauth_token(
+         "opaque-token", "unigrok:connect"
+     )
+ 
+-    assert claims == {
++    assert result.status == "allowed"
++    assert result.claims == {
+         "active": True,
+         "scope": original_scope,
+         "unigrok_principal": _canonical_principal("reviewer:42"),
+         "unigrok_auth": "oauth",
+     }
+-    assert marker not in json.dumps(claims, sort_keys=True)
++    assert marker not in json.dumps(result.claims, sort_keys=True)
++
++
++async def test_oauth_control_outage_is_retryable(
++    remote_oauth_env: None, monkeypatch: pytest.MonkeyPatch
++) -> None:
++    class Client:
++        async def __aenter__(self) -> Client:
++            return self
++
++        async def __aexit__(self, *_args: Any) -> None:
++            return None
++
++        async def post(self, *_args: Any, **_kwargs: Any) -> Any:
++            raise httpx.ConnectError("control unavailable")
++
++    monkeypatch.setattr(remote_auth.httpx, "AsyncClient", lambda **_kwargs: Client())
++
++    async def downstream(scope: dict[str, Any], receive: Any, send: Any) -> None:
++        raise AssertionError("unverified request reached the application")
++
++    status, headers, response_body = await _asgi_exchange(
++        remote_auth.RemoteOAuthMiddleware(downstream),
++        path="/v1/models",
++        headers=((b"authorization", b"Bearer opaque-token"),),
++    )
++
++    assert status == 503
++    assert json.loads(response_body) == {"error": "oauth_temporarily_unavailable"}
++    assert headers["retry-after"] == "1"
++    assert headers["cache-control"] == "no-store"
++    assert "www-authenticate" not in headers
++
++
++async def test_oauth_control_outage_is_coalesced(
++    remote_oauth_env: None, monkeypatch: pytest.MonkeyPatch
++) -> None:
++    started = asyncio.Event()
++    release = asyncio.Event()
++    calls = 0
++
++    class Client:
++        async def __aenter__(self) -> Client:
++            return self
++
++        async def __aexit__(self, *_args: Any) -> None:
++            return None
++
++        async def post(self, *_args: Any, **_kwargs: Any) -> Any:
++            nonlocal calls
++            calls += 1
++            started.set()
++            await release.wait()
++            raise httpx.ConnectError("control unavailable")
++
++    monkeypatch.setattr(remote_auth.httpx, "AsyncClient", lambda **_kwargs: Client())
++
++    async def downstream(scope: dict[str, Any], receive: Any, send: Any) -> None:
++        raise AssertionError("unverified request reached the application")
++
++    app = remote_auth.RemoteOAuthMiddleware(downstream)
++    request = {
++        "path": "/v1/models",
++        "headers": ((b"authorization", b"Bearer shared-token"),),
++    }
++    first = asyncio.create_task(_asgi_exchange(app, **request))
++    await asyncio.wait_for(started.wait(), timeout=1)
++    second = asyncio.create_task(_asgi_exchange(app, **request))
++    await asyncio.sleep(0.01)
++    release.set()
++    responses = await asyncio.gather(first, second)
++
++    assert calls == 1
++    assert [response[0] for response in responses] == [503, 503]
++    assert [json.loads(response[2]) for response in responses] == [
++        {"error": "oauth_temporarily_unavailable"},
++        {"error": "oauth_temporarily_unavailable"},
++    ]
++
++
++async def test_oauth_control_outage_survives_cancelled_leader(
++    remote_oauth_env: None, monkeypatch: pytest.MonkeyPatch
++) -> None:
++    started = asyncio.Event()
++    release = asyncio.Event()
++    calls = 0
++
++    class Client:
++        async def __aenter__(self) -> Client:
++            return self
++
++        async def __aexit__(self, *_args: Any) -> None:
++            return None
++
++        async def post(self, *_args: Any, **_kwargs: Any) -> Any:
++            nonlocal calls
++            calls += 1
++            started.set()
++            await release.wait()
++            raise httpx.ConnectError("control unavailable")
++
++    monkeypatch.setattr(remote_auth.httpx, "AsyncClient", lambda **_kwargs: Client())
++
++    async def downstream(scope: dict[str, Any], receive: Any, send: Any) -> None:
++        raise AssertionError("unverified request reached the application")
++
++    app = remote_auth.RemoteOAuthMiddleware(downstream)
++    request = {
++        "path": "/v1/models",
++        "headers": ((b"authorization", b"Bearer shared-token"),),
++    }
++    leader = asyncio.create_task(_asgi_exchange(app, **request))
++    await asyncio.wait_for(started.wait(), timeout=1)
++    leader.cancel()
++    with pytest.raises(asyncio.CancelledError):
++        await leader
++    follower = asyncio.create_task(_asgi_exchange(app, **request))
++    await asyncio.sleep(0.01)
++    release.set()
++    status, _, response_body = await follower
++
++    assert calls == 1
++    assert status == 503
++    assert json.loads(response_body) == {"error": "oauth_temporarily_unavailable"}
++
++
++async def test_oauth_inactive_token_is_explicit_denial(
++    remote_oauth_env: None, monkeypatch: pytest.MonkeyPatch
++) -> None:
++    class Response:
++        status_code = 200
++        content = b"{}"
++
++        def json(self) -> dict[str, Any]:
++            return {"active": False}
++
++    class Client:
++        async def __aenter__(self) -> Client:
++            return self
++
++        async def __aexit__(self, *_args: Any) -> None:
++            return None
++
++        async def post(self, *_args: Any, **_kwargs: Any) -> Response:
++            return Response()
++
++    monkeypatch.setattr(remote_auth.httpx, "AsyncClient", lambda **_kwargs: Client())
++
++    async def downstream(scope: dict[str, Any], receive: Any, send: Any) -> None:
++        raise AssertionError("denied request reached the application")
++
++    status, headers, response_body = await _asgi_exchange(
++        remote_auth.RemoteOAuthMiddleware(downstream),
++        path="/v1/models",
++        headers=((b"authorization", b"Bearer inactive-token"),),
++    )
++
++    assert status == 401
++    assert json.loads(response_body) == {"error": "unauthorized"}
++    assert headers["www-authenticate"] == 'Bearer scope="unigrok:chat"'
+ 
+ 
+ async def test_oauth_middleware_logs_constant_route_provenance(
+@@ -516,13 +689,18 @@
+     marker = "hostile-auth-kind-marker"
+     principal = _canonical_principal("reviewer:42")
+ 
+-    async def hostile_claims(_token: str, required: str) -> dict[str, Any]:
+-        return {
+-            "active": True,
+-            "scope": required,
+-            "unigrok_principal": principal,
+-            "unigrok_auth": marker,
+-        }
++    async def hostile_claims(
++        _token: str, required: str
++    ) -> remote_auth.OAuthIntrospectionResult:
++        return remote_auth.OAuthIntrospectionResult(
++            "allowed",
++            {
++                "active": True,
++                "scope": required,
++                "unigrok_principal": principal,
++                "unigrok_auth": marker,
++            },
++        )
+ 
+     monkeypatch.setattr(remote_auth, "introspect_oauth_token", hostile_claims)
+     caplog.set_level(logging.INFO, logger=remote_auth.__name__)
