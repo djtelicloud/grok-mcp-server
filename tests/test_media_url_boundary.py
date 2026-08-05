@@ -125,9 +125,10 @@ async def test_media_dns_concurrency_is_bounded_across_requests() -> None:
 
 
 @pytest.mark.asyncio
-async def test_media_dns_failure_cancels_sibling_resolutions() -> None:
+async def test_media_dns_failure_preserves_active_sibling_slot() -> None:
     slow_started = asyncio.Event()
-    slow_cancelled = asyncio.Event()
+    slow_release = asyncio.Event()
+    slow_finished = asyncio.Event()
 
     async def resolver(host: str, _port: int) -> Sequence[str]:
         if host == "private.example.com":
@@ -135,11 +136,10 @@ async def test_media_dns_failure_cancels_sibling_resolutions() -> None:
             return ["127.0.0.1"]
         slow_started.set()
         try:
-            await asyncio.sleep(10)
-        except asyncio.CancelledError:
-            slow_cancelled.set()
-            raise
-        return ["93.184.216.34"]
+            await slow_release.wait()
+            return ["93.184.216.34"]
+        finally:
+            slow_finished.set()
 
     with pytest.raises(ValueError, match="public https URL"):
         await media.validated_public_media_urls(
@@ -151,7 +151,72 @@ async def test_media_dns_failure_cancels_sibling_resolutions() -> None:
             10,
             resolver=resolver,
         )
-    assert slow_cancelled.is_set()
+    assert not slow_finished.is_set()
+    slow_release.set()
+    await asyncio.wait_for(slow_finished.wait(), timeout=1)
+
+
+@pytest.mark.asyncio
+async def test_media_dns_timeout_retains_slots_until_resolver_work_finishes() -> None:
+    release = asyncio.Event()
+    all_started = asyncio.Event()
+    active = 0
+    started = 0
+
+    async def stalled(_host: str, _port: int) -> Sequence[str]:
+        nonlocal active, started
+        active += 1
+        started += 1
+        if started == media.MEDIA_DNS_CONCURRENCY:
+            all_started.set()
+        try:
+            await release.wait()
+            return ["93.184.216.34"]
+        finally:
+            active -= 1
+
+    requests = [
+        asyncio.create_task(
+            media.validated_public_media_url(
+                f"https://stalled-{index}.example.com/a.png",
+                "image_url",
+                resolver=stalled,
+                timeout_seconds=0.02,
+                total_timeout_seconds=0.1,
+            )
+        )
+        for index in range(media.MEDIA_DNS_CONCURRENCY)
+    ]
+    await asyncio.wait_for(all_started.wait(), timeout=1)
+    results = await asyncio.gather(*requests, return_exceptions=True)
+    assert all(isinstance(result, ValueError) for result in results)
+    assert active == media.MEDIA_DNS_CONCURRENCY
+    assert len(media._MEDIA_DNS_TASKS) == media.MEDIA_DNS_CONCURRENCY
+
+    fifth_called = False
+
+    async def fifth(_host: str, _port: int) -> Sequence[str]:
+        nonlocal fifth_called
+        fifth_called = True
+        return ["93.184.216.34"]
+
+    with pytest.raises(ValueError, match="public https URL"):
+        await media.validated_public_media_url(
+            "https://fifth.example.com/a.png",
+            "image_url",
+            resolver=fifth,
+            timeout_seconds=0.02,
+            total_timeout_seconds=0.1,
+        )
+    assert fifth_called is False
+
+    release.set()
+    for _ in range(100):
+        if active == 0 and not media._MEDIA_DNS_TASKS:
+            break
+        await asyncio.sleep(0.01)
+    assert active == 0
+    assert not media._MEDIA_DNS_TASKS
 
 
 @pytest.mark.asyncio
