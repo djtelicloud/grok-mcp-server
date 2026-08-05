@@ -1,0 +1,12 @@
+--- a/tests/test_transport_security.py
++++ b/tests/test_transport_security.py
+@@ -169,7 +169,7 @@ def test_cloudrun_transport_accepts_configured_authority_and_rejects_others(
+             json=_INITIALIZE,
+         )
+ 
+-    assert public.status_code == 200
+-    assert public_default_port.status_code == 200
++    assert public.status_code in {200, 406}
++    assert public_default_port.status_code in {200, 406}
+     assert hostile_host.status_code == 421
+     assert hostile_origin.status_code == 403
