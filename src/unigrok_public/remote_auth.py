@@ -56,7 +56,8 @@ _OAUTH_SCOPE_RE = re.compile(r"^[\x21\x23-\x5B\x5D-\x7E]{1,128}$")
 _OAUTH_INTROSPECTION_MAX_INFLIGHT = 256
 _OAUTH_RETRY_AFTER_SECONDS = "1"
 _oauth_introspection_tasks: dict[
-    tuple[bytes, str], asyncio.Task[dict[str, Any] | None]
+    tuple[asyncio.AbstractEventLoop, str, bytes, str],
+    asyncio.Task[dict[str, Any] | None],
 ] = {}
 
 
@@ -373,12 +374,18 @@ def required_scope(path: str, body: bytes = b"") -> str:
     return " ".join(sorted(required))
 
 
-def _oauth_introspection_key(token: str, required: str) -> tuple[bytes, str]:
-    return hashlib.sha256(token.encode("utf-8", "strict")).digest(), required
+def _oauth_introspection_key(
+    loop: asyncio.AbstractEventLoop,
+    url: str,
+    token_digest: bytes,
+    required: str,
+) -> tuple[asyncio.AbstractEventLoop, str, bytes, str]:
+    return loop, url, token_digest, required
 
 
 def _finish_oauth_introspection_task(
-    key: tuple[bytes, str], task: asyncio.Task[dict[str, Any] | None]
+    key: tuple[asyncio.AbstractEventLoop, str, bytes, str],
+    task: asyncio.Task[dict[str, Any] | None],
 ) -> None:
     if _oauth_introspection_tasks.get(key) is task:
         _oauth_introspection_tasks.pop(key, None)
@@ -389,10 +396,9 @@ def _finish_oauth_introspection_task(
 
 
 async def _perform_oauth_introspection(
-    token: str, required: str
+    token: str, required: str, url: str
 ) -> dict[str, Any] | None:
-    url = introspection_url()
-    if not url or not token or len(token) > 8_192:
+    if not token or len(token) > 8_192:
         return None
     try:
         async with httpx.AsyncClient(
@@ -406,7 +412,7 @@ async def _perform_oauth_introspection(
                 },
                 data={"required_scope": required},
             )
-    except (httpx.HTTPError, TypeError, ValueError) as exc:
+    except (httpx.HTTPError, OSError, TypeError, ValueError) as exc:
         raise OAuthIntrospectionUnavailable("oauth_control_unreachable") from exc
     if response.status_code in {401, 403}:
         return None
@@ -454,14 +460,20 @@ async def _perform_oauth_introspection(
 
 
 async def introspect_oauth_token(token: str, required: str) -> dict[str, Any] | None:
-    if not token or len(token) > 8_192:
+    url = introspection_url()
+    if not url or not token or len(token) > 8_192:
         return None
-    key = _oauth_introspection_key(token, required)
+    try:
+        token_digest = hashlib.sha256(token.encode("utf-8", "strict")).digest()
+    except UnicodeEncodeError:
+        return None
+    loop = asyncio.get_running_loop()
+    key = _oauth_introspection_key(loop, url, token_digest, required)
     task = _oauth_introspection_tasks.get(key)
     if task is None:
         if len(_oauth_introspection_tasks) >= _OAUTH_INTROSPECTION_MAX_INFLIGHT:
             raise OAuthIntrospectionUnavailable("oauth_control_capacity")
-        task = asyncio.create_task(_perform_oauth_introspection(token, required))
+        task = loop.create_task(_perform_oauth_introspection(token, required, url))
         _oauth_introspection_tasks[key] = task
         task.add_done_callback(
             lambda completed, task_key=key: _finish_oauth_introspection_task(
