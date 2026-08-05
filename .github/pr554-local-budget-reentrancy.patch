@@ -1,0 +1,242 @@
+--- a/src/unigrok_public/server.py
++++ b/src/unigrok_public/server.py
+@@ -738,9 +738,14 @@
+     """Run one provider operation through the shared circuit breaker."""
+     reservation = None
+     if plane == "api":
+-        await enforce_caller_budget(STATE)
+-        reservation = await reserve_caller_budget(STATE)
++        await _enforce_caller_budget_admission()
+     admission = _breaker_before_call(plane, model)
++    if plane == "api":
++        try:
++            reservation = await _begin_caller_budget_reservation()
++        except Exception:
++            _breaker_abandon_probe(admission)
++            raise
+     try:
+         result = await operation()
+     except asyncio.CancelledError:
+@@ -2823,27 +2828,61 @@
+     return [dict(attempt) for attempt in exc.incurred_attempts]
+ 
+ 
++async def _enforce_caller_budget_admission() -> None:
++    active = _ACTIVE_CALLER_BUDGET_RESERVATION.get()
++    if active is not None and not active.settled:
++        return
++    if active is not None:
++        _ACTIVE_CALLER_BUDGET_RESERVATION.set(None)
++    await enforce_caller_budget(STATE)
++
++
++async def _begin_caller_budget_reservation() -> CallerBudgetReservation:
++    active = _ACTIVE_CALLER_BUDGET_RESERVATION.get()
++    if active is not None and not active.settled:
++        return CallerBudgetReservation()
++    if active is not None:
++        _ACTIVE_CALLER_BUDGET_RESERVATION.set(None)
++    reservation = await reserve_caller_budget(STATE)
++    if reservation.store is not None and reservation.token is not None:
++        _ACTIVE_CALLER_BUDGET_RESERVATION.set(reservation)
++    return reservation
++
++
++def _clear_caller_budget_reservation(
++    reservation: CallerBudgetReservation | None,
++) -> None:
++    if reservation is not None and _ACTIVE_CALLER_BUDGET_RESERVATION.get() is reservation:
++        _ACTIVE_CALLER_BUDGET_RESERVATION.set(None)
++
++
+ async def _settle_budget_success(
+     reservation: CallerBudgetReservation | None,
+     result: dict[str, Any],
+ ) -> None:
+-    if reservation is not None:
+-        await reservation.settle(_nonnegative_float(result.get("cost_usd")))
++    try:
++        if reservation is not None:
++            await reservation.settle(_nonnegative_float(result.get("cost_usd")))
++    finally:
++        _clear_caller_budget_reservation(reservation)
+ 
+ 
+ async def _settle_budget_failure(
+     reservation: CallerBudgetReservation | None,
+     exc: Exception | None,
+ ) -> None:
+-    if reservation is None:
+-        return
+-    attempts = _exception_usage_attempts(exc) if exc is not None else []
+-    if attempts:
+-        await reservation.settle(
+-            _nonnegative_float(_usage_totals(attempts).get("cost_usd"))
+-        )
+-        return
+-    await reservation.exhaust()
++    try:
++        if reservation is None:
++            return
++        attempts = _exception_usage_attempts(exc) if exc is not None else []
++        if attempts:
++            await reservation.settle(
++                _nonnegative_float(_usage_totals(attempts).get("cost_usd"))
++            )
++            return
++        await reservation.exhaust()
++    finally:
++        _clear_caller_budget_reservation(reservation)
+ 
+ 
+ def _original_exception(exc: Exception) -> Exception:
+@@ -3150,9 +3189,14 @@
+         reservation = None
+         if target == "api":
+             _require_metered_api_enabled()
+-            await enforce_caller_budget(STATE)
+-            reservation = await reserve_caller_budget(STATE)
++            await _enforce_caller_budget_admission()
+         admission = _breaker_before_call(target, target_model)
++        if target == "api":
++            try:
++                reservation = await _begin_caller_budget_reservation()
++            except Exception:
++                _breaker_abandon_probe(admission)
++                raise
+         capability_unavailable = False
+         try:
+             if target == "cli":
+@@ -3820,8 +3864,8 @@
+         reservation = None
+         try:
+             if kind in _METERED_DURABLE_JOB_KINDS:
+-                await enforce_caller_budget(STATE)
+-                reservation = await reserve_caller_budget(STATE)
++                await _enforce_caller_budget_admission()
++                reservation = await _begin_caller_budget_reservation()
+             result = await produce()
+             await _settle_budget_success(reservation, result)
+         except asyncio.CancelledError:
+@@ -8439,6 +8483,9 @@
+ 
+ 
+ _CALLER_ID_CONTEXT: ContextVar[str | None] = ContextVar("unigrok_caller_id", default=None)
++_ACTIVE_CALLER_BUDGET_RESERVATION: ContextVar[CallerBudgetReservation | None] = (
++    ContextVar("unigrok_active_caller_budget_reservation", default=None)
++)
+ STATE = PublicStateStore()
+ BUILD_ACP = GrokBuildACPManager(
+     binary=CLI_PATH,
+--- a/tests/test_local_daily_budget.py
++++ b/tests/test_local_daily_budget.py
+@@ -5,6 +5,7 @@
+ 
+ import pytest
+ 
++from unigrok_public import server
+ from unigrok_public.caller_budget import (
+     CallerBudgetConfigurationError,
+     CallerBudgetExceeded,
+@@ -151,3 +152,101 @@
+     await enforce_caller_budget(_UnexpectedStore())  # type: ignore[arg-type]
+     reservation = await reserve_caller_budget(_UnexpectedStore())  # type: ignore[arg-type]
+     await reservation.settle(0.0)
++
++
++@pytest.mark.asyncio
++async def test_server_budget_reservation_is_reentrant_within_one_task(
++    monkeypatch: pytest.MonkeyPatch,
++    tmp_path: Path,
++) -> None:
++    monkeypatch.setenv("UNIGROK_LOCAL_DAILY_BUDGET_USD", "1")
++    store = PublicStateStore(tmp_path / "budget.db")
++    monkeypatch.setattr(server, "STATE", store)
++    server._ACTIVE_CALLER_BUDGET_RESERVATION.set(None)
++
++    outer = await server._begin_caller_budget_reservation()
++    inner = await server._begin_caller_budget_reservation()
++
++    assert outer.store is store
++    assert inner.store is None
++    await server._settle_budget_success(inner, {"cost_usd": 0.0})
++    assert (await store.get_local_budget_status(1.0))["status"] == "busy"
++    assert server._ACTIVE_CALLER_BUDGET_RESERVATION.get() is outer
++
++    await server._settle_budget_success(outer, {"cost_usd": 0.4})
++    assert server._ACTIVE_CALLER_BUDGET_RESERVATION.get() is None
++    replacement = await server._begin_caller_budget_reservation()
++    assert replacement.store is store
++    await server._settle_budget_success(replacement, {"cost_usd": 0.1})
++
++
++@pytest.mark.asyncio
++async def test_open_breaker_does_not_strand_local_budget_reservation(
++    monkeypatch: pytest.MonkeyPatch,
++    tmp_path: Path,
++) -> None:
++    monkeypatch.setenv("UNIGROK_LOCAL_DAILY_BUDGET_USD", "1")
++    store = PublicStateStore(tmp_path / "budget.db")
++    monkeypatch.setattr(server, "STATE", store)
++    server._ACTIVE_CALLER_BUDGET_RESERVATION.set(None)
++    called = False
++
++    def reject(_plane: str, _model: str | None) -> server._BreakerAdmission:
++        raise RuntimeError("circuit breaker open")
++
++    async def operation() -> dict[str, object]:
++        nonlocal called
++        called = True
++        return {"cost_usd": 0.0}
++
++    monkeypatch.setattr(server, "_breaker_before_call", reject)
++
++    with pytest.raises(RuntimeError, match="circuit breaker open"):
++        await server._guarded_provider_call("api", "grok-test", operation)
++
++    assert called is False
++    assert (await store.get_local_budget_status(1.0))["status"] == "ready"
++    reservation = await server._begin_caller_budget_reservation()
++    assert reservation.store is store
++    await server._settle_budget_success(reservation, {"cost_usd": 0.0})
++
++
++@pytest.mark.asyncio
++async def test_metered_durable_job_reuses_outer_budget_reservation(
++    monkeypatch: pytest.MonkeyPatch,
++    tmp_path: Path,
++) -> None:
++    monkeypatch.setenv("UNIGROK_LOCAL_DAILY_BUDGET_USD", "1")
++    store = PublicStateStore(tmp_path / "budget.db")
++    monkeypatch.setattr(server, "STATE", store)
++    monkeypatch.setattr(server, "_CIRCUIT_BREAKERS", {})
++    server._ACTIVE_CALLER_BUDGET_RESERVATION.set(None)
++    calls = 0
++
++    async def operation() -> dict[str, object]:
++        nonlocal calls
++        calls += 1
++        return {
++            "status": "complete",
++            "text": "ok",
++            "plane": "api",
++            "resolved_plane": "api",
++            "cost_usd": 0.25,
++        }
++
++    async def produce() -> dict[str, object]:
++        return await server._guarded_provider_call("api", "grok-test", operation)
++
++    result = await server._run_durable_job(
++        produce,
++        ctx=None,
++        kind="web_search",
++        sync_window=5.0,
++    )
++
++    assert result["status"] == "complete"
++    assert calls == 1
++    status = await store.get_local_budget_status(1.0)
++    assert status["status"] == "ready"
++    assert status["spent_usd"] == pytest.approx(0.25)
++    assert server._ACTIVE_CALLER_BUDGET_RESERVATION.get() is None
