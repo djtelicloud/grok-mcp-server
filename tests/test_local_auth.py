@@ -213,6 +213,18 @@ async def test_auth_failure_limit_is_bounded_and_valid_token_still_recovers(
     assert json.loads(body)["unigrok_auth"] == "local_token"
 
 
+def test_failure_limiter_caps_events_per_peer() -> None:
+    limiter = local_auth._FailureLimiter(failure_limit=2)
+
+    assert limiter.record("peer-a", 1.0) is False
+    assert limiter.record("peer-a", 2.0) is False
+    assert limiter.record("peer-a", 3.0) is True
+    for _ in range(1_000):
+        assert limiter.record("peer-a", 3.0) is True
+
+    assert list(limiter._failures["peer-a"]) == [1.0, 2.0, 3.0]
+
+
 def test_failure_limiter_evicts_oldest_peer() -> None:
     limiter = local_auth._FailureLimiter(peer_limit=2)
     limiter.record("peer-a", 1.0)
