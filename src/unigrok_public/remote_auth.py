@@ -408,8 +408,6 @@ async def _perform_oauth_introspection(
             )
     except (httpx.HTTPError, TypeError, ValueError) as exc:
         raise OAuthIntrospectionUnavailable("oauth_control_unreachable") from exc
-    if response.status_code in {401, 403}:
-        return None
     if response.status_code != 200:
         raise OAuthIntrospectionUnavailable("oauth_control_status")
     if len(response.content) > 16_384:

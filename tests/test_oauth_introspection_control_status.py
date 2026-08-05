@@ -1,24 +1,4 @@
-from pathlib import Path
-
-source_path = Path("src/unigrok_public/remote_auth.py")
-source = source_path.read_text(encoding="utf-8")
-old = '''    if response.status_code in {401, 403}:
-        return None
-    if response.status_code != 200:
-        raise OAuthIntrospectionUnavailable("oauth_control_status")
-'''
-new = '''    if response.status_code != 200:
-        raise OAuthIntrospectionUnavailable("oauth_control_status")
-'''
-if source.count(old) != 1:
-    raise SystemExit("unexpected remote_auth.py status-classification anchor")
-source_path.write_text(source.replace(old, new), encoding="utf-8")
-
-test_path = Path("tests/test_oauth_introspection_control_status.py")
-if test_path.exists():
-    raise SystemExit("test_oauth_introspection_control_status.py already exists")
-test_path.write_text(
-    '''from __future__ import annotations
+from __future__ import annotations
 
 import json
 from typing import Any
@@ -165,6 +145,3 @@ async def test_explicit_inactive_token_remains_unauthorized(
     assert status == 401
     assert "www-authenticate" in headers
     assert json.loads(body) == {"error": "unauthorized"}
-''',
-    encoding="utf-8",
-)
