@@ -1,0 +1,300 @@
+name: Complete PR 554 and request final approval
+
+on:
+  push:
+    branches:
+      - chatgpt/pr554-final-approval-gate-v3-20260805
+
+permissions:
+  actions: write
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    env:
+      CANDIDATE_BRANCH: chatgpt/usena-public-core-security-20260805
+      SOURCE_TREE: f1acb28bdb6e5361e2f043dc85ff8f0bec6821a8
+      CLEAN_PARENT: d03022642ec7dea0794f4dea508827ff3025f656
+      SECURITY_PR: '554'
+      TEMP_BUDGET_PR: '560'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: chatgpt/usena-public-core-security-20260805
+          fetch-depth: 0
+      - name: Cancel obsolete candidate workflows
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh run list --repo "$GITHUB_REPOSITORY" --branch "$CANDIDATE_BRANCH" --limit 100 --json databaseId,status --jq '.[] | select(.status == "queued" or .status == "in_progress") | .databaseId' | while read -r run_id; do
+            [ -n "$run_id" ] && gh run cancel "$run_id" --repo "$GITHUB_REPOSITORY" || true
+          done
+      - name: Rebuild the final clean source tree
+        run: |
+          set -euo pipefail
+          staged_head="$(git rev-parse HEAD)"
+          printf 'STAGED_HEAD=%s\n' "$staged_head" >> "$GITHUB_ENV"
+          git reset --hard "$SOURCE_TREE"
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: Path, old: str, new: str) -> None:
+              text = path.read_text(encoding="utf-8")
+              if text.count(old) != 1:
+                  raise SystemExit(f"{path}: expected one anchor, found {text.count(old)}")
+              path.write_text(text.replace(old, new), encoding="utf-8")
+
+          media = Path("src/unigrok_public/tools/media.py")
+          replace_once(
+              media,
+              "] = weakref.WeakKeyDictionary()\n\nMediaResolver = Callable",
+              "] = weakref.WeakKeyDictionary()\n_MEDIA_DNS_TASKS: set[asyncio.Task[None]] = set()\n\nMediaResolver = Callable",
+          )
+          replace_once(
+              media,
+              "def _consume_media_dns_task(task: asyncio.Task[None]) -> None:\n    if task.cancelled():",
+              "def _consume_media_dns_task(task: asyncio.Task[None]) -> None:\n    _MEDIA_DNS_TASKS.discard(task)\n    if task.cancelled():",
+          )
+          replace_once(
+              media,
+              "    worker = asyncio.create_task(resolve_and_release())\n    worker.add_done_callback(_consume_media_dns_task)",
+              "    worker = asyncio.create_task(resolve_and_release())\n    _MEDIA_DNS_TASKS.add(worker)\n    worker.add_done_callback(_consume_media_dns_task)",
+          )
+
+          tests = Path("tests/test_media_url_boundary.py")
+          replace_once(
+              tests,
+              "    assert active == media.MEDIA_DNS_CONCURRENCY\n\n    fifth_called = False",
+              "    assert active == media.MEDIA_DNS_CONCURRENCY\n    assert len(media._MEDIA_DNS_TASKS) == media.MEDIA_DNS_CONCURRENCY\n\n    fifth_called = False",
+          )
+          replace_once(
+              tests,
+              "    for _ in range(100):\n        if active == 0:\n            break\n        await asyncio.sleep(0.01)\n    assert active == 0",
+              "    for _ in range(100):\n        if active == 0 and not media._MEDIA_DNS_TASKS:\n            break\n        await asyncio.sleep(0.01)\n    assert active == 0\n    assert not media._MEDIA_DNS_TASKS",
+          )
+          PY
+          git diff --check
+          expected="$(printf '%s\n%s' 'src/unigrok_public/tools/media.py' 'tests/test_media_url_boundary.py')"
+          test "$(git diff --name-only "$CLEAN_PARENT")" = "$expected"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Install exact lockfile
+        run: uv sync --frozen --python 3.12
+      - name: Static and repository contracts
+        run: |
+          set -euo pipefail
+          uv run ruff check src/unigrok_public/tools/media.py tests/test_media_url_boundary.py --fix
+          git diff --check
+          uv run ruff check .
+          bash scripts/ci-insider-denylist.sh
+          uv run python scripts/check_release_contract.py
+          uv run python scripts/check_docs.py
+      - name: Focused security suite
+        run: uv run pytest -q tests/test_media_url_boundary.py tests/test_transport_security.py tests/test_local_auth.py tests/test_remote_boundary.py tests/test_local_daily_budget.py tests/test_caller_budget.py
+      - name: Full suite
+        run: |
+          set -euo pipefail
+          uv run pytest -q | tee /tmp/pr554-pytest.log
+          summary="$(grep -E '[0-9]+ passed' /tmp/pr554-pytest.log | tail -1)"
+          test -n "$summary"
+          printf 'TEST_SUMMARY=%s\n' "$summary" >> "$GITHUB_ENV"
+      - name: Build exact candidate image
+        run: docker build --tag unigrok:pr554-final .
+      - name: Verify installed image catalog and resolver capacity
+        run: |
+          set -euo pipefail
+          docker run --rm --entrypoint /app/.venv/bin/python unigrok:pr554-final -c '
+          import asyncio
+          from unigrok_public import server
+          tools = asyncio.run(server.mcp.list_tools())
+          names = [tool.name for tool in tools]
+          assert names == list(server.PUBLIC_TOOL_NAMES)
+          assert len(names) == 29
+          assert server.mcp._mcp_server.version == "1.1.0"
+          '
+          docker run --rm --entrypoint /app/.venv/bin/python unigrok:pr554-final -c '
+          import asyncio
+          from collections.abc import Sequence
+          from unigrok_public.tools import media
+
+          async def main() -> None:
+              release = asyncio.Event()
+              started = asyncio.Event()
+              active = 0
+
+              async def stalled(_host: str, _port: int) -> Sequence[str]:
+                  nonlocal active
+                  active += 1
+                  if active == media.MEDIA_DNS_CONCURRENCY:
+                      started.set()
+                  try:
+                      await release.wait()
+                      return ["93.184.216.34"]
+                  finally:
+                      active -= 1
+
+              tasks = [
+                  asyncio.create_task(
+                      media.validated_public_media_url(
+                          f"https://stalled-{index}.example.com/a.png",
+                          "image_url",
+                          resolver=stalled,
+                          timeout_seconds=0.02,
+                          total_timeout_seconds=0.1,
+                      )
+                  )
+                  for index in range(media.MEDIA_DNS_CONCURRENCY)
+              ]
+              await asyncio.wait_for(started.wait(), timeout=1)
+              results = await asyncio.gather(*tasks, return_exceptions=True)
+              assert all(isinstance(result, ValueError) for result in results)
+              assert active == media.MEDIA_DNS_CONCURRENCY
+              assert len(media._MEDIA_DNS_TASKS) == media.MEDIA_DNS_CONCURRENCY
+
+              admitted = False
+
+              async def fifth(_host: str, _port: int) -> Sequence[str]:
+                  nonlocal admitted
+                  admitted = True
+                  return ["93.184.216.34"]
+
+              try:
+                  await media.validated_public_media_url(
+                      "https://fifth.example.com/a.png",
+                      "image_url",
+                      resolver=fifth,
+                      timeout_seconds=0.02,
+                      total_timeout_seconds=0.1,
+                  )
+              except ValueError:
+                  pass
+              else:
+                  raise AssertionError("resolver capacity was over-admitted")
+              assert admitted is False
+
+              release.set()
+              for _ in range(100):
+                  if active == 0 and not media._MEDIA_DNS_TASKS:
+                      break
+                  await asyncio.sleep(0.01)
+              assert active == 0
+              assert not media._MEDIA_DNS_TASKS
+
+          asyncio.run(main())
+          '
+      - name: Verify live HTTP boundary
+        run: |
+          set -euo pipefail
+          docker run --detach --name unigrok-pr554-live --publish 127.0.0.1:48765:8080 --env UNIGROK_HOST=0.0.0.0 --env PORT=8080 --env UNIGROK_ENABLE_METERED_API=false unigrok:pr554-final
+          trap 'docker rm --force unigrok-pr554-live >/dev/null 2>&1 || true' EXIT
+          for _ in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:48765/healthz >/tmp/healthz.json; then
+              break
+            fi
+            sleep 1
+          done
+          test "$(curl --silent --output /tmp/healthz.json --write-out '%{http_code}' http://127.0.0.1:48765/healthz)" = 200
+          test "$(curl --silent --output /tmp/runtimez.json --write-out '%{http_code}' http://127.0.0.1:48765/runtimez)" = 200
+          ready_code="$(curl --silent --output /tmp/readyz.json --write-out '%{http_code}' http://127.0.0.1:48765/readyz)"
+          test "$ready_code" = 200 -o "$ready_code" = 503
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          health = json.loads(Path('/tmp/healthz.json').read_text())
+          runtime = json.loads(Path('/tmp/runtimez.json').read_text())
+          ready = json.loads(Path('/tmp/readyz.json').read_text())
+          assert health['status'] == 'ok'
+          assert runtime['version'] == '1.1.0'
+          assert runtime['tool_count'] == 29
+          assert ready['status'] in {'ready', 'not_ready'}
+          PY
+      - name: Publish one clean final commit
+        run: |
+          set -euo pipefail
+          git add src/unigrok_public/tools/media.py tests/test_media_url_boundary.py
+          tree="$(git write-tree)"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          commit="$(printf '%s\n\n%s\n' 'security: retain media resolver capacity through timeouts' "Verified in GitHub Actions run $GITHUB_RUN_ID." | git commit-tree "$tree" -p "$CLEAN_PARENT")"
+          expected="$(printf '%s\n%s' 'src/unigrok_public/tools/media.py' 'tests/test_media_url_boundary.py')"
+          test "$(git diff-tree --no-commit-id --name-only -r "$commit")" = "$expected"
+          git fetch --force origin "$CANDIDATE_BRANCH:refs/remotes/origin/$CANDIDATE_BRANCH"
+          remote_head="$(git rev-parse "refs/remotes/origin/$CANDIDATE_BRANCH")"
+          git push --force-with-lease="refs/heads/$CANDIDATE_BRANCH:$remote_head" origin "$commit:refs/heads/$CANDIDATE_BRANCH"
+          printf 'FINAL_SHA=%s\n' "$commit" >> "$GITHUB_ENV"
+      - name: Confirm standard CI on final SHA
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          success=false
+          for _ in $(seq 1 180); do
+            record="$(gh run list --repo "$GITHUB_REPOSITORY" --commit "$FINAL_SHA" --workflow CI --limit 1 --json status,conclusion --jq '.[0] // {}')"
+            status="$(printf '%s' "$record" | jq -r '.status // "missing"')"
+            conclusion="$(printf '%s' "$record" | jq -r '.conclusion // ""')"
+            if [ "$status" = completed ] && [ "$conclusion" = success ]; then
+              success=true
+              break
+            fi
+            if [ "$status" = completed ] && [ "$conclusion" != success ]; then
+              printf 'Final CI concluded %s\n' "$conclusion" >&2
+              exit 1
+            fi
+            sleep 5
+          done
+          test "$success" = true
+      - name: Mark PR 554 ready for David
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cat > /tmp/pr554-body.md <<EOF
+          ## Ready for final human approval
+
+          This is the authoritative independently implemented public-Core security change. No donor commit, file, patch, or branch code was merged, copied, or cherry-picked.
+
+          ### Security coverage
+
+          - bounded, cancellation-safe OAuth introspection coalescing
+          - retryable 503 handling for temporary authorization-control failures; explicit inactive-token denial remains 401
+          - deterministic malformed-Unicode identity rejection
+          - optional local bearer authentication with bounded abuse state
+          - local and hosted Host/Origin rebinding protection
+          - public-media URL and DNS boundary with resolver slots retained through timeout completion
+          - safe-by-default IDE onboarding and exact Cursor hook matching
+          - optional atomic local daily metered-spend ceiling
+
+          ### Exact-head verification
+
+          - Commit: \`$FINAL_SHA\`
+          - Full suite: **$TEST_SUMMARY**
+          - Ruff, insider denylist, release contract, documentation contract: passed
+          - Docker build: passed
+          - Installed-image MCP catalog: 29 tools, version 1.1.0
+          - Live container health/runtime and truthful readiness: passed
+          - Media resolver timeout-capacity proof: passed
+          - Standard CI on the exact final SHA: passed
+
+          ### Provenance
+
+          Curtis (\`cfrat33\`) and PR #544 are credited as the source of donor security ideas. The implementation and regression tests were independently authored from public \`main\`.
+          EOF
+          gh pr edit "$SECURITY_PR" --repo "$GITHUB_REPOSITORY" --title 'security: harden public Core trust boundaries' --body-file /tmp/pr554-body.md
+          gh pr ready "$SECURITY_PR" --repo "$GITHUB_REPOSITORY"
+          gh pr comment "$SECURITY_PR" --repo "$GITHUB_REPOSITORY" --body "Final independent gate passed on exact head \`$FINAL_SHA\`: $TEST_SUMMARY; standard CI, Docker, live HTTP boundary, 29-tool MCP catalog, and resolver-capacity proof passed. Ready for David's final merge approval."
+          gh pr close "$TEMP_BUDGET_PR" --repo "$GITHUB_REPOSITORY" --comment 'Completed and promoted into PR #554; closing this temporary gate without merge.' || true
+      - name: Remove temporary gate branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --method DELETE "repos/$GITHUB_REPOSITORY/git/refs/heads/${GITHUB_REF_NAME//\//%2F}" || true
