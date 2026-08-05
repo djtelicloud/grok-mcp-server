@@ -1,0 +1,26 @@
+name: Export PR554 budget baseline
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    if: github.head_ref == 'chatgpt/pr554-budget-source-export-20260805'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 1
+      - run: tar --exclude=.git -czf /tmp/pr554-budget-baseline.tgz .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pr554-budget-baseline
+          path: /tmp/pr554-budget-baseline.tgz
+          if-no-files-found: error
+          retention-days: 1
