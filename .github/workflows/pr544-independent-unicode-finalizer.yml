@@ -1,0 +1,434 @@
+name: PR544 independent Unicode finalizer
+
+on:
+  push:
+    branches:
+      - chatgpt/pr544-finalizer-20260804-v4
+    paths:
+      - .github/workflows/pr544-independent-unicode-finalizer.yml
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  actions: read
+
+concurrency:
+  group: pr544-independent-unicode-finalizer
+  cancel-in-progress: false
+
+env:
+  TARGET_BRANCH: chatgpt/pr544-independent-hardening-20260804
+  DONOR_PR: "544"
+  REVIEWED_DONOR_CURSOR: d1426ebc24e2dae508065d67cb911d60b7f7bc88
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Record governing repository instructions
+        run: |
+          set -euo pipefail
+          mapfile -t instruction_files < <(find .. -name AGENTS.md -type f -print | sort)
+          if [ "${#instruction_files[@]}" -eq 0 ]; then
+            printf '%s\n' "AGENTS.md not found" >&2
+            exit 1
+          fi
+          for file in "${instruction_files[@]}"; do
+            printf '\n===== %s =====\n' "$file"
+            cat "$file"
+          done
+          mapfile -t usena_files < <(grep -RIl --exclude-dir=.git -E 'USENA|Usena|usena' . | sort || true)
+          if [ "${#usena_files[@]}" -eq 0 ]; then
+            printf '%s\n' "USENA policy not found" >&2
+            exit 1
+          fi
+          for file in "${usena_files[@]}"; do
+            printf '\n===== %s =====\n' "$file"
+            cat "$file"
+          done
+
+      - name: Verify clean independent base and donor metadata
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git fetch origin main "$TARGET_BRANCH" || git fetch origin main
+          git switch -C "$TARGET_BRANCH" origin/main
+          if git show-ref --verify --quiet "refs/remotes/origin/$TARGET_BRANCH"; then
+            git merge-base --is-ancestor "origin/$TARGET_BRANCH" origin/main
+          fi
+          donor_json="$(gh pr view "$DONOR_PR" --repo "$GITHUB_REPOSITORY" --json number,state,headRefOid,headRefName,author,url,title)"
+          printf '%s\n' "$donor_json" > /tmp/pr544-donor-metadata.json
+          donor_head="$(printf '%s' "$donor_json" | jq -r '.headRefOid')"
+          donor_state="$(printf '%s' "$donor_json" | jq -r '.state')"
+          printf 'DONOR_HEAD=%s\n' "$donor_head" >> "$GITHUB_ENV"
+          printf 'DONOR_STATE=%s\n' "$donor_state" >> "$GITHUB_ENV"
+          printf 'BASE_SHA=%s\n' "$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+
+      - name: Apply the isolated Unicode boundary correction and regression
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from __future__ import annotations
+
+          import ast
+          import json
+          import re
+          from pathlib import Path
+
+          candidates = []
+          for path in Path(".").rglob("*.py"):
+              if any(part in {".git", ".venv", "venv", "site-packages"} for part in path.parts):
+                  continue
+              text = path.read_text(encoding="utf-8")
+              if "def canonical_oauth_principal(" in text:
+                  candidates.append((path, text))
+          if len(candidates) != 1:
+              raise SystemExit(f"expected exactly one canonical_oauth_principal definition, found {len(candidates)}")
+
+          auth_path, source = candidates[0]
+          tree = ast.parse(source)
+          function = next(
+              node
+              for node in ast.walk(tree)
+              if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+              and node.name == "canonical_oauth_principal"
+          )
+          function_lines = source.splitlines()[function.lineno - 1 : function.end_lineno]
+          function_text = "\n".join(function_lines)
+          if "UnicodeEncodeError" not in function_text:
+              pattern = re.compile(
+                  r"(    if any\(ord\(char\) <= 31 or ord\(char\) == 127 for char in subject\):\n"
+                  r"        return None\n)"
+                  r"(    return \(\n)"
+              )
+              replacement = (
+                  r"\1"
+                  "    try:\n"
+                  "        issuer.encode(\"utf-8\")\n"
+                  "        subject.encode(\"utf-8\")\n"
+                  "    except UnicodeEncodeError:\n"
+                  "        return None\n"
+                  r"\2"
+              )
+              source, count = pattern.subn(replacement, source, count=1)
+              if count != 1:
+                  raise SystemExit("canonical_oauth_principal layout no longer matches the independently reviewed boundary")
+              ast.parse(source)
+              auth_path.write_text(source, encoding="utf-8")
+
+          module_parts = list(auth_path.with_suffix("").parts)
+          if module_parts and module_parts[0] == "src":
+              module_parts = module_parts[1:]
+          module_name = ".".join(module_parts)
+          test_path = Path("tests/test_oauth_unicode_concurrency.py")
+          test_source = f'''from __future__ import annotations
+
+import asyncio
+import importlib
+import json
+from typing import Any
+
+import pytest
+
+
+auth = importlib.import_module({module_name!r})
+
+
+class _MalformedIdentityResponse:
+    status_code = 200
+    content = b"{{}}"
+    headers: dict[str, str] = {{}}
+    text = "{{}}"
+
+    def __init__(self, *, issuer: str, audience: str) -> None:
+        self._payload = {{
+            "active": True,
+            "scope": "unigrok:connect",
+            "iss": issuer,
+            "sub": chr(0xD800),
+            "aud": audience,
+        }}
+
+    def json(self) -> dict[str, Any]:
+        return self._payload
+
+    def raise_for_status(self) -> None:
+        return None
+
+
+class _MalformedIdentityClient:
+    calls = 0
+    issuer = ""
+    audience = ""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        return None
+
+    async def __aenter__(self) -> _MalformedIdentityClient:
+        return self
+
+    async def __aexit__(self, *args: Any) -> bool:
+        return False
+
+    async def post(self, *args: Any, **kwargs: Any) -> _MalformedIdentityResponse:
+        type(self).calls += 1
+        await asyncio.sleep(0.02)
+        return _MalformedIdentityResponse(
+            issuer=type(self).issuer,
+            audience=type(self).audience,
+        )
+
+
+@pytest.mark.asyncio
+async def test_malformed_unicode_oauth_identity_denies_all_coalesced_callers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    issuer = "https://auth.example.test"
+    audience = "https://mcp.example.test/mcp"
+    monkeypatch.setenv("UNIGROK_RUNTIME", "cloudrun")
+    monkeypatch.setenv("UNIGROK_PUBLIC_MCP_URL", audience)
+    monkeypatch.setenv("UNIGROK_OAUTH_AUTHORIZATION_SERVERS", issuer)
+    monkeypatch.setenv(
+        "UNIGROK_OAUTH_INTROSPECTION_URL",
+        "https://control.example.test/introspect",
+    )
+    monkeypatch.setenv(
+        "UNIGROK_OAUTH_SCOPES",
+        "unigrok:connect,unigrok:invoke,unigrok:review,unigrok:status,unigrok:chat",
+    )
+    monkeypatch.delenv("UNIGROK_SERVICE_TOKENS", raising=False)
+    monkeypatch.delenv("UNIGROK_SERVICE_TOKEN_SHA256", raising=False)
+    _MalformedIdentityClient.calls = 0
+    _MalformedIdentityClient.issuer = issuer
+    _MalformedIdentityClient.audience = audience
+    monkeypatch.setattr(auth.httpx, "AsyncClient", _MalformedIdentityClient)
+    inner_calls = 0
+
+    async def inner_app(
+        scope: dict[str, Any],
+        receive: Any,
+        send: Any,
+    ) -> None:
+        nonlocal inner_calls
+        inner_calls += 1
+        await send({{"type": "http.response.start", "status": 204, "headers": []}})
+        await send({{"type": "http.response.body", "body": b""}})
+
+    middleware = auth.RemoteOAuthMiddleware(inner_app)
+    body = json.dumps(
+        {{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {{}}}},
+        separators=(",", ":"),
+    ).encode("utf-8")
+
+    async def invoke() -> int:
+        delivered = False
+        messages: list[dict[str, Any]] = []
+
+        async def receive() -> dict[str, Any]:
+            nonlocal delivered
+            if not delivered:
+                delivered = True
+                return {{"type": "http.request", "body": body, "more_body": False}}
+            await asyncio.sleep(0)
+            return {{"type": "http.disconnect"}}
+
+        async def send(message: dict[str, Any]) -> None:
+            messages.append(message)
+
+        scope = {{
+            "type": "http",
+            "asgi": {{"version": "3.0", "spec_version": "2.3"}},
+            "http_version": "1.1",
+            "method": "POST",
+            "scheme": "https",
+            "path": "/mcp",
+            "raw_path": b"/mcp",
+            "query_string": b"",
+            "root_path": "",
+            "headers": [
+                (b"host", b"mcp.example.test"),
+                (b"authorization", b"Bearer malformed-unicode-concurrency-token"),
+                (b"content-type", b"application/json"),
+                (b"content-length", str(len(body)).encode("ascii")),
+            ],
+            "client": ("203.0.113.10", 43100),
+            "server": ("mcp.example.test", 443),
+            "state": {{}},
+        }}
+        await middleware(scope, receive, send)
+        starts = [message for message in messages if message.get("type") == "http.response.start"]
+        assert len(starts) == 1
+        return int(starts[0]["status"])
+
+    results = await asyncio.gather(*(invoke() for _ in range(32)), return_exceptions=True)
+    assert results == [401] * 32
+    assert _MalformedIdentityClient.calls == 1
+    assert inner_calls == 0
+'''
+          test_path.write_text(test_source, encoding="utf-8")
+          Path("/tmp/pr544-change.json").write_text(
+              json.dumps(
+                  {
+                      "auth_path": str(auth_path),
+                      "test_path": str(test_path),
+                      "module": module_name,
+                  },
+                  indent=2,
+              )
+              + "\n",
+              encoding="utf-8",
+          )
+          PY
+          printf 'AUTH_PATH=%s\n' "$(jq -r '.auth_path' /tmp/pr544-change.json)" >> "$GITHUB_ENV"
+          printf 'TEST_PATH=%s\n' "$(jq -r '.test_path' /tmp/pr544-change.json)" >> "$GITHUB_ENV"
+          git diff --check
+          git diff -- "$AUTH_PATH" "$TEST_PATH"
+
+      - name: Install repository test dependencies
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          if [ -f requirements-dev.txt ]; then
+            python -m pip install -r requirements-dev.txt
+          fi
+          extra="$(python - <<'PY'
+          from pathlib import Path
+          import tomllib
+
+          path = Path("pyproject.toml")
+          if not path.exists():
+              print("")
+              raise SystemExit
+          data = tomllib.loads(path.read_text(encoding="utf-8"))
+          extras = data.get("project", {}).get("optional-dependencies", {})
+          selected = [name for name in ("dev", "test", "tests") if name in extras]
+          print(f".[{','.join(selected)}]" if selected else ".")
+          PY
+          )"
+          python -m pip install -e "$extra"
+          python -m pip install pytest pytest-asyncio
+
+      - name: Run focused Unicode concurrency regression
+        run: |
+          set -euo pipefail
+          python -m pytest -q "$TEST_PATH" | tee /tmp/pr544-focused-tests.txt
+
+      - name: Run repository lint gates for the isolated change
+        run: |
+          set -euo pipefail
+          if python -c 'import ruff' >/dev/null 2>&1; then
+            python -m ruff check "$AUTH_PATH" "$TEST_PATH"
+            python -m ruff format --check "$AUTH_PATH" "$TEST_PATH"
+          fi
+          python -m compileall -q "$AUTH_PATH" "$TEST_PATH"
+
+      - name: Run the full repository test suite
+        run: |
+          set -euo pipefail
+          python -m pytest -q | tee /tmp/pr544-full-tests.txt
+
+      - name: Build the repository container
+        run: |
+          set -euo pipefail
+          if [ -f Dockerfile ]; then
+            docker build --tag grok-mcp-server:pr544-independent . | tee /tmp/pr544-docker-build.txt
+          else
+            printf '%s\n' "No root Dockerfile; container build not applicable." | tee /tmp/pr544-docker-build.txt
+          fi
+
+      - name: Commit and publish the independently implemented fix
+        run: |
+          set -euo pipefail
+          git config user.name "ChatGPT"
+          git config user.email "chatgpt@users.noreply.github.com"
+          git add "$AUTH_PATH" "$TEST_PATH"
+          git diff --cached --check
+          git commit -m "security: reject malformed OAuth identity Unicode"
+          git push origin "HEAD:$TARGET_BRANCH"
+          printf 'FIX_SHA=%s\n' "$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+
+      - name: Create or refresh the draft pull request and record donor credit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          focused_result="$(tail -n 1 /tmp/pr544-focused-tests.txt)"
+          full_result="$(tail -n 1 /tmp/pr544-full-tests.txt)"
+          docker_result="$(tail -n 1 /tmp/pr544-docker-build.txt)"
+          cat > /tmp/pr544-pr-body.md <<EOF
+          ## Summary
+
+          - Rejects OAuth issuer or subject claims that cannot be encoded as valid UTF-8 before principal canonicalization.
+          - Prevents a malformed lone-surrogate identity claim from escaping as an exception and splitting simultaneous callers between server-error and denial outcomes.
+          - Adds an exact 32-caller coalescing regression that requires one introspection request, thirty-two HTTP 401 denials, and no protected-app invocation.
+
+          ## Verification
+
+          - Focused regression: \`$focused_result\`
+          - Full repository suite: \`$full_result\`
+          - Container verification: \`$docker_result\`
+          - Base: \`$BASE_SHA\`
+          - Fix: \`$FIX_SHA\`
+
+          ## Provenance
+
+          This implementation was rebuilt independently from public \`main\`. PR #544 by @cfrat33 was used only as donor research for security behaviors. No donor-branch code was merged, copied, or cherry-picked.
+
+          Thanks to Curtis (@cfrat33) for the security ideas and evidence contributed through PR #544. The donor PR head observed at publication was \`$DONOR_HEAD\` with state \`$DONOR_STATE\`; the task's initial reviewed cursor was \`$REVIEWED_DONOR_CURSOR\`.
+          EOF
+          pr_number="$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --head "$TARGET_BRANCH" --json number --jq '.[0].number // empty')"
+          if [ -z "$pr_number" ]; then
+            pr_url="$(gh pr create --repo "$GITHUB_REPOSITORY" --draft --base main --head "$TARGET_BRANCH" --title "security: reject malformed OAuth identity Unicode" --body-file /tmp/pr544-pr-body.md)"
+            pr_number="${pr_url##*/}"
+          else
+            gh pr edit "$pr_number" --repo "$GITHUB_REPOSITORY" --title "security: reject malformed OAuth identity Unicode" --body-file /tmp/pr544-pr-body.md
+          fi
+          marker='<!-- pr544-independent-credit-recorded -->'
+          existing_comments="$(gh pr view "$DONOR_PR" --repo "$GITHUB_REPOSITORY" --json comments --jq '[.comments[].body] | join("\n")')"
+          if ! grep -Fq "$marker" <<<"$existing_comments"; then
+            gh pr comment "$DONOR_PR" --repo "$GITHUB_REPOSITORY" --body "$marker
+          Thanks @cfrat33 (Curtis) for the security ideas and evidence in this donor PR. The malformed-Unicode OAuth identity edge has now been implemented independently from public main, with no donor code merged, copied, or cherry-picked. The independent draft is #$pr_number."
+          fi
+          printf 'PR_NUMBER=%s\n' "$pr_number" >> "$GITHUB_ENV"
+          printf 'PR_URL=https://github.com/%s/pull/%s\n' "$GITHUB_REPOSITORY" "$pr_number" >> "$GITHUB_ENV"
+
+      - name: Publish verification artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr544-independent-final-verification
+          path: |
+            /tmp/pr544-donor-metadata.json
+            /tmp/pr544-change.json
+            /tmp/pr544-focused-tests.txt
+            /tmp/pr544-full-tests.txt
+            /tmp/pr544-docker-build.txt
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Write final workflow summary
+        run: |
+          set -euo pipefail
+          {
+            printf '## Independent PR #544 remediation\n\n'
+            printf -- '- Draft PR: %s\n' "$PR_URL"
+            printf -- '- Base SHA: `%s`\n' "$BASE_SHA"
+            printf -- '- Fix SHA: `%s`\n' "$FIX_SHA"
+            printf -- '- Donor head observed: `%s`\n' "$DONOR_HEAD"
+            printf -- '- Donor state: `%s`\n' "$DONOR_STATE"
+            printf -- '- Focused tests: `%s`\n' "$(tail -n 1 /tmp/pr544-focused-tests.txt)"
+            printf -- '- Full tests: `%s`\n' "$(tail -n 1 /tmp/pr544-full-tests.txt)"
+            printf -- '- Container: `%s`\n' "$(tail -n 1 /tmp/pr544-docker-build.txt)"
+          } >> "$GITHUB_STEP_SUMMARY"
