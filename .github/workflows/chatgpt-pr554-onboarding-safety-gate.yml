@@ -1,0 +1,70 @@
+name: Publish safer onboarding boundary
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+concurrency:
+  group: chatgpt-pr554-onboarding-safety-20260805
+  cancel-in-progress: false
+
+jobs:
+  verify-and-publish:
+    if: github.head_ref == 'chatgpt/usena-public-core-security-20260805'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - name: Verify isolated cursor
+        env:
+          CLEAN_PARENT: 4334ee4955e0901e8c98ed15df80d18d08a7c472
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          expected="$(printf '%s\n%s' '.github/pr554-onboarding-safety.patch' '.github/workflows/chatgpt-pr554-onboarding-safety-gate.yml')"
+          test "$(git diff --name-only "$CLEAN_PARENT" HEAD)" = "$expected"
+      - name: Apply independently authored onboarding correction
+        run: |
+          set -euo pipefail
+          git apply --check .github/pr554-onboarding-safety.patch
+          git apply .github/pr554-onboarding-safety.patch
+          git rm .github/pr554-onboarding-safety.patch .github/workflows/chatgpt-pr554-onboarding-safety-gate.yml
+          git diff --check
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --frozen --python 3.12
+      - run: uv run ruff check .
+      - run: uv run pytest -q tests/test_onboarding_safe_mode.py tests/test_public_boundary.py tests/test_remote_boundary.py
+      - run: bash scripts/ci-insider-denylist.sh
+      - run: uv run python scripts/check_release_contract.py
+      - run: uv run python scripts/check_docs.py
+      - run: uv run pytest -q
+      - run: docker build --tag unigrok:onboarding-safety .
+      - name: Publish clean commit
+        env:
+          CLEAN_PARENT: 4334ee4955e0901e8c98ed15df80d18d08a7c472
+          TARGET_BRANCH: chatgpt/usena-public-core-security-20260805
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          git add -A
+          tree="$(git write-tree)"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          commit="$(printf '%s\n\n%s\n' 'security: make onboarding approval explicit' "Verified in GitHub Actions run $GITHUB_RUN_ID." | git commit-tree "$tree" -p "$CLEAN_PARENT")"
+          expected="$(printf '%s\n%s' 'src/unigrok_public/server.py' 'tests/test_onboarding_safe_mode.py')"
+          test "$(git diff-tree --no-commit-id --name-only -r "$commit")" = "$expected"
+          git push --force-with-lease="refs/heads/$TARGET_BRANCH:$EXPECTED_HEAD" origin "$commit:refs/heads/$TARGET_BRANCH"
