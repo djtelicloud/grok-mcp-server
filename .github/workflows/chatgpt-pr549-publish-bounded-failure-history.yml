@@ -1,0 +1,135 @@
+name: Publish bounded local authentication failure history
+
+on:
+  push:
+    branches:
+      - chatgpt/pr544-local-edge-hardening-20260804
+    paths:
+      - .github/workflows/chatgpt-pr549-publish-bounded-failure-history.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pr549-publish-bounded-failure-history
+  cancel-in-progress: false
+
+jobs:
+  verify-and-publish:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: chatgpt/pr544-local-edge-hardening-20260804
+          fetch-depth: 0
+      - name: Verify exact branch cursor
+        env:
+          STAGED_HEAD: 994cd0eddc2c9801a23744f7869f937c15294630
+        run: |
+          test "$(git rev-parse HEAD^)" = "$STAGED_HEAD"
+          test "$(git diff --name-only "$STAGED_HEAD" HEAD)" = ".github/workflows/chatgpt-pr549-publish-bounded-failure-history.yml"
+      - name: Apply bounded per-peer failure history
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          source_path = Path("src/unigrok_public/local_auth.py")
+          source = source_path.read_text()
+          old_source = '''    def record(self, peer: str, now: float) -> bool:
+              events = self._events(peer, now)
+              events.append(now)
+              return len(events) > self.failure_limit
+          '''
+          new_source = '''    def record(self, peer: str, now: float) -> bool:
+              events = self._events(peer, now)
+              if len(events) <= self.failure_limit:
+                  events.append(now)
+              return len(events) > self.failure_limit
+          '''
+          if source.count(old_source) != 1:
+              raise RuntimeError("local failure limiter changed")
+          source_path.write_text(source.replace(old_source, new_source, 1))
+
+          test_path = Path("tests/test_local_auth.py")
+          tests = test_path.read_text()
+          marker = '''def test_failure_limiter_evicts_oldest_peer() -> None:
+          '''
+          regression = '''def test_failure_limiter_caps_events_per_peer() -> None:
+              limiter = local_auth._FailureLimiter(failure_limit=2)
+
+              assert limiter.record("peer-a", 1.0) is False
+              assert limiter.record("peer-a", 2.0) is False
+              assert limiter.record("peer-a", 3.0) is True
+              for _ in range(1_000):
+                  assert limiter.record("peer-a", 3.0) is True
+
+              assert list(limiter._failures["peer-a"]) == [1.0, 2.0, 3.0]
+
+
+          '''
+          if tests.count(marker) != 1:
+              raise RuntimeError("local auth test insertion point changed")
+          test_path.write_text(tests.replace(marker, regression + marker, 1))
+          PY
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --frozen --python 3.12
+      - run: uv run ruff check .
+      - run: uv run pytest -q tests/test_local_auth.py
+      - run: bash scripts/ci-insider-denylist.sh
+      - run: uv run python scripts/check_release_contract.py
+      - run: uv run python scripts/check_docs.py
+      - run: uv run pytest -q
+      - run: docker build --tag unigrok:pr549-bounded-failures .
+      - name: Verify live limiter and authentication recovery
+        run: |
+          set -euo pipefail
+          LOCAL_TOKEN="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
+          docker run --detach \
+            --name unigrok-pr549-bounded-failures \
+            --init \
+            --read-only \
+            --cap-drop ALL \
+            --security-opt no-new-privileges:true \
+            --tmpfs /home/appuser/.grok:rw,noexec,nosuid,nodev,size=16m,uid=1000,gid=1000,mode=0700 \
+            --tmpfs /state:rw,noexec,nosuid,nodev,size=64m,uid=1000,gid=1000,mode=0700 \
+            --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m,uid=1000,gid=1000,mode=0700 \
+            --env UNIGROK_LOCAL_MCP_TOKEN="$LOCAL_TOKEN" \
+            --publish 127.0.0.1:14766:8080 \
+            unigrok:pr549-bounded-failures
+          trap 'docker logs unigrok-pr549-bounded-failures || true; docker rm --force unigrok-pr549-bounded-failures || true' EXIT
+          ready=0
+          for _ in $(seq 1 60); do
+            if curl --fail --silent --show-error http://127.0.0.1:14766/healthz >/tmp/pr549-health.json; then
+              ready=1
+              break
+            fi
+            sleep 1
+          done
+          test "$ready" -eq 1
+          for _ in $(seq 1 12); do
+            test "$(curl --silent --output /tmp/pr549-unauthorized.json --write-out '%{http_code}' http://127.0.0.1:14766/v1/models)" = "401"
+          done
+          test "$(curl --silent --output /tmp/pr549-limited.json --write-out '%{http_code}' http://127.0.0.1:14766/v1/models)" = "429"
+          test "$(curl --silent --output /tmp/pr549-valid.txt --write-out '%{http_code}' --header "Authorization: Bearer $LOCAL_TOKEN" http://127.0.0.1:14766/v1/models)" = "404"
+          test "$(curl --silent --output /tmp/pr549-forwarded.json --write-out '%{http_code}' --header "Authorization: Bearer $LOCAL_TOKEN" --header 'X-Forwarded-For: 127.0.0.1' http://127.0.0.1:14766/v1/models)" = "403"
+          git diff --check
+      - name: Publish one clean verified commit
+        env:
+          CLEAN_PARENT: 2a6c13de2e50eb75cf83c3c84d34ceb8f6eb78a3
+          TARGET_BRANCH: chatgpt/pr544-local-edge-hardening-20260804
+        run: |
+          git rm .github/workflows/chatgpt-pr549-bound-failure-history.yml
+          git rm .github/workflows/chatgpt-pr549-publish-bounded-failure-history.yml
+          git add src/unigrok_public/local_auth.py tests/test_local_auth.py
+          tree="$(git write-tree)"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          commit="$(printf '%s\n\n%s\n' 'fix: bound local authentication failure history' "Verified in GitHub Actions run $GITHUB_RUN_ID." | git commit-tree "$tree" -p "$CLEAN_PARENT")"
+          git push --force-with-lease="refs/heads/$TARGET_BRANCH:$GITHUB_SHA" origin "$commit:refs/heads/$TARGET_BRANCH"
