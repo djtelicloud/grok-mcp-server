@@ -1,0 +1,108 @@
+name: PR544 independent sequencer
+
+on:
+  push:
+    branches:
+      - chatgpt/pr544-finalizer-20260804-v4
+    paths:
+      - .github/workflows/pr544-independent-sequencer.yml
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: pr544-independent-sequencer
+  cancel-in-progress: false
+
+env:
+  RUNNER_BRANCH: chatgpt/pr544-finalizer-20260804-v4
+  INITIAL_WORKFLOW: pr544-independent-unicode-finalizer.yml
+  RECOVERY_WORKFLOW: pr544-independent-oauth-recovery-v2.yml
+  SUPERVISOR_WORKFLOW: pr544-independent-final-supervisor.yml
+
+jobs:
+  sequence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - name: Wait for the initial finalizer
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mapfile -t run_ids < <(
+            gh run list \
+              --repo "$GITHUB_REPOSITORY" \
+              --workflow "$INITIAL_WORKFLOW" \
+              --branch "$RUNNER_BRANCH" \
+              --limit 20 \
+              --json databaseId,status \
+              --jq '.[] | select(.status != "completed") | .databaseId'
+          )
+          for run_id in "${run_ids[@]}"; do
+            set +e
+            gh run watch "$run_id" --repo "$GITHUB_REPOSITORY" --exit-status --interval 10
+            set -e
+          done
+
+      - name: Run the corrected OAuth recovery to completion
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          run_json="$(
+            gh run list \
+              --repo "$GITHUB_REPOSITORY" \
+              --workflow "$RECOVERY_WORKFLOW" \
+              --branch "$RUNNER_BRANCH" \
+              --limit 1 \
+              --json databaseId,status,conclusion \
+              --jq '.[0] // {}'
+          )"
+          run_id="$(printf '%s' "$run_json" | jq -r '.databaseId // empty')"
+          run_status="$(printf '%s' "$run_json" | jq -r '.status // empty')"
+          if [ -z "$run_id" ]; then
+            printf '%s\n' "OAuth recovery workflow run not found" >&2
+            exit 1
+          fi
+          if [ "$run_status" = completed ]; then
+            gh run rerun "$run_id" --repo "$GITHUB_REPOSITORY"
+          fi
+          gh run watch "$run_id" --repo "$GITHUB_REPOSITORY" --exit-status --interval 10
+          printf 'RECOVERY_RUN_ID=%s\n' "$run_id" >> "$GITHUB_ENV"
+
+      - name: Run the final supervisor after recovery
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          run_json="$(
+            gh run list \
+              --repo "$GITHUB_REPOSITORY" \
+              --workflow "$SUPERVISOR_WORKFLOW" \
+              --branch "$RUNNER_BRANCH" \
+              --limit 1 \
+              --json databaseId,status,conclusion \
+              --jq '.[0] // {}'
+          )"
+          run_id="$(printf '%s' "$run_json" | jq -r '.databaseId // empty')"
+          run_status="$(printf '%s' "$run_json" | jq -r '.status // empty')"
+          if [ -z "$run_id" ]; then
+            printf '%s\n' "final supervisor workflow run not found" >&2
+            exit 1
+          fi
+          if [ "$run_status" = completed ]; then
+            gh run rerun "$run_id" --repo "$GITHUB_REPOSITORY"
+          fi
+          gh run watch "$run_id" --repo "$GITHUB_REPOSITORY" --exit-status --interval 10
+          printf 'SUPERVISOR_RUN_ID=%s\n' "$run_id" >> "$GITHUB_ENV"
+
+      - name: Write sequencing summary
+        run: |
+          set -euo pipefail
+          {
+            printf '## PR544 independent sequencing complete\n\n'
+            printf -- '- OAuth recovery run: %s\n' "$RECOVERY_RUN_ID"
+            printf -- '- Final supervisor run: %s\n' "$SUPERVISOR_RUN_ID"
+          } >> "$GITHUB_STEP_SUMMARY"
