@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
 import ipaddress
 import re
 import socket
@@ -138,15 +139,12 @@ async def _validate_resolved_target(
     target: _MediaTarget,
     field: str,
     resolver: MediaResolver,
-    timeout_seconds: float,
 ) -> None:
     if target.literal_address is not None:
         return
     try:
-        answers = await asyncio.wait_for(
-            resolver(target.host, target.port), timeout=timeout_seconds
-        )
-    except (OSError, TimeoutError, UnicodeError) as exc:
+        answers = await resolver(target.host, target.port)
+    except (OSError, UnicodeError) as exc:
         raise ValueError(f"{field} must be a public https URL") from exc
     if not answers:
         raise ValueError(f"{field} must be a public https URL")
@@ -156,6 +154,45 @@ async def _validate_resolved_target(
         raise ValueError(f"{field} must be a public https URL") from exc
     if any(not _is_public_address(address) for address in addresses):
         raise ValueError(f"{field} must be a public https URL")
+
+
+def _consume_media_dns_task(task: asyncio.Task[None]) -> None:
+    if task.cancelled():
+        return
+    with contextlib.suppress(Exception):
+        task.exception()
+
+
+async def _validate_target_with_slot(
+    target: _MediaTarget,
+    field: str,
+    resolver: MediaResolver,
+    limiter: asyncio.Semaphore,
+    timeout_seconds: float,
+) -> None:
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout_seconds
+    try:
+        await asyncio.wait_for(limiter.acquire(), timeout=timeout_seconds)
+    except TimeoutError as exc:
+        raise ValueError(f"{field} must be a public https URL") from exc
+    remaining = deadline - loop.time()
+    if remaining <= 0:
+        limiter.release()
+        raise ValueError(f"{field} must be a public https URL")
+
+    async def resolve_and_release() -> None:
+        try:
+            await _validate_resolved_target(target, field, resolver)
+        finally:
+            limiter.release()
+
+    worker = asyncio.create_task(resolve_and_release())
+    worker.add_done_callback(_consume_media_dns_task)
+    try:
+        await asyncio.wait_for(asyncio.shield(worker), timeout=remaining)
+    except TimeoutError as exc:
+        raise ValueError(f"{field} must be a public https URL") from exc
 
 
 async def validated_public_media_urls(
@@ -181,10 +218,9 @@ async def validated_public_media_urls(
         limiter = _media_dns_limiter()
 
         async def validate(target: _MediaTarget) -> None:
-            async with limiter:
-                await _validate_resolved_target(
-                    target, field, active_resolver, timeout_seconds
-                )
+            await _validate_target_with_slot(
+                target, field, active_resolver, limiter, timeout_seconds
+            )
 
         async def validate_all() -> None:
             tasks = [
