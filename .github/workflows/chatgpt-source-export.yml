@@ -1,4 +1,4 @@
-name: ChatGPT OAuth head export
+name: Audit PR549 clean bounded-history ancestor
 
 on:
   push:
@@ -11,28 +11,100 @@ permissions:
   contents: write
 
 jobs:
-  export:
+  audit:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 1
+          ref: chatgpt/pr544-source-export-20260804
+          fetch-depth: 0
       - uses: actions/checkout@v4
         with:
-          ref: chatgpt/oauth-resilience-20260804
-          path: oauth-head
-          fetch-depth: 1
-      - run: tar --exclude=.git -C oauth-head -czf /tmp/grok-mcp-oauth-head.tgz .
-      - uses: actions/upload-artifact@v4
+          ref: chatgpt/pr544-local-edge-hardening-20260804
+          path: pr549
+          fetch-depth: 0
+      - name: Identify and fence the clean ancestor
+        run: |
+          set -euo pipefail
+          current="$(git -C pr549 rev-parse HEAD)"
+          clean="$(git -C pr549 rev-parse 4f5c9679cd805d3cfe4fa13fb64ba7bb3a2c83d0^)"
+          test "$current" = "ecb59b8bae7cf34b1f8599d78c56649a956a6ab0"
+          test "$(git -C pr549 diff --name-only 2a6c13de2e50eb75cf83c3c84d34ceb8f6eb78a3 "$clean")" = $'src/unigrok_public/local_auth.py\ntests/test_local_auth.py'
+          test "$(git -C pr549 diff --name-only "$clean" "$current")" = $'.github/workflows/chatgpt-pr549-bound-failure-history.yml\n.github/workflows/chatgpt-pr549-publish-bounded-failure-history.yml'
+          grep -F 'if len(events) <= self.failure_limit:' pr549/src/unigrok_public/local_auth.py
+          grep -F 'def test_failure_limiter_caps_events_per_peer() -> None:' pr549/tests/test_local_auth.py
+          printf '%s\n' "$current" > /tmp/pr549-current
+          printf '%s\n' "$clean" > /tmp/pr549-clean
+          git -C pr549 log --format='%H%x09%P%x09%s' -8 > /tmp/pr549-history
+      - uses: actions/setup-python@v5
         with:
-          name: grok-mcp-oauth-head
-          path: /tmp/grok-mcp-oauth-head.tgz
-          if-no-files-found: error
-          retention-days: 1
-      - run: |
-          printf '%s\n' "$GITHUB_RUN_ID" > .oauth-head-export-run-id
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --frozen --python 3.12
+        working-directory: pr549
+      - run: uv run ruff check .
+        working-directory: pr549
+      - run: uv run pytest -q tests/test_local_auth.py
+        working-directory: pr549
+      - run: bash scripts/ci-insider-denylist.sh
+        working-directory: pr549
+      - run: uv run python scripts/check_release_contract.py
+        working-directory: pr549
+      - run: uv run python scripts/check_docs.py
+        working-directory: pr549
+      - run: uv run pytest -q
+        working-directory: pr549
+      - run: docker build --tag unigrok:pr549-clean-audit .
+        working-directory: pr549
+      - name: Verify live bounded authentication
+        working-directory: pr549
+        run: |
+          set -euo pipefail
+          local_token="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
+          docker run --detach \
+            --name unigrok-pr549-clean-audit \
+            --init \
+            --read-only \
+            --cap-drop ALL \
+            --security-opt no-new-privileges:true \
+            --tmpfs /home/appuser/.grok:rw,noexec,nosuid,nodev,size=16m,uid=1000,gid=1000,mode=0700 \
+            --tmpfs /state:rw,noexec,nosuid,nodev,size=64m,uid=1000,gid=1000,mode=0700 \
+            --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m,uid=1000,gid=1000,mode=0700 \
+            --env UNIGROK_LOCAL_MCP_TOKEN="$local_token" \
+            --publish 127.0.0.1:14766:8080 \
+            unigrok:pr549-clean-audit
+          trap 'docker logs unigrok-pr549-clean-audit || true; docker rm --force unigrok-pr549-clean-audit || true' EXIT
+          ready=0
+          for _ in $(seq 1 60); do
+            if curl --fail --silent --show-error http://127.0.0.1:14766/healthz >/tmp/pr549-health.json; then
+              ready=1
+              break
+            fi
+            sleep 1
+          done
+          test "$ready" -eq 1
+          for _ in $(seq 1 12); do
+            test "$(curl --silent --output /tmp/pr549-unauthorized.json --write-out '%{http_code}' http://127.0.0.1:14766/v1/models)" = "401"
+          done
+          test "$(curl --silent --output /tmp/pr549-limited.json --write-out '%{http_code}' http://127.0.0.1:14766/v1/models)" = "429"
+          test "$(curl --silent --output /tmp/pr549-valid.txt --write-out '%{http_code}' --header "Authorization: Bearer $local_token" http://127.0.0.1:14766/v1/models)" = "404"
+          test "$(curl --silent --output /tmp/pr549-forwarded.json --write-out '%{http_code}' --header "Authorization: Bearer $local_token" --header 'X-Forwarded-For: 127.0.0.1' http://127.0.0.1:14766/v1/models)" = "403"
+          git diff --check
+      - name: Record exact verified lineage
+        run: |
+          {
+            printf 'run_id=%s\n' "$GITHUB_RUN_ID"
+            printf 'audited_head=%s\n' "$(cat /tmp/pr549-current)"
+            printf 'clean_ancestor=%s\n' "$(cat /tmp/pr549-clean)"
+            printf 'history_begin\n'
+            cat /tmp/pr549-history
+            printf 'history_end\n'
+          } > .pr549-clean-audit
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add .oauth-head-export-run-id
-          git commit -m "chore: record OAuth head export run"
+          git add .pr549-clean-audit
+          git commit -m "chore: record verified PR549 clean ancestor"
           git push
