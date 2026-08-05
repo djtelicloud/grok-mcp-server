@@ -1,4 +1,4 @@
-name: ChatGPT PR549 bound failure history
+name: ChatGPT PR549 record bounded-history lineage
 
 on:
   push:
@@ -11,95 +11,29 @@ permissions:
   contents: write
 
 jobs:
-  verify-and-publish:
+  record:
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:
           ref: chatgpt/pr544-local-edge-hardening-20260804
           fetch-depth: 0
-      - name: Record this verification run
-        run: |
+      - run: |
           git fetch origin chatgpt/pr544-source-export-20260804
-          git worktree add /tmp/pr549-run-tracker origin/chatgpt/pr544-source-export-20260804
-          cd /tmp/pr549-run-tracker
-          printf '%s\n' "$GITHUB_RUN_ID" > .pr549-bounded-history-run-id
+          git worktree add /tmp/pr549-lineage origin/chatgpt/pr544-source-export-20260804
+          {
+            printf 'observer_run=%s\n' "$GITHUB_RUN_ID"
+            printf 'observer_head=%s\n' "$(git rev-parse HEAD)"
+            printf 'workflow_parent=%s\n' "$(git rev-parse HEAD^)"
+            printf 'verified_commit=%s\n' "$(git rev-parse HEAD^^)"
+            printf 'verified_message_begin\n'
+            git log -1 --format=%B HEAD^^
+            printf 'verified_message_end\n'
+          } > /tmp/pr549-lineage/.pr549-bounded-history-lineage
+          cd /tmp/pr549-lineage
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add .pr549-bounded-history-run-id
-          git commit -m "chore: record PR549 bounded-history run"
+          git add .pr549-bounded-history-lineage
+          git commit -m "chore: record PR549 bounded-history lineage"
           git push origin HEAD:chatgpt/pr544-source-export-20260804
-      - name: Verify exact branch cursor
-        env:
-          BASE_HEAD: 2a6c13de2e50eb75cf83c3c84d34ceb8f6eb78a3
-          WORKFLOW_PARENT: cab2202f9fc755f3b0b7115c8bf852eb7d6b937d
-        run: |
-          test "$(git rev-parse HEAD^)" = "$WORKFLOW_PARENT"
-          test "$(git diff --name-only "$BASE_HEAD" HEAD)" = ".github/workflows/chatgpt-pr549-bound-failure-history.yml"
-      - name: Apply exact bounded-history patch
-        run: |
-          printf '%s' 'H4sIAAAAAAAC/5WSQY/bIBCF7/yKkU9Yjh3bbdUqalY57anqqbcoQsQep3QpWIC32n9fsPE2jtZqlgMIvXkPmI9WdB3k+UU44Ftrmu2gxMXoJ9YPZymardQNl4wP7mfRv8D5vyUkz/M7kkiWZfekHQ6Qf6k2HyHz8yc4HAiE0WIHBhttWmpRdhvoEc0OrDMbUPrPDjqpuUshf4Cz1nI3ucLAZ1TOwh6Cr2DTlgb76ExJvqwseN+jaumoZbMmOpCo6FSSwtcY13EhB4NMit/C7f6Vr8S9agbdYNQi8uGNRNJew3JonR1ndgtpTYpwVuUJyqocYNRV7TlkYak+v/Lg1qJxvv/cDb65e6jLcqH8sloVnklr6Vm3L+kxmbGH8OQUPMl0mtNPqBJCSBYoj9dYdAENa3hvIzrW+33AR0fa37XC2PhY7FFfvYI9TlHfJpEukve1RzyZ47VjRhH/WhIOynmygaooUxAWHrm0eJ+lfr/lQ7T8MEN0dNoAA6HAcHVBWrGyLNOrn/a+xJtbWEdn49xye5y9pzQwOvqHj08Zo04hgsAqJ3wWjUekZRvUW0p/AbQBfiV7BAAA' | base64 --decode | gzip --decompress > /tmp/pr549-bounded-history.patch
-          printf '%s  %s\n' '6ba3a2d864584e23d04ce1740098216b1f39eccccd73b029dd68d02821fadf6c' '/tmp/pr549-bounded-history.patch' | sha256sum --check
-          git apply --check /tmp/pr549-bounded-history.patch
-          git apply /tmp/pr549-bounded-history.patch
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - uses: astral-sh/setup-uv@v6
-        with:
-          enable-cache: true
-      - run: uv sync --frozen --python 3.12
-      - run: uv run ruff check .
-      - run: uv run pytest -q tests/test_local_auth.py
-      - run: bash scripts/ci-insider-denylist.sh
-      - run: uv run python scripts/check_release_contract.py
-      - run: uv run python scripts/check_docs.py
-      - run: uv run pytest -q
-      - run: docker build --tag unigrok:pr549-bounded-failures .
-      - name: Verify the live local-auth boundary
-        run: |
-          set -euo pipefail
-          LOCAL_TOKEN="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
-          docker run --detach \
-            --name unigrok-pr549-bounded-failures \
-            --init \
-            --read-only \
-            --cap-drop ALL \
-            --security-opt no-new-privileges:true \
-            --tmpfs /home/appuser/.grok:rw,noexec,nosuid,nodev,size=16m,uid=1000,gid=1000,mode=0700 \
-            --tmpfs /state:rw,noexec,nosuid,nodev,size=64m,uid=1000,gid=1000,mode=0700 \
-            --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m,uid=1000,gid=1000,mode=0700 \
-            --env UNIGROK_LOCAL_MCP_TOKEN="$LOCAL_TOKEN" \
-            --publish 127.0.0.1:14766:8080 \
-            unigrok:pr549-bounded-failures
-          trap 'docker logs unigrok-pr549-bounded-failures || true; docker rm --force unigrok-pr549-bounded-failures || true' EXIT
-          ready=0
-          for _ in $(seq 1 60); do
-            if curl --fail --silent --show-error http://127.0.0.1:14766/healthz >/tmp/pr549-health.json; then
-              ready=1
-              break
-            fi
-            sleep 1
-          done
-          test "$ready" -eq 1
-          for _ in $(seq 1 12); do
-            test "$(curl --silent --output /tmp/pr549-unauthorized.json --write-out '%{http_code}' http://127.0.0.1:14766/v1/models)" = "401"
-          done
-          test "$(curl --silent --output /tmp/pr549-limited.json --write-out '%{http_code}' http://127.0.0.1:14766/v1/models)" = "429"
-          test "$(curl --silent --output /tmp/pr549-valid.txt --write-out '%{http_code}' --header "Authorization: Bearer $LOCAL_TOKEN" http://127.0.0.1:14766/v1/models)" = "404"
-          test "$(curl --silent --output /tmp/pr549-forwarded.json --write-out '%{http_code}' --header "Authorization: Bearer $LOCAL_TOKEN" --header 'X-Forwarded-For: 127.0.0.1' http://127.0.0.1:14766/v1/models)" = "403"
-          git diff --check
-      - name: Publish one clean verified commit
-        env:
-          BASE_HEAD: 2a6c13de2e50eb75cf83c3c84d34ceb8f6eb78a3
-          TARGET_BRANCH: chatgpt/pr544-local-edge-hardening-20260804
-        run: |
-          git rm .github/workflows/chatgpt-pr549-bound-failure-history.yml
-          git add src/unigrok_public/local_auth.py tests/test_local_auth.py
-          tree="$(git write-tree)"
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          commit="$(printf '%s\n\n%s\n' 'fix: bound local authentication failure history' "Verified in GitHub Actions run $GITHUB_RUN_ID." | git commit-tree "$tree" -p "$BASE_HEAD")"
-          git push --force-with-lease="refs/heads/$TARGET_BRANCH:$GITHUB_SHA" origin "$commit:refs/heads/$TARGET_BRANCH"
