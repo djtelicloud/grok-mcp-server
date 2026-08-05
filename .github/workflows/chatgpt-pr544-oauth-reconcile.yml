@@ -1,0 +1,167 @@
+name: ChatGPT PR544 OAuth reconcile
+
+on:
+  push:
+    branches:
+      - chatgpt/pr544-source-export-20260804
+    paths:
+      - .github/workflows/chatgpt-pr544-oauth-reconcile.yml
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Record run
+        run: |
+          printf '%s\n' "$GITHUB_RUN_ID" > .pr544-oauth-reconcile-run-id
+          git config user.name "chatgpt-recovery[bot]"
+          git config user.email "chatgpt-recovery[bot]@users.noreply.github.com"
+          git add .pr544-oauth-reconcile-run-id
+          git commit -m "chore: record PR544 OAuth reconcile run"
+          git push
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Select only an authorized recovery state
+        env:
+          TARGET_BRANCH: chatgpt/pr544-independent-hardening-20260804
+        run: |
+          sleep 120
+          cp .github/chatgpt/pr544_oauth_rebuild_20260804.py /tmp/pr544_oauth_rebuild.py
+          git fetch origin main "$TARGET_BRANCH"
+          UNIQUE=$(git rev-list --count "origin/main..origin/$TARGET_BRANCH")
+          if [ "$UNIQUE" = "0" ]; then
+            git checkout --detach origin/main
+            python /tmp/pr544_oauth_rebuild.py .
+          else
+            test "$UNIQUE" -le 2
+            CHANGED=$(git diff --name-only "origin/main...origin/$TARGET_BRANCH" | sort)
+            EXPECTED=$(printf '%s\n' src/unigrok_public/remote_auth.py tests/test_remote_boundary.py | sort)
+            test "$CHANGED" = "$EXPECTED"
+            while read -r subject; do
+              case "$subject" in
+                "fix(auth): make OAuth control failures retryable"|"fix(auth): bound shared OAuth introspection work") ;;
+                *) exit 1 ;;
+              esac
+            done < <(git log --format=%s "origin/main..origin/$TARGET_BRANCH")
+            git checkout --detach "origin/$TARGET_BRANCH"
+          fi
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('src/unigrok_public/remote_auth.py')
+          text = path.read_text(encoding='utf-8')
+          if '_OAUTH_INTROSPECTION_MAX_FLIGHTS = 256' not in text:
+              text = text.replace(
+                  '] = {}\n\n\ndef _oauth_control_unavailable',
+                  '] = {}\n_OAUTH_INTROSPECTION_MAX_FLIGHTS = 256\n\n\ndef _oauth_control_unavailable',
+                  1,
+              )
+          if 'oauth_introspection_capacity_exhausted' not in text:
+              text = text.replace(
+                  '    if task is None:\n        task = loop.create_task(_run_oauth_introspection(token, required))',
+                  '    if task is None:\n        if len(_oauth_introspection_flights) >= _OAUTH_INTROSPECTION_MAX_FLIGHTS:\n            raise _oauth_control_unavailable("oauth_introspection_capacity_exhausted")\n        task = loop.create_task(_run_oauth_introspection(token, required))',
+                  1,
+              )
+          text = text.replace(
+              '    try:\n        task.exception()\n    except BaseException:\n        return',
+              '    try:\n        task.exception()\n    except asyncio.CancelledError:\n        return\n    except Exception:\n        return',
+          )
+          required = (
+              '_OAUTH_INTROSPECTION_MAX_FLIGHTS = 256',
+              'oauth_introspection_capacity_exhausted',
+              'except asyncio.CancelledError:',
+          )
+          if any(item not in text for item in required) or 'except BaseException:' in text:
+              raise RuntimeError('bounded flight reconciliation failed')
+          path.write_text(text, encoding='utf-8')
+          PY
+          git diff --check
+      - name: Verify targeted boundary
+        run: |
+          uv sync --frozen --python 3.13
+          uv run ruff check src/unigrok_public/remote_auth.py tests/test_remote_boundary.py
+          uv run pytest -q tests/test_remote_boundary.py | tee /tmp/pytest-targeted.log
+      - name: Verify full suite
+        run: uv run pytest -q | tee /tmp/pytest-full.log
+      - name: Verify container build
+        run: docker build --pull=false -t grok-mcp-server:pr544-oauth . | tee /tmp/docker-build.log
+      - name: Commit and push reconciled branch
+        env:
+          TARGET_BRANCH: chatgpt/pr544-independent-hardening-20260804
+        run: |
+          git config user.name "chatgpt-recovery[bot]"
+          git config user.email "chatgpt-recovery[bot]@users.noreply.github.com"
+          git add src/unigrok_public/remote_auth.py tests/test_remote_boundary.py
+          if ! git diff --cached --quiet; then
+            if git log -1 --format=%s | grep -qx 'fix(auth): make OAuth control failures retryable'; then
+              git commit -m "fix(auth): bound shared OAuth introspection work"
+            else
+              git commit -m "fix(auth): make OAuth control failures retryable"
+            fi
+          fi
+          PATCH_SHA=$(git rev-parse HEAD)
+          printf '%s\n' "$PATCH_SHA" > /tmp/patch-sha
+          git push origin "HEAD:refs/heads/$TARGET_BRANCH"
+      - name: Create or update draft pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_BRANCH: chatgpt/pr544-independent-hardening-20260804
+        run: |
+          TARGETED=$(tail -n 1 /tmp/pytest-targeted.log)
+          FULL=$(tail -n 1 /tmp/pytest-full.log)
+          cat > /tmp/pr-body.md <<EOF
+          ## Summary
+
+          - Distinguish explicit OAuth token denial from temporary introspection-control failure.
+          - Return retryable HTTP 503 responses for transport, HTTP, malformed-control-response, capacity, and shared-task cancellation failures; retain HTTP 401 for explicit denial.
+          - Coalesce simultaneous introspection of the same token and scope without retaining raw bearer values, with a bounded in-flight table.
+          - Shield shared introspection work from a cancelled requesting caller.
+          - Reject malformed surrogate Unicode in OAuth identity claims before canonical principal encoding.
+
+          ## Verification
+
+          - Targeted remote-boundary suite: $TARGETED
+          - Full test suite: $FULL
+          - Docker image build: passed
+          - `git diff --check`: passed
+          - Ruff on changed Python files: passed
+
+          ## Provenance
+
+          Independently implemented from public `main` in an isolated branch. Thanks to Curtis (`@cfrat33`): PR #544 supplied the donor security ideas and review stimulus. No donor-branch code was merged, copied, cherry-picked, or pushed into this branch.
+          EOF
+          PR_URL=$(gh pr list --head "$TARGET_BRANCH" --base main --state open --json url --jq '.[0].url // empty')
+          if [ -z "$PR_URL" ]; then
+            PR_URL=$(gh pr create --draft --base main --head "$TARGET_BRANCH" --title "fix(auth): make OAuth control failures retryable" --body-file /tmp/pr-body.md)
+          else
+            gh pr edit "$PR_URL" --title "fix(auth): make OAuth control failures retryable" --body-file /tmp/pr-body.md
+          fi
+          printf '%s\n' "$PR_URL" > /tmp/pr-url
+      - name: Record final receipt
+        run: |
+          PATCH_SHA=$(cat /tmp/patch-sha)
+          git reset --hard
+          git switch chatgpt/pr544-source-export-20260804
+          git pull --ff-only
+          {
+            printf 'run_id=%s\n' "$GITHUB_RUN_ID"
+            printf 'patch_sha=%s\n' "$PATCH_SHA"
+            printf 'targeted=%s\n' "$(tail -n 1 /tmp/pytest-targeted.log)"
+            printf 'full=%s\n' "$(tail -n 1 /tmp/pytest-full.log)"
+            printf 'docker=passed\n'
+            printf 'draft_pr=%s\n' "$(cat /tmp/pr-url)"
+          } > .pr544-oauth-publication-result
+          git add .pr544-oauth-publication-result
+          git commit -m "chore: record final PR544 OAuth publication"
+          git push
