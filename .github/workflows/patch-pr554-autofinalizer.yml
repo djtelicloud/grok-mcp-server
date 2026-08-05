@@ -1,0 +1,44 @@
+name: Patch PR554 autonomous finalizer
+
+on:
+  push:
+    branches:
+      - chatgpt/pr554-autofinalizer-v2-20260805
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Patch monitor branch fetch refspecs
+        run: |
+          set -euo pipefail
+          target=chatgpt/pr554-autofinalizer-20260805
+          git fetch origin "$target:refs/remotes/origin/$target"
+          git switch -C "$target" "origin/$target"
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path(".github/workflows/pr554-autofinalizer.yml")
+          text = path.read_text(encoding="utf-8")
+          text = text.replace(
+              'git fetch origin "$TARGET_BRANCH"',
+              'git fetch origin "$TARGET_BRANCH:refs/remotes/origin/$TARGET_BRANCH"',
+          )
+          text = text.replace(
+              "git fetch origin chatgpt/pr554-cloudrun-transport-publication-20260805",
+              "git fetch origin chatgpt/pr554-cloudrun-transport-publication-20260805:refs/remotes/origin/chatgpt/pr554-cloudrun-transport-publication-20260805",
+          )
+          path.write_text(text, encoding="utf-8")
+          PY
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/workflows/pr554-autofinalizer.yml
+          git diff --cached --check
+          git commit -m "fix: fetch PR554 finalizer branches explicitly"
+          git push origin HEAD:refs/heads/$target
