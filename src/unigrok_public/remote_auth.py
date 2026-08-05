@@ -467,7 +467,8 @@ async def introspect_oauth_token(token: str, required: str) -> dict[str, Any] | 
             )
         )
     try:
-        return await asyncio.shield(task)
+        claims = await asyncio.shield(task)
+        return dict(claims) if claims is not None else None
     except asyncio.CancelledError:
         raise
     except OAuthIntrospectionUnavailable:
