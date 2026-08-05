@@ -1449,7 +1449,9 @@ def _global_files(client: str) -> list[dict[str, str]]:
     return []
 
 
-def _client_onboarding_plan(client: str, scope: str) -> dict[str, Any]:
+def _client_onboarding_plan(
+    client: str, scope: str, *, safe_mode: bool = True
+) -> dict[str, Any]:
     adapter = CLIENT_ADAPTERS[client]
     cloud_mode = is_cloudrun_runtime()
     common = {
@@ -1461,7 +1463,8 @@ def _client_onboarding_plan(client: str, scope: str) -> dict[str, Any]:
         "scope": scope,
         "writes_performed": False,
         "requires_explicit_user_approval": True,
-        "automatic_tool_approval_offered": not cloud_mode,
+        "safe_mode": safe_mode,
+        "automatic_tool_approval_offered": not cloud_mode and not safe_mode,
         "installer": "calling_ide_agent",
         "runtime_contract": {
             "execution_policy": "api_only" if cloud_mode else "dual_plane",
@@ -1519,7 +1522,7 @@ def _client_onboarding_plan(client: str, scope: str) -> dict[str, Any]:
                 _owned_file(".cursor/rules/unigrok-visuals.mdc", VISUALS_CURSOR_RULE)
             )
             plan["mcp_server"] = _cursor_mcp_server("project")
-            if not cloud_mode:
+            if not cloud_mode and not safe_mode:
                 plan["files"].append(
                     _owned_file(".cursor/hooks/before-unigrok-agent.py", CURSOR_AGENT_HOOK)
                 )
@@ -1574,6 +1577,11 @@ def _client_onboarding_plan(client: str, scope: str) -> dict[str, Any]:
                 "Reload Cursor after authorizing the remote MCP server, then call "
                 "grok_mcp_discover_self."
             )
+        elif safe_mode:
+            plan["reload"] = (
+                "Reload Cursor after adding the MCP server, then call "
+                "grok_mcp_discover_self."
+            )
         else:
             plan["hooks"] = _cursor_hooks("global")
             plan["files"].append(
@@ -1586,7 +1594,7 @@ def _client_onboarding_plan(client: str, scope: str) -> dict[str, Any]:
     else:
         # Same "never prompt for @grok" outcome for the other IDEs, each via its own
         # native mechanism (optional; the IDE previews before applying).
-        if not cloud_mode:
+        if not cloud_mode and not safe_mode:
             auto_approve = _auto_approve(client, "global")
             if auto_approve is not None:
                 plan["auto_approve"] = auto_approve
@@ -6313,14 +6321,17 @@ async def grok_mcp_onboard_client(
         "generic",
     ] = "auto",
     choice: Literal["global", "project", "not_now", "never"] | None = None,
+    safe_mode: bool = True,
 ) -> dict[str, Any]:
     """Offer a consent-first UniGrok integration plan for the calling IDE.
 
     This tool never writes files. If the MCP client supports elicitation and no
     `choice` is supplied, it asks the user to choose a scope. Otherwise it returns
     a structured offer for the calling IDE to present. The IDE owns all approved
-    writes and must preserve user-modified files. Clients behind a generic MCP bridge
-    should pass their host kind explicitly because bridges can hide the IDE identity.
+    writes and must preserve user-modified files. Safe mode is enabled by default and
+    omits automatic tool approvals, trust grants, and approval hooks. Clients behind a
+    generic MCP bridge should pass their host kind explicitly because bridges can hide
+    the IDE identity.
     """
     params = ctx.request_context.session.client_params
     detected_name = params.clientInfo.name if params is not None else None
@@ -6334,7 +6345,8 @@ async def grok_mcp_onboard_client(
             (
                 "Install the optional UniGrok integration globally so it is available "
                 "without adding files to repositories? Project customizations keep "
-                "higher priority, and no existing file will be overwritten blindly."
+                "higher priority, no existing file will be overwritten blindly, and "
+                "safe mode omits automatic tool approvals by default."
             ),
             ClientOnboardingSelection,
         )
@@ -6362,9 +6374,10 @@ async def grok_mcp_onboard_client(
                 "tool": "grok_mcp_onboard_client",
                 "client": resolved_client,
                 "choice": "<approved choice>",
+                "safe_mode": True,
             },
         }
-    return _client_onboarding_plan(resolved_client, choice)
+    return _client_onboarding_plan(resolved_client, choice, safe_mode=safe_mode)
 
 
 @mcp.tool(annotations=READ_ONLY)

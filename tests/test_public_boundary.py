@@ -158,6 +158,7 @@ def test_public_mcp_tool_contract_is_exact_and_self_checked() -> None:
     assert "prompt" in agent_tool.inputSchema["properties"]
     onboarding_tool = next(tool for tool in tools if tool.name == "grok_mcp_onboard_client")
     assert "ctx" not in onboarding_tool.inputSchema["properties"]
+    assert onboarding_tool.inputSchema["properties"]["safe_mode"]["default"] is True
 
 
 def test_heuristic_route_skips_metered_router_for_direct_tasks() -> None:
@@ -458,8 +459,8 @@ def test_client_onboarding_detection_and_safe_non_filesystem_fallback() -> None:
     assert server._client_kind("Visual Studio Code") == "github_copilot"
     assert server._client_kind("unknown") == "generic"
     cursor = server._client_onboarding_plan("cursor", "global")
-    # Cursor now gets the ported client setup: an mcp.json merge entry pointing at the
-    # Grok gateway and a routing rule (no longer an empty client_settings-only plan).
+    assert cursor["safe_mode"] is True
+    assert cursor["automatic_tool_approval_offered"] is False
     assert cursor["client_settings_instruction"] is None
     entry = cursor["mcp_server"]
     assert entry["target"] == "~/.cursor/mcp.json"
@@ -467,20 +468,22 @@ def test_client_onboarding_detection_and_safe_non_filesystem_fallback() -> None:
     assert entry["entry"]["mcpServers"]["grok"]["url"].endswith("/mcp")
     rule_paths = [f["path"] for f in cursor["files"]]
     assert ".cursor/rules/using-unigrok.mdc" in rule_paths
-    # The emitted MCP config carries NO credential — only the URL and the non-secret
-    # X-Client-ID telemetry header (Cursor is a client, never an execution plane).
     grok_server = entry["entry"]["mcpServers"]["grok"]
     assert set(grok_server) == {"url", "headers"}
     assert set(grok_server["headers"]) == {"X-Client-ID"}
     assert "CURSOR_API_KEY" not in json.dumps(cursor)
-    # Cursor's "plugin": the beforeMCPExecution hook that auto-approves ONLY the agent
-    # tool, plus the hook script shipped as an owned file.
-    hooks = cursor["hooks"]
+    assert "hooks" not in cursor
+    assert "~/.cursor/hooks/before-unigrok-agent.py" not in rule_paths
+
+    permissive = server._client_onboarding_plan("cursor", "global", safe_mode=False)
+    assert permissive["safe_mode"] is False
+    assert permissive["automatic_tool_approval_offered"] is True
+    hooks = permissive["hooks"]
     assert hooks["target"] == "~/.cursor/hooks.json"
     before = hooks["entry"]["hooks"]["beforeMCPExecution"][0]
     assert before["matcher"] == "agent"
-    assert "~/.cursor/hooks/before-unigrok-agent.py" in rule_paths
-    # The hook auto-allows the agent tool and defers (ask) on anything else.
+    permissive_paths = [f["path"] for f in permissive["files"]]
+    assert "~/.cursor/hooks/before-unigrok-agent.py" in permissive_paths
     assert '"allow"' in server.CURSOR_AGENT_HOOK and '"ask"' in server.CURSOR_AGENT_HOOK
 
 
@@ -1334,15 +1337,15 @@ def test_media_generation_detector_and_guard() -> None:
 def test_per_client_auto_approve_uses_native_mechanism() -> None:
     from unigrok_public import server
 
-    cc = server._client_onboarding_plan("claude_code", "global")["auto_approve"]
+    cc = server._client_onboarding_plan("claude_code", "global", safe_mode=False)["auto_approve"]
     assert cc["merge_into"] == "permissions.allow"
     assert cc["entry"]["permissions"]["allow"] == ["mcp__grok__agent", "mcp__grok__agent_result"]
 
-    cx = server._client_onboarding_plan("codex", "global")["auto_approve"]
+    cx = server._client_onboarding_plan("codex", "global", safe_mode=False)["auto_approve"]
     assert cx["target"].endswith("config.toml")
     assert 'approval_mode = "auto"' in cx["toml"]
 
-    ag = server._client_onboarding_plan("antigravity", "global")["auto_approve"]
+    ag = server._client_onboarding_plan("antigravity", "global", safe_mode=False)["auto_approve"]
     assert ag["entry"]["userSettings"]["globalPermissionGrants"]["allow"] == [
         "mcp(grok/agent)",
         "mcp(grok/agent_result)",
@@ -1355,7 +1358,7 @@ def test_per_client_auto_approve_uses_native_mechanism() -> None:
         "mcp(grok/agent_result)",
     ]
 
-    gh = server._client_onboarding_plan("github_copilot", "global")
+    gh = server._client_onboarding_plan("github_copilot", "global", safe_mode=False)
     assert "--allow-tool 'grok(agent)'" in gh["auto_approve"]["command"]
     assert gh["mcp_server"]["target"] == "~/.copilot/mcp-config.json"
     assert gh["mcp_server"]["entry"]["mcpServers"]["grok"]["url"].endswith("/mcp")
@@ -1366,11 +1369,18 @@ def test_per_client_auto_approve_uses_native_mechanism() -> None:
         f["path"] == ".github/instructions/unigrok.instructions.md" for f in gh_proj["files"]
     )
 
-    # Clients without a verified mechanism must NOT fabricate one.
-    assert "auto_approve" not in server._client_onboarding_plan("generic", "global")
-    # None of the auto-approve configs carry a credential.
+    for client in ("claude_code", "codex", "antigravity", "github_copilot", "generic"):
+        safe = server._client_onboarding_plan(client, "global")
+        assert safe["safe_mode"] is True
+        assert safe["automatic_tool_approval_offered"] is False
+        assert "auto_approve" not in safe
+        assert "hooks" not in safe
+
+    assert "auto_approve" not in server._client_onboarding_plan(
+        "generic", "global", safe_mode=False
+    )
     for c in ("claude_code", "codex", "antigravity", "github_copilot"):
-        blob = json.dumps(server._client_onboarding_plan(c, "global"))
+        blob = json.dumps(server._client_onboarding_plan(c, "global", safe_mode=False))
         assert "XAI_API_KEY" not in blob and "CURSOR_API_KEY" not in blob
 
 
