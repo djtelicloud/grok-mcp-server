@@ -21,6 +21,7 @@ from typing import Any, Literal
 from urllib.parse import urlsplit
 
 from mcp.server.fastmcp import Context, FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import ToolAnnotations
 from pydantic import BaseModel, Field
 from starlette.requests import Request
@@ -1630,6 +1631,17 @@ PROJECT_ONBOARDING = {
     },
 }
 
+_TRANSPORT_SECURITY = TransportSecuritySettings(
+    enable_dns_rebinding_protection=True,
+    allowed_hosts=["127.0.0.1:*", "localhost:*", "[::1]:*"],
+    allowed_origins=[
+        "http://127.0.0.1:*",
+        "http://localhost:*",
+        "http://[::1]:*",
+    ],
+)
+
+
 mcp = FastMCP(
     MCP_SERVER_NAME,
     instructions=INSTRUCTIONS,
@@ -1638,6 +1650,7 @@ mcp = FastMCP(
     streamable_http_path="/mcp",
     stateless_http=stateless_http_enabled(),
     json_response=False,
+    transport_security=_TRANSPORT_SECURITY,
 )
 # FastMCP 1.28 does not forward a product version to its low-level server,
 # so set the protocol handshake value explicitly until the SDK exposes it.
