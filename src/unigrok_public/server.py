@@ -746,7 +746,8 @@ async def _guarded_provider_call(
     try:
         admission = _breaker_before_call(plane, model)
     except Exception:
-        await release_local_budget(STATE, reservation)
+        with contextlib.suppress(Exception):
+            await release_local_budget(STATE, reservation)
         raise
     try:
         result = await operation()
@@ -7317,8 +7318,8 @@ def main() -> None:
     validate_caller_budget_configuration()
     app = mcp.streamable_http_app()
     app.add_middleware(CallerIdentityMiddleware)
-    app.add_middleware(LocalMcpAuthMiddleware)
     app.add_middleware(RemoteOAuthMiddleware)
+    app.add_middleware(LocalMcpAuthMiddleware)
     app.add_middleware(RemoteOriginMiddleware)
     app.add_middleware(SecurityHeadersMiddleware)
     previous_lifespan = getattr(app.router, "lifespan_context", None)
