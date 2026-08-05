@@ -1,0 +1,83 @@
+name: ChatGPT PR544 OAuth rebuild
+
+on:
+  push:
+    branches:
+      - chatgpt/pr544-source-export-20260804
+    paths:
+      - .github/workflows/chatgpt-pr544-oauth-rebuild.yml
+
+permissions:
+  contents: write
+
+jobs:
+  rebuild:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Record run
+        run: |
+          printf '%s\n' "$GITHUB_RUN_ID" > .pr544-oauth-rebuild-run-id
+          git config user.name "chatgpt-recovery[bot]"
+          git config user.email "chatgpt-recovery[bot]@users.noreply.github.com"
+          git add .pr544-oauth-rebuild-run-id
+          git commit -m "chore: record PR544 OAuth rebuild run"
+          git push
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Rebuild from public main
+        env:
+          TARGET_BRANCH: chatgpt/pr544-independent-hardening-20260804
+        run: |
+          cp .github/chatgpt/pr544_oauth_rebuild_20260804.py /tmp/pr544_oauth_rebuild.py
+          git fetch origin main "$TARGET_BRANCH"
+          if git show-ref --verify --quiet "refs/remotes/origin/$TARGET_BRANCH"; then
+            test "$(git rev-list --count "origin/main..origin/$TARGET_BRANCH")" = "0"
+            git merge-base --is-ancestor "origin/$TARGET_BRANCH" origin/main
+          fi
+          git checkout --detach origin/main
+          python /tmp/pr544_oauth_rebuild.py .
+          git diff --check
+      - name: Verify targeted boundary
+        run: |
+          uv sync --frozen --python 3.13
+          uv run ruff check src/unigrok_public/remote_auth.py tests/test_remote_boundary.py
+          uv run pytest -q tests/test_remote_boundary.py | tee /tmp/pytest-targeted.log
+      - name: Verify full suite
+        run: uv run pytest -q | tee /tmp/pytest-full.log
+      - name: Verify container build
+        run: docker build --pull=false -t grok-mcp-server:pr544-oauth . | tee /tmp/docker-build.log
+      - name: Publish independent branch
+        env:
+          TARGET_BRANCH: chatgpt/pr544-independent-hardening-20260804
+        run: |
+          git config user.name "chatgpt-recovery[bot]"
+          git config user.email "chatgpt-recovery[bot]@users.noreply.github.com"
+          git add src/unigrok_public/remote_auth.py tests/test_remote_boundary.py
+          git commit -m "fix(auth): make OAuth control failures retryable"
+          printf '%s\n' "$(git rev-parse HEAD)" > /tmp/patch-sha
+          git push origin "HEAD:refs/heads/$TARGET_BRANCH"
+      - name: Record verified result
+        if: success()
+        run: |
+          PATCH_SHA=$(cat /tmp/patch-sha)
+          git reset --hard
+          git switch chatgpt/pr544-source-export-20260804
+          git pull --ff-only
+          {
+            printf 'run_id=%s\n' "$GITHUB_RUN_ID"
+            printf 'patch_sha=%s\n' "$PATCH_SHA"
+            printf 'targeted=%s\n' "$(tail -n 1 /tmp/pytest-targeted.log)"
+            printf 'full=%s\n' "$(tail -n 1 /tmp/pytest-full.log)"
+            printf 'docker=passed\n'
+          } > .pr544-oauth-rebuild-result
+          git add .pr544-oauth-rebuild-result
+          git commit -m "chore: record verified PR544 OAuth rebuild"
+          git push
