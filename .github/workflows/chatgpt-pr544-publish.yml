@@ -1,0 +1,286 @@
+name: ChatGPT PR 544 independent hardening publication
+
+on:
+  push:
+    branches:
+      - chatgpt/pr544-publish-20260804
+    paths:
+      - .github/workflows/chatgpt-pr544-publish.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: chatgpt-pr544-independent-hardening-publication
+  cancel-in-progress: false
+
+env:
+  BASE_SHA: 517372387f40bd8246215e793a21195516623ea5
+  TARGET_BRANCH: chatgpt/pr544-independent-hardening-20260804
+  PUBLISH_BRANCH: chatgpt/pr544-publish-20260804
+  PATCH_B64_SHA256: 08a110029b89194fe3b484183171e49c24524670b7a2741b0dae3969bf58ebc8
+  PATCH_SHA256: b0b4023fa2af458be1322c715fa06efd8010ec654406c9359c951ee79e19f5e2
+  EXPECTED_TREE: 876689a77f773f6e607cc6e893d77bc8b4c97b43
+
+jobs:
+  verify-and-publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Record workflow run
+        run: |
+          set -euo pipefail
+          mkdir -p .github/chatgpt-pr544-patch
+          printf '%s\n' "$GITHUB_RUN_ID" > .github/chatgpt-pr544-patch/run-id
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/chatgpt-pr544-patch/run-id
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: record PR 544 publication run"
+            git push origin "HEAD:$PUBLISH_BRANCH"
+          fi
+
+      - name: Verify immutable baseline and reconstruct patch
+        run: |
+          set -euo pipefail
+          git fetch origin main "$TARGET_BRANCH"
+          test "$(git rev-parse origin/main)" = "$BASE_SHA"
+          test "$(git rev-parse "origin/$TARGET_BRANCH")" = "$BASE_SHA"
+          cat .github/chatgpt-pr544-patch/part-*.b64 > /tmp/pr544.patch.b64
+          printf '%s  %s\n' "$PATCH_B64_SHA256" /tmp/pr544.patch.b64 | sha256sum --check --strict
+          base64 --decode /tmp/pr544.patch.b64 | gzip -dc > /tmp/pr544.patch
+          printf '%s  %s\n' "$PATCH_SHA256" /tmp/pr544.patch | sha256sum --check --strict
+          git worktree add --detach /tmp/pr544-target "$BASE_SHA"
+          cd /tmp/pr544-target
+          git am /tmp/pr544.patch
+          test "$(git rev-list --count "$BASE_SHA"..HEAD)" = "11"
+          test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_TREE"
+          git diff --check "$BASE_SHA"..HEAD
+          mkdir -p /tmp/pr544-verification
+          git rev-parse HEAD > /tmp/pr544-verification/head-sha.txt
+          git rev-parse HEAD^{tree} > /tmp/pr544-verification/tree-sha.txt
+          git log --format='%H %s' "$BASE_SHA"..HEAD > /tmp/pr544-verification/commits.txt
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Run repository gates
+        working-directory: /tmp/pr544-target
+        run: |
+          set -euo pipefail
+          uv sync --frozen
+          uv run ruff check . | tee /tmp/pr544-verification/ruff.txt
+          bash scripts/ci-insider-denylist.sh | tee /tmp/pr544-verification/insider-denylist.txt
+          uv run python scripts/check_release_contract.py | tee /tmp/pr544-verification/release-contract.txt
+          uv run python scripts/check_docs.py | tee /tmp/pr544-verification/docs-contract.txt
+          uv run pytest -q | tee /tmp/pr544-verification/pytest.txt
+
+      - name: Build and smoke-test container
+        working-directory: /tmp/pr544-target
+        env:
+          UNIGROK_IMAGE: unigrok:pr544-${{ github.run_id }}
+          UNIGROK_PORT: "4775"
+          XAI_API_KEY: ""
+          UNIGROK_LOCAL_MCP_TOKEN: ""
+          UNIGROK_LOCAL_MCP_TOKEN_SHA256: ""
+          UNIGROK_BUILD_TIMEOUT: "15"
+          UNIGROK_API_TIMEOUT: "15"
+        run: |
+          set -euo pipefail
+          docker compose config --quiet
+          docker compose build grok-mcp | tee /tmp/pr544-verification/docker-build.txt
+          docker compose up -d --no-deps grok-mcp
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent --show-error http://127.0.0.1:4775/healthz > /tmp/pr544-verification/healthz.json; then
+              break
+            fi
+            if [ "$attempt" = "60" ]; then
+              docker compose logs grok-mcp
+              exit 1
+            fi
+            sleep 2
+          done
+          uv run python - <<'PY'
+          from __future__ import annotations
+
+          import json
+          import urllib.error
+          import urllib.request
+
+          def read(path: str) -> tuple[int, dict[str, object]]:
+              try:
+                  with urllib.request.urlopen(
+                      f"http://127.0.0.1:4775{path}", timeout=30
+                  ) as response:
+                      return response.status, json.loads(response.read())
+              except urllib.error.HTTPError as exc:
+                  return exc.code, json.loads(exc.read())
+
+          health_status, health = read("/healthz")
+          if health_status != 200 or health.get("status") != "ok":
+              raise RuntimeError(f"unexpected health response: {health_status} {health}")
+          runtime_status, runtime = read("/runtimez")
+          if runtime_status != 200 or runtime.get("tool_count") != 29:
+              raise RuntimeError(f"unexpected runtime response: {runtime_status} {runtime}")
+          limits = runtime.get("request_limits")
+          if not isinstance(limits, dict):
+              raise RuntimeError("runtime response omitted request limits")
+          if limits.get("media_validation_timeout_seconds") != 5.0:
+              raise RuntimeError("runtime response omitted media validation timeout")
+          if limits.get("media_validation_max_inflight") != 8:
+              raise RuntimeError("runtime response omitted media validation capacity")
+          ready_status, ready = read("/readyz")
+          if ready_status != 503 or ready.get("status") != "not_ready":
+              raise RuntimeError(f"unexpected credential-free readiness: {ready_status} {ready}")
+          bootstrap = ready.get("bootstrap")
+          if not isinstance(bootstrap, dict) or bootstrap.get("can_chat") is not False:
+              raise RuntimeError("credential-free readiness did not fail closed")
+          with open("/tmp/pr544-verification/runtimez.json", "w", encoding="utf-8") as handle:
+              json.dump(runtime, handle, indent=2, sort_keys=True)
+          with open("/tmp/pr544-verification/readyz.json", "w", encoding="utf-8") as handle:
+              json.dump(ready, handle, indent=2, sort_keys=True)
+          PY
+          uv run python - <<'PY' | tee /tmp/pr544-verification/mcp-smoke.txt
+          from __future__ import annotations
+
+          import asyncio
+          import json
+          from typing import Any
+
+          from mcp import ClientSession
+          from mcp.client.streamable_http import streamablehttp_client
+
+          EXPECTED_TOOLS = [
+              "agent",
+              "agent_result",
+              "review_pull_request",
+              "chat",
+              "grok_mcp_discover_self",
+              "grok_mcp_onboard_client",
+              "grok_mcp_status",
+              "benchmark_status",
+              "record_benchmark_result",
+              "list_models",
+              "list_sessions",
+              "session_history",
+              "forget_session",
+              "remember_fact",
+              "search_knowledge",
+              "forget_fact",
+              "web_search",
+              "x_search",
+              "remote_code_execution",
+              "chat_with_vision",
+              "chat_with_files",
+              "generate_image",
+              "generate_video",
+              "extend_video",
+              "xai_upload_file",
+              "xai_list_files",
+              "xai_get_file",
+              "xai_get_file_content",
+              "xai_delete_file",
+          ]
+
+          def structured(result: Any) -> dict[str, Any]:
+              value = getattr(result, "structuredContent", None)
+              if isinstance(value, dict):
+                  payload = value.get("result", value)
+                  if isinstance(payload, dict):
+                      return payload
+              for item in getattr(result, "content", []):
+                  text = getattr(item, "text", None)
+                  if not isinstance(text, str):
+                      continue
+                  try:
+                      payload = json.loads(text)
+                  except json.JSONDecodeError:
+                      continue
+                  if isinstance(payload, dict):
+                      return payload
+              return {}
+
+          async def main() -> None:
+              async with streamablehttp_client(
+                  "http://127.0.0.1:4775/mcp",
+                  headers={"X-Client-ID": "publication-smoke"},
+              ) as (read, write, _):
+                  async with ClientSession(read, write) as session:
+                      initialized = await session.initialize()
+                      if initialized.serverInfo.version != "1.1.0":
+                          raise RuntimeError("MCP handshake version mismatch")
+                      listed = await session.list_tools()
+                      names = [tool.name for tool in listed.tools]
+                      if names != EXPECTED_TOOLS:
+                          raise RuntimeError(f"unexpected tools: {names}")
+                      status_result = await session.call_tool(
+                          "grok_mcp_status", {"refresh": True}
+                      )
+                      if status_result.isError:
+                          raise RuntimeError("grok_mcp_status failed")
+                      status = structured(status_result)
+                      if status.get("tool_count") != len(EXPECTED_TOOLS):
+                          raise RuntimeError("status tool count mismatch")
+                      discover_result = await session.call_tool(
+                          "grok_mcp_discover_self", {}
+                      )
+                      if discover_result.isError:
+                          raise RuntimeError("grok_mcp_discover_self failed")
+                      discover = structured(discover_result)
+                      discovered = [
+                          tool.get("name") for tool in discover.get("tools", [])
+                      ]
+                      if discovered != EXPECTED_TOOLS:
+                          raise RuntimeError("discovery tool catalog mismatch")
+                      bootstrap = discover.get("bootstrap")
+                      if not isinstance(bootstrap, dict):
+                          raise RuntimeError("discovery omitted bootstrap state")
+                      if bootstrap.get("can_chat") is not False:
+                          raise RuntimeError("credential-free discovery did not fail closed")
+                      destructive = await session.call_tool(
+                          "forget_session",
+                          {"session": "publication:confirmation-probe"},
+                      )
+                      if not destructive.isError:
+                          raise RuntimeError("destructive tool bypassed confirmation")
+                      print("version=1.1.0")
+                      print(f"tools={len(names)}")
+                      print("credential_free_bootstrap=blocked")
+                      print("destructive_gate=ok")
+
+          asyncio.run(main())
+          PY
+
+      - name: Publish verified branch
+        working-directory: /tmp/pr544-target
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_TREE"
+          test "$(git ls-remote origin "refs/heads/$TARGET_BRANCH" | cut -f1)" = "$BASE_SHA"
+          git push origin "HEAD:$TARGET_BRANCH"
+          git rev-parse HEAD > /tmp/pr544-verification/published-head-sha.txt
+
+      - name: Upload verification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr544-independent-hardening-verification-${{ github.run_id }}
+          path: /tmp/pr544-verification
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Clean container resources
+        if: always()
+        env:
+          UNIGROK_IMAGE: unigrok:pr544-${{ github.run_id }}
+          UNIGROK_PORT: "4775"
+        run: |
+          if [ -d /tmp/pr544-target ]; then
+            cd /tmp/pr544-target
+            docker compose down --volumes --remove-orphans || true
+          fi
