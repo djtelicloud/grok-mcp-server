@@ -1,0 +1,280 @@
+diff --git a/src/unigrok_public/server.py b/src/unigrok_public/server.py
+index 358207f..e659e74 100644
+--- a/src/unigrok_public/server.py
++++ b/src/unigrok_public/server.py
+@@ -1104,22 +1104,30 @@ def _cursor_mcp_server(scope: str) -> dict[str, Any]:
+ # other IDEs do not (ported from the old .cursor/hooks/before-unigrok-agent.py, with the
+ # removed-platform Canvas/sponsor tip stripped out).
+ CURSOR_AGENT_HOOK = '''#!/usr/bin/env python3
+-"""Cursor beforeMCPExecution hook: auto-allow UniGrok's agent tool (fail-open)."""
++"""Cursor beforeMCPExecution hook for the two approved UniGrok agent tools."""
+ from __future__ import annotations
+ 
+ import json
+ import sys
+ 
+ 
++_ALLOWED_TOOLS = {
++    "agent",
++    "agent_result",
++    "grok/agent",
++    "grok/agent_result",
++    "mcp__grok__agent",
++    "mcp__grok__agent_result",
++}
++
++
+ def main() -> int:
+     try:
+         payload = json.load(sys.stdin)
+     except Exception:
+         payload = {}
+-    tool = str(payload.get("tool_name") or payload.get("toolName") or "").lower()
+-    # The hooks.json matcher already scopes this to the agent tool; auto-approve it so
+-    # @grok runs without a permission prompt. Never deny; unknown shapes fail open.
+-    decision = "allow" if ("agent" in tool or tool == "") else "ask"
++    tool = str(payload.get("tool_name") or payload.get("toolName") or "").strip().lower()
++    decision = "allow" if tool in _ALLOWED_TOOLS else "ask"
+     sys.stdout.write(json.dumps({"permission": decision}))
+     return 0
+ 
+@@ -1301,11 +1309,13 @@ def _auto_approve(client: str, scope: str) -> dict[str, Any] | None:
+             "gemini_cli_alternative": {
+                 "target": "~/.gemini/settings.json",
+                 "note": (
+-                    "Gemini CLI has no permission grants; set trust:true on the grok "
+-                    "mcpServers entry instead. That trusts the whole grok server — "
+-                    "acceptable because it is your own local gateway."
++                    "Gemini CLI has no per-tool grants. Setting trust:true trusts every "
++                    "tool exposed by the grok server, including metered tools. Prefer "
++                    "safe_mode=true when whole-server trust is not explicitly intended."
+                 ),
+                 "entry": {"mcpServers": {"grok": {"trust": True}}},
++                "whole_server_trust": True,
++                "risk": "high",
+             },
+             "assumes_server_name": "grok",
+         }
+@@ -1378,6 +1388,12 @@ class ClientOnboardingSelection(BaseModel):
+             "a namespaced pack; project creates a local plan; the others defer or decline."
+         )
+     )
++    safe_mode: bool = Field(
++        default=False,
++        description=(
++            "Omit auto-approval hooks, per-tool allowlists, and whole-server trust entries."
++        ),
++    )
+ 
+ 
+ def _client_kind(client_name: str | None) -> str:
+@@ -1447,7 +1463,9 @@ def _global_files(client: str) -> list[dict[str, str]]:
+     return []
+ 
+ 
+-def _client_onboarding_plan(client: str, scope: str) -> dict[str, Any]:
++def _client_onboarding_plan(
++    client: str, scope: str, *, safe_mode: bool = False
++) -> dict[str, Any]:
+     adapter = CLIENT_ADAPTERS[client]
+     cloud_mode = is_cloudrun_runtime()
+     common = {
+@@ -1457,9 +1475,10 @@ def _client_onboarding_plan(client: str, scope: str) -> dict[str, Any]:
+         "client": client,
+         "client_label": adapter["label"],
+         "scope": scope,
++        "safe_mode": bool(safe_mode),
+         "writes_performed": False,
+         "requires_explicit_user_approval": True,
+-        "automatic_tool_approval_offered": not cloud_mode,
++        "automatic_tool_approval_offered": (not cloud_mode) and (not safe_mode),
+         "installer": "calling_ide_agent",
+         "runtime_contract": {
+             "execution_policy": "api_only" if cloud_mode else "dual_plane",
+@@ -1517,11 +1536,16 @@ def _client_onboarding_plan(client: str, scope: str) -> dict[str, Any]:
+                 _owned_file(".cursor/rules/unigrok-visuals.mdc", VISUALS_CURSOR_RULE)
+             )
+             plan["mcp_server"] = _cursor_mcp_server("project")
+-            if not cloud_mode:
++            if not cloud_mode and not safe_mode:
+                 plan["files"].append(
+                     _owned_file(".cursor/hooks/before-unigrok-agent.py", CURSOR_AGENT_HOOK)
+                 )
+                 plan["hooks"] = _cursor_hooks("project")
++            elif not cloud_mode:
++                plan["safe_mode_note"] = (
++                    "No beforeMCPExecution hook is included; Cursor will prompt before "
++                    "UniGrok tool calls."
++                )
+         if client == "github_copilot":
+             plan["files"].append(
+                 _owned_file(
+@@ -1572,6 +1596,15 @@ def _client_onboarding_plan(client: str, scope: str) -> dict[str, Any]:
+                 "Reload Cursor after authorizing the remote MCP server, then call "
+                 "grok_mcp_discover_self."
+             )
++        elif safe_mode:
++            plan["safe_mode_note"] = (
++                "No beforeMCPExecution hook is included; Cursor will prompt before "
++                "UniGrok tool calls."
++            )
++            plan["reload"] = (
++                "Reload Cursor after adding the MCP server, then call "
++                "grok_mcp_discover_self."
++            )
+         else:
+             plan["hooks"] = _cursor_hooks("global")
+             plan["files"].append(
+@@ -1584,10 +1617,15 @@ def _client_onboarding_plan(client: str, scope: str) -> dict[str, Any]:
+     else:
+         # Same "never prompt for @grok" outcome for the other IDEs, each via its own
+         # native mechanism (optional; the IDE previews before applying).
+-        if not cloud_mode:
++        if not cloud_mode and not safe_mode:
+             auto_approve = _auto_approve(client, "global")
+             if auto_approve is not None:
+                 plan["auto_approve"] = auto_approve
++        elif not cloud_mode:
++            plan["safe_mode_note"] = (
++                "No auto-approval or whole-server trust entry is included; the client "
++                "will prompt before UniGrok tool calls."
++            )
+         if client == "github_copilot":
+             # gh Copilot CLI reads ~/.copilot/mcp-config.json; VS Code uses .vscode/
+             # mcp.json (carried as vscode_alternative). Project instructions live in
+@@ -6272,6 +6310,7 @@ async def grok_mcp_onboard_client(
+         "generic",
+     ] = "auto",
+     choice: Literal["global", "project", "not_now", "never"] | None = None,
++    safe_mode: bool = False,
+ ) -> dict[str, Any]:
+     """Offer a consent-first UniGrok integration plan for the calling IDE.
+ 
+@@ -6280,6 +6319,7 @@ async def grok_mcp_onboard_client(
+     a structured offer for the calling IDE to present. The IDE owns all approved
+     writes and must preserve user-modified files. Clients behind a generic MCP bridge
+     should pass their host kind explicitly because bridges can hide the IDE identity.
++    Set ``safe_mode=true`` to omit every automatic approval mechanism.
+     """
+     params = ctx.request_context.session.client_params
+     detected_name = params.clientInfo.name if params is not None else None
+@@ -6288,6 +6328,7 @@ async def grok_mcp_onboard_client(
+     supports_elicitation = bool(
+         capabilities is not None and getattr(capabilities, "elicitation", None) is not None
+     )
++    selected_safe_mode = bool(safe_mode)
+     if choice is None and supports_elicitation:
+         result = await ctx.elicit(
+             (
+@@ -6304,6 +6345,7 @@ async def grok_mcp_onboard_client(
+                 if selected in {"global", "project", "not_now", "never"}
+                 else "not_now"
+             )
++            selected_safe_mode = bool(result.data.safe_mode) or selected_safe_mode
+         else:
+             choice = "not_now"
+     if choice is None:
+@@ -6314,6 +6356,7 @@ async def grok_mcp_onboard_client(
+             "client_label": CLIENT_ADAPTERS[resolved_client]["label"],
+             "recommended_choice": "global",
+             "choices": ["global", "project", "not_now", "never"],
++            "safe_mode_available": True,
+             "reason": "Keep repositories clean while allowing project-level overrides.",
+             "writes_performed": False,
+             "elicitation_supported": False,
+@@ -6321,9 +6364,12 @@ async def grok_mcp_onboard_client(
+                 "tool": "grok_mcp_onboard_client",
+                 "client": resolved_client,
+                 "choice": "<approved choice>",
++                "safe_mode": False,
+             },
+         }
+-    return _client_onboarding_plan(resolved_client, choice)
++    return _client_onboarding_plan(
++        resolved_client, choice, safe_mode=selected_safe_mode
++    )
+ 
+ 
+ @mcp.tool(annotations=READ_ONLY)
+diff --git a/tests/test_onboarding_safe_mode.py b/tests/test_onboarding_safe_mode.py
+new file mode 100644
+index 0000000..bf58c73
+--- /dev/null
++++ b/tests/test_onboarding_safe_mode.py
+@@ -0,0 +1,76 @@
++from __future__ import annotations
++
++import json
++import subprocess
++import sys
++from pathlib import Path
++
++import pytest
++
++from unigrok_public import server
++
++
++@pytest.fixture(autouse=True)
++def _local_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
++    monkeypatch.delenv("UNIGROK_RUNTIME", raising=False)
++    monkeypatch.delenv("UNIGROK_PUBLIC_MCP_URL", raising=False)
++
++
++def _run_cursor_hook(tmp_path: Path, payload: object) -> dict[str, str]:
++    hook = tmp_path / "hook.py"
++    hook.write_text(server.CURSOR_AGENT_HOOK, encoding="utf-8")
++    completed = subprocess.run(
++        [sys.executable, str(hook)],
++        input=json.dumps(payload),
++        text=True,
++        capture_output=True,
++        check=True,
++    )
++    return json.loads(completed.stdout)
++
++
++def test_cursor_hook_fails_closed_for_empty_or_ambiguous_tools(tmp_path: Path) -> None:
++    assert _run_cursor_hook(tmp_path, {}) == {"permission": "ask"}
++    assert _run_cursor_hook(tmp_path, {"tool_name": "agent-shell"}) == {
++        "permission": "ask"
++    }
++    assert _run_cursor_hook(tmp_path, {"tool_name": "agent"}) == {
++        "permission": "allow"
++    }
++    assert _run_cursor_hook(tmp_path, {"toolName": "mcp__grok__agent_result"}) == {
++        "permission": "allow"
++    }
++
++
++@pytest.mark.parametrize("scope", ["global", "project"])
++def test_cursor_safe_mode_omits_automatic_hook(scope: str) -> None:
++    plan = server._client_onboarding_plan("cursor", scope, safe_mode=True)
++
++    assert plan["safe_mode"] is True
++    assert plan["automatic_tool_approval_offered"] is False
++    assert "hooks" not in plan
++    assert "safe_mode_note" in plan
++    assert all(
++        not item["path"].endswith("before-unigrok-agent.py")
++        for item in plan["files"]
++    )
++
++
++@pytest.mark.parametrize("client", sorted(server.CLIENT_ADAPTERS))
++def test_safe_mode_never_emits_auto_approval(client: str) -> None:
++    plan = server._client_onboarding_plan(client, "global", safe_mode=True)
++
++    assert plan["safe_mode"] is True
++    assert plan["automatic_tool_approval_offered"] is False
++    assert "auto_approve" not in plan
++    assert "hooks" not in plan
++
++
++def test_antigravity_whole_server_trust_is_explicitly_high_risk() -> None:
++    alternative = server._auto_approve("antigravity", "global")[
++        "gemini_cli_alternative"
++    ]
++
++    assert alternative["whole_server_trust"] is True
++    assert alternative["risk"] == "high"
++    assert "metered" in alternative["note"].lower()
