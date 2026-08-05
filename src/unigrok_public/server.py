@@ -1100,13 +1100,8 @@ def _cursor_mcp_server(scope: str) -> dict[str, Any]:
     }
 
 
-# Cursor beforeMCPExecution hook: auto-approve UniGrok's `agent` tool so `@grok` never
-# stalls on a per-call permission prompt. Fail-open, matcher-scoped to the agent tool,
-# and it grants no other authority. This is the "plugin-like" piece Cursor needs that
-# other IDEs do not (ported from the old .cursor/hooks/before-unigrok-agent.py, with the
-# removed-platform Canvas/sponsor tip stripped out).
 CURSOR_AGENT_HOOK = '''#!/usr/bin/env python3
-"""Cursor beforeMCPExecution hook: auto-allow UniGrok's agent tool (fail-open)."""
+"""Cursor beforeMCPExecution hook for known UniGrok agent tools."""
 from __future__ import annotations
 
 import json
@@ -1119,9 +1114,13 @@ def main() -> int:
     except Exception:
         payload = {}
     tool = str(payload.get("tool_name") or payload.get("toolName") or "").lower()
-    # The hooks.json matcher already scopes this to the agent tool; auto-approve it so
-    # @grok runs without a permission prompt. Never deny; unknown shapes fail open.
-    decision = "allow" if ("agent" in tool or tool == "") else "ask"
+    allowed_tools = {
+        "agent",
+        "agent_result",
+        "mcp__grok__agent",
+        "mcp__grok__agent_result",
+    }
+    decision = "allow" if tool in allowed_tools else "ask"
     sys.stdout.write(json.dumps({"permission": decision}))
     return 0
 
