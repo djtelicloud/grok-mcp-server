@@ -24,11 +24,23 @@ API_TIMEOUT_SECONDS = max(
     min(int(os.environ.get("UNIGROK_API_TIMEOUT", "120") or 120), 600),
 )
 # Split concurrency pools so slow files.list (up to ~120s) cannot HOL-block
-# metered generation (B1). Generation keeps the historic inflight cap; file
-# reads get a smaller dedicated pool.
-API_MAX_INFLIGHT = max(1, min(int(os.environ.get("UNIGROK_API_MAX_INFLIGHT", "4") or 4), 16))
+# metered generation (B1). Defaults stay thrifty (4 / 2); env may raise up to
+# platform-safe ceilings (256 gen / 64 file) — not the old hard 16/4 caps.
+_API_INFLIGHT_PLATFORM_MAX = 256
+_API_FILE_INFLIGHT_PLATFORM_MAX = 64
+API_MAX_INFLIGHT = max(
+    1,
+    min(
+        int(os.environ.get("UNIGROK_API_MAX_INFLIGHT", "4") or 4),
+        _API_INFLIGHT_PLATFORM_MAX,
+    ),
+)
 API_MAX_FILE_INFLIGHT = max(
-    1, min(int(os.environ.get("UNIGROK_API_MAX_FILE_INFLIGHT", "2") or 2), 4)
+    1,
+    min(
+        int(os.environ.get("UNIGROK_API_MAX_FILE_INFLIGHT", "2") or 2),
+        _API_FILE_INFLIGHT_PLATFORM_MAX,
+    ),
 )
 _API_GENERATION_WORKERS = asyncio.Semaphore(API_MAX_INFLIGHT)
 _API_FILE_WORKERS = asyncio.Semaphore(API_MAX_FILE_INFLIGHT)
