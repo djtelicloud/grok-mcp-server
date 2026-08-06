@@ -163,7 +163,13 @@ class HomeMirrorMiddleware:
                 + str(type(exc).__name__).encode()
                 + b"}"
             )
-            await send({"type": "http.response.end", "body": payload})
+            await send(
+                {
+                    "type": "http.response.body",
+                    "body": payload,
+                    "more_body": False,
+                }
+            )
             return
 
         out_headers: list[tuple[bytes, bytes]] = []

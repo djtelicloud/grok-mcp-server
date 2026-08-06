@@ -140,12 +140,21 @@ async def test_require_returns_503_when_home_down(
         return {"type": "http.request", "body": b"{}", "more_body": False}
 
     messages: list[dict] = []
+    _allowed = frozenset({"http.response.start", "http.response.body"})
 
     async def send(message):  # noqa: ANN001
+        # Strict ASGI: reject invalid types (e.g. legacy http.response.end).
+        assert message.get("type") in _allowed, message
         messages.append(message)
 
     await mw(scope, receive, send)
     starts = [m for m in messages if m.get("type") == "http.response.start"]
+    bodies = [m for m in messages if m.get("type") == "http.response.body"]
     assert starts and starts[0]["status"] == 503
-    bodies = b"".join(m.get("body", b"") for m in messages if "body" in m)
-    assert b"home_mirror_unavailable" in bodies
+    assert bodies, "require-mode 503 must send http.response.body"
+    assert all(m.get("type") in _allowed for m in messages)
+    assert not any(m.get("type") == "http.response.end" for m in messages)
+    payload = b"".join(m.get("body", b"") for m in bodies)
+    assert b"home_mirror_unavailable" in payload
+    # Final body chunk must terminate the response.
+    assert bodies[-1].get("more_body") is False
