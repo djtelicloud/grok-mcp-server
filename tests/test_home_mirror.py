@@ -158,3 +158,10 @@ async def test_require_returns_503_when_home_down(
     assert b"home_mirror_unavailable" in payload
     # Final body chunk must terminate the response.
     assert bodies[-1].get("more_body") is False
+    # Body must be valid JSON with a string error class name.
+    import json
+
+    parsed = json.loads(payload.decode("utf-8"))
+    assert parsed["status"] == "home_mirror_unavailable"
+    assert parsed["mode"] == "require"
+    assert isinstance(parsed["error"], str) and parsed["error"]

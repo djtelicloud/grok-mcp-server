@@ -195,10 +195,18 @@ _HIVE_VOTE_JSON_RE = re.compile(r"\{[^{}]*\"v\"\s*:\s*\"(?:pass|fail|risk)\"[^{}
 def _map_acc_to_legacy_c(acc: Any) -> int:
     """Map accuracy 1–100 → legacy c 0|1|2 (acc//34)."""
     try:
-        a = max(0.0, min(100.0, float(acc)))
+        a = max(1.0, min(100.0, float(acc)))
     except (TypeError, ValueError):
         return 0
     return max(0, min(2, int(a) // 34))
+
+
+def _clamp_acc(raw: Any) -> float | None:
+    """Normalize accuracy to contract range 1–100."""
+    try:
+        return max(1.0, min(100.0, float(raw)))
+    except (TypeError, ValueError):
+        return None
 
 
 def _normalize_hive_vote(vote: dict[str, Any]) -> dict[str, Any]:
@@ -208,10 +216,7 @@ def _normalize_hive_vote(vote: dict[str, Any]) -> dict[str, Any]:
     c_raw = out.get("c")
     acc: float | None = None
     if acc_raw is not None:
-        try:
-            acc = max(0.0, min(100.0, float(acc_raw)))
-        except (TypeError, ValueError):
-            acc = None
+        acc = _clamp_acc(acc_raw)
     if acc is None and c_raw is not None:
         try:
             c_i = max(0, min(2, int(c_raw)))
@@ -221,9 +226,11 @@ def _normalize_hive_vote(vote: dict[str, Any]) -> dict[str, Any]:
             except (TypeError, ValueError):
                 c_i = None
         if c_i is not None:
-            acc = float(c_i * 50)
+            # c=0 → low confidence maps to acc floor 1 (contract is 1–100).
+            acc = float(max(1, c_i * 50))
             out["c"] = c_i
     if acc is not None:
+        acc = max(1.0, min(100.0, float(acc)))
         out["acc"] = int(round(acc)) if acc == int(acc) else round(acc, 1)
         if out.get("c") is None:
             out["c"] = _map_acc_to_legacy_c(acc)

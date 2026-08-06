@@ -12,6 +12,7 @@ as a full metered seat.
 """
 from __future__ import annotations
 
+import json
 import os
 from typing import Any
 from urllib.parse import urlsplit
@@ -110,13 +111,16 @@ class HomeMirrorMiddleware:
             await self.app(scope, receive, send)
             return
 
-        # Drain body
-        body = b""
+        # Drain body (bytearray — avoid quadratic bytes += on large MCP frames)
+        chunks = bytearray()
         while True:
             message = await receive()
-            body += message.get("body", b"")
+            part = message.get("body", b"") or b""
+            if part:
+                chunks.extend(part)
             if not message.get("more_body"):
                 break
+        body = bytes(chunks)
 
         query = scope.get("query_string", b"").decode("latin-1")
         target = f"{self.base}{path}"
@@ -158,11 +162,14 @@ class HomeMirrorMiddleware:
                     ],
                 }
             )
-            payload = (
-                b'{"status":"home_mirror_unavailable","mode":"require","error":'
-                + str(type(exc).__name__).encode()
-                + b"}"
-            )
+            payload = json.dumps(
+                {
+                    "status": "home_mirror_unavailable",
+                    "mode": "require",
+                    "error": type(exc).__name__,
+                },
+                separators=(",", ":"),
+            ).encode("utf-8")
             await send(
                 {
                     "type": "http.response.body",

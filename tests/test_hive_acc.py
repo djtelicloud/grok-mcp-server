@@ -23,6 +23,19 @@ def test_parse_hive_vote_legacy_c_only() -> None:
     assert vote["acc"] == 50  # c*50
 
 
+def test_parse_hive_vote_legacy_c_zero_maps_acc_floor() -> None:
+    vote = parse_hive_vote('{"v":"pass","c":0,"r":"none","f":"none","loc":"-"}')
+    assert vote is not None
+    assert vote["c"] == 0
+    assert vote["acc"] == 1  # contract floor 1–100
+
+
+def test_parse_hive_vote_acc_zero_clamped() -> None:
+    vote = parse_hive_vote('{"v":"pass","acc":0,"r":"none","f":"none","loc":"-"}')
+    assert vote is not None
+    assert vote["acc"] == 1
+
+
 def test_parse_hive_vote_acc_and_c_both() -> None:
     vote = parse_hive_vote(
         '{"v":"risk","acc":42,"c":2,"r":"edge","f":"clamp","loc":"-"}'
