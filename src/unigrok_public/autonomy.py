@@ -209,9 +209,51 @@ def ledger_summary(events: list[dict[str, Any]], *, limit: int = 12) -> str:
 
 
 _CONTINUE_DRAFT_MARKER = "[continue · not committed]"
+_EMPTY_CONTINUE_BODY = (
+    "No draft cream yet. Re-invoke agent with continue_token to produce an answer."
+)
+_EMPTY_COMMIT_BODY = (
+    "CommitDone produced no host-visible answer body. "
+    "Re-run the agent or continue with a clearer acceptance."
+)
+
+
+def _layout_cream(cream: str) -> str:
+    """Apply cream-first / diff-first layout when host_ux helpers are available."""
+    text = str(cream or "").strip()
+    if not text:
+        return text
+    try:
+        from .host_ux import cream_first_layout
+
+        return cream_first_layout(text)
+    except Exception:
+        return text
+
+
+def recover_cream(*parts: Any) -> str:
+    """First non-empty cream among candidate fields (order is preference)."""
+    for part in parts:
+        if part is None:
+            continue
+        if isinstance(part, dict):
+            nested = recover_cream(
+                part.get("proposed_text"),
+                part.get("text"),
+                part.get("review"),
+                part.get("answer"),
+            )
+            if nested:
+                return nested
+            continue
+        text = str(part).strip()
+        if text:
+            return text
+    return ""
 
 
 def host_visible_continue_text(proposed_text: object, status_text: object) -> str:
+    """Primary host-visible body for status=continue envelopes (cream-first)."""
     cream = str(proposed_text or "").strip()
     status = str(status_text or "").strip()
     if not cream:
@@ -225,17 +267,96 @@ def host_visible_continue_text(proposed_text: object, status_text: object) -> st
 def apply_continue_cream(
     envelope: dict[str, object], proposed_text: object
 ) -> dict[str, object]:
+    """Attach proposed cream as primary ``text`` on continue seals (#556 + ranks 4–5)."""
     result = dict(envelope)
     if str(result.get("status") or "").strip().casefold() != "continue":
         return result
-    cream = str(proposed_text or "").strip()
+    cream = _layout_cream(recover_cream(proposed_text, result.get("proposed_text")))
     if not cream:
         return result
     status_text = str(result.get("status_text") or result.get("text") or "").strip()
+    if status_text.startswith(cream) or _CONTINUE_DRAFT_MARKER in status_text:
+        status_text = str(result.get("status_text") or "").strip()
     result["proposed_text"] = cream
     result["status_text"] = status_text
     result["text"] = host_visible_continue_text(cream, status_text)
     return result
+
+
+# Alias used by ranks 4–7 host UX wiring (same behavior as apply_continue_cream).
+apply_proposed_cream = apply_continue_cream
+
+
+def ensure_host_text(
+    payload: dict[str, Any],
+    *,
+    cream: str | None = None,
+    complete: bool = False,
+) -> dict[str, Any]:
+    """Never leave host-visible ``text`` blank on continue or CommitDone.
+
+    - continue: cream-first when any cream exists; otherwise an explicit empty-draft note
+    - complete: prefer answer/cream body; never silent blank CommitDone
+    """
+    if not isinstance(payload, dict):
+        return payload
+    status = str(payload.get("status") or "").strip().casefold()
+    is_complete = complete or status == "complete"
+    if is_complete:
+        recovered = _layout_cream(
+            recover_cream(
+                cream,
+                payload.get("proposed_text"),
+                payload.get("text"),
+                payload.get("review"),
+                payload.get("answer"),
+            )
+        )
+        if recovered:
+            payload["text"] = recovered
+            if not str(payload.get("proposed_text") or "").strip():
+                payload["proposed_text"] = recovered
+        else:
+            note = str(payload.get("status_text") or "").strip()
+            payload["text"] = note or _EMPTY_COMMIT_BODY
+            payload["empty_answer_guard"] = True
+        return payload
+
+    # continue: only treat explicit cream / proposed_text / answer fields as cream.
+    # Protocol status notes in ``text`` must not be re-promoted as draft cream.
+    status_note = str(payload.get("status_text") or "").strip()
+    text_val = str(payload.get("text") or "").strip()
+    cream_candidates: list[Any] = [cream, payload.get("proposed_text")]
+    for field in ("review", "answer"):
+        cream_candidates.append(payload.get(field))
+    # Use text only when it is already cream-shaped (differs from status_text and
+    # is not a pure continue footer / empty guard note).
+    if (
+        text_val
+        and text_val != status_note
+        and _CONTINUE_DRAFT_MARKER not in text_val
+        and text_val not in {_EMPTY_CONTINUE_BODY, _EMPTY_COMMIT_BODY}
+    ):
+        cream_candidates.append(text_val)
+    recovered = _layout_cream(recover_cream(*cream_candidates))
+    if recovered:
+        if not status_note:
+            status_note = text_val if text_val != recovered else ""
+        if status_note.startswith(recovered) or _CONTINUE_DRAFT_MARKER in status_note:
+            status_note = str(payload.get("status_text") or "").strip()
+        payload["proposed_text"] = recovered
+        if status_note and status_note != recovered:
+            payload["status_text"] = status_note
+        payload["text"] = host_visible_continue_text(
+            recovered, status_note if status_note != recovered else ""
+        )
+        return payload
+    if not text_val:
+        payload["text"] = _EMPTY_CONTINUE_BODY
+        payload["empty_answer_guard"] = True
+        if not status_note:
+            payload["status_text"] = _EMPTY_CONTINUE_BODY
+    return payload
 
 
 def continue_envelope(
@@ -247,9 +368,19 @@ def continue_envelope(
     gaps: list[str] | None = None,
     artifact_refs: list[str] | None = None,
     text: str | None = None,
+    proposed_text: str | None = None,
     poll: bool = True,
 ) -> dict[str, Any]:
-    """Host-safe quantum seal for autonomy-enabled agent jobs only."""
+    """Host-safe quantum seal for autonomy-enabled agent jobs only.
+
+    When ``proposed_text`` is provided, primary ``text`` is cream-first with a
+    continue footer; ``status`` stays ``continue`` and is never treated as CommitDone.
+    """
+    status_note = text or (
+        "UniGrok sealed a deadline quantum. Preferred: call agent again with "
+        "argument continue_token set to this envelope's continue_token. "
+        "Alternate: poll agent_result with job_id while the quantum is running."
+    )
     envelope: dict[str, Any] = {
         "status": "continue",
         "job_id": job_id,
@@ -264,12 +395,8 @@ def continue_envelope(
             "committed": False,
             "gaps": list(gaps or []),
         },
-        "text": text
-        or (
-            "UniGrok sealed a deadline quantum. Preferred: call agent again with "
-            "argument continue_token set to this envelope's continue_token. "
-            "Alternate: poll agent_result with job_id while the quantum is running."
-        ),
+        "text": status_note,
+        "status_text": status_note,
         "stop_reason": "Continue",
         "workspace_attached": False,
         "reattach": {
@@ -279,9 +406,17 @@ def continue_envelope(
         },
     }
     if poll:
-        envelope["poll"] = {
-            "tool": "agent_result",
-            "job_id": job_id,
-            "wait_seconds": 16,
-        }
+        try:
+            from .host_ux import attach_poll_contract
+
+            attach_poll_contract(envelope, job_id, kind="agent", wait_seconds=16)
+        except Exception:
+            envelope["poll"] = {
+                "tool": "agent_result",
+                "job_id": job_id,
+                "wait_seconds": 16,
+            }
+    if proposed_text is not None and str(proposed_text).strip():
+        apply_continue_cream(envelope, proposed_text)
+    ensure_host_text(envelope, cream=proposed_text, complete=False)
     return envelope

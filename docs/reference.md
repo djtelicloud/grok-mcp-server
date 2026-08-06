@@ -255,8 +255,11 @@ Environment values outside their range are clamped. `grok_mcp_discover_self` and
 | `UNIGROK_MAX_PROMPT_CHARS` | 100,000 | 1,024–500,000 |
 | `UNIGROK_MAX_WORKSPACE_CONTEXT_CHARS` | 100,000 | 1,024–500,000 |
 | `UNIGROK_FILE_CONTENT_MAX_BYTES` | 2,000,000 | 1,024–10,000,000 |
-| `UNIGROK_API_MAX_INFLIGHT` | 4 | 1–16 |
-| `UNIGROK_API_MAX_FILE_INFLIGHT` | 2 | 1–4 |
+| `UNIGROK_API_MAX_INFLIGHT` | 4 | 1–256 (platform-safe) |
+| `UNIGROK_API_MAX_FILE_INFLIGHT` | 2 | 1–64 (platform-safe) |
+| `UNIGROK_HOME_MIRROR_MODE` | off | off \| prefer \| require |
+| `UNIGROK_HOME_MIRROR_URL` | (empty) | base URL of home UniGrok when edge mirrors |
+| `UNIGROK_HOME_MIRROR_TIMEOUT` | 120 s | connect/read timeout for home proxy |
 | `UNIGROK_BREAKER_FAILURES` | 3 | 2–20 |
 | `UNIGROK_BREAKER_COOLDOWN` | 30 s | 5–600 s |
 | `UNIGROK_CATALOG_TTL` | 60 s | 5–600 s |

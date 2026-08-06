@@ -181,12 +181,58 @@ _HIVE_VOTE_RULES = (
     "Vote only; do not rewrite the full artifact. Cap claims to what the material "
     "shows. The draft below has numbered lines (L1, L2, ...). Reply with EXACTLY one "
     "single-line JSON object and nothing else:\n"
-    '{"v":"pass|fail|risk","c":0,"r":"<=12 words top risk or none",'
+    '{"v":"pass|fail|risk","acc":1,"c":0,"r":"<=12 words top risk or none",'
     '"f":"<=16 words minimal fix or none","loc":"L<start>-L<end> or -"}\n'
-    "c is confidence 0-2. loc MUST cite the draft line numbers you are talking about."
+    "acc is accuracy 1-100 of the DRAFT (not a self score of voter ego). "
+    "c is optional legacy confidence 0-2; if only c is given the host maps c*50 "
+    "approx into acc. Prefer acc. loc MUST cite the draft line numbers you are "
+    "talking about."
 )
 
 _HIVE_VOTE_JSON_RE = re.compile(r"\{[^{}]*\"v\"\s*:\s*\"(?:pass|fail|risk)\"[^{}]*\}")
+
+
+def _map_acc_to_legacy_c(acc: Any) -> int:
+    """Map accuracy 1–100 → legacy c 0|1|2 (acc//34)."""
+    try:
+        a = max(0.0, min(100.0, float(acc)))
+    except (TypeError, ValueError):
+        return 0
+    return max(0, min(2, int(a) // 34))
+
+
+def _normalize_hive_vote(vote: dict[str, Any]) -> dict[str, Any]:
+    """Fill acc from legacy c (c*50) or c from acc; keep old c-only votes working."""
+    out = dict(vote)
+    acc_raw = out.get("acc")
+    c_raw = out.get("c")
+    acc: float | None = None
+    if acc_raw is not None:
+        try:
+            acc = max(0.0, min(100.0, float(acc_raw)))
+        except (TypeError, ValueError):
+            acc = None
+    if acc is None and c_raw is not None:
+        try:
+            c_i = max(0, min(2, int(c_raw)))
+        except (TypeError, ValueError):
+            try:
+                c_i = max(0, min(2, int(float(c_raw))))
+            except (TypeError, ValueError):
+                c_i = None
+        if c_i is not None:
+            acc = float(c_i * 50)
+            out["c"] = c_i
+    if acc is not None:
+        out["acc"] = int(round(acc)) if acc == int(acc) else round(acc, 1)
+        if out.get("c") is None:
+            out["c"] = _map_acc_to_legacy_c(acc)
+    elif c_raw is not None:
+        try:
+            out["c"] = max(0, min(2, int(c_raw)))
+        except (TypeError, ValueError):
+            pass
+    return out
 
 
 def number_draft_lines(draft: str) -> str:
@@ -211,6 +257,7 @@ def build_vote_prompt(task: str, draft: str, persona: dict[str, str]) -> str:
 
 def parse_hive_vote(text: str) -> dict[str, Any] | None:
     # Parse only the bounded vote object; ignore surrounding provider chatter.
+    # acc 1-100 preferred; c 0-2 alone still parses (legacy dogfood).
     match = _HIVE_VOTE_JSON_RE.search(str(text or ""))
     if not match:
         return None
@@ -219,14 +266,14 @@ def parse_hive_vote(text: str) -> dict[str, Any] | None:
     except json.JSONDecodeError:
         return None
     if isinstance(vote, dict) and vote.get("v"):
-        return vote
+        return _normalize_hive_vote(vote)
     return None
 
 
 def build_merge_prompt(task: str, draft: str, votes: list[dict[str, Any]]) -> str:
     rendered = "\n".join(
         f"[{vote.get('persona', '?')}] " + json.dumps(
-            {key: vote.get(key) for key in ("v", "c", "r", "f", "loc")}
+            {key: vote.get(key) for key in ("v", "acc", "c", "r", "f", "loc")}
         )
         for vote in votes
     )

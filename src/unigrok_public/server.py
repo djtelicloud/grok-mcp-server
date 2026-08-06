@@ -38,6 +38,7 @@ from .autonomy import (
     artifact_hash,
     check_propose_done,
     continue_envelope,
+    ensure_host_text,
     ledger_summary,
     new_claim_lease,
     new_continue_token,
@@ -3387,19 +3388,23 @@ async def _await_job_window(
 
 
 def _pending_job(job_id: str, *, kind: str = "agent") -> dict[str, Any]:
-    return {
+    from .host_ux import attach_poll_contract, poll_contract
+
+    contract = poll_contract(job_id, kind=kind, wait_seconds=16)
+    envelope: dict[str, Any] = {
         "status": "pending",
         "job_id": job_id,
         "job_kind": kind,
         "text": (
             "UniGrok is still working. Call agent_result with this job_id to retrieve "
-            "the completed answer; repeat while status is pending."
+            "the completed answer; repeat while status is pending. "
+            f"{contract['host_instructions']}"
         ),
         "stop_reason": "InProgress",
-        "poll": {"tool": "agent_result", "job_id": job_id, "wait_seconds": 16},
         "workspace_attached": False,
         "pending": True,
     }
+    return attach_poll_contract(envelope, job_id, kind=kind, wait_seconds=16)
 
 
 async def _autonomy_continue_fields(job_id: str) -> dict[str, Any]:
@@ -3605,6 +3610,56 @@ async def _seal_autonomy_done(
         out = dict(result)
         out.setdefault("job_id", job_id)
         return out
+    # Soft-continue (rank 5): partial cream after tool/turn budget → continue seal
+    # before CommitDone checker (legacy autonomy only; mission path keeps verify).
+    from .host_ux import (
+        apply_soft_continue_markers,
+        should_soft_continue,
+        soft_continue_status_note,
+    )
+
+    result = apply_soft_continue_markers(result)
+    if (
+        should_soft_continue(result)
+        and result.get("soft_continue")
+        and not MISSION_V2_ENABLED
+    ):
+        auto_soft = await STATE.load_autonomy_job(job_id)
+        cream_text = str(
+            result.get("proposed_text") or result.get("text") or ""
+        ).strip()
+        if auto_soft is not None and cream_text:
+            sealed = continue_envelope(
+                job_id=job_id,
+                continue_token=str(auto_soft["continue_token"]),
+                ledger_cursor=int(auto_soft.get("ledger_cursor") or 0),
+                acceptance_hash_value=str(auto_soft["acceptance_hash"]),
+                gaps=["soft_continue_budget"],
+                text=soft_continue_status_note(result),
+                proposed_text=cream_text,
+                poll=True,
+            )
+            for key in (
+                "model",
+                "plane",
+                "resolved_plane",
+                "cost_usd",
+                "orchestration",
+                "telemetry_id",
+                "harness",
+                "requested_mode",
+                "level",
+                "resolved_depth",
+                "agent_tools",
+                "session",
+            ):
+                if key in result:
+                    sealed[key] = result[key]
+            sealed["soft_continue"] = True
+            sealed["partial"] = True
+            with contextlib.suppress(Exception):
+                await STATE.set_autonomy_status(job_id, "needs_continuation")
+            return sealed
     if MISSION_V2_ENABLED:
         from .mission.epoch import seal_mission_epoch
         from .mission.sweeper import sweep_expired_leases
@@ -3684,6 +3739,8 @@ async def _seal_autonomy_done(
             "gaps": [],
             "check": check,
         }
+        # Empty CommitDone guard: never return silent blank host text.
+        ensure_host_text(out, cream=answer, complete=True)
         return out
     with contextlib.suppress(Exception):
         await STATE.set_autonomy_status(job_id, "needs_continuation")
@@ -3698,6 +3755,7 @@ async def _seal_autonomy_done(
             "Acceptance checker rejected ProposeDone. Re-invoke agent with "
             f"continue_token to close gaps: {', '.join(check.get('gaps') or [])}."
         ),
+        proposed_text=answer or None,
         poll=False,
     )
     for key in (
@@ -3717,6 +3775,7 @@ async def _seal_autonomy_done(
         if key in result:
             sealed[key] = result[key]
     sealed = apply_continue_cream(sealed, answer)
+    ensure_host_text(sealed, cream=answer or result, complete=False)
     sealed["autonomy"]["check"] = check
     return sealed
 
@@ -5307,6 +5366,61 @@ async def agent(
     allow_x_search = "x_search" not in disabled
     allow_code = "remote_code_execution" not in disabled
     tool_adjustments = [f"caller disabled {name}" for name in sorted(disabled)]
+
+    # Rank 7: pure Q&A short-circuit — skip full agent/tool loop for simple asks.
+    # Never steal autonomy / Mission V2 quanta (continue/CommitDone stay authoritative).
+    from .host_ux import cream_first_layout, looks_like_pure_qa
+
+    if (
+        not token
+        and not AUTONOMY_ENABLED
+        and depth == "auto"
+        and level is None
+        and not caller_evidence
+        and acceptance is None
+        and looks_like_pure_qa(prompt)
+    ):
+
+        async def _qa_produce() -> dict[str, Any]:
+            layer_block = _layer_context_block()
+            mem = None
+            if CHAT_MEMORY_ALWAYS and effective_use_global_memory:
+                mem = await _durable_knowledge_block(prompt, limit=8)
+            system_context = chat_tools.build_chat_system_context(
+                layer_block=layer_block,
+                knowledge_block=mem,
+            )
+            if safe_workspace:
+                system_context = (
+                    f"{system_context}\n\n# Selected context\n{safe_workspace}"
+                    if system_context
+                    else f"# Selected context\n{safe_workspace}"
+                )
+            reply = await _run_unified(
+                prompt,
+                model=None,
+                effort=None,
+                plane="auto",
+                fallback_policy="cross_plane",
+                agentic=False,
+                max_turns=1,
+                allow_web=False,
+                allow_x_search=False,
+                allow_code=False,
+                system_context=system_context,
+            )
+            if isinstance(reply, dict):
+                body = str(reply.get("text") or "").strip()
+                if body:
+                    reply["text"] = cream_first_layout(body)
+                reply["chat_short_circuit"] = True
+                reply["route_hint"] = "pure_qa_chat"
+                reply.setdefault("status", "complete")
+                reply.setdefault("harness", "unigrok_public_v1")
+            return reply
+
+        return await _run_durable_job(_qa_produce, ctx=ctx, kind="chat")
+
     frozen_governor_config: dict[str, Any] | None = None
     governor_source: str | None = None
     if AUTONOMY_ENABLED and MISSION_V2_ENABLED:
@@ -5818,6 +5932,13 @@ async def agent(
         )
         if governor_execution is not None:
             result["governor_execution"] = governor_execution
+        # Soft-continue markers + cream-first host text (ranks 4–5).
+        from .host_ux import apply_soft_continue_markers, cream_first_layout
+
+        result = apply_soft_continue_markers(result)
+        body = str(result.get("text") or "").strip()
+        if body:
+            result["text"] = cream_first_layout(body)
         shadow_done: dict[str, Any] | None = None
         if SHADOW_DONE_VOTE and result["status"] == "complete":
             shadow_done = await _shadow_done_vote(prompt, str(result.get("text") or ""))
@@ -7317,6 +7438,13 @@ def main() -> None:
     validate_principal_key_configuration()
     validate_caller_budget_configuration()
     app = mcp.streamable_http_app()
+    # Home-mirror (default off): outermost so /healthz stays local and prefer/require
+    # can short-circuit before auth/spend when edge forwards to home.
+    with contextlib.suppress(Exception):
+        from .home_mirror import HomeMirrorMiddleware, home_mirror_enabled
+
+        if home_mirror_enabled():
+            app.add_middleware(HomeMirrorMiddleware)
     app.add_middleware(CallerIdentityMiddleware)
     app.add_middleware(RemoteOAuthMiddleware)
     app.add_middleware(LocalMcpAuthMiddleware)

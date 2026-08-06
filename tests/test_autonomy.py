@@ -278,3 +278,57 @@ async def test_continue_restores_original_task_not_acceptance(
     assert captured.get("use_session_history") is False
     assert captured.get("use_global_memory") is False
     assert second["status"] in {"continue", "complete", "pending"}
+
+
+def test_recover_cream_prefers_first_nonempty() -> None:
+    assert autonomy.recover_cream("", None, "  cream  ", "other") == "cream"
+    assert autonomy.recover_cream({"proposed_text": "from-dict"}, "fallback") == "from-dict"
+    assert autonomy.recover_cream("", None, "   ") == ""
+
+
+def test_continue_envelope_proposed_text_and_poll_contract() -> None:
+    cream = "def process(nums):\n    return sum(set(nums))\n"
+    env = autonomy.continue_envelope(
+        job_id="job-ux-1",
+        continue_token="ctok_ux_1",  # noqa: S106
+        ledger_cursor=3,
+        acceptance_hash_value="abc",
+        gaps=["literal_mismatch"],
+        text="Mission verifier rejected CommitDone. Re-invoke agent with continue_token.",
+        proposed_text=cream,
+        poll=True,
+    )
+    assert env["status"] == "continue"
+    assert env["autonomy"]["committed"] is False
+    assert env["proposed_text"].strip() == cream.strip()
+    assert env["text"].startswith(cream.strip())
+    assert "[continue · not committed]" in env["text"]
+    assert env["poll"]["job_id"] == "job-ux-1"
+    assert "poll_contract" in env
+
+
+def test_ensure_host_text_continue_and_complete_guards() -> None:
+    env = {
+        "status": "continue",
+        "text": "Mission verifier rejected CommitDone.",
+        "status_text": "Mission verifier rejected CommitDone.",
+        "autonomy": {"committed": False},
+    }
+    autonomy.ensure_host_text(env, cream="draft body", complete=False)
+    assert env["text"].startswith("draft body")
+    assert env["proposed_text"] == "draft body"
+    assert env["autonomy"]["committed"] is False
+
+    blank = {"status": "continue", "text": "", "autonomy": {"committed": False}}
+    autonomy.ensure_host_text(blank, cream="", complete=False)
+    assert blank["text"].strip()
+    assert blank.get("empty_answer_guard") is True
+
+    out = {"status": "complete", "text": "", "autonomy": {"committed": True}}
+    autonomy.ensure_host_text(out, cream="", complete=True)
+    assert out["text"].strip()
+    assert out.get("empty_answer_guard") is True
+
+    good = {"status": "complete", "text": "", "autonomy": {"committed": True}}
+    autonomy.ensure_host_text(good, cream="final answer", complete=True)
+    assert good["text"] == "final answer"
