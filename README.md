@@ -114,10 +114,11 @@ receipts; disable web/X tools for true offline briefs; fail closed for cloud-onl
 
 After onboarding, see skills `using-unigrok` and `mission-brief-harness` (installed by
 `grok_mcp_onboard_client` with consent). **Contributors:** after GitHub auth (website or
-local `gh auth login`), install that GroundCommand pack once — step-by-step in
-[CONTRIBUTING.md](CONTRIBUTING.md#after-github-auth--install-groundcommand). Day-1 is
-**Core + Ground pack only** (not Forge Docker, not Sky/Space nodes). Heavier capacity
-is a separate maintainer grant when someone runs an approved Sky-class node.
+local `gh auth login`), install that public Ground pack once — step-by-step in
+[CONTRIBUTING.md](CONTRIBUTING.md#after-github-auth--install-the-public-ground-pack).
+Day-1 is **Core + Ground pack only** (not a second labor Docker seat, not extra
+operator nodes). Heavier capacity is a separate maintainer grant when someone runs an
+approved extra node under their map.
 
 ### Official GitHub contributors (optional)
 
@@ -132,7 +133,7 @@ export UNIGROK_GITHUB_CONTRIBUTOR_ALLOWLIST='djtelicloud,curtisfratianne'
 
 # And/or live GitHub API checks (service token — never put a user PAT in IDE MCP JSON)
 export UNIGROK_GITHUB_TOKEN='ghp_…'   # or GITHUB_TOKEN
-export UNIGROK_GITHUB_CONTRIBUTOR_REPOS='djtelicloud/grok-mcp-server,djtelicloud/grok-mcp-intelligence'
+export UNIGROK_GITHUB_CONTRIBUTOR_REPOS='djtelicloud/grok-mcp-server,your-org/your-other-repo'
 export UNIGROK_GITHUB_CONTRIBUTOR_ORGS='your-org'
 
 # Local single-operator bind (optional)
@@ -327,7 +328,7 @@ See [SECURITY.md](SECURITY.md) for the complete public runtime boundary.
 | See every tool and routing rule | [Technical reference](docs/reference.md) |
 | Use the integrated local route or named local helper | [Local model routes](docs/offline-local-helper.md) |
 | Drive `agent` from an IDE agent | [Technical reference](docs/reference.md#how-an-ide-agent-should-drive-agent) |
-| Auth with GitHub, then install GroundCommand | [Contributing](CONTRIBUTING.md#after-github-auth--install-groundcommand) |
+| Auth with GitHub, then install the public Ground pack | [Contributing](CONTRIBUTING.md#after-github-auth--install-the-public-ground-pack) |
 | Develop or acceptance-test UniGrok | [Development guide](docs/development.md) |
 | See what has limited soak and how to report a miss | [Known limits](docs/known-limits.md) |
 | See what changed between versions | [Changelog](CHANGELOG.md) |
