@@ -99,6 +99,17 @@ curl --fail --silent http://localhost:4765/readyz
 
 You are ready when the response says `"status":"ready"`.
 
+### Multi-step agentic work (Ground pack)
+
+UniGrok’s `agent` tool is **leaf labor**. Your IDE or automation remains the **orchestrator**.
+
+For multi-step work, put a short **Mission Brief** in `task` (goal, options, constraints,
+done-when, return shape). Retry at most a few times with the same goal and an appended
+finding if a try fails. Prefer densified returns: WHAT / WHY / DELTA / NEXT.
+
+After onboarding, see skills `using-unigrok` and `mission-brief-harness` (installed by
+`grok_mcp_onboard_client` with consent).
+
 Optional local bearer protection is available for `/mcp` and `/v1`:
 
 ```bash

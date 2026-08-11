@@ -860,7 +860,9 @@ GLOBAL_SKILL = """---
 name: using-unigrok
 description: >-
   Use when the user says @grok, asks for a Grok second opinion, wants web or X research,
-  or requests Grok image, video, vision, file, or remote-code capabilities.
+  or requests Grok image, video, vision, file, or remote-code capabilities. Also use for
+  multi-step agentic work: structure the agent task as a short Mission Brief (see
+  mission-brief-harness).
 ---
 
 # Using UniGrok
@@ -880,6 +882,79 @@ models, billing planes, capabilities, or safety boundaries matter.
 - Send project material only as deliberately selected, bounded `workspace_context`.
 - UniGrok has no direct project filesystem, shell, Git, credential, or external-MCP access.
 - Never place provider credentials in project files or chat.
+
+## Multi-step agentic work (Ground-style harness)
+
+The **host** (you / your IDE agent / human) is the **orchestrator**. UniGrok is **leaf labor**.
+For anything beyond a one-shot answer, put a structured **Mission Brief** in `task` and keep
+orchestration on the host. Prefer densified returns: WHAT / WHY / DELTA / NEXT.
+
+See skill `mission-brief-harness` for the full template and try ≤3 heal-forward loop.
+"""
+
+MISSION_BRIEF_HARNESS_SKILL = """---
+name: mission-brief-harness
+description: >-
+  Structure multi-step UniGrok agent work as Mission Briefs. Host orchestrates;
+  UniGrok is leaf labor. Use for agentic tasks, retries, and densified returns.
+---
+
+# Mission Brief harness (public Ground pack)
+
+Workspace-neutral product pattern. The host stays the orchestrator; UniGrok `agent` is leaf labor.
+
+## Roles
+
+| Role | Who |
+|------|-----|
+| Orchestrator | Host IDE / human / local agent |
+| Leaf labor | UniGrok `agent` |
+| Judge (optional) | Host second pass or human |
+
+## Brief template (put this in `task`)
+
+```markdown
+# Mission Brief · <title>
+
+## L0 Goal
+One sentence.
+
+## L1 Options
+Rank ≥2 approaches (virtual-first).
+
+## L2 Constraints
+DO NOT · time · tools to avoid.
+
+## L3 Context
+Only bounded quotes or paths the labor needs (no credentials).
+
+## L4 Done when
+Acceptance check + what to return.
+
+## L5 Decision
+EXECUTE | HOLD
+
+## Return form
+WHAT / WHY / DELTA / NEXT · optional confidence 1–100
+```
+
+## Host loop
+
+```text
+BRIEF → try (≤3) → observe result → judge
+  pass → densify return
+  fail → heal-forward (keep original goal, append finding)
+```
+
+## Clean install
+
+1. Connect UniGrok MCP.
+2. Install skills via consent (`grok_mcp_onboard_client` / host skill pack).
+3. Host remains orchestrator; put Mission Briefs in `task`.
+
+## Not included
+
+Private multi-seat OS doctrine, training pipelines, contest scoreboards, or credential values.
 """
 
 ANTIGRAVITY_WORKFLOW = """# Ask Grok
@@ -1443,6 +1518,22 @@ def _visuals_skill_files(client: str, skill_dir: str) -> list[dict[str, str]]:
     ]
 
 
+def _ground_pack_skill_files(skills_root: str) -> list[dict[str, str]]:
+    """Public Ground pack: using-unigrok + mission-brief-harness under a skills root.
+
+    skills_root examples:
+      ~/.claude/skills
+      ~/.codex/skills
+      ~/.gemini/config/plugins/unigrok/skills
+      .agents/skills
+    """
+    root = skills_root.rstrip("/")
+    return [
+        _owned_file(f"{root}/using-unigrok/SKILL.md", GLOBAL_SKILL),
+        _owned_file(f"{root}/mission-brief-harness/SKILL.md", MISSION_BRIEF_HARNESS_SKILL),
+    ]
+
+
 def _global_files(client: str) -> list[dict[str, str]]:
     if client == "antigravity":
         manifest = json.dumps(
@@ -1457,7 +1548,7 @@ def _global_files(client: str) -> list[dict[str, str]]:
         root = "~/.gemini/config/plugins/unigrok"
         return [
             _owned_file(f"{root}/plugin.json", manifest),
-            _owned_file(f"{root}/skills/using-unigrok/SKILL.md", GLOBAL_SKILL),
+            *_ground_pack_skill_files(f"{root}/skills"),
             _owned_file(
                 "~/.gemini/config/global_workflows/ask-grok.md",
                 ANTIGRAVITY_WORKFLOW,
@@ -1466,12 +1557,12 @@ def _global_files(client: str) -> list[dict[str, str]]:
         ]
     if client == "codex":
         return [
-            _owned_file("~/.codex/skills/using-unigrok/SKILL.md", GLOBAL_SKILL),
+            *_ground_pack_skill_files("~/.codex/skills"),
             *_visuals_skill_files("codex", "~/.codex/skills/unigrok-visuals"),
         ]
     if client == "claude_code":
         return [
-            _owned_file("~/.claude/skills/using-unigrok/SKILL.md", GLOBAL_SKILL),
+            *_ground_pack_skill_files("~/.claude/skills"),
             *_visuals_skill_files("claude_code", "~/.claude/skills/unigrok-visuals"),
         ]
     return []
@@ -1530,7 +1621,7 @@ def _client_onboarding_plan(
             "project_root_files_avoided": False,
             "precedence": "project customizations override the global baseline",
             "files": [
-                _owned_file(".agents/skills/using-unigrok/SKILL.md", GLOBAL_SKILL),
+                *_ground_pack_skill_files(".agents/skills"),
                 *_visuals_skill_files(client, ".agents/skills/unigrok-visuals"),
             ],
             "optional_paths": [
