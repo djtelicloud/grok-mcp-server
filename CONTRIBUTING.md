@@ -4,6 +4,23 @@ Anyone can clone, run, and open a pull request. After you authenticate with GitH
 (locally or on the website), install the **GroundCommand pack** so your IDE can
 orchestrate multi-step UniGrok work the same way maintainers do.
 
+## What day-1 access includes (and does not)
+
+| You get after GitHub auth + Core + onboard | You do **not** get automatically |
+|--------------------------------------------|----------------------------------|
+| UniGrok Core on `localhost:4765` | Forge Docker / a second labor seat |
+| GroundCommand pack (`using-unigrok` + `mission-brief-harness`) | SkyCommand / Space Docker nodes |
+| Optional soft `affiliation` if you are an official collaborator | Private operator skills, CoC maps, or training pipelines |
+| Mission Briefs with host-as-orchestrator | Auto-install of anyone’s full `.agents/skills` tree |
+
+**Rule:** GroundCommand is the **safe valuable start**. Heavier, private, or multi-node
+capacity is granted **later** by a maintainer when (and only if) you run an approved
+**Sky-class node** under their map — not because you installed the public pack.
+
+Public skill cream still lands only through normal product review (PR + maintainer
+gate). Practice on Ground → densify findings → PR; do not expect Forge folders to
+mirror into your IDE.
+
 ## After GitHub auth → install GroundCommand
 
 Do this once per machine (or after a clean IDE profile).
@@ -94,6 +111,14 @@ not a secret vault. Service env for operators is documented in the README under
 Put a short **Mission Brief** in `agent`’s `task` (goal, options, constraints, done-when,
 return shape). Prefer densified returns: WHAT / WHY / DELTA / NEXT. Details live in
 skill `mission-brief-harness` and README “Multi-step agentic work (Ground pack)”.
+
+### F. Later: Sky-class node (maintainer grant only)
+
+If a maintainer invites you to operate a **Sky-class node** on your own machine, they
+will issue that access separately (Docker map, keys, and any optional labor seats such
+as Forge). That grant is **not** part of this pack, not part of website GitHub login
+alone, and not implied by `grok_mcp_onboard_client`. Until then, stay on Core +
+GroundCommand + normal git PRs.
 
 ---
 

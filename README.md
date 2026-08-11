@@ -115,7 +115,9 @@ receipts; disable web/X tools for true offline briefs; fail closed for cloud-onl
 After onboarding, see skills `using-unigrok` and `mission-brief-harness` (installed by
 `grok_mcp_onboard_client` with consent). **Contributors:** after GitHub auth (website or
 local `gh auth login`), install that GroundCommand pack once — step-by-step in
-[CONTRIBUTING.md](CONTRIBUTING.md#after-github-auth--install-groundcommand).
+[CONTRIBUTING.md](CONTRIBUTING.md#after-github-auth--install-groundcommand). Day-1 is
+**Core + Ground pack only** (not Forge Docker, not Sky/Space nodes). Heavier capacity
+is a separate maintainer grant when someone runs an approved Sky-class node.
 
 ### Official GitHub contributors (optional)
 

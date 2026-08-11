@@ -1627,6 +1627,27 @@ def _client_onboarding_plan(
         "requires_explicit_user_approval": True,
         "automatic_tool_approval_offered": not cloud_mode and not safe_mode,
         "installer": "calling_ide_agent",
+        # Day-1 public Ground pack only — no Forge/Sky auto-install (CONTRIBUTING.md).
+        "pack": {
+            "name": "groundcommand_public",
+            "includes": [
+                "using-unigrok",
+                "mission-brief-harness",
+                "unigrok-visuals (host adapter when applicable)",
+            ],
+            "does_not_include": [
+                "forge_docker",
+                "skycommand_node",
+                "spacecommand_node",
+                "private_operator_skills",
+                "full_agents_skills_tree",
+            ],
+            "heavier_capacity": (
+                "Separate maintainer grant only if the contributor runs an approved "
+                "Sky-class node — not implied by this onboard pack or GitHub login alone."
+            ),
+            "docs": "CONTRIBUTING.md#what-day-1-access-includes-and-does-not",
+        },
         "runtime_contract": {
             "execution_policy": "api_only" if cloud_mode else "dual_plane",
             "inference_billing": "metered" if cloud_mode else "conditional",
