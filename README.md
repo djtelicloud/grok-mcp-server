@@ -99,6 +99,51 @@ curl --fail --silent http://localhost:4765/readyz
 
 You are ready when the response says `"status":"ready"`.
 
+### Multi-step agentic work (Ground pack)
+
+UniGrok’s `agent` tool is **leaf labor**. Your IDE or automation remains the **orchestrator**.
+
+For multi-step work, put a short **Mission Brief** in `task` (goal, options, constraints,
+done-when, return shape). Retry at most a few times with the same goal and an appended
+finding if a try fails. Prefer densified returns: WHAT / WHY / DELTA / NEXT.
+
+**Offline / free local path:** when subscription or API is unavailable, Core can still use a
+staged **local** model route (Docker Model Runner or loopback OpenAI-compatible runtime).
+See [Local model routes](docs/offline-local-helper.md). Relay `resolved_plane` and cost
+receipts; disable web/X tools for true offline briefs; fail closed for cloud-only media.
+
+After onboarding, see skills `using-unigrok` and `mission-brief-harness` (installed by
+`grok_mcp_onboard_client` with consent). **Contributors:** after GitHub auth (website or
+local `gh auth login`), install that public Ground pack once — step-by-step in
+[CONTRIBUTING.md](CONTRIBUTING.md#after-github-auth--install-the-public-ground-pack).
+Day-1 is **Core + Ground pack only** (not a second labor Docker seat, not extra
+operator nodes). Heavier capacity is a separate maintainer grant when someone runs an
+approved extra node under their map.
+
+### Official GitHub contributors (optional)
+
+UniGrok can detect whether the **authenticated** caller is one of your official GitHub
+contributors. This never trusts `X-Client-ID` alone.
+
+Service environment (examples):
+
+```bash
+# Fast path: explicit allowlist of GitHub logins
+export UNIGROK_GITHUB_CONTRIBUTOR_ALLOWLIST='djtelicloud,curtisfratianne'
+
+# And/or live GitHub API checks (service token — never put a user PAT in IDE MCP JSON)
+export UNIGROK_GITHUB_TOKEN='ghp_…'   # or GITHUB_TOKEN
+export UNIGROK_GITHUB_CONTRIBUTOR_REPOS='djtelicloud/grok-mcp-server,your-org/your-other-repo'
+export UNIGROK_GITHUB_CONTRIBUTOR_ORGS='your-org'
+
+# Local single-operator bind (optional)
+export UNIGROK_GITHUB_LOGIN='djtelicloud'
+```
+
+`grok_mcp_status` and `grok_mcp_discover_self` return an `affiliation` object:
+`is_official_contributor` (true/false/null), `source`, and whether a login was detected.
+Use this for soft UX (contributor tips, onboard tone) — not as a secret vault.
+
 Optional local bearer protection is available for `/mcp` and `/v1`:
 
 ```bash
@@ -283,6 +328,7 @@ See [SECURITY.md](SECURITY.md) for the complete public runtime boundary.
 | See every tool and routing rule | [Technical reference](docs/reference.md) |
 | Use the integrated local route or named local helper | [Local model routes](docs/offline-local-helper.md) |
 | Drive `agent` from an IDE agent | [Technical reference](docs/reference.md#how-an-ide-agent-should-drive-agent) |
+| Auth with GitHub, then install the public Ground pack | [Contributing](CONTRIBUTING.md#after-github-auth--install-the-public-ground-pack) |
 | Develop or acceptance-test UniGrok | [Development guide](docs/development.md) |
 | See what has limited soak and how to report a miss | [Known limits](docs/known-limits.md) |
 | See what changed between versions | [Changelog](CHANGELOG.md) |

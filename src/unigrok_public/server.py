@@ -27,7 +27,7 @@ from pydantic import BaseModel, Field
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, PlainTextResponse
 
-from . import __version__, local_plane_loader, xai_api
+from . import __version__, github_affiliation, local_plane_loader, xai_api
 from .autonomy import (
     JOB_COMPLETE,
     JOB_ERROR,
@@ -860,7 +860,9 @@ GLOBAL_SKILL = """---
 name: using-unigrok
 description: >-
   Use when the user says @grok, asks for a Grok second opinion, wants web or X research,
-  or requests Grok image, video, vision, file, or remote-code capabilities.
+  or requests Grok image, video, vision, file, or remote-code capabilities. Also use for
+  multi-step agentic work: structure the agent task as a short Mission Brief (see
+  mission-brief-harness).
 ---
 
 # Using UniGrok
@@ -880,6 +882,121 @@ models, billing planes, capabilities, or safety boundaries matter.
 - Send project material only as deliberately selected, bounded `workspace_context`.
 - UniGrok has no direct project filesystem, shell, Git, credential, or external-MCP access.
 - Never place provider credentials in project files or chat.
+
+## Multi-step agentic work (Ground-style harness)
+
+The **host** (you / your IDE agent / human) is the **orchestrator**. UniGrok is **leaf labor**.
+For anything beyond a one-shot answer, put a structured **Mission Brief** in `task` and keep
+orchestration on the host. Prefer densified returns: WHAT / WHY / DELTA / NEXT.
+
+See skill `mission-brief-harness` for the full template, try ≤3 heal-forward loop, and
+**offline / free local failover** (no paid plane, no private forge).
+
+## Free path when net or subscription is down
+
+UniGrok Core can still answer on a **local plane** when Docker Model Runner (or another
+loopback OpenAI-compatible runtime) is staged — see `docs/offline-local-helper.md`.
+
+- Relay `resolved_plane` and `cost_usd` (local is `0`) to the user.
+- Prefer `disable_tools: ["web","x_search"]` for true offline briefs.
+- Cloud-only work (media/search without a funded plane) must **fail closed**, not invent.
+- Optional named local helper `gemmagrok-local` is separate from `@grok` —
+  never auto-escape to paid.
+"""
+
+MISSION_BRIEF_HARNESS_SKILL = """---
+name: mission-brief-harness
+description: >-
+  Structure multi-step UniGrok agent work as Mission Briefs. Host orchestrates;
+  UniGrok is leaf labor. Covers offline/local free-path failover when net or paid
+  planes are unavailable. Use for agentic tasks, retries, densified returns.
+---
+
+# Mission Brief harness (public Ground pack)
+
+Workspace-neutral product pattern. The host stays the orchestrator; UniGrok `agent` is leaf labor.
+
+## Roles
+
+| Role | Who |
+|------|-----|
+| Orchestrator | Host IDE / human / local agent |
+| Leaf labor | UniGrok `agent` (CLI / API / **local** free path when staged) |
+| Free local helper (optional) | `gemmagrok-local` MCP — one pinned local model; no remote escape |
+| Judge (optional) | Host second pass, human, or short local prior if the host installs one |
+
+## Brief template (put this in `task`)
+
+```markdown
+# Mission Brief · <title>
+
+## L0 Goal
+One sentence.
+
+## L1 Options
+Rank ≥2 approaches (virtual-first). Prefer free/local when offline.
+
+## L2 Constraints
+DO NOT · time · tools to avoid.
+Offline tip: disable_tools web and x_search; do not request cloud-only media.
+
+## L3 Context
+Only bounded quotes or paths the labor needs (no credentials).
+
+## L4 Done when
+Acceptance check + what to return. Receipt must name plane (cli|api|local).
+
+## L5 Decision
+EXECUTE | HOLD
+
+## Return form
+WHAT / WHY / DELTA / NEXT · optional confidence 1–100 · resolved_plane if known
+```
+
+## Host loop
+
+```text
+BRIEF → try (≤3) → observe result (plane + cost) → judge
+  pass → densify return
+  fail → heal-forward (keep original goal, append finding)
+  offline → stage local runtime first (docs/offline-local-helper.md), then retry brief
+```
+
+## Free path / no-internet / no-paid-plane (product fact)
+
+1. **Integrated zero-key local route** on the normal `@grok` service (`4765`): when remote
+   planes are not ready, Core may use Docker Model Runner / loopback local models if
+   `UNIGROK_LOCAL_AUTO` is on (default) and a runtime is reachable.
+2. Results use `billing_class: local_runtime` and `cost_usd: 0` when local.
+3. **Fail closed** for work that needs web/media without a funded plane — never fabricate.
+4. Optional **gemmagrok-local** (`compose --profile offline`) is a **named** local chat helper,
+   not a secret second UniGrok and not an automatic paid fallback.
+5. Host may run additional short local judges (e.g. operator-owned prior seats) **outside**
+   this product; they are not required for clean install.
+
+Operator doc: `docs/offline-local-helper.md`.
+
+## Clean install
+
+1. Connect UniGrok MCP.
+2. Install skills via consent (`grok_mcp_onboard_client` / host skill pack).
+3. Host remains orchestrator; put Mission Briefs in `task`.
+4. For offline: enable Model Runner, pull the pinned local model, start UniGrok, then brief.
+
+## Edge cases (orchestrator must handle)
+
+| Situation | Host action |
+|-----------|-------------|
+| Local runtime missing offline | HOLD · stage model · retry brief |
+| Paid-only tool requested offline | HOLD · shrink L4 to text-only or fail closed |
+| `continue` / pending | Reattach with `continue_token` / poll `agent_result` — do not duplicate |
+| Hive/ultra depth offline | May be unavailable; fall back to direct brief + local plane |
+| Receipt plane unexpected | Surface to user; do not claim free if metered |
+
+## Not included
+
+Private multi-seat OS doctrine, training pipelines, contest scoreboards, credential values,
+or a mandatory private judge port map.
 """
 
 ANTIGRAVITY_WORKFLOW = """# Ask Grok
@@ -1443,6 +1560,22 @@ def _visuals_skill_files(client: str, skill_dir: str) -> list[dict[str, str]]:
     ]
 
 
+def _ground_pack_skill_files(skills_root: str) -> list[dict[str, str]]:
+    """Public Ground pack: using-unigrok + mission-brief-harness under a skills root.
+
+    skills_root examples:
+      ~/.claude/skills
+      ~/.codex/skills
+      ~/.gemini/config/plugins/unigrok/skills
+      .agents/skills
+    """
+    root = skills_root.rstrip("/")
+    return [
+        _owned_file(f"{root}/using-unigrok/SKILL.md", GLOBAL_SKILL),
+        _owned_file(f"{root}/mission-brief-harness/SKILL.md", MISSION_BRIEF_HARNESS_SKILL),
+    ]
+
+
 def _global_files(client: str) -> list[dict[str, str]]:
     if client == "antigravity":
         manifest = json.dumps(
@@ -1457,7 +1590,7 @@ def _global_files(client: str) -> list[dict[str, str]]:
         root = "~/.gemini/config/plugins/unigrok"
         return [
             _owned_file(f"{root}/plugin.json", manifest),
-            _owned_file(f"{root}/skills/using-unigrok/SKILL.md", GLOBAL_SKILL),
+            *_ground_pack_skill_files(f"{root}/skills"),
             _owned_file(
                 "~/.gemini/config/global_workflows/ask-grok.md",
                 ANTIGRAVITY_WORKFLOW,
@@ -1466,12 +1599,12 @@ def _global_files(client: str) -> list[dict[str, str]]:
         ]
     if client == "codex":
         return [
-            _owned_file("~/.codex/skills/using-unigrok/SKILL.md", GLOBAL_SKILL),
+            *_ground_pack_skill_files("~/.codex/skills"),
             *_visuals_skill_files("codex", "~/.codex/skills/unigrok-visuals"),
         ]
     if client == "claude_code":
         return [
-            _owned_file("~/.claude/skills/using-unigrok/SKILL.md", GLOBAL_SKILL),
+            *_ground_pack_skill_files("~/.claude/skills"),
             *_visuals_skill_files("claude_code", "~/.claude/skills/unigrok-visuals"),
         ]
     return []
@@ -1494,6 +1627,26 @@ def _client_onboarding_plan(
         "requires_explicit_user_approval": True,
         "automatic_tool_approval_offered": not cloud_mode and not safe_mode,
         "installer": "calling_ide_agent",
+        # Day-1 public Ground pack only — no extra labor/operator nodes (CONTRIBUTING.md).
+        "pack": {
+            "name": "ground_pack_public",
+            "includes": [
+                "using-unigrok",
+                "mission-brief-harness",
+                "unigrok-visuals (host adapter when applicable)",
+            ],
+            "does_not_include": [
+                "secondary_labor_docker",
+                "extra_operator_nodes",
+                "private_operator_skills",
+                "full_skill_tree_mirror",
+            ],
+            "heavier_capacity": (
+                "Separate maintainer grant only if the contributor runs an approved "
+                "extra node — not implied by this onboard pack or GitHub login alone."
+            ),
+            "docs": "CONTRIBUTING.md#what-day-1-access-includes-and-does-not",
+        },
         "runtime_contract": {
             "execution_policy": "api_only" if cloud_mode else "dual_plane",
             "inference_billing": "metered" if cloud_mode else "conditional",
@@ -1530,7 +1683,7 @@ def _client_onboarding_plan(
             "project_root_files_avoided": False,
             "precedence": "project customizations override the global baseline",
             "files": [
-                _owned_file(".agents/skills/using-unigrok/SKILL.md", GLOBAL_SKILL),
+                *_ground_pack_skill_files(".agents/skills"),
                 *_visuals_skill_files(client, ".agents/skills/unigrok-visuals"),
             ],
             "optional_paths": [
@@ -6472,7 +6625,9 @@ async def chat(
 @mcp.tool(annotations=READ_ONLY)
 async def grok_mcp_discover_self(refresh_models: bool = False) -> dict[str, Any]:
     """Return the gateway's authoritative live public tools, planes, and model catalogs."""
-    return _live_self_description(await _catalogs(refresh=refresh_models))
+    body = _live_self_description(await _catalogs(refresh=refresh_models))
+    body["affiliation"] = await github_affiliation.affiliation_public_view()
+    return body
 
 
 @mcp.tool(annotations=READ_ONLY)
@@ -6553,13 +6708,14 @@ async def grok_mcp_onboard_client(
 @mcp.tool(annotations=READ_ONLY)
 async def grok_mcp_status(refresh: bool = False) -> dict[str, Any]:
     """Report non-secret credential-plane readiness and the exact public boundary."""
-    catalogs, state_ready, telemetry = await asyncio.gather(
+    catalogs, state_ready, telemetry, affiliation = await asyncio.gather(
         _catalogs(refresh=refresh),
         STATE.health(),
         STATE.telemetry_summary(limit=1000, caller=_tenant_caller()),
+        github_affiliation.affiliation_public_view(),
     )
     description = _live_self_description(catalogs)
-    return system_tools.status_body(
+    body = system_tools.status_body(
         service=MCP_SERVER_NAME,
         version=__version__,
         layer=UNIGROK_LAYER or "public",
@@ -6572,6 +6728,8 @@ async def grok_mcp_status(refresh: bool = False) -> dict[str, Any]:
         metered_api_enabled=METERED_API_ENABLED,
         cloudrun=is_cloudrun_runtime(),
     )
+    body["affiliation"] = affiliation
+    return body
 
 
 @mcp.tool(annotations=READ_ONLY)
@@ -7361,6 +7519,13 @@ class CallerIdentityMiddleware:
                 caller = principal_label(principal)
                 if caller:
                     caller_token = _CALLER_ID_CONTEXT.set(caller)
+                # OAuth claims may carry a GitHub login for affiliation (never X-Client-ID).
+                if isinstance(claims, dict):
+                    github_affiliation.set_request_github_login(
+                        claims.get("github_login")
+                        or claims.get("login")
+                        or claims.get("preferred_username")
+                    )
             else:
                 headers = {
                     key.decode("latin-1").lower(): value.decode("latin-1")
@@ -7370,9 +7535,12 @@ class CallerIdentityMiddleware:
                 if raw:
                     caller = re.sub(r"[^a-z0-9._:-]+", "-", raw)[:80]
                     caller_token = _CALLER_ID_CONTEXT.set(caller)
+                # Never treat X-Client-ID as GitHub affiliation.
+                github_affiliation.clear_request_github_login()
         try:
             await self.app(scope, receive, send)
         finally:
+            github_affiliation.clear_request_github_login()
             if caller_token is not None:
                 _CALLER_ID_CONTEXT.reset(caller_token)
             if principal_token is not None:

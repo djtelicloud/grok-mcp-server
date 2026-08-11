@@ -445,9 +445,23 @@ def test_client_onboarding_is_namespaced_and_never_writes() -> None:
     paths = [item["path"] for item in plan["files"]]
     assert "~/.gemini/config/plugins/unigrok/plugin.json" in paths
     assert "~/.gemini/config/plugins/unigrok/skills/using-unigrok/SKILL.md" in paths
+    assert (
+        "~/.gemini/config/plugins/unigrok/skills/mission-brief-harness/SKILL.md"
+        in paths
+    )
     assert "~/.gemini/config/global_workflows/ask-grok.md" in paths
     assert not any(path.startswith(".agents/") for path in paths)
     assert all(len(item["sha256"]) == 64 for item in plan["files"])
+    mission = next(
+        item
+        for item in plan["files"]
+        if item["path"].endswith("mission-brief-harness/SKILL.md")
+    )
+    assert "Mission Brief" in mission["content"]
+    assert "leaf labor" in mission["content"]
+    assert "local" in mission["content"].lower()
+    assert "offline" in mission["content"].lower() or "free path" in mission["content"].lower()
+    assert "gemmagrok-local" in mission["content"] or "Model Runner" in mission["content"]
 
 
 def test_client_onboarding_detection_and_safe_non_filesystem_fallback() -> None:

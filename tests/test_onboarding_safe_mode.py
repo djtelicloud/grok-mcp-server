@@ -57,6 +57,23 @@ def test_default_onboarding_behavior_remains_compatible() -> None:
     assert "auto_approve" in antigravity
 
 
+def test_onboarding_pack_is_ground_only_not_extra_nodes() -> None:
+    """Day-1 public pack must not imply secondary labor or extra operator nodes."""
+    plan = server._client_onboarding_plan("claude_code", "global")
+    pack = plan["pack"]
+    assert pack["name"] == "ground_pack_public"
+    assert "using-unigrok" in pack["includes"]
+    assert "mission-brief-harness" in pack["includes"]
+    for denied in (
+        "secondary_labor_docker",
+        "extra_operator_nodes",
+        "private_operator_skills",
+        "full_skill_tree_mirror",
+    ):
+        assert denied in pack["does_not_include"]
+    assert "extra node" in pack["heavier_capacity"]
+
+
 def test_cursor_hook_never_allows_empty_or_ambiguous_tool_names() -> None:
     assert _hook_decision({}) == "ask"
     assert _hook_decision({"tool_name": ""}) == "ask"
