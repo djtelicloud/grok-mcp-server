@@ -889,14 +889,26 @@ The **host** (you / your IDE agent / human) is the **orchestrator**. UniGrok is 
 For anything beyond a one-shot answer, put a structured **Mission Brief** in `task` and keep
 orchestration on the host. Prefer densified returns: WHAT / WHY / DELTA / NEXT.
 
-See skill `mission-brief-harness` for the full template and try ≤3 heal-forward loop.
+See skill `mission-brief-harness` for the full template, try ≤3 heal-forward loop, and
+**offline / free local failover** (no paid plane, no private forge).
+
+## Free path when net or subscription is down
+
+UniGrok Core can still answer on a **local plane** when Docker Model Runner (or another
+loopback OpenAI-compatible runtime) is staged — see `docs/offline-local-helper.md`.
+
+- Relay `resolved_plane` and `cost_usd` (local is `0`) to the user.
+- Prefer `disable_tools: ["web","x_search"]` for true offline briefs.
+- Cloud-only work (media/search without a funded plane) must **fail closed**, not invent.
+- Optional named local helper `gemmagrok-local` is separate from `@grok` — never auto-escape to paid.
 """
 
 MISSION_BRIEF_HARNESS_SKILL = """---
 name: mission-brief-harness
 description: >-
   Structure multi-step UniGrok agent work as Mission Briefs. Host orchestrates;
-  UniGrok is leaf labor. Use for agentic tasks, retries, and densified returns.
+  UniGrok is leaf labor. Covers offline/local free-path failover when net or paid
+  planes are unavailable. Use for agentic tasks, retries, densified returns.
 ---
 
 # Mission Brief harness (public Ground pack)
@@ -908,8 +920,9 @@ Workspace-neutral product pattern. The host stays the orchestrator; UniGrok `age
 | Role | Who |
 |------|-----|
 | Orchestrator | Host IDE / human / local agent |
-| Leaf labor | UniGrok `agent` |
-| Judge (optional) | Host second pass or human |
+| Leaf labor | UniGrok `agent` (CLI / API / **local** free path when staged) |
+| Free local helper (optional) | `gemmagrok-local` MCP — one pinned local model; never remote escape |
+| Judge (optional) | Host second pass, human, or short local prior if the host installs one |
 
 ## Brief template (put this in `task`)
 
@@ -920,41 +933,69 @@ Workspace-neutral product pattern. The host stays the orchestrator; UniGrok `age
 One sentence.
 
 ## L1 Options
-Rank ≥2 approaches (virtual-first).
+Rank ≥2 approaches (virtual-first). Prefer free/local when offline.
 
 ## L2 Constraints
 DO NOT · time · tools to avoid.
+Offline tip: disable_tools web and x_search; do not request cloud-only media.
 
 ## L3 Context
 Only bounded quotes or paths the labor needs (no credentials).
 
 ## L4 Done when
-Acceptance check + what to return.
+Acceptance check + what to return. Receipt must name plane (cli|api|local).
 
 ## L5 Decision
 EXECUTE | HOLD
 
 ## Return form
-WHAT / WHY / DELTA / NEXT · optional confidence 1–100
+WHAT / WHY / DELTA / NEXT · optional confidence 1–100 · resolved_plane if known
 ```
 
 ## Host loop
 
 ```text
-BRIEF → try (≤3) → observe result → judge
+BRIEF → try (≤3) → observe result (plane + cost) → judge
   pass → densify return
   fail → heal-forward (keep original goal, append finding)
+  offline → stage local runtime first (docs/offline-local-helper.md), then retry brief
 ```
+
+## Free path / no-internet / no-paid-plane (product fact)
+
+1. **Integrated zero-key local route** on the normal `@grok` service (`4765`): when remote
+   planes are not ready, Core may use Docker Model Runner / loopback local models if
+   `UNIGROK_LOCAL_AUTO` is on (default) and a runtime is reachable.
+2. Results use `billing_class: local_runtime` and `cost_usd: 0` when local.
+3. **Fail closed** for work that needs web/media without a funded plane — never fabricate.
+4. Optional **gemmagrok-local** (`compose --profile offline`) is a **named** local chat helper,
+   not a secret second UniGrok and not an automatic paid fallback.
+5. Host may run additional short local judges (e.g. operator-owned prior seats) **outside**
+   this product; they are not required for clean install.
+
+Operator doc: `docs/offline-local-helper.md`.
 
 ## Clean install
 
 1. Connect UniGrok MCP.
 2. Install skills via consent (`grok_mcp_onboard_client` / host skill pack).
 3. Host remains orchestrator; put Mission Briefs in `task`.
+4. For offline: enable Model Runner, pull the pinned local model, start UniGrok, then brief.
+
+## Edge cases (orchestrator must handle)
+
+| Situation | Host action |
+|-----------|-------------|
+| Local runtime missing offline | HOLD · stage model · retry brief |
+| Paid-only tool requested offline | HOLD · shrink L4 to text-only or fail closed |
+| `continue` / pending | Reattach with `continue_token` / poll `agent_result` — do not duplicate |
+| Hive/ultra depth offline | May be unavailable; fall back to direct brief + local plane |
+| Receipt plane unexpected | Surface to user; do not claim free if metered |
 
 ## Not included
 
-Private multi-seat OS doctrine, training pipelines, contest scoreboards, or credential values.
+Private multi-seat OS doctrine, training pipelines, contest scoreboards, credential values,
+or a mandatory private judge port map.
 """
 
 ANTIGRAVITY_WORKFLOW = """# Ask Grok

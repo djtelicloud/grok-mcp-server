@@ -107,6 +107,11 @@ For multi-step work, put a short **Mission Brief** in `task` (goal, options, con
 done-when, return shape). Retry at most a few times with the same goal and an appended
 finding if a try fails. Prefer densified returns: WHAT / WHY / DELTA / NEXT.
 
+**Offline / free local path:** when subscription or API is unavailable, Core can still use a
+staged **local** model route (Docker Model Runner or loopback OpenAI-compatible runtime).
+See [Local model routes](docs/offline-local-helper.md). Relay `resolved_plane` and cost
+receipts; disable web/X tools for true offline briefs; fail closed for cloud-only media.
+
 After onboarding, see skills `using-unigrok` and `mission-brief-harness` (installed by
 `grok_mcp_onboard_client` with consent).
 

@@ -459,6 +459,9 @@ def test_client_onboarding_is_namespaced_and_never_writes() -> None:
     )
     assert "Mission Brief" in mission["content"]
     assert "leaf labor" in mission["content"]
+    assert "local" in mission["content"].lower()
+    assert "offline" in mission["content"].lower() or "free path" in mission["content"].lower()
+    assert "gemmagrok-local" in mission["content"] or "Model Runner" in mission["content"]
 
 
 def test_client_onboarding_detection_and_safe_non_filesystem_fallback() -> None:
