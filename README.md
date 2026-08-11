@@ -113,7 +113,9 @@ See [Local model routes](docs/offline-local-helper.md). Relay `resolved_plane` a
 receipts; disable web/X tools for true offline briefs; fail closed for cloud-only media.
 
 After onboarding, see skills `using-unigrok` and `mission-brief-harness` (installed by
-`grok_mcp_onboard_client` with consent).
+`grok_mcp_onboard_client` with consent). **Contributors:** after GitHub auth (website or
+local `gh auth login`), install that GroundCommand pack once — step-by-step in
+[CONTRIBUTING.md](CONTRIBUTING.md#after-github-auth--install-groundcommand).
 
 ### Official GitHub contributors (optional)
 
@@ -323,6 +325,7 @@ See [SECURITY.md](SECURITY.md) for the complete public runtime boundary.
 | See every tool and routing rule | [Technical reference](docs/reference.md) |
 | Use the integrated local route or named local helper | [Local model routes](docs/offline-local-helper.md) |
 | Drive `agent` from an IDE agent | [Technical reference](docs/reference.md#how-an-ide-agent-should-drive-agent) |
+| Auth with GitHub, then install GroundCommand | [Contributing](CONTRIBUTING.md#after-github-auth--install-groundcommand) |
 | Develop or acceptance-test UniGrok | [Development guide](docs/development.md) |
 | See what has limited soak and how to report a miss | [Known limits](docs/known-limits.md) |
 | See what changed between versions | [Changelog](CHANGELOG.md) |

@@ -1,5 +1,102 @@
 # Contributing to UniGrok Public
 
+Anyone can clone, run, and open a pull request. After you authenticate with GitHub
+(locally or on the website), install the **GroundCommand pack** so your IDE can
+orchestrate multi-step UniGrok work the same way maintainers do.
+
+## After GitHub auth → install GroundCommand
+
+Do this once per machine (or after a clean IDE profile).
+
+### A. Authenticate with GitHub
+
+**Website (contributor control center)**
+
+1. Open [Contribute](https://grokmcp.org/contribute) (or your deployed site’s `/contribute`).
+2. Sign in with GitHub at [control.grokmcp.org](https://control.grokmcp.org).
+3. Access is rechecked against your GitHub role on this repository — no xAI keys on the site.
+
+**Local (git + GitHub CLI)**
+
+```bash
+# one-time (or when your token expires)
+gh auth login
+# confirm the login that will appear on PRs / collaborator checks
+gh api user --jq .login
+```
+
+Use that same GitHub login for branch names and collaborator invites. Do not put
+personal PATs into IDE MCP JSON.
+
+### B. Run UniGrok Core on this machine
+
+Follow the README “Get running in three minutes” path, then confirm readiness:
+
+```bash
+docker compose up -d grok-mcp
+curl --fail --silent http://localhost:4765/readyz
+```
+
+Connect your IDE to `http://localhost:4765/mcp` (stable `X-Client-ID` per IDE).
+Optional local bearer: see README “Optional local bearer protection”.
+
+### C. Install the GroundCommand pack (skills)
+
+GroundCommand here means the **public Ground pack**: your IDE stays the orchestrator;
+UniGrok `agent` is leaf labor. The pack is two skills:
+
+| Skill | Role |
+|-------|------|
+| `using-unigrok` | How to call `@grok` / `agent` safely |
+| `mission-brief-harness` | Mission Brief template, try ≤3 loop, offline free path |
+
+**From any connected IDE** (Claude Code, Cursor, Codex, Antigravity, Copilot, etc.):
+
+1. Ensure the UniGrok MCP server is connected.
+2. Call the tool **`grok_mcp_onboard_client`** (or accept the first-use offer).
+3. Choose **`global`** (recommended) so skills land in your IDE user scope — not every repo.
+4. Let the IDE preview files, approve the writes, then **reload** the session.
+5. Confirm skills exist: `using-unigrok` and `mission-brief-harness`.
+
+Example tool call when elicitation is not available:
+
+```text
+grok_mcp_onboard_client
+  client: auto   # or claude_code | cursor | codex | antigravity | github_copilot | generic
+  choice: global
+```
+
+**What “installed” looks like**
+
+- Claude Code: `~/.claude/skills/using-unigrok/` and `…/mission-brief-harness/`
+- Codex: `~/.codex/skills/using-unigrok/` (and companion)
+- Cursor / others: paths returned in the onboard plan — follow the IDE’s preview
+
+UniGrok never writes those files itself; the **calling IDE** installs after you approve.
+
+### D. Optional: confirm contributor affiliation
+
+If maintainers configured official-contributor detection on the service, after you are
+authenticated as a GitHub collaborator (or on the allowlist):
+
+```text
+grok_mcp_status
+# or
+grok_mcp_discover_self
+```
+
+Look for `affiliation.is_official_contributor` (true/false/null). That is soft UX only —
+not a secret vault. Service env for operators is documented in the README under
+“Official GitHub contributors”.
+
+### E. First multi-step task (GroundCommand in practice)
+
+Put a short **Mission Brief** in `agent`’s `task` (goal, options, constraints, done-when,
+return shape). Prefer densified returns: WHAT / WHY / DELTA / NEXT. Details live in
+skill `mission-brief-harness` and README “Multi-step agentic work (Ground pack)”.
+
+---
+
 ## Local checks
 
 ```bash
