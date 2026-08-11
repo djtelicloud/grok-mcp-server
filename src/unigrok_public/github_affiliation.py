@@ -22,7 +22,6 @@ Optional request claim path: OAuth introspection may supply ``login`` /
 
 from __future__ import annotations
 
-import asyncio
 import os
 import re
 import time

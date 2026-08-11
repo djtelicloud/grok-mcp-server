@@ -27,7 +27,7 @@ from pydantic import BaseModel, Field
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, PlainTextResponse
 
-from . import __version__, local_plane_loader, xai_api
+from . import __version__, github_affiliation, local_plane_loader, xai_api
 from .autonomy import (
     JOB_COMPLETE,
     JOB_ERROR,
@@ -80,7 +80,6 @@ from .harness import (
     should_auto_deepen,
     workspace_courier,
 )
-from . import github_affiliation
 from .identity import (
     get_active_principal,
     principal_label,
@@ -901,7 +900,8 @@ loopback OpenAI-compatible runtime) is staged — see `docs/offline-local-helper
 - Relay `resolved_plane` and `cost_usd` (local is `0`) to the user.
 - Prefer `disable_tools: ["web","x_search"]` for true offline briefs.
 - Cloud-only work (media/search without a funded plane) must **fail closed**, not invent.
-- Optional named local helper `gemmagrok-local` is separate from `@grok` — never auto-escape to paid.
+- Optional named local helper `gemmagrok-local` is separate from `@grok` —
+  never auto-escape to paid.
 """
 
 MISSION_BRIEF_HARNESS_SKILL = """---
@@ -922,7 +922,7 @@ Workspace-neutral product pattern. The host stays the orchestrator; UniGrok `age
 |------|-----|
 | Orchestrator | Host IDE / human / local agent |
 | Leaf labor | UniGrok `agent` (CLI / API / **local** free path when staged) |
-| Free local helper (optional) | `gemmagrok-local` MCP — one pinned local model; never remote escape |
+| Free local helper (optional) | `gemmagrok-local` MCP — one pinned local model; no remote escape |
 | Judge (optional) | Host second pass, human, or short local prior if the host installs one |
 
 ## Brief template (put this in `task`)

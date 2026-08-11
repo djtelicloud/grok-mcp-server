@@ -449,7 +449,8 @@ async def _perform_oauth_introspection(
         "unigrok_principal": principal,
         "unigrok_auth": "oauth",
     }
-    # Optional GitHub-shaped fields for official-contributor affiliation (no trust of client headers).
+    # Optional GitHub-shaped fields for official-contributor affiliation
+    # (never trust client headers alone for that claim).
     for key in ("login", "preferred_username", "nickname"):
         value = payload.get(key)
         if isinstance(value, str) and value.strip():
