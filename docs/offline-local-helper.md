@@ -17,6 +17,17 @@ docker model pull ai/gemma3:4B-Q4_K_M
 docker model run --detach ai/gemma3:4B-Q4_K_M
 ```
 
+**Windows (PowerShell):** use the same sequence; confirm pulls finished before expecting
+a ready local plane:
+
+```powershell
+docker model status
+docker model ls
+# empty table = not ready (partial % downloads do not bind)
+docker compose up -d grok-mcp
+curl.exe -fsS http://127.0.0.1:4765/readyz
+```
+
 Then start UniGrok normally:
 
 ```bash
@@ -30,6 +41,13 @@ The container automatically probes Docker Model Runner through
 remote route is ready, the discovered Gemma model supplies the bounded router and text
 path. Requests without a funded local role, including cloud-only media and search, fail
 closed instead of escaping to a paid service or fabricating a result.
+
+**Ready signal:** under `planes.local` in `/readyz`, expect `"ready": true`,
+`"data_ready": true`, and `rewrite.missing_min_roles: []`. Discovered model ids are often
+prefixed (`docker.io/ai/...`). Family mapping + min roles `router` and `text_generator`
+must bind; discovery alone is not enough if roles are unfunded. Other DMR checkpoints
+(qwen, nemotron, …) can appear in `models` once pulled — they still do not replace
+UltraHive CLI/API persona voters.
 
 Set `UNIGROK_LOCAL_AUTO=off` to disable automatic probing. For another
 OpenAI-compatible loopback runtime, set `UNIGROK_LOCAL_RUNTIME_URL` to its base URL.

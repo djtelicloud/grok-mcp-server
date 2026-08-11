@@ -71,6 +71,37 @@ Optional local bearer: see README “Optional local bearer protection”.
 Never put `XAI_API_KEY`, personal PATs, or Grok session tokens into IDE MCP JSON —
 credentials stay in the UniGrok service environment / CLI auth volume only.
 
+**Optional — local Docker Model Runner plane (zero-key text path):** day-1 does **not**
+require this. Core can chat on CLI/API while `planes.local.ready` is false. To arm the
+integrated local free path on Docker Desktop:
+
+```powershell
+docker desktop enable model-runner
+docker model pull ai/gemma3:4B-Q4_K_M
+docker model ls
+# models must appear here (partial downloads do not bind)
+docker compose up -d grok-mcp
+curl.exe -fsS http://127.0.0.1:4765/readyz
+```
+
+Inspect the `planes.local` object: you want `"ready": true`, `"data_ready": true`, and
+empty `rewrite.missing_min_roles`. Discovery IDs often look like
+`docker.io/ai/<name>:latest` (not only the short `ai/...` pull name). Min offline roles
+are `router` + `text_generator` (see [Local model routes](docs/offline-local-helper.md)).
+Local DMR models are **not** UltraHive persona voters — hive (`level: ultra`) still uses
+built-in personas on CLI/API.
+
+**Grok Build CLI inside Docker (subscription plane):** host CLI login is separate from
+the Core volume. Refresh with:
+
+```powershell
+docker compose --profile auth run --rm grok-cli-auth
+docker compose up -d --force-recreate grok-mcp
+curl.exe -fsS http://127.0.0.1:4765/readyz
+```
+
+Confirm `planes.cli.authenticated` is true when you intend SuperGrok-in-Core as the lead.
+
 ### C. Install the public Ground pack (skills)
 
 The **public Ground pack** means: your IDE stays the orchestrator; UniGrok `agent` is
