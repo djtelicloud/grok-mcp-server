@@ -51,11 +51,25 @@ Follow the README “Get running in three minutes” path, then confirm readines
 
 ```bash
 docker compose up -d grok-mcp
-curl --fail --silent http://localhost:4765/readyz
+curl --fail --silent http://127.0.0.1:4765/readyz
+```
+
+You are ready when the JSON includes `"status":"ready"` (HTTP 200 alone is not enough if
+the body is an error page or partial bootstrap). Prefer `127.0.0.1` over hostnames that
+might resolve oddly on some networks.
+
+**Windows (PowerShell):** Docker Desktop must be running (WSL2 backend is typical). If
+`curl` is the PowerShell alias and misbehaves, call the real binary:
+
+```powershell
+docker compose up -d grok-mcp
+curl.exe -fsS http://127.0.0.1:4765/readyz
 ```
 
 Connect your IDE to `http://localhost:4765/mcp` (stable `X-Client-ID` per IDE).
 Optional local bearer: see README “Optional local bearer protection”.
+Never put `XAI_API_KEY`, personal PATs, or Grok session tokens into IDE MCP JSON —
+credentials stay in the UniGrok service environment / CLI auth volume only.
 
 ### C. Install the public Ground pack (skills)
 
@@ -87,7 +101,10 @@ grok_mcp_onboard_client
 
 - Claude Code: `~/.claude/skills/using-unigrok/` and `…/mission-brief-harness/`
 - Codex: `~/.codex/skills/using-unigrok/` (and companion)
-- Cursor / others: paths returned in the onboard plan — follow the IDE’s preview
+- Cursor: user-scope skills such as `~/.cursor/skills/using-unigrok/` and
+  `~/.cursor/skills/mission-brief-harness/` (Windows:
+  `%USERPROFILE%\.cursor\skills\…`), plus any rule/hook paths from the onboard plan
+- Other clients: paths returned in the onboard plan — follow the IDE’s preview
 
 UniGrok never writes those files itself; the **calling IDE** installs after you approve.
 
