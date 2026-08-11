@@ -35,6 +35,10 @@ async def test_allowlist_marks_official(monkeypatch: pytest.MonkeyPatch) -> None
     assert view["source"] == "allowlist"
     # roster not leaked as plaintext login
     assert view.get("github_login_hint") == "cu***"
+    # no raw repo/org names on public surface
+    assert "repos" not in view
+    assert "orgs" not in view
+    assert view["allowlist_entries"] == 2
 
 
 @pytest.mark.asyncio

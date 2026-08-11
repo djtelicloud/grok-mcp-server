@@ -25,6 +25,7 @@ from __future__ import annotations
 import os
 import re
 import time
+from contextvars import ContextVar
 from typing import Any
 
 import httpx
@@ -33,21 +34,19 @@ from .identity import get_active_principal, principal_kind
 
 _LOGIN_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$")
 _CACHE: dict[str, tuple[float, bool]] = {}
-_GITHUB_LOGIN_CLAIM: str | None = None  # set per-request by remote_auth / middleware
 
-# Context-style mutable for request-scoped GitHub login claim (set by auth layer).
-_REQUEST_GITHUB_LOGIN: str | None = None
+# Request-scoped GitHub login claim (set by auth middleware / remote_auth).
+_REQUEST_GITHUB_LOGIN: ContextVar[str | None] = ContextVar(
+    "unigrok_request_github_login", default=None
+)
 
 
 def set_request_github_login(login: str | None) -> None:
-    global _REQUEST_GITHUB_LOGIN
-    value = _normalize_login(login)
-    _REQUEST_GITHUB_LOGIN = value
+    _REQUEST_GITHUB_LOGIN.set(_normalize_login(login))
 
 
 def clear_request_github_login() -> None:
-    global _REQUEST_GITHUB_LOGIN
-    _REQUEST_GITHUB_LOGIN = None
+    _REQUEST_GITHUB_LOGIN.set(None)
 
 
 def _normalize_login(raw: Any) -> str | None:
@@ -120,8 +119,9 @@ def cache_ttl_seconds() -> int:
 
 def resolve_github_login(*, oauth_claims: dict[str, Any] | None = None) -> str | None:
     """Best-effort GitHub login for the current request (may be None)."""
-    if _REQUEST_GITHUB_LOGIN:
-        return _REQUEST_GITHUB_LOGIN
+    bound = _REQUEST_GITHUB_LOGIN.get()
+    if bound:
+        return bound
     if oauth_claims:
         for key in ("login", "preferred_username", "nickname", "name"):
             login = _normalize_login(oauth_claims.get(key))
@@ -250,6 +250,9 @@ async def affiliation_public_view(
     is_official, source = await is_official_contributor(
         login, oauth_claims=oauth_claims
     )
+    repos = configured_repos()
+    orgs = configured_orgs()
+    allow = configured_allowlist()
     return {
         "github_login_detected": bool(login),
         # Do not echo raw login to shared logs; optional short hash for self-debug
@@ -257,14 +260,16 @@ async def affiliation_public_view(
         "is_official_contributor": is_official,
         "source": source,
         "check_configured": bool(
-            configured_allowlist()
-            or configured_repos()
-            or configured_orgs()
+            allow
+            or repos
+            or orgs
             or service_github_token()
             or os.environ.get("UNIGROK_GITHUB_LOGIN", "").strip()
         ),
-        "repos": configured_repos(),
-        "orgs": configured_orgs(),
+        # Counts only — never echo private repo/org names to public status surfaces
+        "allowlist_entries": len(allow),
+        "repo_checks": len(repos),
+        "org_checks": len(orgs),
         "notes": (
             "X-Client-ID is never used for affiliation. "
             "Configure allowlist and/or GitHub API token + repos/orgs. "
