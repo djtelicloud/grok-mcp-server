@@ -115,6 +115,30 @@ receipts; disable web/X tools for true offline briefs; fail closed for cloud-onl
 After onboarding, see skills `using-unigrok` and `mission-brief-harness` (installed by
 `grok_mcp_onboard_client` with consent).
 
+### Official GitHub contributors (optional)
+
+UniGrok can detect whether the **authenticated** caller is one of your official GitHub
+contributors. This never trusts `X-Client-ID` alone.
+
+Service environment (examples):
+
+```bash
+# Fast path: explicit allowlist of GitHub logins
+export UNIGROK_GITHUB_CONTRIBUTOR_ALLOWLIST='djtelicloud,curtisfratianne'
+
+# And/or live GitHub API checks (service token — never put a user PAT in IDE MCP JSON)
+export UNIGROK_GITHUB_TOKEN='ghp_…'   # or GITHUB_TOKEN
+export UNIGROK_GITHUB_CONTRIBUTOR_REPOS='djtelicloud/grok-mcp-server,djtelicloud/grok-mcp-intelligence'
+export UNIGROK_GITHUB_CONTRIBUTOR_ORGS='your-org'
+
+# Local single-operator bind (optional)
+export UNIGROK_GITHUB_LOGIN='djtelicloud'
+```
+
+`grok_mcp_status` and `grok_mcp_discover_self` return an `affiliation` object:
+`is_official_contributor` (true/false/null), `source`, and whether a login was detected.
+Use this for soft UX (contributor tips, onboard tone) — not as a secret vault.
+
 Optional local bearer protection is available for `/mcp` and `/v1`:
 
 ```bash

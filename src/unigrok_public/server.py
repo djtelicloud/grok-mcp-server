@@ -80,6 +80,7 @@ from .harness import (
     should_auto_deepen,
     workspace_courier,
 )
+from . import github_affiliation
 from .identity import (
     get_active_principal,
     principal_label,
@@ -6604,7 +6605,9 @@ async def chat(
 @mcp.tool(annotations=READ_ONLY)
 async def grok_mcp_discover_self(refresh_models: bool = False) -> dict[str, Any]:
     """Return the gateway's authoritative live public tools, planes, and model catalogs."""
-    return _live_self_description(await _catalogs(refresh=refresh_models))
+    body = _live_self_description(await _catalogs(refresh=refresh_models))
+    body["affiliation"] = await github_affiliation.affiliation_public_view()
+    return body
 
 
 @mcp.tool(annotations=READ_ONLY)
@@ -6685,13 +6688,14 @@ async def grok_mcp_onboard_client(
 @mcp.tool(annotations=READ_ONLY)
 async def grok_mcp_status(refresh: bool = False) -> dict[str, Any]:
     """Report non-secret credential-plane readiness and the exact public boundary."""
-    catalogs, state_ready, telemetry = await asyncio.gather(
+    catalogs, state_ready, telemetry, affiliation = await asyncio.gather(
         _catalogs(refresh=refresh),
         STATE.health(),
         STATE.telemetry_summary(limit=1000, caller=_tenant_caller()),
+        github_affiliation.affiliation_public_view(),
     )
     description = _live_self_description(catalogs)
-    return system_tools.status_body(
+    body = system_tools.status_body(
         service=MCP_SERVER_NAME,
         version=__version__,
         layer=UNIGROK_LAYER or "public",
@@ -6704,6 +6708,8 @@ async def grok_mcp_status(refresh: bool = False) -> dict[str, Any]:
         metered_api_enabled=METERED_API_ENABLED,
         cloudrun=is_cloudrun_runtime(),
     )
+    body["affiliation"] = affiliation
+    return body
 
 
 @mcp.tool(annotations=READ_ONLY)
@@ -7493,6 +7499,13 @@ class CallerIdentityMiddleware:
                 caller = principal_label(principal)
                 if caller:
                     caller_token = _CALLER_ID_CONTEXT.set(caller)
+                # OAuth claims may carry a GitHub login for affiliation (never X-Client-ID).
+                if isinstance(claims, dict):
+                    github_affiliation.set_request_github_login(
+                        claims.get("github_login")
+                        or claims.get("login")
+                        or claims.get("preferred_username")
+                    )
             else:
                 headers = {
                     key.decode("latin-1").lower(): value.decode("latin-1")
@@ -7502,9 +7515,12 @@ class CallerIdentityMiddleware:
                 if raw:
                     caller = re.sub(r"[^a-z0-9._:-]+", "-", raw)[:80]
                     caller_token = _CALLER_ID_CONTEXT.set(caller)
+                # Never treat X-Client-ID as GitHub affiliation.
+                github_affiliation.clear_request_github_login()
         try:
             await self.app(scope, receive, send)
         finally:
+            github_affiliation.clear_request_github_login()
             if caller_token is not None:
                 _CALLER_ID_CONTEXT.reset(caller_token)
             if principal_token is not None:

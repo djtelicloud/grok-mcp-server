@@ -443,12 +443,25 @@ async def _perform_oauth_introspection(
         return None
     if public_mcp_resource() not in audiences:
         return None
-    return {
+    claims: dict[str, Any] = {
         "active": True,
         "scope": scopes,
         "unigrok_principal": principal,
         "unigrok_auth": "oauth",
     }
+    # Optional GitHub-shaped fields for official-contributor affiliation (no trust of client headers).
+    for key in ("login", "preferred_username", "nickname"):
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            claims["github_login"] = value.strip().lstrip("@")
+            claims[key] = value.strip()
+            break
+    user = payload.get("user")
+    if "github_login" not in claims and isinstance(user, dict):
+        login = user.get("login")
+        if isinstance(login, str) and login.strip():
+            claims["github_login"] = login.strip().lstrip("@")
+    return claims
 
 
 async def introspect_oauth_token(token: str, required: str) -> dict[str, Any] | None:
