@@ -94,10 +94,11 @@ recovery between compatible routes.
 
 ```bash
 docker compose up -d grok-mcp
-curl --fail --silent http://localhost:4765/readyz
+curl --fail --silent http://127.0.0.1:4765/readyz
 ```
 
-You are ready when the response says `"status":"ready"`.
+You are ready when the response says `"status":"ready"`. On Windows PowerShell, prefer
+`curl.exe -fsS http://127.0.0.1:4765/readyz` if the `curl` alias is unreliable.
 
 ### Multi-step agentic work (Ground pack)
 
