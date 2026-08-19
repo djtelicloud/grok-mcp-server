@@ -8,6 +8,7 @@ from urllib.parse import quote, unquote
 SCHEME = "unigrok://"
 KINDS = frozenset({"memories", "resources", "skills", "peers", "sessions"})
 _SAFE = ".-_~"
+PATH_MAX_BYTES = 512
 
 
 class CabinetUriError(ValueError):
@@ -48,21 +49,51 @@ class CabinetUri:
         return format_uri(self.scope, self.kind, self.path)
 
 
+def _valid_scope(value: str) -> str:
+    text = str(value or "").strip()
+    if not text or "\x00" in text or "\\" in text or len(text) > 128:
+        raise CabinetUriError("scope is invalid")
+    if any(part in {".", "..", ""} for part in text.split("/")):
+        raise CabinetUriError("scope is invalid")
+    return text
+
+
+def _valid_segment(value: str) -> str:
+    text = str(value or "")
+    if (
+        not text
+        or text in {".", ".."}
+        or "/" in text
+        or "\\" in text
+        or "\x00" in text
+    ):
+        raise CabinetUriError("path must not contain empty, '.', '..', slash, or NUL")
+    return text
+
+
+def fs_segment(value: str) -> str:
+    """Unambiguous directory name. `a:b` and `a--b` must not collide."""
+    text = str(value or "")
+    if not text or "\x00" in text or "\\" in text:
+        raise CabinetUriError("invalid filesystem segment")
+    if text in {".", ".."} or any(part in {".", "..", ""} for part in text.split("/")):
+        raise CabinetUriError("invalid filesystem segment")
+    return quote(text, safe=_SAFE)
+
+
 def format_uri(scope: str, kind: str, path: str = "") -> str:
     kind_n = str(kind or "").strip()
     if kind_n not in KINDS:
         raise CabinetUriError(f"kind must be one of {sorted(KINDS)}")
-    scope_n = str(scope or "").strip()
-    if not scope_n:
-        raise CabinetUriError("scope is required")
+    scope_n = _valid_scope(str(scope or "").strip())
     encoded_scope = quote(scope_n, safe=_SAFE)
     rest = str(path or "").strip("/")
     if rest:
-        parts = []
-        for segment in rest.split("/"):
-            if segment in {"", ".", ".."}:
-                raise CabinetUriError("path must not contain empty, '.', or '..' segments")
-            parts.append(quote(segment, safe=_SAFE))
+        if len(rest.encode()) > PATH_MAX_BYTES:
+            raise CabinetUriError("path exceeds 512 bytes")
+        parts = [
+            quote(_valid_segment(segment), safe=_SAFE) for segment in rest.split("/")
+        ]
         return f"{SCHEME}{encoded_scope}/{kind_n}/{'/'.join(parts)}"
     return f"{SCHEME}{encoded_scope}/{kind_n}"
 
@@ -77,21 +108,23 @@ def parse_uri(value: str) -> CabinetUri:
     parts = body.split("/")
     if len(parts) < 2:
         raise CabinetUriError("URI must include a kind")
-    scope = unquote(parts[0])
+    scope = _valid_scope(unquote(parts[0]))
     kind = unquote(parts[1])
     if kind not in KINDS:
         raise CabinetUriError(f"kind must be one of {sorted(KINDS)}")
-    segs = [unquote(p) for p in parts[2:] if p != ""]
-    if any(seg in {".", "..", ""} for seg in segs):
-        raise CabinetUriError("path must not contain empty, '.', or '..' segments")
-    return CabinetUri(scope=scope, kind=kind, path="/".join(segs))
+    segs = [_valid_segment(unquote(part)) for part in parts[2:] if part != ""]
+    path = "/".join(segs)
+    if len(path.encode()) > PATH_MAX_BYTES:
+        raise CabinetUriError("path exceeds 512 bytes")
+    return CabinetUri(scope=scope, kind=kind, path=path)
 
 
-def _leaf_name(value: str) -> str:
+def _name_path(value: str, leaf: str) -> str:
     text = str(value or "").strip().strip("/")
     if not text:
         raise CabinetUriError("name is required")
-    return text.replace("/", "__").replace(":", "--")
+    safe = [_valid_segment(piece) for piece in text.split("/")]
+    return "/".join([*safe, leaf])
 
 
 def fact_uri(scope: str, fact_id: int) -> CabinetUri:
@@ -99,8 +132,8 @@ def fact_uri(scope: str, fact_id: int) -> CabinetUri:
 
 
 def handoff_uri(scope: str, session: str) -> CabinetUri:
-    return CabinetUri(scope=scope, kind="sessions", path=f"{_leaf_name(session)}/handoff")
+    return CabinetUri(scope=scope, kind="sessions", path=_name_path(session, "handoff"))
 
 
 def peer_last_job_uri(scope: str, seat: str) -> CabinetUri:
-    return CabinetUri(scope=scope, kind="peers", path=f"{_leaf_name(seat)}/last-job")
+    return CabinetUri(scope=scope, kind="peers", path=_name_path(seat, "last-job"))

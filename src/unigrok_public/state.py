@@ -986,6 +986,8 @@ class PublicStateStore:
             raise ValueError("fact must not be empty")
         if len(safe_fact) > 4_000:
             raise ValueError("fact exceeds the 4000 character limit")
+        if contains_origin(safe_fact):
+            raise ValueError("fact must not contain cabinet origin markers")
         return int(
             await self._write(
                 self._save_fact_sync,
@@ -1400,7 +1402,10 @@ class PublicStateStore:
         terms = _terms(query)
         if not terms:
             return None
-        match = " OR ".join(terms)
+        quoted = ['"' + term.replace('"', "") + '"' for term in terms if term]
+        if not quoted:
+            return None
+        match = " OR ".join(quoted)
         try:
             rows = connection.execute(
                 "SELECT uri FROM cabinet_fts WHERE cabinet_fts MATCH ? ORDER BY rank",
@@ -1525,8 +1530,17 @@ class PublicStateStore:
             raise ValueError("qid is required")
         return await self._read(self._load_trajectory_sync, token)
 
-    def _cabinet_ls_sync(self, uri_value: str) -> list[dict[str, Any]]:
+    def _guard_cabinet_uri(self, uri: CabinetUri, scope_prefix: str | None) -> None:
+        if TENANT_SCOPE_PATTERN.match(uri.scope):
+            prefix = str(scope_prefix or "")
+            if not prefix or not uri.scope.startswith(prefix):
+                raise ValueError("cabinet uri is outside the caller tenant")
+
+    def _cabinet_ls_sync(
+        self, uri_value: str, scope_prefix: str | None
+    ) -> list[dict[str, Any]]:
         uri = parse_uri(uri_value)
+        self._guard_cabinet_uri(uri, scope_prefix)
         directory = self._wiki().node_dir(uri)
         if not directory.is_dir():
             return []
@@ -1555,11 +1569,22 @@ class PublicStateStore:
                 )
         return items
 
-    async def cabinet_ls(self, uri: str) -> list[dict[str, Any]]:
-        return list(await self._read(self._cabinet_ls_sync, str(uri)))
+    async def cabinet_ls(
+        self, uri: str, *, scope_prefix: str | None = None
+    ) -> list[dict[str, Any]]:
+        return list(
+            await self._read(
+                self._cabinet_ls_sync,
+                str(uri),
+                str(scope_prefix or "")[:40] or None,
+            )
+        )
 
-    def _cabinet_read_sync(self, uri_value: str, layer: int) -> dict[str, Any]:
+    def _cabinet_read_sync(
+        self, uri_value: str, layer: int, scope_prefix: str | None
+    ) -> dict[str, Any]:
         uri = parse_uri(uri_value)
+        self._guard_cabinet_uri(uri, scope_prefix)
         wiki = self._wiki()
         if layer <= 0:
             text = wiki.read_l0(uri)
@@ -1569,9 +1594,18 @@ class PublicStateStore:
             text = wiki.read_leaf(uri)
         return {"uri": str(uri), "layer": int(layer), "text": text}
 
-    async def cabinet_read(self, uri: str, *, layer: int = 0) -> dict[str, Any]:
+    async def cabinet_read(
+        self, uri: str, *, layer: int = 0, scope_prefix: str | None = None
+    ) -> dict[str, Any]:
         bounded = max(0, min(int(layer), 2))
-        return dict(await self._read(self._cabinet_read_sync, str(uri), bounded))
+        return dict(
+            await self._read(
+                self._cabinet_read_sync,
+                str(uri),
+                bounded,
+                str(scope_prefix or "")[:40] or None,
+            )
+        )
 
     def _write_peer_last_job_sync(
         self, seat: str, body: str, scope: str, next_step: str, now: str
@@ -1620,6 +1654,8 @@ class PublicStateStore:
         text = str(body or "").strip()
         if not text:
             raise ValueError("last-job body must not be empty")
+        if contains_origin(text) or contains_origin(str(next_step or "")):
+            raise ValueError("last-job must not contain cabinet origin markers")
         return str(
             await self._write(
                 self._write_peer_last_job_sync,

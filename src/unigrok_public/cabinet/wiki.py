@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 
 from .layers import TOKEN_L0, TOKEN_L1, should_refresh, zero_llm_l0, zero_llm_l1
-from .uri import CabinetUri
+from .uri import CabinetUri, CabinetUriError, fs_segment
 
 ABSTRACT = ".abstract.md"
 OVERVIEW = ".overview.md"
@@ -18,20 +18,26 @@ class WikiStore:
         self.root = Path(root)
 
     def node_dir(self, uri: CabinetUri) -> Path:
-        parts = [self._safe_scope(uri.scope), uri.kind]
+        parts = [fs_segment(uri.scope), uri.kind]
         rest = uri.normalized_path()
         if rest:
-            parts.extend(self._safe_scope(segment) for segment in rest.split("/"))
-        return self.root.joinpath(*parts)
+            parts.extend(fs_segment(segment) for segment in rest.split("/"))
+        return self._contained(self.root.joinpath(*parts))
 
     def leaf_path(self, uri: CabinetUri) -> Path:
         directory = self.node_dir(uri)
         if uri.normalized_path():
-            return directory.parent / f"{directory.name}.md"
-        return directory / "INDEX.md"
+            return self._contained(directory.parent / f"{directory.name}.md")
+        return self._contained(directory / "INDEX.md")
 
-    def _safe_scope(self, scope: str) -> str:
-        return scope.replace("/", "__").replace(":", "--")
+    def _contained(self, path: Path) -> Path:
+        root = self.root.expanduser().resolve()
+        target = path.expanduser().resolve()
+        try:
+            target.relative_to(root)
+        except ValueError as exc:
+            raise CabinetUriError("path escapes cabinet root") from exc
+        return target
 
     def write_leaf(self, uri: CabinetUri, body: str, *, title: str | None = None) -> Path:
         path = self.leaf_path(uri)

@@ -29,6 +29,9 @@ All notable changes to the public UniGrok gateway.
   Needle remains inactive by default.
 
 ### Fixed
+- Context cabinet red-team: percent-encode wiki paths so `a:b` cannot collide with
+  `a--b`; reject encoded `..` traversal; quote FTS terms; refuse origin-marker
+  re-entry; tenant-fence `cabinet_ls`/`cabinet_read`; JSON-quote injected facts.
 - Durable shutdown is monotonic: an atomic interrupted transition cannot overwrite a
   terminal result, shutdown cancellation preserves the honest `lost`/unknown-provider
   payload, explicit cancellation remains distinguishable, and first restart polls make

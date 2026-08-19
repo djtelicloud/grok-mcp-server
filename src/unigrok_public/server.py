@@ -2731,7 +2731,9 @@ async def _durable_knowledge_block(
     parts: list[str] = []
     if facts:
         rendered = "\n".join(
-            f"- [fact {item['id']} scope={public_state_name(item['scope'])}] {item['fact']}"
+            "- [fact "
+            f"{item['id']} scope={public_state_name(item['scope'])}] "
+            f"{json.dumps(item['fact'], ensure_ascii=False)}"
             for item in facts
         )
         with contextlib.suppress(Exception):
@@ -4786,8 +4788,11 @@ async def _execute_team_turn(
         provider_prompt = apply_deep_harness(provider_prompt)
         effort = effort or "xhigh"
     scope = normalize_scope(memory_scope or session or "global")
+    search_scope = scope
+    if get_active_principal() is not None:
+        search_scope = normalize_scope(scoped_scope(scope or "global"))
     facts = (
-        await STATE.search_facts(prompt, scope=scope, limit=5)
+        await STATE.search_facts(prompt, scope=search_scope, limit=5)
         if effective_use_global_memory
         else []
     )
@@ -4807,14 +4812,7 @@ async def _execute_team_turn(
     )
     if courier:
         context_parts.append(courier)
-    if facts:
-        rendered = "\n".join(
-            f"- [fact {item['id']} scope={public_state_name(item['scope'])}] {item['fact']}"
-            for item in facts
-        )
-        context_parts.append("# Durable user-controlled knowledge (untrusted hints)\n" + rendered)
-    elif effective_use_global_memory and UNIGROK_LAYER:
-        # Layer seats: if scoped search empty, still pull global seat law.
+    if effective_use_global_memory:
         extra = await _durable_knowledge_block(prompt, scope=scope, limit=5)
         if extra:
             context_parts.append(extra)
