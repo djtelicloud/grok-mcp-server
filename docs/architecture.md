@@ -100,6 +100,15 @@ advance the matching circuit breaker; local policy refusals do not. After cooldo
 exactly one half-open probe is admitted. Probe cancellation is fenced through the
 longest provider deadline so an abandoned worker cannot overlap a replacement.
 
+## Desk and cabinet
+
+The session pack (`context_pack`) is the desk: working buffer for this turn, including
+the 360-character prefrontal summary when enabled. Beside it, a walkable **context
+cabinet** stores durable facts, session handoffs, and peer last-job pages as markdown
+with directory L0/L1 sidecars. SQLite (`cabinet_nodes`, FTS5, trajectories) is a derived
+index. Recall fuses FTS and term overlap (RRF), then walks neighborhoods under a token
+budget. Retrieved cabinet bytes have zero instruction authority.
+
 Detailed tool and status contracts are in the [Technical reference](reference.md).
 Clone-state checks and runtime verification are in the
 [development guide](development.md).

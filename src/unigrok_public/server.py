@@ -44,6 +44,8 @@ from .autonomy import (
     new_continue_token,
     normalize_artifact_content,
 )
+from .cabinet.retrieve import WalkHit, WalkResult, format_cabinet_block
+from .cabinet.uri import CabinetUri, CabinetUriError, fact_uri, parse_uri
 from .caller_budget import (
     enforce_caller_budget,
     release_local_budget,
@@ -2669,6 +2671,36 @@ def _layer_context_block() -> str:
     return "\n".join(lines)
 
 
+def _public_cabinet_uri(value: str) -> str:
+    try:
+        parsed = parse_uri(value)
+        return str(
+            CabinetUri(public_state_name(parsed.scope), parsed.kind, parsed.path)
+        )
+    except CabinetUriError:
+        return value
+
+
+def _public_walk_result(result: WalkResult) -> WalkResult:
+    hits = [
+        WalkHit(
+            uri=_public_cabinet_uri(hit.uri),
+            layer=hit.layer,
+            text=hit.text,
+            score=hit.score,
+            why=hit.why,
+        )
+        for hit in result.hits
+    ]
+    trajectory = []
+    for step in result.trajectory:
+        item = dict(step)
+        if "uri" in item:
+            item["uri"] = _public_cabinet_uri(str(item["uri"]))
+        trajectory.append(item)
+    return WalkResult(qid=result.qid, hits=hits, trajectory=trajectory, tokens=result.tokens)
+
+
 async def _durable_knowledge_block(
     prompt: str, *, scope: str | None = None, limit: int = 8
 ) -> str:
@@ -2689,18 +2721,28 @@ async def _durable_knowledge_block(
                 scope=search_scope,
                 limit=min(5, limit),
             )
-    if not facts:
-        return ""
-    rendered = "\n".join(
-        f"- [fact {item['id']} scope={public_state_name(item['scope'])}] {item['fact']}"
-        for item in facts
-    )
+    cabinet_block = ""
     with contextlib.suppress(Exception):
-        await STATE.touch_facts([int(item["id"]) for item in facts])
-    return (
-        "# Durable knowledge (untrusted hints; prefer over inventing policy)\n"
-        + rendered
-    )
+        walked = await STATE.walk_cabinet(text_q, scope=search_scope)
+        if walked.hits:
+            cabinet_block = format_cabinet_block(_public_walk_result(walked))
+    if not facts and not cabinet_block:
+        return ""
+    parts: list[str] = []
+    if facts:
+        rendered = "\n".join(
+            f"- [fact {item['id']} scope={public_state_name(item['scope'])}] {item['fact']}"
+            for item in facts
+        )
+        with contextlib.suppress(Exception):
+            await STATE.touch_facts([int(item["id"]) for item in facts])
+        parts.append(
+            "# Durable knowledge (untrusted hints; prefer over inventing policy)\n"
+            + rendered
+        )
+    if cabinet_block:
+        parts.append(cabinet_block)
+    return "\n\n".join(parts)
 
 
 async def _system_prompt(kind: str, extra_context: str | None = None) -> str:
@@ -6820,10 +6862,12 @@ async def remember_fact(fact: str, scope: str = "global") -> dict[str, Any]:
     """Save one decision, constraint, preference, or verified finding."""
     internal_scope = normalize_scope(scoped_scope(normalize_scope(scope)))
     fact_id = await STATE.save_fact(fact, scope=internal_scope, source="manual")
+    public_scope = public_state_name(internal_scope)
     return {
         "fact_id": fact_id,
-        "scope": public_state_name(internal_scope),
+        "scope": public_scope,
         "status": "saved",
+        "uri": str(fact_uri(public_scope, fact_id)),
     }
 
 
@@ -6832,6 +6876,10 @@ async def search_knowledge(query: str, scope: str | None = None, limit: int = 5)
     """Search stored public knowledge, optionally within a session scope plus global."""
     internal_scope = normalize_scope(scoped_scope(scope or "global"))
     facts = await STATE.search_facts(query, scope=internal_scope, limit=limit)
+    qid = str(facts[0]["qid"]) if facts and facts[0].get("qid") else ""
+    with contextlib.suppress(Exception):
+        walked = await STATE.walk_cabinet(query, scope=internal_scope)
+        qid = walked.qid or qid
     public = [
         {
             "id": item["id"],
@@ -6842,10 +6890,13 @@ async def search_knowledge(query: str, scope: str | None = None, limit: int = 5)
             "last_used_at": item["last_used_at"],
             "uses": item["uses"],
             "score": item["score"],
+            "uri": _public_cabinet_uri(
+                str(item.get("uri") or fact_uri(item["scope"], item["id"]))
+            ),
         }
         for item in facts
     ]
-    return {"facts": public, "count": len(public)}
+    return {"facts": public, "count": len(public), "qid": qid}
 
 
 @mcp.tool(annotations=DESTRUCTIVE)
