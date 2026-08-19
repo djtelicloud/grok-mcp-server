@@ -5,6 +5,11 @@ All notable changes to the public UniGrok gateway.
 ## [Unreleased]
 
 ### Added
+- Context cabinet beside the session desk: markdown wiki + L0/L1 sidecars, RRF
+  neighborhood walk, session handoff compile, and `peers/{seat}/last-job`.
+  `remember_fact` dual-writes `unigrok://` leaves; `search_knowledge` keeps the
+  old JSON and adds `uri`/`qid`. Retrieved cabinet text is untrusted evidence.
+  The 29-tool MCP surface is unchanged. No AGPL vendor code.
 - Experimental `gemmagrok-local` Compose profile and standalone MCP helper for an
   explicitly selected, operator-owned local model runtime. The helper is loopback-only,
   exposes `chat`/`status`, receives no Grok credentials, and is not part of automatic
@@ -24,6 +29,9 @@ All notable changes to the public UniGrok gateway.
   Needle remains inactive by default.
 
 ### Fixed
+- Context cabinet red-team: percent-encode wiki paths so `a:b` cannot collide with
+  `a--b`; reject encoded `..` traversal; quote FTS terms; refuse origin-marker
+  re-entry; tenant-fence `cabinet_ls`/`cabinet_read`; JSON-quote injected facts.
 - Durable shutdown is monotonic: an atomic interrupted transition cannot overwrite a
   terminal result, shutdown cancellation preserves the honest `lost`/unknown-provider
   payload, explicit cancellation remains distinguishable, and first restart polls make

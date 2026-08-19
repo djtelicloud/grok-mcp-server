@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 import re
@@ -11,6 +12,11 @@ from pathlib import Path
 from typing import Any
 
 from . import local_plane_loader
+from .cabinet.compile import compile_session, contains_origin, peer_last_job_markdown
+from .cabinet.layers import estimate_tokens, zero_llm_l0
+from .cabinet.retrieve import Candidate, WalkResult, walk
+from .cabinet.uri import CabinetUri, fact_uri, handoff_uri, parse_uri, peer_last_job_uri
+from .cabinet.wiki import WikiStore
 
 SESSION_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
 SCOPE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
@@ -169,6 +175,24 @@ def _terms(value: str) -> tuple[str, ...]:
     return tuple(dict.fromkeys(match.lower() for match in TERM_PATTERN.findall(value)))
 
 
+def cabinet_qid(query: str, scope: str | None) -> str:
+    blob = f"{query}\n{scope or ''}".encode()
+    return hashlib.sha256(blob).hexdigest()[:16]
+
+
+def _age_days(iso: str) -> float:
+    raw = str(iso or "").strip()
+    if not raw:
+        return 0.0
+    try:
+        stamp = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return 0.0
+    if stamp.tzinfo is None:
+        stamp = stamp.replace(tzinfo=UTC)
+    return max(0.0, (datetime.now(UTC) - stamp).total_seconds() / 86_400.0)
+
+
 class PublicStateStore:
     """Small local SQLite store for public sessions and distilled facts.
 
@@ -189,9 +213,11 @@ class PublicStateStore:
             or (Path.home() / ".local" / "share" / "unigrok" / "public-state.db")
         )
         self.path = Path(configured).expanduser()
+        self.cabinet_root = self.path.parent / f"{self.path.stem}-cabinet"
         self._initialized = False
         self._init_lock = asyncio.Lock()
         self._write_lock = asyncio.Lock()
+        self._cabinet_has_fts = False
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.path, timeout=30)
@@ -387,6 +413,7 @@ class PublicStateStore:
             )
 
             self._ensure_local_plane_schema_sync(connection)
+            self._ensure_cabinet_schema_sync(connection)
             self._seed_local_plane_sync(connection)
 
             columns = {
@@ -419,6 +446,67 @@ class PublicStateStore:
             )
             self._prune_retention_connection(connection)
             connection.commit()
+
+    def _ensure_cabinet_schema_sync(self, connection: sqlite3.Connection) -> None:
+        connection.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS cabinet_nodes (
+                uri TEXT PRIMARY KEY,
+                parent TEXT,
+                scope TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                path TEXT NOT NULL,
+                is_dir INTEGER NOT NULL DEFAULT 0,
+                title TEXT,
+                l0 TEXT,
+                l1 TEXT,
+                body TEXT,
+                sha256 TEXT,
+                tokens_l0 INTEGER,
+                tokens_l1 INTEGER,
+                pinned INTEGER NOT NULL DEFAULT 0,
+                tags TEXT,
+                updated_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS cabinet_nodes_scope
+                ON cabinet_nodes(scope, kind);
+            CREATE TABLE IF NOT EXISTS cabinet_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                ts TEXT NOT NULL,
+                uri TEXT,
+                body TEXT NOT NULL,
+                hash TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS cabinet_events_session
+                ON cabinet_events(session, id);
+            CREATE TABLE IF NOT EXISTS cabinet_traj (
+                qid TEXT PRIMARY KEY,
+                query TEXT NOT NULL,
+                gamma_json TEXT NOT NULL,
+                picked_uris TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS cabinet_handoff (
+                cwd_or_scope TEXT PRIMARY KEY,
+                from_seat TEXT,
+                to_seat TEXT,
+                state TEXT,
+                body TEXT NOT NULL,
+                obs_hash TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+            """
+        )
+        try:
+            connection.execute(
+                "CREATE VIRTUAL TABLE IF NOT EXISTS cabinet_fts USING fts5("
+                "title, l0, l1, body, uri UNINDEXED)"
+            )
+            self._cabinet_has_fts = True
+        except sqlite3.OperationalError:
+            self._cabinet_has_fts = False
 
     def _ensure_local_plane_schema_sync(self, connection: sqlite3.Connection) -> None:
         schema_path = Path(__file__).with_name("schema_local_plane.sql")
@@ -681,7 +769,12 @@ class PublicStateStore:
                 "SELECT COUNT(*) FROM messages WHERE session_name=?", (session,)
             ).fetchone()
             connection.commit()
-        return int(row[0] if row else 0), True
+        count = int(row[0] if row else 0)
+        try:
+            self._compile_session_turn_sync(session, safe_user, safe_assistant, now)
+        except (OSError, sqlite3.Error, ValueError):
+            pass
+        return count, True
 
     async def append_turn(
         self,
@@ -882,8 +975,10 @@ class PublicStateStore:
             row = connection.execute(
                 "SELECT id FROM knowledge WHERE scope=? AND fact=?", (scope, fact)
             ).fetchone()
+            fact_id = int(row[0])
+            self._cabinet_write_fact_sync(connection, fact_id, scope, fact, now)
             connection.commit()
-        return int(row[0])
+        return fact_id
 
     async def save_fact(self, fact: str, *, scope: str = "global", source: str = "manual") -> int:
         safe_fact = redact_secrets(fact).strip()
@@ -891,6 +986,8 @@ class PublicStateStore:
             raise ValueError("fact must not be empty")
         if len(safe_fact) > 4_000:
             raise ValueError("fact exceeds the 4000 character limit")
+        if contains_origin(safe_fact):
+            raise ValueError("fact must not contain cabinet origin markers")
         return int(
             await self._write(
                 self._save_fact_sync,
@@ -946,7 +1043,12 @@ class PublicStateStore:
             item["score"] = overlap / max(len(query_terms), 1)
             scored.append(item)
         scored.sort(key=lambda item: (float(item["score"]), int(item["id"])), reverse=True)
-        return scored[:limit]
+        qid = cabinet_qid(query, scope)
+        selected = scored[:limit]
+        for item in selected:
+            item["uri"] = str(fact_uri(str(item["scope"]), int(item["id"])))
+            item["qid"] = qid
+        return selected
 
     async def search_facts(
         self, query: str, *, scope: str | None = None, limit: int = 5
@@ -984,13 +1086,27 @@ class PublicStateStore:
     def _delete_fact_sync(self, fact_id: int, scope_prefix: str | None) -> bool:
         with self._connect() as connection:
             if scope_prefix:
-                cursor = connection.execute(
-                    "DELETE FROM knowledge WHERE id=? AND scope LIKE ?",
+                row = connection.execute(
+                    "SELECT id, scope FROM knowledge WHERE id=? AND scope LIKE ?",
                     (fact_id, f"{scope_prefix}%"),
-                )
+                ).fetchone()
             else:
-                cursor = connection.execute("DELETE FROM knowledge WHERE id=?", (fact_id,))
+                row = connection.execute(
+                    "SELECT id, scope FROM knowledge WHERE id=?",
+                    (fact_id,),
+                ).fetchone()
+            if row is None:
+                return False
+            uri = fact_uri(str(row["scope"]), int(row["id"]))
+            self._cabinet_delete_node_sync(connection, str(uri))
+            cursor = connection.execute(
+                "DELETE FROM knowledge WHERE id=?", (int(row["id"]),)
+            )
             connection.commit()
+        try:
+            WikiStore(self.cabinet_root).delete_leaf(uri)
+        except OSError:
+            pass
         return bool(cursor.rowcount)
 
     async def delete_fact(self, fact_id: int, *, scope_prefix: str | None = None) -> bool:
@@ -999,6 +1115,555 @@ class PublicStateStore:
                 self._delete_fact_sync,
                 int(fact_id),
                 str(scope_prefix or "")[:40] or None,
+            )
+        )
+
+    def _wiki(self) -> WikiStore:
+        return WikiStore(self.cabinet_root)
+
+    def _cabinet_upsert_node_sync(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        uri: CabinetUri,
+        is_dir: bool,
+        title: str,
+        l0: str,
+        l1: str,
+        body: str,
+        now: str,
+        pinned: bool = False,
+        tags: str = "",
+    ) -> None:
+        parent = uri.parent()
+        parent_s = str(parent) if parent is not None else None
+        sha = hashlib.sha256(str(body or l0 or "").encode("utf-8")).hexdigest()
+        connection.execute(
+            """
+            INSERT INTO cabinet_nodes(
+                uri, parent, scope, kind, path, is_dir, title, l0, l1, body,
+                sha256, tokens_l0, tokens_l1, pinned, tags, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(uri) DO UPDATE SET
+                parent=excluded.parent,
+                title=excluded.title,
+                l0=excluded.l0,
+                l1=excluded.l1,
+                body=excluded.body,
+                sha256=excluded.sha256,
+                tokens_l0=excluded.tokens_l0,
+                tokens_l1=excluded.tokens_l1,
+                pinned=excluded.pinned,
+                tags=excluded.tags,
+                updated_at=excluded.updated_at
+            """,
+            (
+                str(uri),
+                parent_s,
+                uri.scope,
+                uri.kind,
+                uri.normalized_path(),
+                int(is_dir),
+                title,
+                l0,
+                l1,
+                body,
+                sha,
+                estimate_tokens(l0),
+                estimate_tokens(l1),
+                int(pinned),
+                tags,
+                now,
+            ),
+        )
+        if self._cabinet_has_fts:
+            connection.execute("DELETE FROM cabinet_fts WHERE uri=?", (str(uri),))
+            connection.execute(
+                "INSERT INTO cabinet_fts(title, l0, l1, body, uri) VALUES (?, ?, ?, ?, ?)",
+                (title, l0, l1, body, str(uri)),
+            )
+
+    def _cabinet_delete_node_sync(
+        self, connection: sqlite3.Connection, uri: str
+    ) -> None:
+        connection.execute("DELETE FROM cabinet_nodes WHERE uri=?", (uri,))
+        if self._cabinet_has_fts:
+            connection.execute("DELETE FROM cabinet_fts WHERE uri=?", (uri,))
+
+    def _cabinet_write_fact_sync(
+        self,
+        connection: sqlite3.Connection,
+        fact_id: int,
+        scope: str,
+        fact: str,
+        now: str,
+    ) -> None:
+        uri = fact_uri(scope, fact_id)
+        wiki = self._wiki()
+        try:
+            wiki.write_leaf(uri, fact, title=f"fact {fact_id}")
+        except OSError:
+            pass
+        l0 = zero_llm_l0(fact)
+        self._cabinet_upsert_node_sync(
+            connection,
+            uri=uri,
+            is_dir=False,
+            title=f"fact {fact_id}",
+            l0=l0,
+            l1="",
+            body=fact,
+            now=now,
+        )
+        parent = uri.parent()
+        if parent is not None:
+            self._cabinet_upsert_node_sync(
+                connection,
+                uri=parent,
+                is_dir=True,
+                title=parent.normalized_path() or parent.kind,
+                l0=wiki.read_l0(parent),
+                l1=wiki.read_l1(parent),
+                body="",
+                now=now,
+            )
+            kind_root = CabinetUri(scope, uri.kind, "")
+            self._cabinet_upsert_node_sync(
+                connection,
+                uri=kind_root,
+                is_dir=True,
+                title=uri.kind,
+                l0=wiki.read_l0(kind_root),
+                l1=wiki.read_l1(kind_root),
+                body="",
+                now=now,
+            )
+
+    def _compile_session_turn_sync(
+        self,
+        session: str,
+        user_text: str,
+        assistant_text: str,
+        now: str,
+    ) -> None:
+        if contains_origin(user_text) or contains_origin(assistant_text):
+            return
+        compiled = compile_session(
+            session,
+            [
+                {"role": "user", "content": user_text},
+                {"role": "assistant", "content": assistant_text},
+            ],
+            scope="global",
+        )
+        uri = handoff_uri("global", session)
+        with self._connect() as connection:
+            existing = connection.execute(
+                "SELECT obs_hash FROM cabinet_handoff WHERE cwd_or_scope=?",
+                (session,),
+            ).fetchone()
+            if existing and str(existing["obs_hash"]) == compiled["observation"]:
+                return
+            for event in compiled["events"]:
+                body = str(event.get("body") or "")
+                connection.execute(
+                    """
+                    INSERT INTO cabinet_events(session, kind, ts, uri, body, hash)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        session,
+                        str(event.get("kind") or "other"),
+                        now,
+                        compiled["uri"],
+                        body,
+                        hashlib.sha256(body.encode("utf-8")).hexdigest(),
+                    ),
+                )
+            connection.execute(
+                """
+                INSERT INTO cabinet_handoff(
+                    cwd_or_scope, from_seat, to_seat, state, body, obs_hash, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(cwd_or_scope) DO UPDATE SET
+                    from_seat=excluded.from_seat,
+                    to_seat=excluded.to_seat,
+                    state=excluded.state,
+                    body=excluded.body,
+                    obs_hash=excluded.obs_hash,
+                    created_at=excluded.created_at
+                """,
+                (
+                    session,
+                    compiled["from_seat"],
+                    compiled["to_seat"],
+                    "open",
+                    compiled["handoff"],
+                    compiled["observation"],
+                    now,
+                ),
+            )
+            wiki = self._wiki()
+            try:
+                wiki.write_leaf(uri, compiled["handoff"], title=f"{session} handoff")
+            except OSError:
+                pass
+            self._cabinet_upsert_node_sync(
+                connection,
+                uri=uri,
+                is_dir=False,
+                title=f"{session} handoff",
+                l0=zero_llm_l0(compiled["handoff"]),
+                l1="",
+                body=compiled["handoff"],
+                now=now,
+            )
+            connection.commit()
+
+    def _scope_rows(
+        self,
+        connection: sqlite3.Connection,
+        table: str,
+        scope: str | None,
+        *,
+        order: str,
+        limit: int,
+    ) -> list[sqlite3.Row]:
+        tenant_match = TENANT_SCOPE_PATTERN.match(scope or "")
+        tenant_global = (
+            f"{tenant_match.group(1)}:global" if tenant_match is not None else None
+        )
+        statements = {
+            ("cabinet_nodes", "updated"): (
+                "SELECT * FROM cabinet_nodes WHERE scope IN (?, ?) "
+                "ORDER BY updated_at DESC LIMIT ?",
+                "SELECT * FROM cabinet_nodes WHERE scope=? "
+                "ORDER BY updated_at DESC LIMIT ?",
+                "SELECT * FROM cabinet_nodes WHERE scope IN ('global', ?) "
+                "ORDER BY updated_at DESC LIMIT ?",
+                "SELECT * FROM cabinet_nodes WHERE scope='global' "
+                "ORDER BY updated_at DESC LIMIT ?",
+                "SELECT * FROM cabinet_nodes WHERE scope NOT GLOB ? "
+                "ORDER BY updated_at DESC LIMIT ?",
+            ),
+            ("knowledge", "id"): (
+                "SELECT * FROM knowledge WHERE scope IN (?, ?) "
+                "ORDER BY id DESC LIMIT ?",
+                "SELECT * FROM knowledge WHERE scope=? ORDER BY id DESC LIMIT ?",
+                "SELECT * FROM knowledge WHERE scope IN ('global', ?) "
+                "ORDER BY id DESC LIMIT ?",
+                "SELECT * FROM knowledge WHERE scope='global' ORDER BY id DESC LIMIT ?",
+                "SELECT * FROM knowledge WHERE scope NOT GLOB ? ORDER BY id DESC LIMIT ?",
+            ),
+        }
+        key = (
+            table,
+            "updated" if order == "ORDER BY updated_at DESC" else "id",
+        )
+        sql = statements.get(key)
+        if sql is None:
+            raise ValueError("unsupported cabinet table")
+        in_two, one, with_global, only_global, unauth = sql
+        if scope and tenant_global and scope != tenant_global:
+            return connection.execute(in_two, (tenant_global, scope, limit)).fetchall()
+        if scope and tenant_global:
+            return connection.execute(one, (tenant_global, limit)).fetchall()
+        if scope and scope != "global":
+            return connection.execute(with_global, (scope, limit)).fetchall()
+        if scope:
+            return connection.execute(only_global, (limit,)).fetchall()
+        return connection.execute(unauth, (TENANT_SCOPE_GLOB, limit)).fetchall()
+
+    def _candidate_from_node(self, row: sqlite3.Row) -> Candidate:
+        tags = tuple(
+            part for part in str(row["tags"] or "").split() if part
+        )
+        return Candidate(
+            uri=str(row["uri"]),
+            scope=str(row["scope"]),
+            kind=str(row["kind"]),
+            path=str(row["path"] or ""),
+            parent_uri=str(row["parent"]) if row["parent"] else None,
+            is_dir=bool(row["is_dir"]),
+            l0=str(row["l0"] or ""),
+            l1=str(row["l1"] or ""),
+            body=str(row["body"] or ""),
+            updated_at=str(row["updated_at"] or ""),
+            age_days=_age_days(str(row["updated_at"] or "")),
+            pinned=bool(row["pinned"]),
+            tags=tags,
+        )
+
+    def _fts_ranking_sync(
+        self, connection: sqlite3.Connection, query: str, allowed: set[str]
+    ) -> list[str] | None:
+        if not self._cabinet_has_fts or not allowed:
+            return None
+        terms = _terms(query)
+        if not terms:
+            return None
+        quoted = ['"' + term.replace('"', "") + '"' for term in terms if term]
+        if not quoted:
+            return None
+        match = " OR ".join(quoted)
+        try:
+            rows = connection.execute(
+                "SELECT uri FROM cabinet_fts WHERE cabinet_fts MATCH ? ORDER BY rank",
+                (match,),
+            ).fetchall()
+        except sqlite3.OperationalError:
+            return None
+        return [str(row["uri"]) for row in rows if str(row["uri"]) in allowed]
+
+    def _walk_cabinet_sync(
+        self, query: str, scope: str | None, budget: int
+    ) -> WalkResult:
+        qid = cabinet_qid(query, scope)
+        with self._connect() as connection:
+            rows = self._scope_rows(
+                connection,
+                "cabinet_nodes",
+                scope,
+                order="ORDER BY updated_at DESC",
+                limit=400,
+            )
+            candidates = [self._candidate_from_node(row) for row in rows]
+            if not candidates:
+                facts = self._scope_rows(
+                    connection,
+                    "knowledge",
+                    scope,
+                    order="ORDER BY id DESC",
+                    limit=400,
+                )
+                for fact in facts:
+                    uri = fact_uri(str(fact["scope"]), int(fact["id"]))
+                    body = str(fact["fact"] or "")
+                    candidates.append(
+                        Candidate(
+                            uri=str(uri),
+                            scope=str(fact["scope"]),
+                            kind="memories",
+                            path=uri.normalized_path(),
+                            parent_uri=str(uri.parent()) if uri.parent() else None,
+                            is_dir=False,
+                            l0=zero_llm_l0(body),
+                            l1="",
+                            body=body,
+                            updated_at=str(fact["created_at"] or ""),
+                            age_days=_age_days(str(fact["created_at"] or "")),
+                        )
+                    )
+            allowed = {item.uri for item in candidates}
+            fts_ranking = self._fts_ranking_sync(connection, query, allowed)
+            result = walk(
+                query,
+                candidates,
+                qid=qid,
+                budget=max(1, int(budget)),
+                fts_ranking=fts_ranking,
+            )
+            connection.execute(
+                """
+                INSERT INTO cabinet_traj(qid, query, gamma_json, picked_uris, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(qid) DO UPDATE SET
+                    query=excluded.query,
+                    gamma_json=excluded.gamma_json,
+                    picked_uris=excluded.picked_uris,
+                    created_at=excluded.created_at
+                """,
+                (
+                    result.qid,
+                    query,
+                    json.dumps(result.trajectory, ensure_ascii=False),
+                    json.dumps([hit.uri for hit in result.hits], ensure_ascii=False),
+                    utc_now(),
+                ),
+            )
+            connection.commit()
+        return result
+
+    async def walk_cabinet(
+        self,
+        query: str,
+        *,
+        scope: str | None = None,
+        budget: int = 2000,
+    ) -> WalkResult:
+        text = str(query or "").strip()
+        if not text:
+            raise ValueError("query must not be empty")
+        scope_value = normalize_scope(scope) if scope else None
+        return await self._write(
+            self._walk_cabinet_sync, text, scope_value, max(1, int(budget))
+        )
+
+    def _load_trajectory_sync(self, qid: str) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT qid, query, gamma_json, picked_uris, created_at "
+                "FROM cabinet_traj WHERE qid=?",
+                (qid,),
+            ).fetchone()
+        if row is None:
+            return None
+        try:
+            gamma = json.loads(row["gamma_json"])
+        except json.JSONDecodeError:
+            gamma = []
+        try:
+            picked = json.loads(row["picked_uris"])
+        except json.JSONDecodeError:
+            picked = []
+        return {
+            "qid": str(row["qid"]),
+            "query": str(row["query"]),
+            "trajectory": gamma if isinstance(gamma, list) else [],
+            "picked_uris": picked if isinstance(picked, list) else [],
+            "created_at": str(row["created_at"]),
+        }
+
+    async def load_trajectory(self, qid: str) -> dict[str, Any] | None:
+        token = str(qid or "").strip()
+        if not token:
+            raise ValueError("qid is required")
+        return await self._read(self._load_trajectory_sync, token)
+
+    def _guard_cabinet_uri(self, uri: CabinetUri, scope_prefix: str | None) -> None:
+        if TENANT_SCOPE_PATTERN.match(uri.scope):
+            prefix = str(scope_prefix or "")
+            if not prefix or not uri.scope.startswith(prefix):
+                raise ValueError("cabinet uri is outside the caller tenant")
+
+    def _cabinet_ls_sync(
+        self, uri_value: str, scope_prefix: str | None
+    ) -> list[dict[str, Any]]:
+        uri = parse_uri(uri_value)
+        self._guard_cabinet_uri(uri, scope_prefix)
+        directory = self._wiki().node_dir(uri)
+        if not directory.is_dir():
+            return []
+        items: list[dict[str, Any]] = []
+        for child in sorted(directory.iterdir()):
+            if child.name.startswith(".") or child.name in {".abstract.md", ".overview.md"}:
+                continue
+            if child.suffix == ".md" and child.is_file():
+                items.append(
+                    {
+                        "name": child.stem,
+                        "is_dir": False,
+                        "l0": zero_llm_l0(child.read_text(encoding="utf-8"), limit=40),
+                    }
+                )
+            elif child.is_dir():
+                sidecar = child / ".abstract.md"
+                items.append(
+                    {
+                        "name": child.name,
+                        "is_dir": True,
+                        "l0": sidecar.read_text(encoding="utf-8").strip()
+                        if sidecar.is_file()
+                        else "",
+                    }
+                )
+        return items
+
+    async def cabinet_ls(
+        self, uri: str, *, scope_prefix: str | None = None
+    ) -> list[dict[str, Any]]:
+        return list(
+            await self._read(
+                self._cabinet_ls_sync,
+                str(uri),
+                str(scope_prefix or "")[:40] or None,
+            )
+        )
+
+    def _cabinet_read_sync(
+        self, uri_value: str, layer: int, scope_prefix: str | None
+    ) -> dict[str, Any]:
+        uri = parse_uri(uri_value)
+        self._guard_cabinet_uri(uri, scope_prefix)
+        wiki = self._wiki()
+        if layer <= 0:
+            text = wiki.read_l0(uri)
+        elif layer == 1:
+            text = wiki.read_l1(uri)
+        else:
+            text = wiki.read_leaf(uri)
+        return {"uri": str(uri), "layer": int(layer), "text": text}
+
+    async def cabinet_read(
+        self, uri: str, *, layer: int = 0, scope_prefix: str | None = None
+    ) -> dict[str, Any]:
+        bounded = max(0, min(int(layer), 2))
+        return dict(
+            await self._read(
+                self._cabinet_read_sync,
+                str(uri),
+                bounded,
+                str(scope_prefix or "")[:40] or None,
+            )
+        )
+
+    def _write_peer_last_job_sync(
+        self, seat: str, body: str, scope: str, next_step: str, now: str
+    ) -> str:
+        uri = peer_last_job_uri(scope, seat)
+        markdown = peer_last_job_markdown(seat, body, next_step=next_step)
+        wiki = self._wiki()
+        wiki.write_leaf(uri, markdown, title=f"{seat} last-job")
+        with self._connect() as connection:
+            self._cabinet_upsert_node_sync(
+                connection,
+                uri=uri,
+                is_dir=False,
+                title=f"{seat} last-job",
+                l0=zero_llm_l0(markdown),
+                l1="",
+                body=markdown,
+                now=now,
+            )
+            parent = uri.parent()
+            if parent is not None:
+                self._cabinet_upsert_node_sync(
+                    connection,
+                    uri=parent,
+                    is_dir=True,
+                    title=seat,
+                    l0=wiki.read_l0(parent),
+                    l1=wiki.read_l1(parent),
+                    body="",
+                    now=now,
+                )
+            connection.commit()
+        return str(uri)
+
+    async def write_peer_last_job(
+        self,
+        seat: str,
+        body: str,
+        *,
+        scope: str = "global",
+        next_step: str = "",
+    ) -> str:
+        name = str(seat or "").strip()
+        if not name:
+            raise ValueError("seat is required")
+        text = str(body or "").strip()
+        if not text:
+            raise ValueError("last-job body must not be empty")
+        if contains_origin(text) or contains_origin(str(next_step or "")):
+            raise ValueError("last-job must not contain cabinet origin markers")
+        return str(
+            await self._write(
+                self._write_peer_last_job_sync,
+                name,
+                text,
+                normalize_scope(scope),
+                str(next_step or ""),
+                utc_now(),
             )
         )
 

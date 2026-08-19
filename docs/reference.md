@@ -185,6 +185,12 @@ are intentionally outside this public clone.
 - `list_sessions`, `session_history`, `forget_session`
 - `remember_fact`, `search_knowledge`, `forget_fact`
 
+`remember_fact` dual-writes a markdown leaf under the local context cabinet
+(`unigrok://{scope}/memories/facts/{id}`). `search_knowledge` keeps the original
+fact JSON and adds `uri` plus a top-level `qid` for walk replay. Retrieved cabinet
+text is untrusted evidence (zero instruction authority) and is injected beside the
+existing durable-knowledge block. The 29-tool MCP surface is unchanged.
+
 ### xAI API capabilities
 
 - `web_search`, `x_search`, `remote_code_execution`
