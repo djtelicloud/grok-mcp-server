@@ -166,6 +166,27 @@ PUBLIC_TOOLS: tuple[dict[str, Any], ...] = (
     },
     {"name": "chat", "plane": "Grok Build or xAI API", "purpose": "Stateless answer"},
     {
+        "name": "counsel",
+        "plane": "Grok Build or xAI API",
+        "purpose": "Counsel pass through agent (deep)",
+    },
+    {
+        "name": "swarm",
+        "plane": "Grok Build or xAI API",
+        "purpose": "Swarm pass through agent (auto)",
+    },
+    {
+        "name": "hive",
+        "plane": "Grok Build or xAI API",
+        "purpose": "Hive pass through agent (persona votes)",
+    },
+    {
+        "name": "cascade",
+        "plane": "Grok Build or xAI API",
+        "purpose": "Cascade pass through agent (ultra)",
+    },
+    {"name": "ask", "plane": "Grok Build or xAI API", "purpose": "Same as agent"},
+    {
         "name": "grok_mcp_discover_self",
         "plane": "gateway utility",
         "purpose": "Live tools, planes, models, and onboarding",
@@ -274,7 +295,17 @@ PUBLIC_TOOLS = tuple(
             else "api_account"
             if tool["name"] in _API_ACCOUNT_TOOL_NAMES
             else "conditional"
-            if tool["name"] in {"agent", "review_pull_request", "chat"}
+            if tool["name"]
+            in {
+                "agent",
+                "review_pull_request",
+                "chat",
+                "counsel",
+                "swarm",
+                "hive",
+                "cascade",
+                "ask",
+            }
             else "non_metered"
         ),
         "destructive": tool["name"] in _DESTRUCTIVE_TOOL_NAMES,
@@ -290,7 +321,16 @@ PUBLIC_TOOL_NAMES = tuple(tool["name"] for tool in PUBLIC_TOOLS)
 def _runtime_public_tools() -> list[dict[str, Any]]:
     if not is_cloudrun_runtime():
         return [dict(tool) for tool in PUBLIC_TOOLS]
-    always_metered = {"agent", "review_pull_request", "chat"}
+    always_metered = {
+        "agent",
+        "review_pull_request",
+        "chat",
+        "counsel",
+        "swarm",
+        "hive",
+        "cascade",
+        "ask",
+    }
     return [
         {
             **tool,
@@ -6698,6 +6738,50 @@ async def chat(
         )
 
     return await _run_durable_job(_produce, ctx=ctx, kind="chat")
+
+
+async def _organ_via_agent(
+    prompt: str,
+    *,
+    ctx: Context | None,
+    depth: Literal["auto", "deep", "hive"] = "auto",
+    level: Literal[
+        "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"
+    ]
+    | None = None,
+) -> dict[str, Any]:
+    """Named organ doors share the agent engine. They never call TerminalGrok."""
+    return await agent(task=prompt, ctx=ctx, depth=depth, level=level)
+
+
+@mcp.tool()
+async def counsel(prompt: str, ctx: Context | None = None) -> dict[str, Any]:
+    """UniGrok Counsel: one deep agent pass. Tools stay on."""
+    return await _organ_via_agent(prompt, ctx=ctx, depth="deep")
+
+
+@mcp.tool()
+async def swarm(prompt: str, ctx: Context | None = None) -> dict[str, Any]:
+    """UniGrok Swarm: agent at auto depth. Tools stay on."""
+    return await _organ_via_agent(prompt, ctx=ctx, depth="auto")
+
+
+@mcp.tool()
+async def hive(prompt: str, ctx: Context | None = None) -> dict[str, Any]:
+    """UniGrok Hive: draft, persona votes, merge. Tools stay on."""
+    return await _organ_via_agent(prompt, ctx=ctx, depth="hive")
+
+
+@mcp.tool()
+async def cascade(prompt: str, ctx: Context | None = None) -> dict[str, Any]:
+    """UniGrok Cascade: ultra ladder in one agent run. Tools stay on."""
+    return await _organ_via_agent(prompt, ctx=ctx, level="ultra")
+
+
+@mcp.tool()
+async def ask(prompt: str, ctx: Context | None = None) -> dict[str, Any]:
+    """Same as agent(task=prompt). Compatibility door."""
+    return await agent(task=prompt, ctx=ctx)
 
 
 @mcp.tool(annotations=READ_ONLY)

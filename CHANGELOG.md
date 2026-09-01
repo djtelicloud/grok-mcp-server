@@ -5,6 +5,9 @@ All notable changes to the public UniGrok gateway.
 ## [Unreleased]
 
 ### Added
+- Named UniGrok organs `counsel`, `swarm`, `hive`, `cascade`, and `ask`. Each
+  is a door into `agent` (deep / auto / hive / ultra / same). `chat` stays the
+  one-shot smoke path. None of these call TerminalGrok.
 - GemmaGrok local helper named sessions (opt-in) under `GEMMAGROK_STATE_DIR`,
   with redacted `store KEY=VALUE` facts. No gym boards or IDE state.
 - `caller_knobs`: MCP `disable_tools` is prepended as a suggestion. Tools stay on.

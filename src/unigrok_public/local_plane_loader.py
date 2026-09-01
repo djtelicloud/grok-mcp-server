@@ -890,17 +890,16 @@ def ensure_dogfood_min_roles(conn: sqlite3.Connection, *, family: str = "gemma")
         )
     except sqlite3.Error:
         return False
-    if n_map >= 1 and n_floor >= 2:
-        return False  # already funded
-
     now = _utc_now_iso()
     router_metric = f"router:{family}:offline-min"
     tg_metric = f"text_generator:{family}:offline-min"
     rules = (
         ("substring", "ai/gemma", family, 5),
+        ("substring", "unigrok/", family, 8),
         ("substring", "gemma", family, 10),
         ("regex", r"(?i)gemma", family, 20),
     )
+    already_funded = n_map >= 1 and n_floor >= 2
     try:
         for kind, pattern, fam, prio in rules:
             conn.execute(
@@ -912,6 +911,8 @@ def ensure_dogfood_min_roles(conn: sqlite3.Connection, *, family: str = "gemma")
                 """,
                 (kind, pattern, fam, prio),
             )
+        if already_funded:
+            return False
         for metric_id, role in ((router_metric, "router"), (tg_metric, "text_generator")):
             conn.execute(
                 """

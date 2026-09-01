@@ -129,7 +129,7 @@ def test_public_mcp_tool_contract_is_exact_and_self_checked() -> None:
     tools = asyncio.run(server.mcp.list_tools())
     names = [tool.name for tool in tools]
     assert names == list(server.PUBLIC_TOOL_NAMES)
-    assert len(names) == 29
+    assert len(names) == 34
     assert server.mcp._mcp_server.version == __version__ == "1.1.0"
     assert server.mcp._mcp_server.instructions == server.INSTRUCTIONS
     assert "makes web research, X search, and code execution available" in server.INSTRUCTIONS
