@@ -64,6 +64,8 @@ The default-off `gemmagrok-local` service is separate from `@grok`:
 
 - MCP URL: `http://127.0.0.1:4777/mcp`
 - tools: `chat` and `status`
+- optional named `session` stores a notebook under `GEMMAGROK_STATE_DIR`
+  (defaults to a temp dir; never gym boards or IDE state)
 - route: exactly one live-discovered model selected with `GEMMAGROK_MODEL_ID`
 - recovery: none; it never escapes to a remote provider
 

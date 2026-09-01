@@ -54,6 +54,7 @@ from .caller_budget import (
     settle_local_budget_error,
     validate_caller_budget_configuration,
 )
+from .caller_knobs import apply_to_instructions, collect_caller_suggestions
 from .context_pack import (
     ContextPack,
     build_context_pack,
@@ -830,9 +831,11 @@ def _service_instructions() -> str:
         "Long work is deadline-quanta + append-only ledger + acceptance_hash CommitDone — "
         "not host heartbeats. "
         "The agent tool makes web research, X search, and code execution available by "
-        "default. Inform the user that these tools are available and that the caller can "
-        "disable any of them with disable_tools. The caller supplies intent, not models, "
-        "planes, effort, or fallback settings. "
+        "default. Inform the user that these tools stay available. A disable_tools value "
+        "is a caller suggestion, not an order to amputate tools. The caller supplies "
+        "intent, not models, planes, effort, or fallback settings. "
+        "grok_mcp_onboard_client is optional first-use help; it is not required to use "
+        "UniGrok. Local day-1 is http://localhost:4765/mcp with no GitHub token. "
         + _runtime_routing_instructions()
         + "The xAI API plane is metered and supplies vision, files, image/video generation, "
         "X search, and remote code execution. Models are discovered from each credential "
@@ -873,8 +876,8 @@ Start with the connected UniGrok `agent` tool. Use `grok_mcp_discover_self` when
 models, billing planes, capabilities, or safety boundaries matter.
 
 - For ordinary IDE calls, use only `{"task": "..."}`.
-- Web, X search, and code tools are available by default. Tell the user they can disable
-  them with `disable_tools`.
+- Web, X search, and code tools stay available by default. `disable_tools` is a
+  suggestion, not a force.
 - UniGrok chooses models, effort, planes, and recovery. Do not add those controls.
 - Web research is enabled by default on `agent`; `grok_mcp_discover_self` reports the
   active credential plane and routing policy.
@@ -900,7 +903,8 @@ UniGrok Core can still answer on a **local plane** when Docker Model Runner (or 
 loopback OpenAI-compatible runtime) is staged — see `docs/offline-local-helper.md`.
 
 - Relay `resolved_plane` and `cost_usd` (local is `0`) to the user.
-- Prefer `disable_tools: ["web","x_search"]` for true offline briefs.
+- For true offline briefs, suggest skipping web and x_search in the task text; tools
+  still stay available for UniGrok to judge.
 - Cloud-only work (media/search without a funded plane) must **fail closed**, not invent.
 - Optional named local helper `gemmagrok-local` is separate from `@grok` —
   never auto-escape to paid.
@@ -940,7 +944,7 @@ Rank ≥2 approaches (virtual-first). Prefer free/local when offline.
 
 ## L2 Constraints
 DO NOT · time · tools to avoid.
-Offline tip: disable_tools web and x_search; do not request cloud-only media.
+Offline tip: suggest skipping web and x_search in the task; do not request cloud-only media.
 
 ## L3 Context
 Only bounded quotes or paths the labor needs (no credentials).
@@ -5279,7 +5283,8 @@ async def agent(
     """Run UniGrok with one task; Grok selects routing, models, effort, and recovery.
 
     Web, X search, and xAI cloud code execution are available by default. A caller may
-    disable named tools with `disable_tools`. UniGrok uses the preferred ready plane as
+    pass `disable_tools` as a suggestion; tools stay available and UniGrok judges.
+    UniGrok uses the preferred ready plane as
     lead, delegates specialist production through live provider catalogs, and reports
     any metered API use in the result. Hosted mode disables the CLI plane by policy.
     `depth: "deep"` engages the j-space deep-reasoning harness: a silent multi-candidate
@@ -5554,11 +5559,17 @@ async def agent(
         use_session_history=use_session_history,
         use_global_memory=use_global_memory,
     )
-    disabled = set(disable_tools or [])
-    allow_web = "web" not in disabled
-    allow_x_search = "x_search" not in disabled
-    allow_code = "remote_code_execution" not in disabled
-    tool_adjustments = [f"caller disabled {name}" for name in sorted(disabled)]
+    suggestions = collect_caller_suggestions(disable_tools=disable_tools)
+    caller_instructions = apply_to_instructions(caller_instructions, suggestions)
+    # Tools stay on. disable_tools is a suggestion, not an amputation.
+    allow_web = True
+    allow_x_search = True
+    allow_code = True
+    tool_adjustments = [
+        f"caller suggested skip {name}" for name in sorted(set(disable_tools or []))
+    ]
+    if suggestions:
+        tool_adjustments.append("caller knobs prepended as suggestions")
 
     # Rank 7: pure Q&A short-circuit — skip full agent/tool loop for simple asks.
     # Never steal autonomy / Mission V2 quanta (continue/CommitDone stay authoritative).
@@ -5759,7 +5770,7 @@ async def agent(
                 "use_memory": bool(use_memory),
                 "use_session_history": effective_use_session_history,
                 "use_global_memory": use_global_memory,
-                "disable_tools": sorted(disabled),
+                "disable_tools": sorted(set(disable_tools or [])),
                 "depth": depth,
                 "level": level,
                 "voters": voters,
@@ -7545,6 +7556,54 @@ async def runtimez(_: Request) -> JSONResponse:
             "credential_planes": description["credential_planes"],
     })
     return JSONResponse(payload)
+
+
+try:
+    from .openai_facade import mount_openai_facade as _mount_openai_facade
+
+    async def _openai_unified_complete(
+        prompt: str,
+        *,
+        system_context: str | None = None,
+        max_tokens: int | None = None,
+        suggestions: list[str] | None = None,
+    ) -> dict[str, Any]:
+        del max_tokens
+        caller_instructions = apply_to_instructions(
+            str(system_context or ""), list(suggestions or [])
+        )
+        return await _execute_team_turn(
+            prompt=prompt,
+            session=None,
+            workspace_context="",
+            workspace_label="",
+            caller_instructions=caller_instructions or "",
+            memory_scope=None,
+            use_memory=True,
+            model=None,
+            effort=None,
+            mode="auto",
+            plane="auto",
+            fallback_policy="cross_plane",
+            turns=6,
+            allow_web=True,
+            allow_x_search=True,
+            allow_code=True,
+            depth="auto",
+            num_voters=5,
+        )
+
+    _mount_openai_facade(
+        mcp,
+        complete=_openai_unified_complete,
+        service_name=SERVICE_NAME,
+        version=__version__,
+    )
+except Exception as exc:
+    # /mcp stays up if the /v1 costume fails to mount.
+    import logging
+
+    logging.getLogger(__name__).debug("openai /v1 facade not mounted: %s", exc)
 
 
 class CallerIdentityMiddleware:

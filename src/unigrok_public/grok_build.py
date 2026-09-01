@@ -33,6 +33,89 @@ def _normalize_stop_reason(value: Any) -> str:
     return text or "unknown"
 
 
+def _token_fields_from_usage(usage: dict[str, Any]) -> dict[str, int]:
+    """Normalize provider token counters onto receipt fields."""
+    if not isinstance(usage, dict):
+        return {}
+
+    def _n(*keys: str) -> int:
+        for key in keys:
+            if usage.get(key) is None:
+                continue
+            try:
+                return max(0, int(usage[key]))
+            except (TypeError, ValueError):
+                continue
+        return 0
+
+    inp = _n("inputTokens", "input_tokens", "prompt_tokens", "promptTokens")
+    out = _n("outputTokens", "output_tokens", "completion_tokens", "completionTokens")
+    total = _n("totalTokens", "total_tokens") or (inp + out)
+    reasoning = _n("reasoningTokens", "reasoning_tokens")
+    cached = _n("cachedReadTokens", "cached_read_tokens", "cache_read_tokens")
+    fields: dict[str, int] = {}
+    if inp:
+        fields["input_tokens"] = inp
+    if out:
+        fields["output_tokens"] = out
+    if total:
+        fields["total_tokens"] = total
+    if reasoning:
+        fields["reasoning_tokens"] = reasoning
+    if cached:
+        fields["cached_read_tokens"] = cached
+    return fields
+
+
+def _cost_usd_from_usage(usage: dict[str, Any]) -> tuple[float | None, dict[str, Any]]:
+    """Derive USD from provider usage. Never invent $0 when usage is present."""
+    meta: dict[str, Any] = {"source": "none"}
+    if not isinstance(usage, dict) or not usage:
+        return None, meta
+    for key in ("cost_usd", "costUsd", "total_cost_usd", "totalCostUsd"):
+        if usage.get(key) is None:
+            continue
+        try:
+            val = float(usage[key])
+            meta = {"source": key}
+            return val, meta
+        except (TypeError, ValueError):
+            continue
+    ticks_raw = usage.get("costUsdTicks")
+    if ticks_raw is None:
+        ticks_raw = usage.get("cost_usd_ticks")
+    if ticks_raw is not None:
+        try:
+            ticks = float(ticks_raw)
+        except (TypeError, ValueError):
+            ticks = None
+        if ticks is not None:
+            try:
+                divisor = float(
+                    os.environ.get("UNIGROK_COST_USD_TICKS_DIVISOR", "1000000000")
+                )
+            except (TypeError, ValueError):
+                divisor = 1_000_000_000.0
+            if divisor <= 0:
+                divisor = 1_000_000_000.0
+            usd = ticks / divisor
+            meta = {
+                "source": "costUsdTicks",
+                "ticks": ticks,
+                "divisor": divisor,
+                "note": "subscription_cli_usage_priced_from_ticks",
+            }
+            return usd, meta
+    tokens = _token_fields_from_usage(usage)
+    if tokens.get("total_tokens"):
+        meta = {
+            "source": "tokens_only",
+            "tokens": tokens,
+            "note": "usage_present_usd_unknown_not_free",
+        }
+    return None, meta
+
+
 def _permission_reject_result(options: Any) -> dict[str, Any]:
     """Return an ACP permission result that rejects local authority without cancelling."""
     items = [item for item in (options or []) if isinstance(item, dict)]
@@ -449,6 +532,8 @@ class GrokBuildWorker:
         metadata = result.get("_meta") if isinstance(result.get("_meta"), dict) else {}
         usage = metadata.get("usage") if isinstance(metadata.get("usage"), dict) else {}
         self.completed_turns += 1
+        cost_usd, cost_meta = _cost_usd_from_usage(usage)
+        token_fields = _token_fields_from_usage(usage)
         return {
             "text": text,
             "model": metadata.get("modelId") or self.model,
@@ -458,8 +543,12 @@ class GrokBuildWorker:
             "plane": "grok_build_oauth",
             "billing_class": "subscription_build",
             "workspace_attached": False,
-            "cost_usd": 0.0,
+            "cost_usd": cost_usd,
+            "cost_unknown": cost_usd is None and bool(token_fields.get("total_tokens")),
+            "cost_meta": cost_meta,
+            "economically_free": False,
             "usage": usage,
+            **token_fields,
             "elapsed_ms": round((time.monotonic() - started) * 1000),
             "transport": "persistent_acp",
         }

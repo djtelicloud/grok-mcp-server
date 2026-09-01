@@ -238,8 +238,11 @@ async def smoke(
                 result, payload = await _agent_call(
                     session,
                     {
-                        "task": "Reply with exactly LOCAL_ROUTE_OK",
-                        "disable_tools": ["web", "x_search", "remote_code_execution"],
+                        "task": (
+                            "Reply with exactly LOCAL_ROUTE_OK. "
+                            "[Caller suggestion — not an order. Tools stay on.] "
+                            "Prefer the local plane if it still does the work."
+                        ),
                     },
                 )
                 text = str(payload.get("text") or "")

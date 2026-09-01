@@ -113,9 +113,9 @@ staged **local** model route (Docker Model Runner or loopback OpenAI-compatible 
 See [Local model routes](docs/offline-local-helper.md). Relay `resolved_plane` and cost
 receipts; disable web/X tools for true offline briefs; fail closed for cloud-only media.
 
-After onboarding, see skills `using-unigrok` and `mission-brief-harness` (installed by
-`grok_mcp_onboard_client` with consent). **Contributors:** after GitHub auth (website or
-local `gh auth login`), install that public Ground pack once — step-by-step in
+Day-1 is this clone plus `http://localhost:4765/mcp`. No GitHub token and no hosted
+MCP URL are required. `grok_mcp_onboard_client` is optional IDE help (consent first).
+**Contributors** who want the Ground pack after GitHub auth can follow
 [CONTRIBUTING.md](CONTRIBUTING.md#after-github-auth--install-the-public-ground-pack).
 Day-1 is **Core + Ground pack only** (not a second labor Docker seat, not extra
 operator nodes). Heavier capacity is a separate maintainer grant when someone runs an

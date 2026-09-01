@@ -5,6 +5,11 @@ All notable changes to the public UniGrok gateway.
 ## [Unreleased]
 
 ### Added
+- GemmaGrok local helper named sessions (opt-in) under `GEMMAGROK_STATE_DIR`,
+  with redacted `store KEY=VALUE` facts. No gym boards or IDE state.
+- `caller_knobs`: MCP `disable_tools` is prepended as a suggestion. Tools stay on.
+- OpenAI-compatible `/v1/models` and `/v1/chat/completions` on the same looper.
+  Fields are suggestions; tools stay on.
 - Context cabinet beside the session desk: markdown wiki + L0/L1 sidecars, RRF
   neighborhood walk, session handoff compile, and `peers/{seat}/last-job`.
   `remember_fact` dual-writes `unigrok://` leaves; `search_knowledge` keeps the
@@ -16,6 +21,8 @@ All notable changes to the public UniGrok gateway.
   `@grok` recovery.
 
 ### Changed
+- Grok Build receipts no longer hardcode `cost_usd: 0.0`. Usage ticks/tokens are
+  reported honestly; unknown USD stays unknown instead of "free".
 - Runtime limits that formerly behaved as fixed constants are now clamped environment
   controls and are reported by discovery/runtime receipts: agent sync window and turn
   cap, mission lease TTL, semantic-router output, prompt/workspace size, concurrency,

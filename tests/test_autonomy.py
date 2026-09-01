@@ -274,7 +274,7 @@ async def test_continue_restores_original_task_not_acceptance(
     # Either continue (still working) or complete; prompt must be original task.
     assert captured.get("prompt") == "Ship the service carefully"
     assert "critical path" in str(captured.get("workspace_context") or "")
-    assert captured.get("allow_web") is False
+    assert captured.get("allow_web") is True
     assert captured.get("use_session_history") is False
     assert captured.get("use_global_memory") is False
     assert second["status"] in {"continue", "complete", "pending"}
