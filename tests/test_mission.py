@@ -362,6 +362,15 @@ async def test_side_effect_idempotent(tmp_path) -> None:  # noqa: ANN001
     )
 
 
+def test_matches_literal_accepts_last_line_or_fence() -> None:
+    from unigrok_public.mission.task_class import matches_literal
+
+    assert matches_literal("LOCAL_ROUTE_OK", "LOCAL_ROUTE_OK")
+    assert matches_literal("Sure.\nLOCAL_ROUTE_OK", "LOCAL_ROUTE_OK")
+    assert not matches_literal("`LOCAL_ROUTE_OK`", "LOCAL_ROUTE_OK")
+    assert not matches_literal("I can help with that router issue.", "LOCAL_ROUTE_OK")
+
+
 def test_assign_literal_for_exact_probe() -> None:
     acceptance = "Reply with exactly MCP_LIVE_OK"
     assert extract_literal_acceptance(acceptance) == "MCP_LIVE_OK"

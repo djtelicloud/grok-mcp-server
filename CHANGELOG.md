@@ -10,6 +10,9 @@ All notable changes to the public UniGrok gateway.
 - `caller_knobs`: MCP `disable_tools` is prepended as a suggestion. Tools stay on.
 - OpenAI-compatible `/v1/models` and `/v1/chat/completions` on the same looper.
   Fields are suggestions; tools stay on.
+- Literal probes (`Reply with exactly TOKEN`) tell the model to emit only that
+  token; small local models may put it on the last line. Mission V2 still
+  verifies.
 - Context cabinet beside the session desk: markdown wiki + L0/L1 sidecars, RRF
   neighborhood walk, session handoff compile, and `peers/{seat}/last-job`.
   `remember_fact` dual-writes `unigrok://` leaves; `search_knowledge` keeps the

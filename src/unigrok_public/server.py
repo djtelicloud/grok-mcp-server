@@ -5503,14 +5503,27 @@ async def agent(
                         gap_bits = [str(g) for g in payload.get("gaps") or []]
                     break
             ledger_block = ledger_summary(events)
-            gap_block = (
-                "# Acceptance gaps to close\n" + "\n".join(f"- {g}" for g in gap_bits)
-                if gap_bits
-                else (
+            from .mission.task_class import extract_literal_acceptance as _extract_lit
+
+            expected_lit = _extract_lit(
+                str(request_snapshot.get("task") or acceptance_text),
+                acceptance_text,
+            )
+            if gap_bits:
+                gap_lines = "# Acceptance gaps to close\n" + "\n".join(
+                    f"- {g}" for g in gap_bits
+                )
+                if expected_lit and "literal_mismatch" in gap_bits:
+                    gap_lines += (
+                        "\n\nEmit only this exact token, no other words:\n"
+                        f"{expected_lit}"
+                    )
+                gap_block = gap_lines
+            else:
+                gap_block = (
                     "# Continue quantum\nClose remaining work against the frozen "
                     "acceptance_hash."
                 )
-            )
             resume_context = f"{ledger_block}\n\n{gap_block}"
         finally:
             if claim_lease is not None:
@@ -5561,6 +5574,14 @@ async def agent(
     )
     suggestions = collect_caller_suggestions(disable_tools=disable_tools)
     caller_instructions = apply_to_instructions(caller_instructions, suggestions)
+    from .mission.task_class import extract_literal_acceptance, literal_output_contract
+
+    literal_token = extract_literal_acceptance(prompt, acceptance_text)
+    if literal_token:
+        caller_instructions = apply_to_instructions(
+            caller_instructions,
+            [literal_output_contract(literal_token)],
+        )
     # Tools stay on. disable_tools is a suggestion, not an amputation.
     allow_web = True
     allow_x_search = True
