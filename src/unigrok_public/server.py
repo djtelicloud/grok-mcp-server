@@ -437,6 +437,7 @@ LOCAL_PROBE_TIMEOUT_SECONDS = _bounded_int("UNIGROK_LOCAL_PROBE_TIMEOUT", 5, 1, 
 _LOCAL_PROBE_BACKENDS = None
 LOCAL_DIRECT_TALK_MODE = os.environ.get("UNIGROK_LOCAL_DIRECT_TALK_MODE", "").strip().lower()
 LOCAL_DIRECT_MODEL = os.environ.get("UNIGROK_LOCAL_DIRECT_MODEL", "").strip()
+LOCAL_PREFERRED_MODEL = os.environ.get("UNIGROK_LOCAL_PREFERRED_MODEL", "").strip()
 DIRECT_TALK_ACTIVE = (
     UNIGROK_LAYER == "gemma"
     and LOCAL_DIRECT_TALK_MODE == "non_certified"
@@ -7893,7 +7894,9 @@ async def _local_chat(
         raise RuntimeError("local runtime not configured")
     catalogs = await _catalogs()
     local_cat = catalogs.get("local") or {}
-    lead = model_id or local_cat.get("default_model")
+    lead = model_id or await _pick_local_role_model(role, catalogs)
+    if not lead:
+        lead = local_cat.get("default_model")
     if not lead:
         raise RuntimeError(f"local {role} bind missing (no_floor)")
     lead_s = str(lead)
@@ -8189,18 +8192,64 @@ def _local_model_ids(catalogs: dict[str, Any]) -> list[str]:
     return ids
 
 
-async def _pick_local_role_model(role: str, catalogs: dict[str, Any]) -> str | None:
-    """Prefer certified bind for role; soft-fund with any live local model if unbound.
+_LOCAL_EMBED_OR_TINY_RE = re.compile(
+    r"embeddinggemma|mxbai|needle-26m",
+    re.IGNORECASE,
+)
+_LOCAL_TEXT_PREFER = ("gemma3-qat", "gemma3n", "gemma3")
 
-    Direct DMR calls work without role certs. Hard-failing offline when models
-    are listed but unbound turns config lag into fake peer answers.
+
+def _local_role_model_score(
+    model_id: str, role: str, *, preferred: str = ""
+) -> tuple[int, int]:
+    """Lower tuple wins. Chat hops skip function/router/embedding models when a
+    Gemma chat checkpoint is listed; router hops prefer a named router.
     """
-    for mid in _local_model_ids(catalogs):
-        if await STATE.local_bind(mid, role) is not None:
-            return mid
-    # Soft fund: first live local model (config lag / dogfood bind miss)
+    mid = (model_id or "").strip()
+    low = mid.lower()
+    if preferred and (mid == preferred or preferred.lower() in low):
+        return (0, 0)
+    embed_or_tiny = bool(_LOCAL_EMBED_OR_TINY_RE.search(low))
+    function_router = "functiongemma" in low
+    named_router = "router" in low and not function_router
+    if role == "text_generator":
+        if embed_or_tiny:
+            return (9, 0)
+        if function_router or named_router:
+            return (8, 0)
+        for index, token in enumerate(_LOCAL_TEXT_PREFER):
+            if token in low:
+                return (1, index)
+        return (2, 50)
+    if embed_or_tiny:
+        return (9, 0)
+    if named_router:
+        return (1, 0)
+    if function_router:
+        return (1, 1)
+    return (2, 50)
+
+
+async def _pick_local_role_model(role: str, catalogs: dict[str, Any]) -> str | None:
+    """Prefer a role-fit chat/router model, not merely the first DMR listing.
+
+    Certified binds still win over unbound ids. Direct DMR calls work without
+    role certs — missing binds soft-fund the ranked live catalog so config
+    lag does not become a fake peer answer.
+    """
     ids = _local_model_ids(catalogs)
-    return ids[0] if ids else None
+    if not ids:
+        return None
+    bound: list[str] = []
+    for mid in ids:
+        if await STATE.local_bind(mid, role) is not None:
+            bound.append(mid)
+    pool = bound or ids
+    preferred = LOCAL_PREFERRED_MODEL
+    return sorted(
+        pool,
+        key=lambda mid: (_local_role_model_score(mid, role, preferred=preferred), pool.index(mid)),
+    )[0]
 
 
 async def _local_router_floor(
