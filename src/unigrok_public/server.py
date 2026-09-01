@@ -5737,6 +5737,11 @@ async def agent(
         if governor_settings is not None
         else None
     )
+    if literal_token:
+        resolved_depth = "direct"
+        turn_max_turns = 1
+        turn_voters = 0
+        tool_adjustments.append("literal probe: one direct emit hop")
 
     async def _turn() -> dict[str, Any]:
         return await _execute_team_turn(
