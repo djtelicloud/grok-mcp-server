@@ -3,7 +3,7 @@
 <img src="assets/hero.svg" alt="UniGrok — one Grok teammate for every coding agent" width="100%" />
 
 [![CI](https://img.shields.io/github/actions/workflow/status/djtelicloud/grok-mcp-server/ci.yml?branch=main&style=flat-square&label=CI)](https://github.com/djtelicloud/grok-mcp-server/actions)
-[![Version](https://img.shields.io/badge/version-1.1.0-bc8cff?style=flat-square)](pyproject.toml)
+[![Version](https://img.shields.io/badge/version-1.2.0-bc8cff?style=flat-square)](pyproject.toml)
 [![Python](https://img.shields.io/badge/python-3.12-58a6ff?style=flat-square)](pyproject.toml)
 [![License](https://img.shields.io/badge/license-MIT-3fb950?style=flat-square)](LICENSE)
 [![MCP](https://img.shields.io/badge/MCP-Streamable_HTTP-58e6d9?style=flat-square)](https://modelcontextprotocol.io)

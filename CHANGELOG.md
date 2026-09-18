@@ -4,6 +4,8 @@ All notable changes to the public UniGrok gateway.
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-09-18
+
 ### Added
 - Named UniGrok organs `counsel`, `swarm`, `hive`, `cascade`, and `ask`. Each
   is a door into `agent` (deep / auto / hive / ultra / same). `chat` stays the

@@ -130,7 +130,7 @@ def test_public_mcp_tool_contract_is_exact_and_self_checked() -> None:
     names = [tool.name for tool in tools]
     assert names == list(server.PUBLIC_TOOL_NAMES)
     assert len(names) == 34
-    assert server.mcp._mcp_server.version == __version__ == "1.1.0"
+    assert server.mcp._mcp_server.version == __version__ == "1.2.0"
     assert server.mcp._mcp_server.instructions == server.INSTRUCTIONS
     assert "makes web research, X search, and code execution available" in server.INSTRUCTIONS
     assert "Inform the user" in server.INSTRUCTIONS
@@ -358,7 +358,7 @@ async def test_self_description_is_generated_from_live_boundary(
     monkeypatch.setattr(server, "_catalogs", fake_catalogs)
     description = await server.grok_mcp_discover_self()
     assert [tool["name"] for tool in description["tools"]] == list(server.PUBLIC_TOOL_NAMES)
-    assert description["version"] == "1.1.0"
+    assert description["version"] == "1.2.0"
     assert description["bootstrap"]["can_chat"] is True
     assert description["bootstrap"]["can_spend_api"] is True
     assert description["bootstrap"]["metered_api_requires_confirmation"] is False

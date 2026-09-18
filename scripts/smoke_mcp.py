@@ -45,7 +45,7 @@ EXPECTED_TOOLS = [
     "xai_get_file_content",
     "xai_delete_file",
 ]
-EXPECTED_VERSION = "1.1.0"
+EXPECTED_VERSION = "1.2.0"
 
 
 def _structured(result: Any) -> dict[str, Any]:

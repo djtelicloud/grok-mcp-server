@@ -5,7 +5,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: ${UNIGROK_IMAGE:-unigrok:1.1.0}
+    image: ${UNIGROK_IMAGE:-unigrok:1.2.0}
     container_name: unigrok
     ports:
       - "127.0.0.1:${UNIGROK_PORT:-4765}:8080"
@@ -76,7 +76,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: ${UNIGROK_IMAGE:-unigrok:1.1.0}
+    image: ${UNIGROK_IMAGE:-unigrok:1.2.0}
     profiles: ["auth"]
     command: ["grok", "login", "--device-auth"]
     environment:
@@ -98,7 +98,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: unigrok:1.1.0
+    image: unigrok:1.2.0
     profiles: ["offline"]
     command: ["/app/.venv/bin/python", "-m", "unigrok_public.gemmagrok_peer"]
     ports:
