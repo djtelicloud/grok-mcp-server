@@ -43,6 +43,10 @@ All notable changes to the public UniGrok gateway.
   Needle remains inactive by default.
 
 ### Fixed
+- Local DMR chat no longer waits the Grok Build 120 s deadline. Catalog GET
+  can succeed while POST `/chat/completions` is wedged on Docker Model Runner's
+  "Loading backend runner" path; `UNIGROK_LOCAL_CHAT_TIMEOUT` defaults to 20 s
+  so the hop fail-closes instead of hanging `/v1`.
 - Context cabinet red-team: percent-encode wiki paths so `a:b` cannot collide with
   `a--b`; reject encoded `..` traversal; quote FTS terms; refuse origin-marker
   re-entry; tenant-fence `cabinet_ls`/`cabinet_read`; JSON-quote injected facts.

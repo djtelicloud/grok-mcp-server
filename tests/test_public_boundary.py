@@ -414,6 +414,7 @@ async def test_self_description_is_generated_from_live_boundary(
         "request_limits": {
             "build_concurrency": "provider_managed",
             "build_timeout_seconds": 120,
+            "local_chat_timeout_seconds": 20,
             "api_timeout_seconds": 120,
             "file_list_timeout_seconds": 120,
             "file_io_timeout_seconds": 60,

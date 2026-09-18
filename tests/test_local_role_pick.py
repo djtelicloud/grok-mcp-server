@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 
 from unigrok_public import server
 
@@ -23,6 +24,14 @@ _CATALOG = {
         "default_model": "docker.io/ai/functiongemma:latest",
     }
 }
+
+
+def test_local_chat_timeout_is_not_the_build_deadline() -> None:
+    assert server.LOCAL_CHAT_TIMEOUT_SECONDS == 20
+    assert server.LOCAL_CHAT_TIMEOUT_SECONDS < server.BUILD_TIMEOUT_SECONDS
+    src = inspect.getsource(server._local_chat)
+    assert "timeout=LOCAL_CHAT_TIMEOUT_SECONDS" in src
+    assert "timeout=BUILD_TIMEOUT_SECONDS" not in src
 
 
 def test_text_score_prefers_gemma3_qat_over_functiongemma() -> None:

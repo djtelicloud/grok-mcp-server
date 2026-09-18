@@ -353,6 +353,9 @@ def _bounded_int(name: str, default: int, minimum: int, maximum: int) -> int:
 
 
 BUILD_TIMEOUT_SECONDS = _bounded_int("UNIGROK_BUILD_TIMEOUT", 120, 30, 600)
+# Local DMR chat must not inherit the Grok Build 120s deadline. GET /models can
+# succeed while POST /chat/completions is wedged ("Loading backend runner").
+LOCAL_CHAT_TIMEOUT_SECONDS = _bounded_int("UNIGROK_LOCAL_CHAT_TIMEOUT", 20, 5, 120)
 CATALOG_TTL_SECONDS = _bounded_int("UNIGROK_CATALOG_TTL", 60, 5, 600)
 MAX_PROMPT_CHARS = _bounded_int("UNIGROK_MAX_PROMPT_CHARS", 100_000, 1_024, 500_000)
 MAX_WORKSPACE_CONTEXT_CHARS = _bounded_int(
@@ -2646,6 +2649,7 @@ def _live_self_description(catalogs: dict[str, Any]) -> dict[str, Any]:
             "request_limits": {
                 "build_concurrency": "provider_managed",
                 "build_timeout_seconds": BUILD_TIMEOUT_SECONDS,
+                "local_chat_timeout_seconds": LOCAL_CHAT_TIMEOUT_SECONDS,
                 "api_timeout_seconds": xai_api.API_TIMEOUT_SECONDS,
                 "file_list_timeout_seconds": xai_api.FILE_LIST_TIMEOUT_SECONDS,
                 "file_io_timeout_seconds": xai_api.FILE_IO_TIMEOUT_SECONDS,
@@ -7597,6 +7601,7 @@ async def runtimez(_: Request) -> JSONResponse:
             "request_limits": {
                 "build_concurrency": "provider_managed",
                 "build_timeout_seconds": BUILD_TIMEOUT_SECONDS,
+                "local_chat_timeout_seconds": LOCAL_CHAT_TIMEOUT_SECONDS,
                 "api_timeout_seconds": xai_api.API_TIMEOUT_SECONDS,
                 "file_list_timeout_seconds": xai_api.FILE_LIST_TIMEOUT_SECONDS,
                 "file_io_timeout_seconds": xai_api.FILE_IO_TIMEOUT_SECONDS,
@@ -8000,7 +8005,7 @@ async def _local_chat(
             lead_s,
             messages,
             max_tokens=max_tokens,
-            timeout=BUILD_TIMEOUT_SECONDS,
+            timeout=LOCAL_CHAT_TIMEOUT_SECONDS,
         )
         _breaker_success(admission)
         return {
@@ -8628,7 +8633,7 @@ async def _serve_local_direct_noncertified(
             LOCAL_DIRECT_MODEL,
             messages,
             max_tokens=None,
-            timeout=BUILD_TIMEOUT_SECONDS,
+            timeout=LOCAL_CHAT_TIMEOUT_SECONDS,
         )
         _breaker_success(admission)
     except asyncio.CancelledError:

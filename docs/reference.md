@@ -255,6 +255,7 @@ Environment values outside their range are clamped. `grok_mcp_discover_self` and
 | Control | Default | Allowed range |
 |---|---:|---:|
 | `UNIGROK_BUILD_TIMEOUT` | 120 s | 30–600 s |
+| `UNIGROK_LOCAL_CHAT_TIMEOUT` | 20 s | 5–120 s |
 | `UNIGROK_API_TIMEOUT` | 120 s | 30–600 s |
 | `UNIGROK_FILE_LIST_TIMEOUT` | 120 s | 60–600 s |
 | `UNIGROK_FILE_IO_TIMEOUT` | 60 s | 30–600 s |
