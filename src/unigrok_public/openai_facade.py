@@ -390,7 +390,7 @@ def mount_openai_facade(
     *,
     complete: CompleteFn,
     service_name: str = "UniGrok",
-    version: str = "1.1.0",
+    version: str = "1.2.0",
 ) -> None:
     """Register /v1 on the same FastMCP app as /mcp. Does not start agent()."""
     from starlette.requests import Request

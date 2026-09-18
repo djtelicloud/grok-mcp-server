@@ -150,7 +150,7 @@ http://localhost:4765/mcp
 ```
 
 Transport: Streamable HTTP. The MCP handshake, `/healthz`, `/readyz`, `/runtimez`,
-`grok_mcp_status`, and `grok_mcp_discover_self` all report version `1.1.0`.
+`grok_mcp_status`, and `grok_mcp_discover_self` all report version `1.2.0`.
 The README build copies the source tree into the image. Rebuild after source changes;
 health and version responses do not prove that an older image contains the current
 checkout.
