@@ -5,17 +5,31 @@ All notable changes to the public UniGrok gateway.
 ## [Unreleased]
 
 ### Added
+- Named UniGrok organs `counsel`, `swarm`, `hive`, `cascade`, and `ask`. Each
+  is a door into `agent` (deep / auto / hive / ultra / same). `chat` stays the
+  one-shot smoke path. None of these call TerminalGrok.
+- GemmaGrok local helper named sessions (opt-in) under `GEMMAGROK_STATE_DIR`,
+  with redacted `store KEY=VALUE` facts. No gym boards or IDE state.
+- `caller_knobs`: MCP `disable_tools` is prepended as a suggestion. Tools stay on.
+- OpenAI-compatible `/v1/models` and `/v1/chat/completions` on the same looper.
+  Fields are suggestions; tools stay on.
+- Literal probes (`Reply with exactly TOKEN`) tell the model to emit only that
+  token; small local models may put it on the last line. Mission V2 still
+  verifies.
 - Context cabinet beside the session desk: markdown wiki + L0/L1 sidecars, RRF
   neighborhood walk, session handoff compile, and `peers/{seat}/last-job`.
   `remember_fact` dual-writes `unigrok://` leaves; `search_knowledge` keeps the
   old JSON and adds `uri`/`qid`. Retrieved cabinet text is untrusted evidence.
-  The 29-tool MCP surface is unchanged. No AGPL vendor code.
+  Cabinet adds no MCP tools. Named organs above raise the public surface from
+  29 to 34. No AGPL vendor code.
 - Experimental `gemmagrok-local` Compose profile and standalone MCP helper for an
   explicitly selected, operator-owned local model runtime. The helper is loopback-only,
   exposes `chat`/`status`, receives no Grok credentials, and is not part of automatic
   `@grok` recovery.
 
 ### Changed
+- Grok Build receipts no longer hardcode `cost_usd: 0.0`. Usage ticks/tokens are
+  reported honestly; unknown USD stays unknown instead of "free".
 - Runtime limits that formerly behaved as fixed constants are now clamped environment
   controls and are reported by discovery/runtime receipts: agent sync window and turn
   cap, mission lease TTL, semantic-router output, prompt/workspace size, concurrency,
@@ -29,6 +43,10 @@ All notable changes to the public UniGrok gateway.
   Needle remains inactive by default.
 
 ### Fixed
+- Local DMR chat no longer waits the Grok Build 120 s deadline. Catalog GET
+  can succeed while POST `/chat/completions` is wedged on Docker Model Runner's
+  "Loading backend runner" path; `UNIGROK_LOCAL_CHAT_TIMEOUT` defaults to 20 s
+  so the hop fail-closes instead of hanging `/v1`.
 - Context cabinet red-team: percent-encode wiki paths so `a:b` cannot collide with
   `a--b`; reject encoded `..` traversal; quote FTS terms; refuse origin-marker
   re-entry; tenant-fence `cabinet_ls`/`cabinet_read`; JSON-quote injected facts.

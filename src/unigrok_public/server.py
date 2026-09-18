@@ -54,6 +54,7 @@ from .caller_budget import (
     settle_local_budget_error,
     validate_caller_budget_configuration,
 )
+from .caller_knobs import apply_to_instructions, collect_caller_suggestions
 from .context_pack import (
     ContextPack,
     build_context_pack,
@@ -165,6 +166,27 @@ PUBLIC_TOOLS: tuple[dict[str, Any], ...] = (
     },
     {"name": "chat", "plane": "Grok Build or xAI API", "purpose": "Stateless answer"},
     {
+        "name": "counsel",
+        "plane": "Grok Build or xAI API",
+        "purpose": "Counsel pass through agent (deep)",
+    },
+    {
+        "name": "swarm",
+        "plane": "Grok Build or xAI API",
+        "purpose": "Swarm pass through agent (auto)",
+    },
+    {
+        "name": "hive",
+        "plane": "Grok Build or xAI API",
+        "purpose": "Hive pass through agent (persona votes)",
+    },
+    {
+        "name": "cascade",
+        "plane": "Grok Build or xAI API",
+        "purpose": "Cascade pass through agent (ultra)",
+    },
+    {"name": "ask", "plane": "Grok Build or xAI API", "purpose": "Same as agent"},
+    {
         "name": "grok_mcp_discover_self",
         "plane": "gateway utility",
         "purpose": "Live tools, planes, models, and onboarding",
@@ -273,7 +295,17 @@ PUBLIC_TOOLS = tuple(
             else "api_account"
             if tool["name"] in _API_ACCOUNT_TOOL_NAMES
             else "conditional"
-            if tool["name"] in {"agent", "review_pull_request", "chat"}
+            if tool["name"]
+            in {
+                "agent",
+                "review_pull_request",
+                "chat",
+                "counsel",
+                "swarm",
+                "hive",
+                "cascade",
+                "ask",
+            }
             else "non_metered"
         ),
         "destructive": tool["name"] in _DESTRUCTIVE_TOOL_NAMES,
@@ -289,7 +321,16 @@ PUBLIC_TOOL_NAMES = tuple(tool["name"] for tool in PUBLIC_TOOLS)
 def _runtime_public_tools() -> list[dict[str, Any]]:
     if not is_cloudrun_runtime():
         return [dict(tool) for tool in PUBLIC_TOOLS]
-    always_metered = {"agent", "review_pull_request", "chat"}
+    always_metered = {
+        "agent",
+        "review_pull_request",
+        "chat",
+        "counsel",
+        "swarm",
+        "hive",
+        "cascade",
+        "ask",
+    }
     return [
         {
             **tool,
@@ -312,6 +353,9 @@ def _bounded_int(name: str, default: int, minimum: int, maximum: int) -> int:
 
 
 BUILD_TIMEOUT_SECONDS = _bounded_int("UNIGROK_BUILD_TIMEOUT", 120, 30, 600)
+# Local DMR chat must not inherit the Grok Build 120s deadline. GET /models can
+# succeed while POST /chat/completions is wedged ("Loading backend runner").
+LOCAL_CHAT_TIMEOUT_SECONDS = _bounded_int("UNIGROK_LOCAL_CHAT_TIMEOUT", 20, 5, 120)
 CATALOG_TTL_SECONDS = _bounded_int("UNIGROK_CATALOG_TTL", 60, 5, 600)
 MAX_PROMPT_CHARS = _bounded_int("UNIGROK_MAX_PROMPT_CHARS", 100_000, 1_024, 500_000)
 MAX_WORKSPACE_CONTEXT_CHARS = _bounded_int(
@@ -436,6 +480,7 @@ LOCAL_PROBE_TIMEOUT_SECONDS = _bounded_int("UNIGROK_LOCAL_PROBE_TIMEOUT", 5, 1, 
 _LOCAL_PROBE_BACKENDS = None
 LOCAL_DIRECT_TALK_MODE = os.environ.get("UNIGROK_LOCAL_DIRECT_TALK_MODE", "").strip().lower()
 LOCAL_DIRECT_MODEL = os.environ.get("UNIGROK_LOCAL_DIRECT_MODEL", "").strip()
+LOCAL_PREFERRED_MODEL = os.environ.get("UNIGROK_LOCAL_PREFERRED_MODEL", "").strip()
 DIRECT_TALK_ACTIVE = (
     UNIGROK_LAYER == "gemma"
     and LOCAL_DIRECT_TALK_MODE == "non_certified"
@@ -830,9 +875,11 @@ def _service_instructions() -> str:
         "Long work is deadline-quanta + append-only ledger + acceptance_hash CommitDone — "
         "not host heartbeats. "
         "The agent tool makes web research, X search, and code execution available by "
-        "default. Inform the user that these tools are available and that the caller can "
-        "disable any of them with disable_tools. The caller supplies intent, not models, "
-        "planes, effort, or fallback settings. "
+        "default. Inform the user that these tools stay available. A disable_tools value "
+        "is a caller suggestion, not an order to amputate tools. The caller supplies "
+        "intent, not models, planes, effort, or fallback settings. "
+        "grok_mcp_onboard_client is optional first-use help; it is not required to use "
+        "UniGrok. Local day-1 is http://localhost:4765/mcp with no GitHub token. "
         + _runtime_routing_instructions()
         + "The xAI API plane is metered and supplies vision, files, image/video generation, "
         "X search, and remote code execution. Models are discovered from each credential "
@@ -873,8 +920,8 @@ Start with the connected UniGrok `agent` tool. Use `grok_mcp_discover_self` when
 models, billing planes, capabilities, or safety boundaries matter.
 
 - For ordinary IDE calls, use only `{"task": "..."}`.
-- Web, X search, and code tools are available by default. Tell the user they can disable
-  them with `disable_tools`.
+- Web, X search, and code tools stay available by default. `disable_tools` is a
+  suggestion, not a force.
 - UniGrok chooses models, effort, planes, and recovery. Do not add those controls.
 - Web research is enabled by default on `agent`; `grok_mcp_discover_self` reports the
   active credential plane and routing policy.
@@ -900,7 +947,8 @@ UniGrok Core can still answer on a **local plane** when Docker Model Runner (or 
 loopback OpenAI-compatible runtime) is staged — see `docs/offline-local-helper.md`.
 
 - Relay `resolved_plane` and `cost_usd` (local is `0`) to the user.
-- Prefer `disable_tools: ["web","x_search"]` for true offline briefs.
+- For true offline briefs, suggest skipping web and x_search in the task text; tools
+  still stay available for UniGrok to judge.
 - Cloud-only work (media/search without a funded plane) must **fail closed**, not invent.
 - Optional named local helper `gemmagrok-local` is separate from `@grok` —
   never auto-escape to paid.
@@ -940,7 +988,7 @@ Rank ≥2 approaches (virtual-first). Prefer free/local when offline.
 
 ## L2 Constraints
 DO NOT · time · tools to avoid.
-Offline tip: disable_tools web and x_search; do not request cloud-only media.
+Offline tip: suggest skipping web and x_search in the task; do not request cloud-only media.
 
 ## L3 Context
 Only bounded quotes or paths the labor needs (no credentials).
@@ -2601,6 +2649,7 @@ def _live_self_description(catalogs: dict[str, Any]) -> dict[str, Any]:
             "request_limits": {
                 "build_concurrency": "provider_managed",
                 "build_timeout_seconds": BUILD_TIMEOUT_SECONDS,
+                "local_chat_timeout_seconds": LOCAL_CHAT_TIMEOUT_SECONDS,
                 "api_timeout_seconds": xai_api.API_TIMEOUT_SECONDS,
                 "file_list_timeout_seconds": xai_api.FILE_LIST_TIMEOUT_SECONDS,
                 "file_io_timeout_seconds": xai_api.FILE_IO_TIMEOUT_SECONDS,
@@ -5279,7 +5328,8 @@ async def agent(
     """Run UniGrok with one task; Grok selects routing, models, effort, and recovery.
 
     Web, X search, and xAI cloud code execution are available by default. A caller may
-    disable named tools with `disable_tools`. UniGrok uses the preferred ready plane as
+    pass `disable_tools` as a suggestion; tools stay available and UniGrok judges.
+    UniGrok uses the preferred ready plane as
     lead, delegates specialist production through live provider catalogs, and reports
     any metered API use in the result. Hosted mode disables the CLI plane by policy.
     `depth: "deep"` engages the j-space deep-reasoning harness: a silent multi-candidate
@@ -5498,14 +5548,27 @@ async def agent(
                         gap_bits = [str(g) for g in payload.get("gaps") or []]
                     break
             ledger_block = ledger_summary(events)
-            gap_block = (
-                "# Acceptance gaps to close\n" + "\n".join(f"- {g}" for g in gap_bits)
-                if gap_bits
-                else (
+            from .mission.task_class import extract_literal_acceptance as _extract_lit
+
+            expected_lit = _extract_lit(
+                str(request_snapshot.get("task") or acceptance_text),
+                acceptance_text,
+            )
+            if gap_bits:
+                gap_lines = "# Acceptance gaps to close\n" + "\n".join(
+                    f"- {g}" for g in gap_bits
+                )
+                if expected_lit and "literal_mismatch" in gap_bits:
+                    gap_lines += (
+                        "\n\nEmit only this exact token, no other words:\n"
+                        f"{expected_lit}"
+                    )
+                gap_block = gap_lines
+            else:
+                gap_block = (
                     "# Continue quantum\nClose remaining work against the frozen "
                     "acceptance_hash."
                 )
-            )
             resume_context = f"{ledger_block}\n\n{gap_block}"
         finally:
             if claim_lease is not None:
@@ -5554,11 +5617,25 @@ async def agent(
         use_session_history=use_session_history,
         use_global_memory=use_global_memory,
     )
-    disabled = set(disable_tools or [])
-    allow_web = "web" not in disabled
-    allow_x_search = "x_search" not in disabled
-    allow_code = "remote_code_execution" not in disabled
-    tool_adjustments = [f"caller disabled {name}" for name in sorted(disabled)]
+    suggestions = collect_caller_suggestions(disable_tools=disable_tools)
+    caller_instructions = apply_to_instructions(caller_instructions, suggestions)
+    from .mission.task_class import extract_literal_acceptance, literal_output_contract
+
+    literal_token = extract_literal_acceptance(prompt, acceptance_text)
+    if literal_token:
+        caller_instructions = apply_to_instructions(
+            caller_instructions,
+            [literal_output_contract(literal_token)],
+        )
+    # Tools stay on. disable_tools is a suggestion, not an amputation.
+    allow_web = True
+    allow_x_search = True
+    allow_code = True
+    tool_adjustments = [
+        f"caller suggested skip {name}" for name in sorted(set(disable_tools or []))
+    ]
+    if suggestions:
+        tool_adjustments.append("caller knobs prepended as suggestions")
 
     # Rank 7: pure Q&A short-circuit — skip full agent/tool loop for simple asks.
     # Never steal autonomy / Mission V2 quanta (continue/CommitDone stay authoritative).
@@ -5705,6 +5782,11 @@ async def agent(
         if governor_settings is not None
         else None
     )
+    if literal_token:
+        resolved_depth = "direct"
+        turn_max_turns = 1
+        turn_voters = 0
+        tool_adjustments.append("literal probe: one direct emit hop")
 
     async def _turn() -> dict[str, Any]:
         return await _execute_team_turn(
@@ -5759,7 +5841,7 @@ async def agent(
                 "use_memory": bool(use_memory),
                 "use_session_history": effective_use_session_history,
                 "use_global_memory": use_global_memory,
-                "disable_tools": sorted(disabled),
+                "disable_tools": sorted(set(disable_tools or [])),
                 "depth": depth,
                 "level": level,
                 "voters": voters,
@@ -6662,6 +6744,50 @@ async def chat(
     return await _run_durable_job(_produce, ctx=ctx, kind="chat")
 
 
+async def _organ_via_agent(
+    prompt: str,
+    *,
+    ctx: Context | None,
+    depth: Literal["auto", "deep", "hive"] = "auto",
+    level: Literal[
+        "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"
+    ]
+    | None = None,
+) -> dict[str, Any]:
+    """Named organ doors share the agent engine. They never call TerminalGrok."""
+    return await agent(task=prompt, ctx=ctx, depth=depth, level=level)
+
+
+@mcp.tool()
+async def counsel(prompt: str, ctx: Context | None = None) -> dict[str, Any]:
+    """UniGrok Counsel: one deep agent pass. Tools stay on."""
+    return await _organ_via_agent(prompt, ctx=ctx, depth="deep")
+
+
+@mcp.tool()
+async def swarm(prompt: str, ctx: Context | None = None) -> dict[str, Any]:
+    """UniGrok Swarm: agent at auto depth. Tools stay on."""
+    return await _organ_via_agent(prompt, ctx=ctx, depth="auto")
+
+
+@mcp.tool()
+async def hive(prompt: str, ctx: Context | None = None) -> dict[str, Any]:
+    """UniGrok Hive: draft, persona votes, merge. Tools stay on."""
+    return await _organ_via_agent(prompt, ctx=ctx, depth="hive")
+
+
+@mcp.tool()
+async def cascade(prompt: str, ctx: Context | None = None) -> dict[str, Any]:
+    """UniGrok Cascade: ultra ladder in one agent run. Tools stay on."""
+    return await _organ_via_agent(prompt, ctx=ctx, level="ultra")
+
+
+@mcp.tool()
+async def ask(prompt: str, ctx: Context | None = None) -> dict[str, Any]:
+    """Same as agent(task=prompt). Compatibility door."""
+    return await agent(task=prompt, ctx=ctx)
+
+
 @mcp.tool(annotations=READ_ONLY)
 async def grok_mcp_discover_self(refresh_models: bool = False) -> dict[str, Any]:
     """Return the gateway's authoritative live public tools, planes, and model catalogs."""
@@ -7475,6 +7601,7 @@ async def runtimez(_: Request) -> JSONResponse:
             "request_limits": {
                 "build_concurrency": "provider_managed",
                 "build_timeout_seconds": BUILD_TIMEOUT_SECONDS,
+                "local_chat_timeout_seconds": LOCAL_CHAT_TIMEOUT_SECONDS,
                 "api_timeout_seconds": xai_api.API_TIMEOUT_SECONDS,
                 "file_list_timeout_seconds": xai_api.FILE_LIST_TIMEOUT_SECONDS,
                 "file_io_timeout_seconds": xai_api.FILE_IO_TIMEOUT_SECONDS,
@@ -7545,6 +7672,54 @@ async def runtimez(_: Request) -> JSONResponse:
             "credential_planes": description["credential_planes"],
     })
     return JSONResponse(payload)
+
+
+try:
+    from .openai_facade import mount_openai_facade as _mount_openai_facade
+
+    async def _openai_unified_complete(
+        prompt: str,
+        *,
+        system_context: str | None = None,
+        max_tokens: int | None = None,
+        suggestions: list[str] | None = None,
+    ) -> dict[str, Any]:
+        del max_tokens
+        caller_instructions = apply_to_instructions(
+            str(system_context or ""), list(suggestions or [])
+        )
+        return await _execute_team_turn(
+            prompt=prompt,
+            session=None,
+            workspace_context="",
+            workspace_label="",
+            caller_instructions=caller_instructions or "",
+            memory_scope=None,
+            use_memory=True,
+            model=None,
+            effort=None,
+            mode="auto",
+            plane="auto",
+            fallback_policy="cross_plane",
+            turns=6,
+            allow_web=True,
+            allow_x_search=True,
+            allow_code=True,
+            depth="auto",
+            num_voters=5,
+        )
+
+    _mount_openai_facade(
+        mcp,
+        complete=_openai_unified_complete,
+        service_name=SERVICE_NAME,
+        version=__version__,
+    )
+except Exception as exc:
+    # /mcp stays up if the /v1 costume fails to mount.
+    import logging
+
+    logging.getLogger(__name__).debug("openai /v1 facade not mounted: %s", exc)
 
 
 class CallerIdentityMiddleware:
@@ -7808,7 +7983,9 @@ async def _local_chat(
         raise RuntimeError("local runtime not configured")
     catalogs = await _catalogs()
     local_cat = catalogs.get("local") or {}
-    lead = model_id or local_cat.get("default_model")
+    lead = model_id or await _pick_local_role_model(role, catalogs)
+    if not lead:
+        lead = local_cat.get("default_model")
     if not lead:
         raise RuntimeError(f"local {role} bind missing (no_floor)")
     lead_s = str(lead)
@@ -7828,7 +8005,7 @@ async def _local_chat(
             lead_s,
             messages,
             max_tokens=max_tokens,
-            timeout=BUILD_TIMEOUT_SECONDS,
+            timeout=LOCAL_CHAT_TIMEOUT_SECONDS,
         )
         _breaker_success(admission)
         return {
@@ -8104,18 +8281,64 @@ def _local_model_ids(catalogs: dict[str, Any]) -> list[str]:
     return ids
 
 
-async def _pick_local_role_model(role: str, catalogs: dict[str, Any]) -> str | None:
-    """Prefer certified bind for role; soft-fund with any live local model if unbound.
+_LOCAL_EMBED_OR_TINY_RE = re.compile(
+    r"embeddinggemma|mxbai|needle-26m",
+    re.IGNORECASE,
+)
+_LOCAL_TEXT_PREFER = ("gemma3-qat", "gemma3n", "gemma3")
 
-    Direct DMR calls work without role certs. Hard-failing offline when models
-    are listed but unbound turns config lag into fake peer answers.
+
+def _local_role_model_score(
+    model_id: str, role: str, *, preferred: str = ""
+) -> tuple[int, int]:
+    """Lower tuple wins. Chat hops skip function/router/embedding models when a
+    Gemma chat checkpoint is listed; router hops prefer a named router.
     """
-    for mid in _local_model_ids(catalogs):
-        if await STATE.local_bind(mid, role) is not None:
-            return mid
-    # Soft fund: first live local model (config lag / dogfood bind miss)
+    mid = (model_id or "").strip()
+    low = mid.lower()
+    if preferred and (mid == preferred or preferred.lower() in low):
+        return (0, 0)
+    embed_or_tiny = bool(_LOCAL_EMBED_OR_TINY_RE.search(low))
+    function_router = "functiongemma" in low
+    named_router = "router" in low and not function_router
+    if role == "text_generator":
+        if embed_or_tiny:
+            return (9, 0)
+        if function_router or named_router:
+            return (8, 0)
+        for index, token in enumerate(_LOCAL_TEXT_PREFER):
+            if token in low:
+                return (1, index)
+        return (2, 50)
+    if embed_or_tiny:
+        return (9, 0)
+    if named_router:
+        return (1, 0)
+    if function_router:
+        return (1, 1)
+    return (2, 50)
+
+
+async def _pick_local_role_model(role: str, catalogs: dict[str, Any]) -> str | None:
+    """Prefer a role-fit chat/router model, not merely the first DMR listing.
+
+    Certified binds still win over unbound ids. Direct DMR calls work without
+    role certs — missing binds soft-fund the ranked live catalog so config
+    lag does not become a fake peer answer.
+    """
     ids = _local_model_ids(catalogs)
-    return ids[0] if ids else None
+    if not ids:
+        return None
+    bound: list[str] = []
+    for mid in ids:
+        if await STATE.local_bind(mid, role) is not None:
+            bound.append(mid)
+    pool = bound or ids
+    preferred = LOCAL_PREFERRED_MODEL
+    return sorted(
+        pool,
+        key=lambda mid: (_local_role_model_score(mid, role, preferred=preferred), pool.index(mid)),
+    )[0]
 
 
 async def _local_router_floor(
@@ -8410,7 +8633,7 @@ async def _serve_local_direct_noncertified(
             LOCAL_DIRECT_MODEL,
             messages,
             max_tokens=None,
-            timeout=BUILD_TIMEOUT_SECONDS,
+            timeout=LOCAL_CHAT_TIMEOUT_SECONDS,
         )
         _breaker_success(admission)
     except asyncio.CancelledError:

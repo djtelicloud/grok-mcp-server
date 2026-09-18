@@ -129,7 +129,7 @@ def test_public_mcp_tool_contract_is_exact_and_self_checked() -> None:
     tools = asyncio.run(server.mcp.list_tools())
     names = [tool.name for tool in tools]
     assert names == list(server.PUBLIC_TOOL_NAMES)
-    assert len(names) == 29
+    assert len(names) == 34
     assert server.mcp._mcp_server.version == __version__ == "1.1.0"
     assert server.mcp._mcp_server.instructions == server.INSTRUCTIONS
     assert "makes web research, X search, and code execution available" in server.INSTRUCTIONS
@@ -414,6 +414,7 @@ async def test_self_description_is_generated_from_live_boundary(
         "request_limits": {
             "build_concurrency": "provider_managed",
             "build_timeout_seconds": 120,
+            "local_chat_timeout_seconds": 20,
             "api_timeout_seconds": 120,
             "file_list_timeout_seconds": 120,
             "file_io_timeout_seconds": 60,

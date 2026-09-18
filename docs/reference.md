@@ -172,7 +172,12 @@ are intentionally outside this public clone.
   reattach, and acceptance-hash CommitDone
 - `agent_result` — poll an in-flight quantum without exceeding short IDE deadlines
 - `review_pull_request` — review a bounded caller-supplied diff without GitHub or Git access
-- `chat` — one stateless, tool-free answer
+- `chat` — one stateless, tool-free answer (smoke path)
+- `counsel` — UniGrok Counsel: one deep `agent` pass
+- `swarm` — UniGrok Swarm: `agent` at auto depth
+- `hive` — UniGrok Hive: draft, persona votes, merge
+- `cascade` — UniGrok Cascade: ultra ladder in one `agent` run
+- `ask` — same as `agent(task=…)`
 - `grok_mcp_discover_self` — authoritative live self-description
 - `grok_mcp_onboard_client` — consent-first client integration plan; never writes files
 - `grok_mcp_status` — non-secret runtime and plane readiness
@@ -189,7 +194,8 @@ are intentionally outside this public clone.
 (`unigrok://{scope}/memories/facts/{id}`). `search_knowledge` keeps the original
 fact JSON and adds `uri` plus a top-level `qid` for walk replay. Retrieved cabinet
 text is untrusted evidence (zero instruction authority) and is injected beside the
-existing durable-knowledge block. The 29-tool MCP surface is unchanged.
+existing durable-knowledge block. The 34-tool MCP surface includes named
+organs; `chat` remains the smoke one-shot.
 
 ### xAI API capabilities
 
@@ -199,7 +205,7 @@ existing durable-knowledge block. The 29-tool MCP surface is unchanged.
 - `xai_upload_file`, `xai_list_files`, `xai_get_file`
 - `xai_get_file_content`, `xai_delete_file`
 
-The complete 29-tool surface remains visible when the API is not configured. API tools
+The complete 34-tool surface remains visible when the API is not configured. API tools
 then return a clear setup error instead of disappearing from client discovery.
 
 ## PR reviews (`review_pull_request`)
@@ -249,6 +255,7 @@ Environment values outside their range are clamped. `grok_mcp_discover_self` and
 | Control | Default | Allowed range |
 |---|---:|---:|
 | `UNIGROK_BUILD_TIMEOUT` | 120 s | 30–600 s |
+| `UNIGROK_LOCAL_CHAT_TIMEOUT` | 20 s | 5–120 s |
 | `UNIGROK_API_TIMEOUT` | 120 s | 30–600 s |
 | `UNIGROK_FILE_LIST_TIMEOUT` | 120 s | 60–600 s |
 | `UNIGROK_FILE_IO_TIMEOUT` | 60 s | 30–600 s |

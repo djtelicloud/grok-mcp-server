@@ -185,9 +185,33 @@ def _usable_literal_token(token: str, *, command_framed: bool = False) -> bool:
 
 
 def matches_literal(candidate: str, expected: str) -> bool:
-    left = (candidate or "").strip()
+    """True when the candidate is the expected token, or ends on that token.
+
+    Small local models often add a short preamble. Quotes/punctuation on the
+    token itself still count as a mismatch. The expected token must be a
+    whole last line, not a substring of a sentence.
+    """
     right = _normalize_extracted_token(expected)
-    return bool(left) and bool(right) and left == right
+    if not right:
+        return False
+    left = (candidate or "").strip()
+    if not left:
+        return False
+    if left == right:
+        return True
+    lines = [ln.strip() for ln in left.splitlines() if ln.strip()]
+    return len(lines) >= 2 and lines[-1] == right
+
+
+def literal_output_contract(token: str) -> str:
+    """Caller-instruction block so the next hop emits only the expected token."""
+    tok = _normalize_extracted_token(token)
+    if not tok:
+        return ""
+    return (
+        "This is a literal probe. Your entire answer must be exactly this token "
+        f"and nothing else:\n{tok}"
+    )
 
 
 def _dual_intent_work(text: str) -> bool:

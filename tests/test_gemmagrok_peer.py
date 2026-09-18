@@ -145,6 +145,9 @@ async def test_chat_calls_only_local_runtime_and_returns_honest_receipt(
         "cost_usd": 0.0,
         "finish_reason": "stop",
         "remote_fallback": False,
+        "self_conf": 80,
+        "icl_exemplars_used": 0,
+        "icl_exemplar_chars": 0,
     }
 
 
@@ -254,6 +257,44 @@ async def test_public_grok_no_credentials_remains_terminal(
     monkeypatch.setattr(server, "_catalogs", no_credentials)
     with pytest.raises(RuntimeError, match="Neither Grok credential plane is ready"):
         await server._resolve_plane("auto", None, requires_api=False)
+
+
+def test_helper_does_not_read_private_mac_paths() -> None:
+    source = Path(gemmagrok_peer.__file__).read_text(encoding="utf-8")
+    assert "~/.claude" not in source
+    assert ".claude/state" not in source
+    assert "gym/bench" not in source
+
+
+@pytest.mark.asyncio
+async def test_named_session_persists_under_state_dir(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    calls: list[dict | None] = []
+
+    async def request(method: str, path: str, *, payload: dict | None = None) -> dict:
+        calls.append(payload)
+        if path == "/v1/models":
+            return {"data": [{"id": "local-model"}]}
+        return {
+            "choices": [
+                {
+                    "message": {"role": "assistant", "content": "SAVED"},
+                    "finish_reason": "stop",
+                }
+            ]
+        }
+
+    monkeypatch.setattr(gemmagrok_peer, "_runtime_request", request)
+    monkeypatch.setenv("GEMMAGROK_STATE_DIR", str(tmp_path))
+    first = await gemmagrok_peer.chat(
+        "store theme=dark then greet",
+        session="desk-1",
+    )
+    assert first["session_id"] == "desk-1"
+    second = await gemmagrok_peer.chat("continue", session="desk-1")
+    system = second and calls[-1] and calls[-1]["messages"][0]["content"]
+    assert "theme=dark" in str(system)
 
 
 def test_compose_helper_is_default_off_loopback_only_and_has_no_credentials() -> None:

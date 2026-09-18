@@ -1,8 +1,9 @@
 # Contributing to UniGrok Public
 
-Anyone can clone, run, and open a pull request. After you authenticate with GitHub
-(locally or on the website), install the **public Ground pack** so your IDE can
-orchestrate multi-step UniGrok work the same way maintainers do.
+Anyone can clone, run, and open a pull request. Day-1 is Core on
+`localhost:4765` — no GitHub token required. After you authenticate with GitHub
+(locally or on the website), you may optionally install the **public Ground pack**
+so your IDE can orchestrate multi-step UniGrok work the same way maintainers do.
 
 ## What day-1 access includes (and does not)
 

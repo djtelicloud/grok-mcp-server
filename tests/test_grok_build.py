@@ -7,9 +7,19 @@ from unigrok_public.grok_build import (
     LOCAL_AUTHORITY_TOOLS,
     GrokBuildACPManager,
     GrokBuildWorker,
+    _cost_usd_from_usage,
     _normalize_stop_reason,
     _permission_reject_result,
 )
+
+
+def test_cli_usage_ticks_are_not_reported_as_free() -> None:
+    usd, meta = _cost_usd_from_usage({"costUsdTicks": 2_500_000_000, "total_tokens": 40})
+    assert usd == pytest.approx(2.5)
+    assert meta["source"] == "costUsdTicks"
+    unknown, unknown_meta = _cost_usd_from_usage({"total_tokens": 40})
+    assert unknown is None
+    assert unknown_meta["source"] == "tokens_only"
 
 
 def _worker(tmp_path: Path, *, agentic: bool = True, allow_web: bool = True) -> GrokBuildWorker:
