@@ -11,6 +11,11 @@ The generic remote mode is OAuth-gated, not anonymous multi-tenant SaaS. OAuth i
 isolates sessions, facts, jobs, telemetry, and configured budgets, while hosted xAI
 file tools require a principal-bound provider credential.
 
+OAuth introspection has a per-process concurrency bound. A saturated process returns
+temporary unavailability with `Retry-After` instead of misreporting a valid caller as
+unauthorized. Scaled processes do not share that short-lived guard or negative cache, so
+hosted deployments should also enforce an upstream per-client rate limit.
+
 Cloud Run currently stores SQLite under `/tmp`. A revision or instance replacement can
 therefore lose hosted sessions, facts, and durable-job state, and two scaled instances
 do not share that state. Release cutovers are atomic rather than fractional for this
@@ -18,10 +23,19 @@ reason. Treat an unknown poll after replacement like `lost`: inspect provider st
 before retrying any metered or mutating operation. Local Compose uses a persistent
 volume and has the stronger restart behavior documented below.
 
-Configured caller budgets are pre-call daily stop thresholds, not atomic reservations.
-A call admitted just below its threshold, or several concurrent calls, can finish above
-the configured amount. Use conservative thresholds and provider-side account controls
-when a strict financial ceiling is required.
+Configured local and hosted caller guards now reserve admission atomically within their
+SQLite ledger, so concurrent calls cannot all spend the same remaining capacity.
+They are still admission guards, not provider-enforced hard ceilings: a single admitted
+call can settle above its reservation or the remaining daily amount. Unknown cost blocks
+later admissions until it is resolved. Hosted ledgers remain instance-local, so scaled
+instances do not share reservations. Use conservative limits and provider-side account
+controls when a strict financial ceiling is required.
+
+The ledger fails closed after 10,000 new reservation IDs for one guarded scope in one
+UTC day. Exact retries are checked first. Pending and unknown-cost rows are retained;
+known reconciled rows are eligible for deletion only after both their UTC day and the
+configured state-retention window have expired. Exact replay protection for those old
+known-final IDs is therefore finite to that retention window.
 
 ### Depth modes are new — here is what a "miss" looks like
 

@@ -8,6 +8,7 @@ import re
 import sqlite3
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
+from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +25,18 @@ TERM_PATTERN = re.compile(r"[A-Za-z0-9_]{2,}")
 TENANT_SCOPE_PATTERN = re.compile(r"^(tenant-[0-9a-f]{24}):")
 TENANT_SCOPE_GLOB = "tenant-" + "[0-9a-f]" * 24 + ":*"
 DURABLE_TEXT_MAX_BYTES = 100_000
+SPEND_GUARD_TICKS_PER_USD = 10_000_000_000
+SPEND_GUARD_MAX_TICKS = (1 << 63) - 1
+SPEND_GUARD_MAX_USD = SPEND_GUARD_MAX_TICKS / SPEND_GUARD_TICKS_PER_USD
+SPEND_GUARD_RESERVATION_PATTERN = re.compile(
+    r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,159}$"
+)
+SPEND_GUARD_MIN_STALE_SECONDS = 1
+SPEND_GUARD_MAX_STALE_SECONDS = 24 * 60 * 60
+# Bound work and durable growth for any one authenticated scope on one UTC day.
+# Existing reservation ids are checked before this ceiling so retries remain
+# idempotent; reaching it denies only creation of another provider attempt.
+SPEND_GUARD_MAX_ROWS_PER_SCOPE_DAY = 10_000
 
 _SECRET_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (
@@ -68,6 +81,74 @@ _SECRET_KEY_NAME = re.compile(
 
 def utc_now() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def _spend_guard_clock() -> tuple[datetime, str, str]:
+    """Return one normalized UTC instant, its ISO timestamp, and UTC day."""
+    try:
+        instant = datetime.fromisoformat(utc_now())
+    except ValueError as exc:
+        raise RuntimeError("spend guard clock returned an invalid timestamp") from exc
+    if instant.tzinfo is None:
+        raise RuntimeError("spend guard clock must be timezone-aware")
+    normalized = instant.astimezone(UTC)
+    return normalized, normalized.isoformat(), normalized.date().isoformat()
+
+
+def _spend_guard_ticks(
+    value: Any,
+    *,
+    field: str,
+    rounding: str,
+    require_positive: bool = False,
+) -> int:
+    """Convert USD to exact 1e-10 USD ticks without ever rounding spend down."""
+    if isinstance(value, bool):
+        raise ValueError(f"{field} must be a finite non-negative USD amount")
+    try:
+        amount = Decimal(str(value))
+    except (InvalidOperation, ValueError) as exc:
+        raise ValueError(f"{field} must be a finite non-negative USD amount") from exc
+    if not amount.is_finite() or amount < 0 or (require_positive and amount == 0):
+        qualifier = "positive" if require_positive else "non-negative"
+        raise ValueError(f"{field} must be a finite {qualifier} USD amount")
+    ticks_decimal = (amount * SPEND_GUARD_TICKS_PER_USD).to_integral_value(
+        rounding=rounding
+    )
+    ticks = int(ticks_decimal)
+    if ticks > SPEND_GUARD_MAX_TICKS:
+        raise ValueError(f"{field} exceeds the spend guard storage range")
+    if require_positive and ticks < 1:
+        ticks = 1
+    return ticks
+
+
+def _spend_guard_usd(ticks: int) -> float:
+    return float(Decimal(int(ticks)) / SPEND_GUARD_TICKS_PER_USD)
+
+
+def _validated_spend_guard_identity(value: Any, field: str) -> str:
+    normalized = str(value or "").strip()
+    if not SPEND_GUARD_RESERVATION_PATTERN.fullmatch(normalized):
+        raise ValueError(
+            f"{field} must be 1-160 characters using letters, numbers, '.', '_', "
+            "':', '/', or '-'"
+        )
+    return normalized
+
+
+def _validated_spend_guard_stale_seconds(value: Any) -> int:
+    if isinstance(value, bool):
+        raise ValueError("stale_after_seconds must be an integer")
+    try:
+        seconds = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("stale_after_seconds must be an integer") from exc
+    if not SPEND_GUARD_MIN_STALE_SECONDS <= seconds <= SPEND_GUARD_MAX_STALE_SECONDS:
+        raise ValueError(
+            "stale_after_seconds must be between 1 and 86400 seconds"
+        )
+    return seconds
 
 
 def redact_secrets(value: Any) -> str:
@@ -150,7 +231,8 @@ def _retention_cutoff() -> str:
     except ValueError:
         hours = 24
     hours = max(1, min(hours, 24 * 30))
-    return (datetime.now(UTC) - timedelta(hours=hours)).isoformat()
+    now, _, _ = _spend_guard_clock()
+    return (now - timedelta(hours=hours)).isoformat()
 
 
 def normalize_session(value: Any) -> str:
@@ -237,10 +319,51 @@ class PublicStateStore:
             "AND status IN ('committed','terminal')",
             "DELETE FROM missions WHERE updated_at < ? "
             "AND status IN ('complete','failed','budget_exhausted','cancelled')",
-            "DELETE FROM telemetry WHERE created_at < ?",
         ):
             cursor = connection.execute(statement, (cutoff,))
             deleted += max(0, int(cursor.rowcount))
+        now, _, _ = _spend_guard_clock()
+        utc_day_start = now.replace(
+            hour=0,
+            minute=0,
+            second=0,
+            microsecond=0,
+        )
+        # Pending and unknown spend rows are permanent fail-closed evidence.
+        # Known final rows have exact replay protection for at least the configured
+        # retention window and for their full UTC accounting day; only then may the
+        # ordinary retention pass remove them.
+        finalized_spend = connection.execute(
+            """
+            DELETE FROM spend_guard_reservations
+            WHERE status='reconciled'
+              AND updated_at < ?
+              AND utc_day < ?
+            """,
+            (cutoff, utc_day_start.date().isoformat()),
+        )
+        deleted += max(0, int(finalized_spend.rowcount))
+        telemetry = connection.execute(
+            """
+            DELETE FROM telemetry
+            WHERE created_at < ?
+              AND (
+                    created_at < ?
+                    OR EXISTS (
+                        SELECT 1
+                        FROM spend_guard_telemetry_baselines AS baseline
+                        WHERE baseline.telemetry_caller = telemetry.caller
+                          AND baseline.utc_day = ?
+                    )
+              )
+            """,
+            (
+                cutoff,
+                utc_day_start.isoformat(),
+                utc_day_start.date().isoformat(),
+            ),
+        )
+        deleted += max(0, int(telemetry.rowcount))
         return deleted
 
     def _initialize_sync(self) -> None:
@@ -315,6 +438,36 @@ class PublicStateStore:
                     ON telemetry(created_at DESC);
                 CREATE INDEX IF NOT EXISTS telemetry_caller_created
                     ON telemetry(caller, created_at DESC);
+                CREATE TABLE IF NOT EXISTS spend_guard_reservations (
+                    reservation_id TEXT PRIMARY KEY,
+                    scope TEXT NOT NULL,
+                    utc_day TEXT NOT NULL,
+                    status TEXT NOT NULL
+                        CHECK(status IN ('pending', 'reconciled', 'unknown')),
+                    limit_ticks INTEGER NOT NULL CHECK(limit_ticks >= 0),
+                    reserved_ticks INTEGER NOT NULL CHECK(reserved_ticks > 0),
+                    reservation_mode TEXT NOT NULL DEFAULT 'fixed'
+                        CHECK(reservation_mode IN ('fixed', 'remaining')),
+                    actual_ticks INTEGER CHECK(actual_ticks >= 0),
+                    created_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    reconciled_at TEXT,
+                    updated_at TEXT NOT NULL,
+                    unknown_reason TEXT
+                );
+                CREATE INDEX IF NOT EXISTS spend_guard_scope_day
+                    ON spend_guard_reservations(scope, utc_day, status);
+                CREATE INDEX IF NOT EXISTS spend_guard_pending_expiry
+                    ON spend_guard_reservations(status, expires_at);
+                CREATE TABLE IF NOT EXISTS spend_guard_telemetry_baselines (
+                    scope TEXT NOT NULL,
+                    utc_day TEXT NOT NULL,
+                    telemetry_caller TEXT NOT NULL,
+                    baseline_ticks INTEGER NOT NULL CHECK(baseline_ticks >= 0),
+                    source_max_telemetry_id INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY(scope, utc_day)
+                );
                 CREATE TABLE IF NOT EXISTS agent_jobs (
                     job_id TEXT PRIMARY KEY,
                     created_at TEXT NOT NULL,
@@ -434,6 +587,17 @@ class PublicStateStore:
                 "CREATE INDEX IF NOT EXISTS telemetry_session_created "
                 "ON telemetry(session_name, created_at DESC)"
             )
+            spend_guard_columns = {
+                str(row[1])
+                for row in connection.execute(
+                    "PRAGMA table_info(spend_guard_reservations)"
+                ).fetchall()
+            }
+            if spend_guard_columns and "reservation_mode" not in spend_guard_columns:
+                connection.execute(
+                    "ALTER TABLE spend_guard_reservations "
+                    "ADD COLUMN reservation_mode TEXT NOT NULL DEFAULT 'fixed'"
+                )
             agent_job_columns = {
                 str(row[1])
                 for row in connection.execute("PRAGMA table_info(agent_jobs)").fetchall()
@@ -1731,6 +1895,706 @@ class PublicStateStore:
                 day_start,
             )
         )
+
+    @staticmethod
+    def _expire_spend_guard_reservations_connection(
+        connection: sqlite3.Connection,
+        *,
+        now: str,
+    ) -> int:
+        """Turn abandoned pending reservations into explicit unknown spend."""
+        changed = connection.execute(
+            """
+            UPDATE spend_guard_reservations
+            SET status='unknown', actual_ticks=NULL,
+                unknown_reason='stale_reservation', updated_at=?
+            WHERE status='pending' AND expires_at<=?
+            """,
+            (now, now),
+        )
+        return max(0, int(changed.rowcount))
+
+    @staticmethod
+    def _ensure_spend_guard_telemetry_baseline_connection(
+        connection: sqlite3.Connection,
+        *,
+        scope: str,
+        utc_day: str,
+        telemetry_caller: str | None,
+        now: str,
+    ) -> int:
+        """Snapshot pre-guard telemetry exactly once for one hosted scope/day."""
+        existing = connection.execute(
+            """
+            SELECT telemetry_caller, baseline_ticks
+            FROM spend_guard_telemetry_baselines
+            WHERE scope=? AND utc_day=?
+            """,
+            (scope, utc_day),
+        ).fetchone()
+        if existing is not None:
+            if (
+                telemetry_caller is not None
+                and str(existing["telemetry_caller"]) != telemetry_caller
+            ):
+                raise ValueError("spend guard baseline caller does not match its scope")
+            return int(existing["baseline_ticks"])
+        if telemetry_caller is None:
+            return 0
+
+        day_start = datetime.fromisoformat(utc_day).replace(tzinfo=UTC)
+        day_end = day_start + timedelta(days=1)
+        first_guard = connection.execute(
+            """
+            SELECT MIN(created_at)
+            FROM spend_guard_reservations
+            WHERE scope=? AND utc_day=?
+            """,
+            (scope, utc_day),
+        ).fetchone()
+        telemetry_upper_bound = day_end
+        if first_guard is not None and first_guard[0]:
+            try:
+                first_guard_at = datetime.fromisoformat(str(first_guard[0]))
+            except ValueError as exc:
+                raise RuntimeError(
+                    "spend guard reservation has an invalid creation timestamp"
+                ) from exc
+            if first_guard_at.tzinfo is None:
+                raise RuntimeError(
+                    "spend guard reservation creation timestamp has no timezone"
+                )
+            first_guard_at = first_guard_at.astimezone(UTC)
+            telemetry_upper_bound = min(
+                day_end,
+                max(day_start, first_guard_at),
+            )
+        telemetry = connection.execute(
+            """
+            SELECT COALESCE(SUM(cost_usd), 0), COALESCE(MAX(id), 0)
+            FROM telemetry
+            WHERE caller=? AND created_at>=? AND created_at<?
+            """,
+            (
+                telemetry_caller,
+                day_start.isoformat(),
+                telemetry_upper_bound.isoformat(),
+            ),
+        ).fetchone()
+        baseline_ticks = _spend_guard_ticks(
+            telemetry[0] if telemetry is not None else 0,
+            field="telemetry_baseline_usd",
+            rounding=ROUND_CEILING,
+        )
+        source_max_id = int(telemetry[1] if telemetry is not None else 0)
+        connection.execute(
+            """
+            INSERT INTO spend_guard_telemetry_baselines(
+                scope, utc_day, telemetry_caller, baseline_ticks,
+                source_max_telemetry_id, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                scope,
+                utc_day,
+                telemetry_caller,
+                baseline_ticks,
+                source_max_id,
+                now,
+            ),
+        )
+        return baseline_ticks
+
+    @staticmethod
+    def _spend_guard_totals_connection(
+        connection: sqlite3.Connection,
+        *,
+        scope: str,
+        utc_day: str,
+    ) -> tuple[int, int, int]:
+        totals = connection.execute(
+            """
+            SELECT
+                COALESCE((
+                    SELECT baseline_ticks
+                    FROM spend_guard_telemetry_baselines
+                    WHERE scope=? AND utc_day=?
+                ), 0)
+                + COALESCE(SUM(
+                    CASE
+                        WHEN status='reconciled' AND actual_ticks IS NOT NULL
+                            THEN actual_ticks
+                        ELSE 0
+                    END
+                ), 0) AS committed_ticks,
+                COALESCE(SUM(
+                    CASE WHEN status='pending' THEN reserved_ticks ELSE 0 END
+                ), 0) AS pending_ticks,
+                COALESCE(SUM(
+                    CASE
+                        WHEN status='unknown'
+                            OR (status='reconciled' AND actual_ticks IS NULL)
+                            THEN 1
+                        ELSE 0
+                    END
+                ), 0) AS unknown_count
+            FROM spend_guard_reservations
+            WHERE scope=? AND utc_day=?
+            """,
+            (scope, utc_day, scope, utc_day),
+        ).fetchone()
+        if totals is None:  # pragma: no cover - aggregate always returns one row
+            return 0, 0, 0
+        return (
+            int(totals["committed_ticks"] or 0),
+            int(totals["pending_ticks"] or 0),
+            int(totals["unknown_count"] or 0),
+        )
+
+    @staticmethod
+    def _spend_guard_admission_payload(
+        *,
+        reservation_id: str,
+        scope: str,
+        utc_day: str,
+        status: str,
+        reservation_mode: str,
+        limit_ticks: int,
+        reserved_ticks: int,
+        committed_ticks: int,
+        pending_ticks: int,
+        unknown_count: int,
+        admitted: bool,
+        created: bool,
+        reason: str | None,
+        expires_at: str | None,
+    ) -> dict[str, Any]:
+        accounted_ticks = committed_ticks + pending_ticks
+        remaining_ticks = max(0, limit_ticks - accounted_ticks)
+        return {
+            "reservation_id": reservation_id,
+            "scope": scope,
+            "utc_day": utc_day,
+            "status": status,
+            "reservation_mode": reservation_mode,
+            "admitted": admitted,
+            # Only a newly created pending reservation authorizes one provider call.
+            "execute_provider": bool(admitted and created and status == "pending"),
+            "created": created,
+            "reason": reason,
+            "limit_usd": _spend_guard_usd(limit_ticks),
+            "reserved_usd": _spend_guard_usd(reserved_ticks),
+            "committed_usd": _spend_guard_usd(committed_ticks),
+            "pending_usd": _spend_guard_usd(pending_ticks),
+            "remaining_usd": _spend_guard_usd(remaining_ticks),
+            "unknown_count": unknown_count,
+            "expires_at": expires_at,
+        }
+
+    def _reserve_spend_guard_sync(
+        self,
+        reservation_id: str,
+        scope: str,
+        limit_ticks: int,
+        requested_ticks: int | None,
+        reservation_mode: str,
+        stale_after_seconds: int,
+        telemetry_baseline_caller: str | None,
+    ) -> dict[str, Any]:
+        instant, now, utc_day = _spend_guard_clock()
+        expires_at = (instant + timedelta(seconds=stale_after_seconds)).isoformat()
+        with self._connect() as connection:
+            # The write lock must be acquired before totals are read. BEGIN IMMEDIATE
+            # provides that property across processes, not merely within this object.
+            connection.execute("BEGIN IMMEDIATE")
+            self._expire_spend_guard_reservations_connection(connection, now=now)
+            existing = connection.execute(
+                """
+                SELECT reservation_id, scope, utc_day, status, limit_ticks,
+                       reserved_ticks, reservation_mode, expires_at, unknown_reason
+                FROM spend_guard_reservations
+                WHERE reservation_id=?
+                """,
+                (reservation_id,),
+            ).fetchone()
+            if existing is not None:
+                existing_scope = str(existing["scope"])
+                existing_day = str(existing["utc_day"])
+                existing_reserved = int(existing["reserved_ticks"])
+                existing_mode = str(existing["reservation_mode"] or "fixed")
+                if (
+                    existing_scope != scope
+                    or existing_mode != reservation_mode
+                    or (
+                        reservation_mode == "fixed"
+                        and existing_reserved != requested_ticks
+                    )
+                ):
+                    raise ValueError(
+                        "reservation_id is already bound to a different spend attempt"
+                    )
+                self._ensure_spend_guard_telemetry_baseline_connection(
+                    connection,
+                    scope=scope,
+                    utc_day=existing_day,
+                    telemetry_caller=telemetry_baseline_caller,
+                    now=now,
+                )
+                status = str(existing["status"])
+                committed, pending, unknown = self._spend_guard_totals_connection(
+                    connection,
+                    scope=scope,
+                    utc_day=existing_day,
+                )
+                admitted = status in {"pending", "reconciled"}
+                reason = (
+                    "reservation_exists"
+                    if admitted
+                    else str(existing["unknown_reason"] or "unknown_cost")
+                )
+                return self._spend_guard_admission_payload(
+                    reservation_id=reservation_id,
+                    scope=scope,
+                    utc_day=existing_day,
+                    status=status,
+                    reservation_mode=existing_mode,
+                    limit_ticks=int(existing["limit_ticks"]),
+                    reserved_ticks=existing_reserved,
+                    committed_ticks=committed,
+                    pending_ticks=pending,
+                    unknown_count=unknown,
+                    admitted=admitted,
+                    created=False,
+                    reason=reason,
+                    expires_at=str(existing["expires_at"]),
+                )
+
+            self._ensure_spend_guard_telemetry_baseline_connection(
+                connection,
+                scope=scope,
+                utc_day=utc_day,
+                telemetry_caller=telemetry_baseline_caller,
+                now=now,
+            )
+            committed, pending, unknown = self._spend_guard_totals_connection(
+                connection,
+                scope=scope,
+                utc_day=utc_day,
+            )
+            if reservation_mode == "remaining":
+                reserved_ticks = max(0, limit_ticks - committed - pending)
+            elif requested_ticks is not None:
+                reserved_ticks = requested_ticks
+            else:  # pragma: no cover - validated before the transaction
+                raise RuntimeError("fixed spend reservation is missing its amount")
+            if unknown:
+                return self._spend_guard_admission_payload(
+                    reservation_id=reservation_id,
+                    scope=scope,
+                    utc_day=utc_day,
+                    status="denied",
+                    reservation_mode=reservation_mode,
+                    limit_ticks=limit_ticks,
+                    reserved_ticks=reserved_ticks,
+                    committed_ticks=committed,
+                    pending_ticks=pending,
+                    unknown_count=unknown,
+                    admitted=False,
+                    created=False,
+                    reason="unknown_cost",
+                    expires_at=None,
+                )
+            if reservation_mode == "remaining" and pending > 0:
+                return self._spend_guard_admission_payload(
+                    reservation_id=reservation_id,
+                    scope=scope,
+                    utc_day=utc_day,
+                    status="denied",
+                    reservation_mode=reservation_mode,
+                    limit_ticks=limit_ticks,
+                    reserved_ticks=reserved_ticks,
+                    committed_ticks=committed,
+                    pending_ticks=pending,
+                    unknown_count=0,
+                    admitted=False,
+                    created=False,
+                    reason="scope_busy",
+                    expires_at=None,
+                )
+            if (
+                reserved_ticks <= 0
+                or committed + pending + reserved_ticks > limit_ticks
+            ):
+                return self._spend_guard_admission_payload(
+                    reservation_id=reservation_id,
+                    scope=scope,
+                    utc_day=utc_day,
+                    status="denied",
+                    reservation_mode=reservation_mode,
+                    limit_ticks=limit_ticks,
+                    reserved_ticks=reserved_ticks,
+                    committed_ticks=committed,
+                    pending_ticks=pending,
+                    unknown_count=0,
+                    admitted=False,
+                    created=False,
+                    reason="limit_reached",
+                    expires_at=None,
+                )
+
+            row_count = connection.execute(
+                """
+                SELECT COUNT(*)
+                FROM spend_guard_reservations
+                WHERE scope=? AND utc_day=?
+                """,
+                (scope, utc_day),
+            ).fetchone()
+            if int(row_count[0] if row_count is not None else 0) >= (
+                SPEND_GUARD_MAX_ROWS_PER_SCOPE_DAY
+            ):
+                return self._spend_guard_admission_payload(
+                    reservation_id=reservation_id,
+                    scope=scope,
+                    utc_day=utc_day,
+                    status="denied",
+                    reservation_mode=reservation_mode,
+                    limit_ticks=limit_ticks,
+                    reserved_ticks=reserved_ticks,
+                    committed_ticks=committed,
+                    pending_ticks=pending,
+                    unknown_count=0,
+                    admitted=False,
+                    created=False,
+                    reason="ledger_capacity",
+                    expires_at=None,
+                )
+
+            connection.execute(
+                """
+                INSERT INTO spend_guard_reservations(
+                    reservation_id, scope, utc_day, status, limit_ticks,
+                    reserved_ticks, reservation_mode, actual_ticks, created_at,
+                    expires_at, reconciled_at, updated_at, unknown_reason
+                ) VALUES (?, ?, ?, 'pending', ?, ?, ?, NULL, ?, ?, NULL, ?, NULL)
+                """,
+                (
+                    reservation_id,
+                    scope,
+                    utc_day,
+                    limit_ticks,
+                    reserved_ticks,
+                    reservation_mode,
+                    now,
+                    expires_at,
+                    now,
+                ),
+            )
+            pending += reserved_ticks
+            return self._spend_guard_admission_payload(
+                reservation_id=reservation_id,
+                scope=scope,
+                utc_day=utc_day,
+                status="pending",
+                reservation_mode=reservation_mode,
+                limit_ticks=limit_ticks,
+                reserved_ticks=reserved_ticks,
+                committed_ticks=committed,
+                pending_ticks=pending,
+                unknown_count=0,
+                admitted=True,
+                created=True,
+                reason=None,
+                expires_at=expires_at,
+            )
+
+    async def reserve_spend_guard(
+        self,
+        *,
+        reservation_id: str,
+        scope: str,
+        limit_usd: float,
+        reserve_usd: float | None = None,
+        stale_after_seconds: int,
+        reserve_remaining: bool = False,
+        telemetry_baseline_caller: str | None = None,
+    ) -> dict[str, Any]:
+        """Atomically reserve fixed dollars or the scope's remaining UTC-day budget.
+
+        Fixed mode remains the default and requires ``reserve_usd``. In remaining
+        mode, the write transaction reserves every currently uncommitted tick, so
+        at most one attempt per scope can be pending. Neither mode is a provider-
+        enforced ceiling: one call can still exceed its reservation or remaining
+        budget. Reconciliation records that overshoot and blocks later admissions.
+        """
+        normalized_id = _validated_spend_guard_identity(
+            reservation_id, "reservation_id"
+        )
+        normalized_scope = _validated_spend_guard_identity(scope, "scope")
+        normalized_baseline_caller = (
+            _validated_spend_guard_identity(
+                telemetry_baseline_caller,
+                "telemetry_baseline_caller",
+            )
+            if telemetry_baseline_caller is not None
+            else None
+        )
+        limit_ticks = _spend_guard_ticks(
+            limit_usd,
+            field="limit_usd",
+            rounding=ROUND_FLOOR,
+        )
+        if reserve_remaining:
+            if reserve_usd is not None:
+                raise ValueError(
+                    "reserve_usd must be omitted when reserve_remaining is true"
+                )
+            requested_ticks = None
+            reservation_mode = "remaining"
+        else:
+            if reserve_usd is None:
+                raise ValueError("reserve_usd is required for a fixed reservation")
+            requested_ticks = _spend_guard_ticks(
+                reserve_usd,
+                field="reserve_usd",
+                rounding=ROUND_CEILING,
+                require_positive=True,
+            )
+            reservation_mode = "fixed"
+        stale_seconds = _validated_spend_guard_stale_seconds(stale_after_seconds)
+        return dict(
+            await self._write(
+                self._reserve_spend_guard_sync,
+                normalized_id,
+                normalized_scope,
+                limit_ticks,
+                requested_ticks,
+                reservation_mode,
+                stale_seconds,
+                normalized_baseline_caller,
+            )
+        )
+
+    def _reconcile_spend_guard_sync(
+        self,
+        reservation_id: str,
+        actual_ticks: int | None,
+        unknown_reason: str,
+        resolve_unknown: bool,
+        expected_scope: str | None,
+    ) -> dict[str, Any]:
+        _, now, _ = _spend_guard_clock()
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            self._expire_spend_guard_reservations_connection(connection, now=now)
+            row = connection.execute(
+                """
+                SELECT reservation_id, scope, utc_day, status, limit_ticks,
+                       reserved_ticks, reservation_mode, actual_ticks,
+                       expires_at, unknown_reason
+                FROM spend_guard_reservations
+                WHERE reservation_id=?
+                """,
+                (reservation_id,),
+            ).fetchone()
+            if row is None:
+                raise ValueError("spend guard reservation was not found")
+            if expected_scope is not None and str(row["scope"]) != expected_scope:
+                raise ValueError("spend guard reservation belongs to another scope")
+
+            current_status = str(row["status"])
+            current_actual = row["actual_ticks"]
+            if current_status == "reconciled":
+                if (
+                    actual_ticks is None
+                    or current_actual is not None
+                    and int(current_actual) == actual_ticks
+                ):
+                    pass
+                else:
+                    connection.execute(
+                        """
+                        UPDATE spend_guard_reservations
+                        SET status='unknown', actual_ticks=NULL,
+                            unknown_reason='conflicting_reconciliation', updated_at=?
+                        WHERE reservation_id=?
+                        """,
+                        (now, reservation_id),
+                    )
+            elif current_status == "unknown" and not resolve_unknown:
+                # Unknown is fail-closed and sticky. Ordinary terminal-path
+                # retries cannot clear it; only the explicit authoritative
+                # resolution API below may do so.
+                pass
+            elif actual_ticks is None:
+                connection.execute(
+                    """
+                    UPDATE spend_guard_reservations
+                    SET status='unknown', actual_ticks=NULL, unknown_reason=?,
+                        reconciled_at=?, updated_at=?
+                    WHERE reservation_id=?
+                    """,
+                    (unknown_reason, now, now, reservation_id),
+                )
+            else:
+                # A late authoritative amount may resolve a stale/unknown reservation.
+                connection.execute(
+                    """
+                    UPDATE spend_guard_reservations
+                    SET status='reconciled', actual_ticks=?, unknown_reason=NULL,
+                        reconciled_at=?, updated_at=?
+                    WHERE reservation_id=?
+                    """,
+                    (actual_ticks, now, now, reservation_id),
+                )
+
+            resolved = connection.execute(
+                """
+                SELECT scope, utc_day, status, limit_ticks, reserved_ticks,
+                       reservation_mode, actual_ticks, expires_at, unknown_reason
+                FROM spend_guard_reservations
+                WHERE reservation_id=?
+                """,
+                (reservation_id,),
+            ).fetchone()
+            if resolved is None:  # pragma: no cover - same-transaction invariant
+                raise RuntimeError("spend guard reservation disappeared")
+            scope = str(resolved["scope"])
+            utc_day = str(resolved["utc_day"])
+            committed, pending, unknown = self._spend_guard_totals_connection(
+                connection,
+                scope=scope,
+                utc_day=utc_day,
+            )
+            status = str(resolved["status"])
+            reason = (
+                str(resolved["unknown_reason"] or "unknown_cost")
+                if status == "unknown"
+                else None
+            )
+            return self._spend_guard_admission_payload(
+                reservation_id=reservation_id,
+                scope=scope,
+                utc_day=utc_day,
+                status=status,
+                reservation_mode=str(resolved["reservation_mode"] or "fixed"),
+                limit_ticks=int(resolved["limit_ticks"]),
+                reserved_ticks=int(resolved["reserved_ticks"]),
+                committed_ticks=committed,
+                pending_ticks=pending,
+                unknown_count=unknown,
+                admitted=status == "reconciled",
+                created=False,
+                reason=reason,
+                expires_at=str(resolved["expires_at"]),
+            )
+
+    async def reconcile_spend_guard(
+        self,
+        *,
+        reservation_id: str,
+        actual_cost_usd: float | None,
+        unknown_reason: str = "provider_cost_unavailable",
+        expected_scope: str | None = None,
+    ) -> dict[str, Any]:
+        """Idempotently replace one reservation with known or unknown actual cost.
+
+        Unknown cost is durable and fail-closed for the reservation's scope/day.
+        A later authoritative amount may resolve it. A contradictory second known
+        amount marks the reservation unknown instead of choosing one silently.
+        """
+        normalized_id = _validated_spend_guard_identity(
+            reservation_id, "reservation_id"
+        )
+        normalized_scope = (
+            _validated_spend_guard_identity(expected_scope, "expected_scope")
+            if expected_scope is not None
+            else None
+        )
+        if not re.fullmatch(r"[a-z0-9_:-]{1,80}", str(unknown_reason or "")):
+            raise ValueError("unknown_reason must be a bounded machine label")
+        actual_ticks: int | None
+        if actual_cost_usd is None:
+            actual_ticks = None
+        else:
+            try:
+                actual_ticks = _spend_guard_ticks(
+                    actual_cost_usd,
+                    field="actual_cost_usd",
+                    rounding=ROUND_CEILING,
+                )
+            except ValueError:
+                actual_ticks = None
+                unknown_reason = "invalid_actual_cost"
+        return dict(
+            await self._write(
+                self._reconcile_spend_guard_sync,
+                normalized_id,
+                actual_ticks,
+                str(unknown_reason),
+                False,
+                normalized_scope,
+            )
+        )
+
+    async def resolve_spend_guard_unknown(
+        self,
+        *,
+        reservation_id: str,
+        authoritative_cost_usd: float,
+    ) -> dict[str, Any]:
+        """Resolve a fail-closed unknown row from an authoritative cost result.
+
+        This is deliberately separate from normal reconciliation so duplicate,
+        contradictory, or delayed terminal handlers cannot silently reopen the
+        spend guard. Callers must establish the provider result's authority.
+        """
+        normalized_id = _validated_spend_guard_identity(
+            reservation_id, "reservation_id"
+        )
+        actual_ticks = _spend_guard_ticks(
+            authoritative_cost_usd,
+            field="authoritative_cost_usd",
+            rounding=ROUND_CEILING,
+        )
+        return dict(
+            await self._write(
+                self._reconcile_spend_guard_sync,
+                normalized_id,
+                actual_ticks,
+                "authoritative_resolution",
+                True,
+                None,
+            )
+        )
+
+    def _spend_guard_status_sync(self, scope: str) -> dict[str, Any]:
+        _, now, utc_day = _spend_guard_clock()
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            expired = self._expire_spend_guard_reservations_connection(
+                connection,
+                now=now,
+            )
+            committed, pending, unknown = self._spend_guard_totals_connection(
+                connection,
+                scope=scope,
+                utc_day=utc_day,
+            )
+            return {
+                "scope": scope,
+                "utc_day": utc_day,
+                "committed_usd": _spend_guard_usd(committed),
+                "pending_usd": _spend_guard_usd(pending),
+                "unknown_count": unknown,
+                "blocked_unknown": bool(unknown),
+                "expired_reservations_marked_unknown": expired,
+            }
+
+    async def spend_guard_status(self, *, scope: str) -> dict[str, Any]:
+        """Return current UTC-day durable guard totals, expiring stale attempts."""
+        normalized_scope = _validated_spend_guard_identity(scope, "scope")
+        return dict(await self._write(self._spend_guard_status_sync, normalized_scope))
 
     def _reclassify_telemetry_error_sync(
         self,
