@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import os
 import time
 from collections.abc import Callable, Sequence
@@ -65,6 +66,19 @@ FILE_CONTENT_HARD_CAP_BYTES = max(
     1_024,
     min(int(os.environ.get("UNIGROK_FILE_CONTENT_MAX_BYTES", "2000000") or 2_000_000), 10_000_000),
 )
+
+
+def _authoritative_cost_usd(value: Any) -> float | None:
+    """Return a provider-reported cost without inventing a zero-dollar receipt."""
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        cost = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(cost) or cost < 0:
+        return None
+    return cost
 
 
 def api_key_configured() -> bool:
@@ -256,7 +270,9 @@ def _chat_result(response: Any, *, model: str, route: str, started: float) -> di
         "billing_class": "metered_api",
         "credential_source": active_credential_source(),
         "workspace_attached": False,
-        "cost_usd": float(getattr(response, "cost_usd", 0.0) or 0.0),
+        "cost_usd": _authoritative_cost_usd(
+            getattr(response, "cost_usd", None)
+        ),
         "usage": _usage(response),
         "citations": citations,
         "tool_outputs": outputs,
@@ -342,6 +358,15 @@ async def resolve_model(requested: str | None) -> str:
     return str(default)
 
 
+def _model_supports_reasoning_effort(model: str | None) -> bool:
+    m = (model or "").strip().lower()
+    if not m:
+        return False
+    if m.startswith("grok-build") or "non-reasoning" in m or "code-fast" in m:
+        return False
+    return True
+
+
 async def chat(
     prompt: str,
     *,
@@ -373,7 +398,7 @@ async def chat(
         params: dict[str, Any] = {"model": selected}
         if tools:
             params["tools"] = tools
-        if reasoning_effort:
+        if reasoning_effort and _model_supports_reasoning_effort(selected):
             params["reasoning_effort"] = reasoning_effort
         if max_turns is not None:
             params["max_turns"] = max_turns
@@ -383,10 +408,19 @@ async def chat(
             params["response_format"] = response_format
         client = _client(timeout_seconds=_rpc_timeout(deadline))
         try:
-            conversation = client.chat.create(**params)
-            conversation.append(system(system_prompt))
-            conversation.append(user(prompt))
-            return conversation.sample()
+            try:
+                conversation = client.chat.create(**params)
+                conversation.append(system(system_prompt))
+                conversation.append(user(prompt))
+                return conversation.sample()
+            except Exception as exc:
+                if "reasoning_effort" in params and "reasoningeffort" in str(exc).lower():
+                    params.pop("reasoning_effort", None)
+                    conversation = client.chat.create(**params)
+                    conversation.append(system(system_prompt))
+                    conversation.append(user(prompt))
+                    return conversation.sample()
+                raise
         finally:
             _close_client(client)
 
@@ -552,7 +586,7 @@ def _media_result(item: Any) -> dict[str, Any]:
         "url": getattr(item, "url", None),
         "revised_prompt": getattr(item, "prompt", None),
         "duration_seconds": getattr(item, "duration", None),
-        "cost_usd": float(getattr(item, "cost_usd", 0.0) or 0.0),
+        "cost_usd": _authoritative_cost_usd(getattr(item, "cost_usd", None)),
     }
 
 
@@ -591,12 +625,13 @@ async def generate_image(
         _media_result(item)
         for item in await _blocking(_call, deadline_seconds=deadline)
     ]
+    costs = [item["cost_usd"] for item in images]
     return {
         "images": images,
         "model": model,
         "plane": API_PLANE,
         "billing_class": "metered_api",
-        "cost_usd": sum(item["cost_usd"] for item in images),
+        "cost_usd": sum(costs) if all(cost is not None for cost in costs) else None,
         "elapsed_ms": round((time.monotonic() - started) * 1000),
     }
 

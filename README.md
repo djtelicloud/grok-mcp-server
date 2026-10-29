@@ -179,6 +179,12 @@ Configure an MCP server named grok for this machine.
 ```
 
 The config filename varies by IDE, but every client connects to the same local URL.
+Loopback access is credential-free by default. Operators who need a local bearer token
+can configure `UNIGROK_LOCAL_MCP_TOKEN_SHA256` (preferred) or
+`UNIGROK_LOCAL_MCP_TOKEN`; the client sends the original token through its secret-input
+or environment facility, never as a checked-in literal. See the
+[GitHub Copilot and VS Code guide](docs/github-copilot-mcp.md) for exact paths and safe
+token placeholders.
 
 ## Try it in 60 seconds
 
@@ -282,6 +288,9 @@ MCP connects → install globally? → IDE previews owned files → user approve
 - **Global** is recommended: install a namespaced skill/plugin in the IDE's user scope.
 - **Project** creates only a plan for project-local guidance.
 - **Not now** and **Never ask again** are explicit choices.
+- Onboarding defaults to safe mode: tool approval stays interactive. Disabling safe mode
+  only offers a client-native, narrowly scoped option where one is verified; Cursor
+  remains interactive because its hook data cannot reliably prove the MCP server URL.
 - UniGrok never writes these files itself. The calling IDE uses its normal permissions,
   shows conflicts, and must not overwrite user-modified files blindly.
 
@@ -314,8 +323,13 @@ the instructions and templates but remains workspace-neutral.
 - In persistent local Compose, terminal runtime rows default to 24-hour retention
   (configurable 1–720 hours), while named sessions and remembered facts persist until
   explicitly deleted. Hosted state is instance-local as documented below.
-- Media accepts public HTTPS URLs; uploads accept caller-supplied bytes, never local
-  filesystem paths.
+- Media applies strict lexical validation to public HTTPS domain URLs; uploads accept
+  caller-supplied bytes, never local filesystem paths. xAI resolves media URLs later,
+  so this is not a DNS or rebinding guarantee. Operators can narrow accepted hosts with
+  `UNIGROK_MEDIA_ALLOWED_DOMAINS`.
+- Optional local and hosted daily spend guards reserve admission atomically and stop on
+  unknown cost. They reduce concurrent overspend but are not provider-enforced hard
+  ceilings: one admitted call can cost more than the remaining amount.
 - Ask for an image or video without an API key and UniGrok says so plainly — it never
   fabricates a media link.
 
@@ -329,7 +343,7 @@ See [SECURITY.md](SECURITY.md) for the complete public runtime boundary.
 | See every tool and routing rule | [Technical reference](docs/reference.md) |
 | Use the integrated local route or named local helper | [Local model routes](docs/offline-local-helper.md) |
 | Drive `agent` from an IDE agent | [Technical reference](docs/reference.md#how-an-ide-agent-should-drive-agent) |
-| Auth with GitHub, then install the public Ground pack | [Contributing](CONTRIBUTING.md#after-github-auth--install-the-public-ground-pack) |
+| Connect GitHub Copilot CLI or VS Code safely | [Copilot and VS Code](docs/github-copilot-mcp.md) |
 | Develop or acceptance-test UniGrok | [Development guide](docs/development.md) |
 | See what has limited soak and how to report a miss | [Known limits](docs/known-limits.md) |
 | See what changed between versions | [Changelog](CHANGELOG.md) |

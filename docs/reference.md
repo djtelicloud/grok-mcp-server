@@ -155,6 +155,14 @@ The README build copies the source tree into the image. Rebuild after source cha
 health and version responses do not prove that an older image contains the current
 checkout.
 
+Local loopback is credential-free by default. Set `UNIGROK_LOCAL_MCP_TOKEN_SHA256`
+(preferred) or `UNIGROK_LOCAL_MCP_TOKEN` to require a Bearer token on protected MCP
+requests. Malformed nonempty configuration fails startup. The original token belongs in
+the client's password-input or process environment, not a repository file. It and
+`XAI_API_KEY` remain server/client-edge credentials and are never passed to the isolated
+Grok Build CLI child. See [Copilot and VS Code](github-copilot-mcp.md) for exact client
+paths and placeholders.
+
 An operator may deploy the same generic runtime behind an OAuth-capable MCP gateway.
 Remote mode is API-only: the Grok Build CLI is disabled by policy. OAuth principals
 receive tenant-scoped sessions, facts, jobs, and telemetry. xAI file tools additionally
@@ -240,12 +248,34 @@ through discovery and never attempts the disabled CLI plane.
   bounded metadata only; Mission V2 cumulatively checkpoints it by lease generation so
   restart polls and later quanta cannot erase or double-add a charge.
 - `UNIGROK_ENABLE_METERED_API=false` disables metered API execution globally.
+- `UNIGROK_LOCAL_DAILY_BUDGET_USD` enables one aggregate local UTC-day admission guard.
+  Hosted `UNIGROK_CALLER_BUDGETS` maps exact canonical OAuth principals to daily USD
+  limits; principals omitted from a valid map remain uncapped.
+- Guard admission is an atomic SQLite reservation. Known cost reconciles idempotently;
+  unknown cost blocks later admissions. A guard is not a provider hard ceiling, so one
+  call can settle above its reservation or the remaining daily amount. Hosted
+  reservations are atomic only within one instance because the current SQLite state is
+  not shared across replicas.
 - API responses include provider billing receipts when available.
 - Destructive tools require `confirm_delete=true`.
 
 Language model IDs are discovered independently from the live local, CLI, and API
 catalogs. The caller does not select them. Media tools retain provider-defined media
 defaults.
+
+## Security and admission settings
+
+| Setting | Scope | Behavior |
+|---|---|---|
+| `UNIGROK_LOCAL_MCP_TOKEN_SHA256` | Local | Preferred comma-separated SHA-256 digest form for optional gateway bearer authentication. |
+| `UNIGROK_LOCAL_MCP_TOKEN` | Local | Plaintext server-side alternative; every token must be 32–256 supported characters. Keep it outside Git. |
+| `UNIGROK_MEDIA_ALLOWED_DOMAINS` | Local or hosted | Optional comma-separated public domain names; each entry includes its subdomains. Narrows lexical HTTPS URL validation only. |
+| `UNIGROK_LOCAL_DAILY_BUDGET_USD` | Local | Optional aggregate UTC-day metered-call admission guard. |
+| `UNIGROK_CALLER_BUDGETS` | Hosted | JSON object mapping exact canonical OAuth principals to UTC-day USD admission limits. Invalid configuration fails closed. |
+
+Media validation performs no DNS or network lookup. The provider resolves accepted URLs
+later, so neither the public-domain syntax check nor the optional allowlist establishes
+DNS-rebinding safety.
 
 ## Runtime limits
 
@@ -324,6 +354,17 @@ The MCP service never performs the installation. Plans contain only UniGrok-owne
 checksummed files or a client-settings instruction. The calling IDE must preview
 conflicts, preserve modified files, and write only after explicit approval. Project
 customizations remain higher priority than the global baseline.
+
+Onboarding defaults to `safe_mode=true`, which leaves tool approval interactive.
+`safe_mode=false` may offer a narrowly scoped, client-native approval entry only where
+that mechanism is verified. Cursor never receives automatic approval: its current hook
+payload cannot reliably bind a tool request to the configured MCP server URL.
+
+For GitHub Copilot CLI, the user-level MCP file is
+`~/.copilot/mcp-config.json`; project scope is `.mcp.json`. VS Code uses
+`.vscode/mcp.json` and can keep a bearer token in a password-marked input rather than a
+literal header. The onboarding plan returns merge entries only and never overwrites an
+existing MCP configuration.
 
 Antigravity's global pack uses `~/.gemini/config/plugins/unigrok` plus the global
 `ask-grok` workflow. Its generated `~/.gemini/antigravity/mcp` cache is never an install

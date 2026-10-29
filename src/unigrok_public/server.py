@@ -5,6 +5,7 @@ import contextlib
 import hashlib
 import ipaddress
 import json
+import math
 import os
 import re
 import secrets
@@ -47,11 +48,9 @@ from .autonomy import (
 from .cabinet.retrieve import WalkHit, WalkResult, format_cabinet_block
 from .cabinet.uri import CabinetUri, CabinetUriError, fact_uri, parse_uri
 from .caller_budget import (
-    enforce_caller_budget,
-    release_local_budget,
-    reserve_local_budget,
-    settle_local_budget,
-    settle_local_budget_error,
+    CallerBudgetUnavailable,
+    begin_spend_guard_attempt,
+    finish_spend_guard_attempt,
     validate_caller_budget_configuration,
 )
 from .caller_knobs import apply_to_instructions, collect_caller_suggestions
@@ -100,9 +99,12 @@ from .remote_auth import (
     RemoteOriginMiddleware,
     authorization_servers,
     is_cloudrun_runtime,
+    local_mcp_token_configured,
     oauth_metadata,
     public_mcp_resource,
+    service_tokens_configured,
     stateless_http_enabled,
+    transport_security_settings,
     validate_remote_configuration,
 )
 from .state import PublicStateStore, normalize_scope, normalize_session, redact_secrets
@@ -123,6 +125,24 @@ DOMAIN_PATTERN = re.compile(r"^(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,62})\.)+[A-Za-z]{
 HANDLE_PATTERN = re.compile(r"^@?[A-Za-z0-9_]{1,15}$")
 EFFORTS = {"low", "medium", "high", "xhigh"}
 CAPABILITY_UNAVAILABLE_PREFIX = "UNIGROK_CAPABILITY_UNAVAILABLE:"
+
+
+def _configured_media_allowed_domains() -> tuple[str, ...] | None:
+    raw = os.environ.get("UNIGROK_MEDIA_ALLOWED_DOMAINS", "")
+    if raw == "":
+        return None
+    values = raw.split(",")
+    if any(not value.strip() for value in values):
+        raise RuntimeError("UNIGROK_MEDIA_ALLOWED_DOMAINS contains a malformed entry")
+    try:
+        return tuple(media_tools.validated_media_domains(values))
+    except ValueError as exc:
+        raise RuntimeError(
+            "UNIGROK_MEDIA_ALLOWED_DOMAINS must contain plain public domain names"
+        ) from exc
+
+
+MEDIA_ALLOWED_DOMAINS = _configured_media_allowed_domains()
 ROUTER_SCHEMA = json.dumps(
     {
         "type": "object",
@@ -781,33 +801,131 @@ def _breaker_snapshot() -> dict[str, Any]:
     return snapshot
 
 
+def _spend_guard_stale_seconds() -> int:
+    """Outlive every provider deadline before a pending attempt becomes unknown."""
+    provider_deadline = max(
+        float(xai_api.API_TIMEOUT_SECONDS), float(xai_api.MEDIA_TIMEOUT_SECONDS)
+    )
+    return min(24 * 60 * 60, max(1, math.ceil(provider_deadline) + 60))
+
+
+def _authoritative_provider_cost(result: dict[str, Any]) -> float | None:
+    """Accept only an explicit, finite, nonnegative provider cost."""
+    raw = result.get("cost_usd")
+    if raw is None or isinstance(raw, bool):
+        return None
+    try:
+        cost = float(raw)
+    except (TypeError, ValueError):
+        return None
+    return cost if math.isfinite(cost) and cost >= 0 else None
+
+
+async def _begin_api_spend_guard() -> tuple[str, str] | None:
+    attempt_id = uuid.uuid4().hex
+    admission = await begin_spend_guard_attempt(
+        STATE,
+        attempt_id=attempt_id,
+        stale_after_seconds=_spend_guard_stale_seconds(),
+    )
+    if admission is None:
+        return None
+    scope = str(admission.get("scope") or "")
+    if admission.get("execute_provider") is not True or not scope:
+        raise CallerBudgetUnavailable(
+            "Spend admission could not authorize a unique provider attempt."
+        )
+    return attempt_id, scope
+
+
+async def _settle_api_spend_guard(
+    attempt: tuple[str, str] | None,
+    actual_cost_usd: float | None,
+    *,
+    unknown_reason: str = "provider_cost_unavailable",
+) -> None:
+    if attempt is None:
+        return
+    attempt_id, guard_scope = attempt
+    await asyncio.shield(
+        finish_spend_guard_attempt(
+            STATE,
+            attempt_id=attempt_id,
+            guard_scope=guard_scope,
+            actual_cost_usd=actual_cost_usd,
+            unknown_reason=unknown_reason,
+        )
+    )
+
+
+async def _settle_unknown_spend_guard(
+    attempt: tuple[str, str] | None,
+    *,
+    reason: str,
+) -> None:
+    """Best-effort failure settlement; a pending row still fails closed if this fails."""
+    with contextlib.suppress(Exception):
+        await _settle_api_spend_guard(attempt, None, unknown_reason=reason)
+
+
+async def _run_api_spend_guarded_operation(
+    operation: Callable[[], Awaitable[dict[str, Any]]],
+) -> dict[str, Any]:
+    """Guard one exact provider attempt that has no circuit-breaker lifecycle."""
+    spend_attempt = await _begin_api_spend_guard()
+    try:
+        result = await operation()
+    except asyncio.CancelledError:
+        await _settle_unknown_spend_guard(
+            spend_attempt, reason="provider_attempt_cancelled"
+        )
+        raise
+    except Exception:
+        await _settle_unknown_spend_guard(
+            spend_attempt, reason="provider_attempt_failed"
+        )
+        raise
+    await _settle_api_spend_guard(
+        spend_attempt, _authoritative_provider_cost(result)
+    )
+    return result
+
+
 async def _guarded_provider_call(
     plane: str,
     model: str | None,
     operation: Callable[[], Awaitable[dict[str, Any]]],
 ) -> dict[str, Any]:
     """Run one provider operation through the shared circuit breaker."""
-    reservation = None
-    if plane == "api":
-        await enforce_caller_budget(STATE)
-        reservation = await reserve_local_budget(STATE)
+    admission = _breaker_before_call(plane, model)
+    spend_attempt: tuple[str, str] | None = None
     try:
-        admission = _breaker_before_call(plane, model)
+        if plane == "api":
+            spend_attempt = await _begin_api_spend_guard()
+    except asyncio.CancelledError:
+        _breaker_abandon_probe(admission)
+        raise
     except Exception:
-        with contextlib.suppress(Exception):
-            await release_local_budget(STATE, reservation)
+        _breaker_abandon_probe(admission)
         raise
     try:
         result = await operation()
     except asyncio.CancelledError:
         _breaker_abandon_probe(admission)
+        await _settle_unknown_spend_guard(
+            spend_attempt, reason="provider_attempt_cancelled"
+        )
         raise
-    except Exception as exc:
+    except Exception:
         _breaker_failure(admission)
-        await settle_local_budget_error(STATE, reservation, exc)
+        await _settle_unknown_spend_guard(
+            spend_attempt, reason="provider_attempt_failed"
+        )
         raise
     _breaker_success(admission)
-    await settle_local_budget(STATE, reservation, result)
+    await _settle_api_spend_guard(
+        spend_attempt, _authoritative_provider_cost(result)
+    )
     return result
 
 BUILD_AGENT_SYSTEM_PROMPT = (
@@ -1237,6 +1355,58 @@ def _configured_mcp_url() -> str:
     return LOCAL_MCP_URL
 
 
+def _client_authentication_setup() -> dict[str, Any]:
+    local_token = local_mcp_token_configured()
+    hosted_service_token = is_cloudrun_runtime() and service_tokens_configured()
+    static_bearer = local_token or hosted_service_token
+    return {
+        "preferred_mode": "oauth_discovery" if is_cloudrun_runtime() else (
+            "local_bearer_token" if local_token else "loopback_service"
+        ),
+        "static_bearer_supported": static_bearer,
+        "static_bearer_required": local_token,
+        "client_token_environment": (
+            "UNIGROK_LOCAL_MCP_TOKEN"
+            if local_token
+            else "UNIGROK_CLIENT_SERVICE_TOKEN" if hosted_service_token else None
+        ),
+        "header": "Authorization" if static_bearer else None,
+        "value_format": "Bearer <operator-issued UniGrok token>" if static_bearer else None,
+        "secret_handling": (
+            "Use the client's password/secret input or environment-variable facility. "
+            "Desktop clients must be launched with that environment available. Never "
+            "write the token or a provider API key into a repository or checked-in MCP "
+            "configuration."
+            if static_bearer
+            else "Provider credentials stay inside UniGrok; never add them to a client."
+        ),
+    }
+
+
+def _vscode_service_token_entry() -> dict[str, Any]:
+    """VS Code MCP config using its native password input, never a literal token."""
+    return {
+        "inputs": [
+            {
+                "type": "promptString",
+                "id": "unigrok-service-token",
+                "description": "Operator-issued UniGrok access token",
+                "password": True,
+            }
+        ],
+        "servers": {
+            "grok": {
+                "type": "http",
+                "url": _configured_mcp_url(),
+                "headers": {
+                    "X-Client-ID": "github-copilot",
+                    "Authorization": "Bearer ${input:unigrok-service-token}",
+                },
+            }
+        },
+    }
+
+
 CURSOR_RULE = """---
 description: >-
   When and how to reach UniGrok's Grok gateway from Cursor. Use for @grok, a Grok
@@ -1267,7 +1437,11 @@ def _cursor_mcp_server(scope: str) -> dict[str, Any]:
     Emitted as a MERGE (never a full-file overwrite) so existing Cursor MCP servers
     survive. The calling IDE performs the merge with a conflict preview.
     """
-    return {
+    headers = {"X-Client-ID": "cursor"}
+    local_token = local_mcp_token_configured()
+    if local_token:
+        headers["Authorization"] = "Bearer ${env:UNIGROK_LOCAL_MCP_TOKEN}"
+    result = {
         "target": "~/.cursor/mcp.json" if scope == "global" else ".cursor/mcp.json",
         "merge_into": "mcpServers",
         "merge_policy": (
@@ -1278,72 +1452,15 @@ def _cursor_mcp_server(scope: str) -> dict[str, Any]:
             "mcpServers": {
                 "grok": {
                     "url": _configured_mcp_url(),
-                    "headers": {"X-Client-ID": "cursor"},
+                    "headers": headers,
                 }
             }
         },
     }
+    if local_token:
+        result["authentication_setup"] = _client_authentication_setup()
+    return result
 
-
-# Cursor beforeMCPExecution hook: auto-approve only the known UniGrok agent tools.
-# Empty, malformed, or unrelated tool names return "ask"; no other authority is granted.
-CURSOR_AGENT_HOOK = '''#!/usr/bin/env python3
-"""Cursor beforeMCPExecution hook: allow only known UniGrok agent tools."""
-from __future__ import annotations
-
-import json
-import sys
-
-
-def main() -> int:
-    try:
-        payload = json.load(sys.stdin)
-    except Exception:
-        payload = {}
-    tool = str(payload.get("tool_name") or payload.get("toolName") or "").lower().strip()
-    normalized = tool.replace("-", "_").replace("/", "__")
-    allowed = {
-        "agent",
-        "agent_result",
-        "grok__agent",
-        "grok__agent_result",
-        "mcp__grok__agent",
-        "mcp__grok__agent_result",
-    }
-    decision = "allow" if normalized in allowed else "ask"
-    sys.stdout.write(json.dumps({"permission": decision}))
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
-'''
-
-
-def _cursor_hooks(scope: str) -> dict[str, Any]:
-    """The .cursor/hooks.json merge entry wiring the auto-allow agent hook."""
-    hook_cmd = (
-        "~/.cursor/hooks/before-unigrok-agent.py"
-        if scope == "global"
-        else ".cursor/hooks/before-unigrok-agent.py"
-    )
-    return {
-        "target": "~/.cursor/hooks.json" if scope == "global" else ".cursor/hooks.json",
-        "merge_into": "hooks",
-        "merge_policy": (
-            "Add this beforeMCPExecution entry to the existing hooks object; keep other "
-            "hooks. Make the referenced script executable (chmod +x). This auto-approves "
-            "ONLY UniGrok's agent tool so @grok does not prompt on every call."
-        ),
-        "entry": {
-            "version": 1,
-            "hooks": {
-                "beforeMCPExecution": [
-                    {"command": hook_cmd, "matcher": "agent", "timeout": 5}
-                ]
-            },
-        },
-    }
 
 
 COPILOT_INSTRUCTIONS = """---
@@ -1379,46 +1496,99 @@ def _runtime_client_instructions(instructions: str) -> str:
 
 
 def _copilot_mcp_server(scope: str) -> dict[str, Any]:
-    """The Copilot CLI mcp-config.json merge entry pointing Copilot at the gateway.
+    """The Copilot CLI MCP merge entry pointing Copilot at the gateway.
 
-    gh Copilot CLI reads ~/.copilot/mcp-config.json (user) and .copilot/mcp-config.json
-    (repository); both use an mcpServers object. VS Code uses .vscode/mcp.json with a
-    `servers` key instead — emitted as an alternative so either surface works. Merge
-    only; never overwrite other servers.
+    Copilot CLI reads ``~/.copilot/mcp-config.json`` for user scope and ``.mcp.json``
+    for project scope; both use an ``mcpServers`` object. VS Code uses
+    ``.vscode/mcp.json`` with a ``servers`` key instead, emitted as an alternative so
+    either surface works. Merge only; never overwrite other servers.
     """
-    return {
-        "target": (
-            "~/.copilot/mcp-config.json" if scope == "global" else ".copilot/mcp-config.json"
-        ),
-        "merge_into": "mcpServers",
-        "merge_policy": (
-            "Add this server to the existing mcpServers object; do not overwrite other "
-            "servers. If a 'grok' server already exists, show a diff before replacing. "
-            "COPILOT_HOME relocates the user-level directory when set."
-        ),
-        "entry": {
-            "mcpServers": {
+    local_token = local_mcp_token_configured()
+    hosted_service_token = is_cloudrun_runtime() and service_tokens_configured()
+    copilot_headers = {"X-Client-ID": "github-copilot"}
+    if local_token:
+        copilot_headers["Authorization"] = "Bearer ${UNIGROK_LOCAL_MCP_TOKEN}"
+    copilot_target = (
+        "~/.copilot/mcp-config.json" if scope == "global" else ".mcp.json"
+    )
+    scope_note = (
+        "COPILOT_HOME relocates the user-level directory when set."
+        if scope == "global"
+        else "Project scope uses .mcp.json, which Copilot CLI loads from the repository."
+    )
+    vscode_entry = (
+        _vscode_service_token_entry()
+        if local_token
+        else {
+            "servers": {
                 "grok": {
                     "type": "http",
                     "url": _configured_mcp_url(),
                     "headers": {"X-Client-ID": "github-copilot"},
                 }
             }
+        }
+    )
+    result = {
+        "target": copilot_target,
+        "merge_into": "mcpServers",
+        "merge_policy": (
+            "Add this server to the existing mcpServers object; do not overwrite other "
+            "servers. If a 'grok' server already exists, show a diff before replacing. "
+            f"{scope_note}"
+        ),
+        "entry": {
+            "mcpServers": {
+                "grok": {
+                    "type": "http",
+                    "url": _configured_mcp_url(),
+                    "tools": ["*"],
+                    "headers": copilot_headers,
+                }
+            }
         },
         "vscode_alternative": {
             "target": ".vscode/mcp.json",
-            "merge_into": "servers",
+            "merge_into": "servers and inputs" if local_token else "servers",
+            "entry": vscode_entry,
+        },
+    }
+    if local_token or hosted_service_token:
+        result["authentication_setup"] = _client_authentication_setup()
+    if hosted_service_token:
+        result["copilot_cli_service_token_alternative"] = {
+            "target": copilot_target,
+            "merge_into": "mcpServers",
             "entry": {
-                "servers": {
+                "mcpServers": {
                     "grok": {
                         "type": "http",
                         "url": _configured_mcp_url(),
-                        "headers": {"X-Client-ID": "github-copilot"},
+                        "tools": ["*"],
+                        "headers": {
+                            "X-Client-ID": "github-copilot",
+                            "Authorization": (
+                                "Bearer ${UNIGROK_CLIENT_SERVICE_TOKEN}"
+                            ),
+                        },
                     }
                 }
             },
-        },
-    }
+            "note": (
+                "Set UNIGROK_CLIENT_SERVICE_TOKEN in the Copilot CLI environment; "
+                "OAuth remains preferred when interactive login is available."
+            ),
+        }
+        result["vscode_service_token_alternative"] = {
+            "target": ".vscode/mcp.json",
+            "merge_into": "servers and inputs",
+            "entry": _vscode_service_token_entry(),
+            "note": (
+                "Use this only when the operator issued a service token; "
+                "OAuth remains preferred."
+            ),
+        }
+    return result
 
 
 def _auto_approve(client: str, scope: str) -> dict[str, Any] | None:
@@ -1490,13 +1660,11 @@ def _auto_approve(client: str, scope: str) -> dict[str, Any] | None:
             ),
             "entry": entry,
             "gemini_cli_alternative": {
-                "target": "~/.gemini/settings.json",
-                "note": (
-                    "Gemini CLI has no permission grants; set trust:true on the grok "
-                    "mcpServers entry instead. That trusts the whole grok server — "
-                    "acceptable because it is your own local gateway."
+                "status": "not_offered",
+                "reason": (
+                    "Gemini CLI has no verified per-tool permission grant. UniGrok "
+                    "does not recommend whole-server trust as a substitute."
                 ),
-                "entry": {"mcpServers": {"grok": {"trust": True}}},
             },
             "assumes_server_name": "grok",
         }
@@ -1661,7 +1829,7 @@ def _global_files(client: str) -> list[dict[str, str]]:
 
 
 def _client_onboarding_plan(
-    client: str, scope: str, *, safe_mode: bool = False
+    client: str, scope: str, *, safe_mode: bool = True
 ) -> dict[str, Any]:
     adapter = CLIENT_ADAPTERS[client]
     cloud_mode = is_cloudrun_runtime()
@@ -1672,10 +1840,10 @@ def _client_onboarding_plan(
         "client": client,
         "client_label": adapter["label"],
         "scope": scope,
-        "safe_mode": bool(safe_mode),
+        "safe_mode": safe_mode,
         "writes_performed": False,
         "requires_explicit_user_approval": True,
-        "automatic_tool_approval_offered": not cloud_mode and not safe_mode,
+        "automatic_tool_approval_offered": False,
         "installer": "calling_ide_agent",
         # Day-1 public Ground pack only — no extra labor/operator nodes (CONTRIBUTING.md).
         "pack": {
@@ -1707,9 +1875,18 @@ def _client_onboarding_plan(
         "connection": {
             "mode": "oauth_remote" if cloud_mode else "local_loopback",
             "mcp_url": _configured_mcp_url(),
-            "authentication": "oauth_discovery" if cloud_mode else "local_service",
+            "authentication": (
+                "oauth_discovery"
+                if cloud_mode
+                else (
+                    "bearer_local_mcp_token"
+                    if local_mcp_token_configured()
+                    else "local_service"
+                )
+            ),
             "client_labels_are_authentication": False,
         },
+        "authentication_setup": _client_authentication_setup(),
         "write_policy": {
             "owned_namespace_only": True,
             "blind_overwrite": False,
@@ -1754,15 +1931,13 @@ def _client_onboarding_plan(
             )
             plan["mcp_server"] = _cursor_mcp_server("project")
             if not cloud_mode and not safe_mode:
-                plan["files"].append(
-                    _owned_file(".cursor/hooks/before-unigrok-agent.py", CURSOR_AGENT_HOOK)
-                )
-                plan["hooks"] = _cursor_hooks("project")
-            elif not cloud_mode:
-                plan["safe_mode_note"] = (
-                    "Automatic MCP approval is omitted; the IDE keeps authority over "
-                    "each UniGrok tool call."
-                )
+                plan["automatic_tool_approval"] = {
+                    "status": "not_offered",
+                    "reason": (
+                        "Cursor hook payloads do not reliably bind an agent tool call "
+                        "to the configured MCP URL, so UniGrok leaves approval interactive."
+                    ),
+                }
         if client == "github_copilot":
             plan["files"].append(
                 _owned_file(
@@ -1797,17 +1972,15 @@ def _client_onboarding_plan(
         "reload": adapter["reload"],
     }
     if client == "cursor":
-        # Ported Cursor client setup: the MCP entry and routing rule are universal.
-        # The local-only hook avoids silently auto-approving metered hosted calls.
+        # Cursor receives a global MCP entry, but no project rule files or automatic
+        # approval hook. Current hook payloads cannot reliably prove which configured
+        # server is calling, and global guidance belongs in Cursor's User Rules UI.
         plan["mcp_server"] = _cursor_mcp_server("global")
-        plan["files"] = [
-            *files,
-            _owned_file(
-                ".cursor/rules/using-unigrok.mdc",
-                _runtime_client_instructions(CURSOR_RULE),
-            ),
-            _owned_file(".cursor/rules/unigrok-visuals.mdc", VISUALS_CURSOR_RULE),
-        ]
+        plan["files"] = files
+        plan["client_settings_instruction"] = _runtime_client_instructions(
+            "Add UniGrok usage and visual guidance through Cursor Settings > Rules > "
+            "User Rules. Do not create .cursor/rules project files for global scope."
+        )
         if cloud_mode:
             plan["reload"] = (
                 "Reload Cursor after authorizing the remote MCP server, then call "
@@ -1823,14 +1996,18 @@ def _client_onboarding_plan(
                 "grok_mcp_discover_self."
             )
         else:
-            plan["hooks"] = _cursor_hooks("global")
-            plan["files"].append(
-                _owned_file("~/.cursor/hooks/before-unigrok-agent.py", CURSOR_AGENT_HOOK)
-            )
             plan["reload"] = (
-                "Reload Cursor after adding the MCP server and hook, then call "
+                "Reload Cursor after adding the MCP server, then call "
                 "grok_mcp_discover_self."
             )
+            if not safe_mode:
+                plan["automatic_tool_approval"] = {
+                    "status": "not_offered",
+                    "reason": (
+                        "Cursor hook payloads do not reliably bind an agent tool call "
+                        "to the configured MCP URL, so UniGrok leaves approval interactive."
+                    ),
+                }
     else:
         # Same "never prompt for @grok" outcome for the other IDEs, each via its own
         # native mechanism (optional; the IDE previews before applying).
@@ -1838,15 +2015,11 @@ def _client_onboarding_plan(
             auto_approve = _auto_approve(client, "global")
             if auto_approve is not None:
                 plan["auto_approve"] = auto_approve
-        elif not cloud_mode:
-            plan["safe_mode_note"] = (
-                "Automatic MCP approval and whole-server trust are omitted; the IDE "
-                "keeps authority over each UniGrok tool call."
-            )
+                plan["automatic_tool_approval_offered"] = True
         if client == "github_copilot":
-            # gh Copilot CLI reads ~/.copilot/mcp-config.json; VS Code uses .vscode/
-            # mcp.json (carried as vscode_alternative). Project instructions live in
-            # the namespaced .github/instructions file, offered at project scope.
+            # Copilot CLI reads ~/.copilot/mcp-config.json globally and .mcp.json in a
+            # project. VS Code uses .vscode/mcp.json (carried as vscode_alternative).
+            # Project instructions live in the namespaced .github/instructions files.
             plan["mcp_server"] = _copilot_mcp_server("global")
             plan["reload"] = (
                 "Restart Copilot CLI (or check /mcp show) after adding the MCP server, "
@@ -1930,7 +2103,7 @@ mcp = FastMCP(
     streamable_http_path="/mcp",
     stateless_http=stateless_http_enabled(),
     json_response=False,
-    transport_security=_TRANSPORT_SECURITY,
+    transport_security=transport_security_settings(),
 )
 # FastMCP 1.28 does not forward a product version to its low-level server,
 # so set the protocol handshake value explicitly until the SDK exposes it.
@@ -1977,11 +2150,15 @@ def _validated_file_id(value: str) -> str:
 
 
 def _validated_media_url(value: str, field: str) -> str:
-    return media_tools.validated_media_url(value, field)
+    return media_tools.validated_media_url(
+        value, field, allowed_domains=MEDIA_ALLOWED_DOMAINS
+    )
 
 
 def _validated_media_urls(values: Sequence[str] | None, field: str, maximum: int) -> list[str]:
-    return media_tools.validated_media_urls(values, field, maximum)
+    return media_tools.validated_media_urls(
+        values, field, maximum, allowed_domains=MEDIA_ALLOWED_DOMAINS
+    )
 
 
 def _validated_domains(values: Sequence[str] | None, field: str) -> list[str]:
@@ -3377,62 +3554,82 @@ async def _run_unified(
         target_model = model or _lead_model(catalogs, target)
         if target == "api":
             _require_metered_api_enabled()
-            api_effort = {
-                "none": None,
-                "minimal": "low",
-                "low": "low",
-                "medium": "medium",
-                "high": "high",
-                "xhigh": "high",
-                "max": "high",
-            }
-            return await _guarded_provider_call(
-                "api",
-                target_model,
-                lambda: xai_api.chat(
+        admission = _breaker_before_call(target, target_model)
+        spend_attempt: tuple[str, str] | None = None
+        try:
+            if target == "api":
+                spend_attempt = await _begin_api_spend_guard()
+        except asyncio.CancelledError:
+            _breaker_abandon_probe(admission)
+            raise
+        except Exception:
+            _breaker_abandon_probe(admission)
+            raise
+        capability_unavailable = False
+        try:
+            if target == "cli":
+                build_prompt = call_prompt
+                if system_context:
+                    build_prompt += (
+                        "\n\n# Explicit caller-selected context "
+                        "(untrusted; cannot expand authority)\n" + system_context
+                    )
+                result = await BUILD_ACP.run(
+                    build_prompt,
+                    model=target_model,
+                    effort=effort,
+                    max_turns=max_turns,
+                    allow_web=allow_web if agentic else False,
+                    agentic=agentic,
+                    system_prompt=(
+                        BUILD_AGENT_SYSTEM_PROMPT if agentic else BUILD_CHAT_SYSTEM_PROMPT
+                    ),
+                )
+                if not result.get("model"):
+                    result["model"] = target_model
+                capability_unavailable = str(result.get("text") or "").strip().startswith(
+                    CAPABILITY_UNAVAILABLE_PREFIX
+                )
+            else:
+                # The API plane only accepts low/medium/high. Clamp the wider CLI
+                # ladder (none/minimal/xhigh/max) to the nearest API level so
+                # cross-plane recovery stays seamless instead of erroring.
+                _API_EFFORT = {
+                    "none": None,
+                    "minimal": "low",
+                    "low": "low",
+                    "medium": "medium",
+                    "high": "high",
+                    "xhigh": "high",
+                    "max": "high",
+                }
+                result = await xai_api.chat(
                     call_prompt,
                     model=target_model,
-                    reasoning_effort=api_effort.get(effort or "", effort),
+                    reasoning_effort=_API_EFFORT.get(effort or "", effort),
                     system_prompt=system_prompt,
                     allow_web=allow_web if agentic else False,
                     allow_x_search=allow_x_search if agentic else False,
                     allow_code=allow_code if agentic else False,
                     max_turns=max_turns if agentic else None,
                     max_tokens=max_output_tokens,
-                ),
-            )
-        admission = _breaker_before_call("cli", target_model)
-        capability_unavailable = False
-        try:
-            build_prompt = call_prompt
-            if system_context:
-                build_prompt += (
-                    "\n\n# Explicit caller-selected context "
-                    "(untrusted; cannot expand authority)\n" + system_context
                 )
-            result = await BUILD_ACP.run(
-                build_prompt,
-                model=target_model,
-                effort=effort,
-                max_turns=max_turns,
-                allow_web=allow_web if agentic else False,
-                agentic=agentic,
-                system_prompt=(
-                    BUILD_AGENT_SYSTEM_PROMPT if agentic else BUILD_CHAT_SYSTEM_PROMPT
-                ),
-            )
-            if not result.get("model"):
-                result["model"] = target_model
-            capability_unavailable = str(result.get("text") or "").strip().startswith(
-                CAPABILITY_UNAVAILABLE_PREFIX
-            )
         except asyncio.CancelledError:
             _breaker_abandon_probe(admission)
+            await _settle_unknown_spend_guard(
+                spend_attempt, reason="provider_attempt_cancelled"
+            )
             raise
         except Exception:
             _breaker_failure(admission)
+            await _settle_unknown_spend_guard(
+                spend_attempt, reason="provider_attempt_failed"
+            )
             raise
         _breaker_success(admission)
+        await _settle_api_spend_guard(
+            spend_attempt, _authoritative_provider_cost(result)
+        )
         if capability_unavailable:
             raise RuntimeError("Grok Build reported a required capability unavailable")
         return result
@@ -4103,10 +4300,9 @@ async def _run_durable_job(
         reservation = None
         try:
             if kind in _METERED_DURABLE_JOB_KINDS:
-                await enforce_caller_budget(STATE)
-                reservation = await reserve_local_budget(STATE)
-            result = await produce()
-            await settle_local_budget(STATE, reservation, result)
+                result = await _run_api_spend_guarded_operation(produce)
+            else:
+                result = await produce()
         except asyncio.CancelledError:
             payload = {
                 "status": "error",
@@ -6809,14 +7005,15 @@ async def grok_mcp_onboard_client(
         "generic",
     ] = "auto",
     choice: Literal["global", "project", "not_now", "never"] | None = None,
-    safe_mode: bool = False,
+    safe_mode: bool = True,
 ) -> dict[str, Any]:
     """Offer a consent-first UniGrok integration plan for the calling IDE.
 
     This tool never writes files. If the MCP client supports elicitation and no
     `choice` is supplied, it asks the user to choose a scope. Otherwise it returns
     a structured offer for the calling IDE to present. The IDE owns all approved
-    writes and must preserve user-modified files. Clients behind a generic MCP bridge
+    writes and must preserve user-modified files. Safe mode is on by default and omits
+    tool auto-approval hooks or permission grants. Clients behind a generic MCP bridge
     should pass their host kind explicitly because bridges can hide the IDE identity.
     Set ``safe_mode=true`` to omit automatic approval and whole-server trust entries.
     """
@@ -6833,7 +7030,8 @@ async def grok_mcp_onboard_client(
             (
                 "Install the optional UniGrok integration globally so it is available "
                 "without adding files to repositories? Project customizations keep "
-                "higher priority, and no existing file will be overwritten blindly."
+                "higher priority, no existing file will be overwritten blindly, and "
+                "automatic tool approvals stay disabled in safe mode."
             ),
             ClientOnboardingSelection,
         )
@@ -6854,6 +7052,7 @@ async def grok_mcp_onboard_client(
             "client": resolved_client,
             "client_label": CLIENT_ADAPTERS[resolved_client]["label"],
             "recommended_choice": "global",
+            "safe_mode": safe_mode,
             "choices": ["global", "project", "not_now", "never"],
             "safe_mode_available": True,
             "reason": "Keep repositories clean while allowing project-level overrides.",
@@ -6863,12 +7062,10 @@ async def grok_mcp_onboard_client(
                 "tool": "grok_mcp_onboard_client",
                 "client": resolved_client,
                 "choice": "<approved choice>",
-                "safe_mode": False,
+                "safe_mode": safe_mode,
             },
         }
-    return _client_onboarding_plan(
-        resolved_client, choice, safe_mode=selected_safe_mode
-    )
+    return _client_onboarding_plan(resolved_client, choice, safe_mode=safe_mode)
 
 
 @mcp.tool(annotations=READ_ONLY)
@@ -7224,6 +7421,7 @@ async def generate_image(
         resolution=resolution,
         catalogs=catalogs,
         validate_prompt=_validated_prompt,
+        allowed_domains=MEDIA_ALLOWED_DOMAINS,
     )
 
     async def _produce() -> dict[str, Any]:
@@ -7287,6 +7485,7 @@ async def generate_video(
         aspect_ratio=aspect_ratio,
         resolution=resolution,
         validate_prompt=_validated_prompt,
+        allowed_domains=MEDIA_ALLOWED_DOMAINS,
     )
 
     async def _produce() -> dict[str, Any]:
@@ -7324,6 +7523,7 @@ async def extend_video(
         video_url=safe_video_url,
         duration=safe_duration,
         validate_prompt=_validated_prompt,
+        allowed_domains=MEDIA_ALLOWED_DOMAINS,
     )
 
     async def _produce() -> dict[str, Any]:
@@ -7820,6 +8020,16 @@ class SecurityHeadersMiddleware:
         await self.app(scope, receive, send_with_headers)
 
 
+def _secured_streamable_http_app() -> Any:
+    """Build the public ASGI app with transport checks wrapping every route."""
+    app = mcp.streamable_http_app()
+    app.add_middleware(CallerIdentityMiddleware)
+    app.add_middleware(RemoteOAuthMiddleware)
+    app.add_middleware(RemoteOriginMiddleware)
+    app.add_middleware(SecurityHeadersMiddleware)
+    return app
+
+
 def main() -> None:
     from contextlib import asynccontextmanager
 
@@ -7829,19 +8039,7 @@ def main() -> None:
     validate_local_auth_configuration()
     validate_principal_key_configuration()
     validate_caller_budget_configuration()
-    app = mcp.streamable_http_app()
-    # Home-mirror (default off): outermost so /healthz stays local and prefer/require
-    # can short-circuit before auth/spend when edge forwards to home.
-    with contextlib.suppress(Exception):
-        from .home_mirror import HomeMirrorMiddleware, home_mirror_enabled
-
-        if home_mirror_enabled():
-            app.add_middleware(HomeMirrorMiddleware)
-    app.add_middleware(CallerIdentityMiddleware)
-    app.add_middleware(RemoteOAuthMiddleware)
-    app.add_middleware(LocalMcpAuthMiddleware)
-    app.add_middleware(RemoteOriginMiddleware)
-    app.add_middleware(SecurityHeadersMiddleware)
+    app = _secured_streamable_http_app()
     previous_lifespan = getattr(app.router, "lifespan_context", None)
 
     @asynccontextmanager

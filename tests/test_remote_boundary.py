@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import sqlite3
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable, Iterator
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
+from mcp.server.transport_security import TransportSecurityMiddleware
+from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from unigrok_public import remote_auth, server, xai_api
@@ -55,6 +59,49 @@ def _canonical_principal(subject: str) -> str:
     principal = remote_auth.canonical_oauth_principal(AUTHORIZATION_SERVER, subject)
     assert principal is not None
     return principal
+
+
+def _active_introspection_payload(subject: str = "reviewer") -> dict[str, Any]:
+    return {
+        "active": True,
+        "scope": "unigrok:connect unigrok:invoke unigrok:review unigrok:status",
+        "iss": AUTHORIZATION_SERVER,
+        "sub": subject,
+        "aud": [PUBLIC_RESOURCE],
+    }
+
+
+class _JSONResponseStream:
+    def __init__(
+        self,
+        payload: Any,
+        *,
+        status_code: int = 200,
+        headers: dict[str, str] | None = None,
+    ) -> None:
+        self.status_code = status_code
+        self.headers = headers or {}
+        self._body = json.dumps(payload).encode()
+
+    async def __aenter__(self) -> _JSONResponseStream:
+        return self
+
+    async def __aexit__(self, *_args: Any) -> None:
+        return None
+
+    async def aiter_raw(self) -> AsyncIterator[bytes]:
+        yield self._body
+
+
+@pytest.fixture
+def clean_oauth_introspection_state() -> Iterator[None]:
+    with remote_auth._oauth_introspection_state_lock:
+        remote_auth._oauth_introspection_inflight.clear()
+        remote_auth._oauth_negative_cache.clear()
+    yield
+    with remote_auth._oauth_introspection_state_lock:
+        remote_auth._oauth_introspection_inflight.clear()
+        remote_auth._oauth_negative_cache.clear()
 
 
 async def _asgi_exchange(
@@ -132,6 +179,270 @@ def test_cloudrun_oauth_configuration_is_fail_closed(
         remote_auth.validate_remote_configuration()
 
 
+@pytest.mark.parametrize(
+    ("name", "value"),
+    (
+        ("UNIGROK_LOCAL_MCP_TOKEN", "too-short"),
+        ("UNIGROK_LOCAL_MCP_TOKEN", f"{'a' * 32},bad"),
+        ("UNIGROK_LOCAL_MCP_TOKEN", " "),
+        ("UNIGROK_LOCAL_MCP_TOKEN_SHA256", "0" * 63),
+        ("UNIGROK_LOCAL_MCP_TOKEN_SHA256", f"{'0' * 64},"),
+    ),
+)
+def test_local_token_configuration_rejects_every_malformed_nonempty_value(
+    monkeypatch: pytest.MonkeyPatch, name: str, value: str
+) -> None:
+    monkeypatch.delenv("UNIGROK_RUNTIME", raising=False)
+    monkeypatch.delenv("UNIGROK_LOCAL_MCP_TOKEN", raising=False)
+    monkeypatch.delenv("UNIGROK_LOCAL_MCP_TOKEN_SHA256", raising=False)
+    monkeypatch.setenv(name, value)
+
+    with pytest.raises(remote_auth.LocalMCPTokenConfigurationError, match=name):
+        remote_auth.validate_remote_configuration()
+
+
+def test_local_token_configuration_and_matching_are_secret_safe() -> None:
+    plaintext = "local-operator-token-aaaaaaaaaaaaaaaaaaaaaaaa"  # noqa: S105
+    digest_token = "local-digest-token-bbbbbbbbbbbbbbbbbbbbbbbbb"  # noqa: S105
+    environ = {
+        "UNIGROK_LOCAL_MCP_TOKEN": plaintext,
+        "UNIGROK_LOCAL_MCP_TOKEN_SHA256": hashlib.sha256(digest_token.encode("utf-8")).hexdigest(),
+    }
+
+    remote_auth.validate_local_mcp_token_configuration(environ)
+    assert remote_auth.local_mcp_token_configured(environ) is True
+    for token in (plaintext, digest_token):
+        claims = remote_auth.match_local_mcp_token(token, environ)
+        assert claims is not None
+        assert claims["unigrok_auth"] == "local_mcp_token"
+        assert claims["unigrok_principal"] == "local:operator"
+        assert token not in json.dumps(claims)
+    assert remote_auth.match_local_mcp_token("x" * 32, environ) is None
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    (
+        ("UNIGROK_SERVICE_TOKENS", ""),
+        ("UNIGROK_SERVICE_TOKENS", "service-secret-marker"),
+        ("UNIGROK_SERVICE_TOKENS", f"{'a' * 32},"),
+        ("UNIGROK_SERVICE_TOKENS", " "),
+        ("UNIGROK_SERVICE_TOKEN_SHA256", ""),
+        ("UNIGROK_SERVICE_TOKEN_SHA256", "0" * 63),
+        ("UNIGROK_SERVICE_TOKEN_SHA256", f"{'0' * 64},"),
+        ("UNIGROK_SERVICE_TOKEN_SCOPES", ""),
+        ("UNIGROK_SERVICE_TOKEN_SCOPES", "unigrok:connect,"),
+        ("UNIGROK_SERVICE_TOKEN_SCOPES", 'unigrok:connect,"scope-secret-marker'),
+    ),
+)
+def test_service_token_configuration_rejects_malformed_and_empty_entries_without_leaks(
+    monkeypatch: pytest.MonkeyPatch, name: str, value: str
+) -> None:
+    for setting in (
+        "UNIGROK_RUNTIME",
+        "UNIGROK_SERVICE_TOKENS",
+        "UNIGROK_SERVICE_TOKEN_SHA256",
+        "UNIGROK_SERVICE_TOKEN_SCOPES",
+    ):
+        monkeypatch.delenv(setting, raising=False)
+    monkeypatch.setenv(name, value)
+
+    with pytest.raises(remote_auth.ServiceTokenConfigurationError) as raised:
+        remote_auth.validate_remote_configuration()
+
+    assert name in str(raised.value)
+    for marker in ("service-secret-marker", "scope-secret-marker"):
+        assert marker not in str(raised.value)
+
+
+def test_service_token_configuration_rejects_duplicate_credentials_and_scopes() -> None:
+    plaintext = "service-duplicate-token-aaaaaaaaaaaaaaaaaaaa"  # noqa: S105
+    digest = hashlib.sha256(plaintext.encode("utf-8")).hexdigest()
+    configurations = (
+        {"UNIGROK_SERVICE_TOKENS": f"{plaintext},{plaintext}"},
+        {"UNIGROK_SERVICE_TOKEN_SHA256": f"{digest},{digest}"},
+        {
+            "UNIGROK_SERVICE_TOKENS": plaintext,
+            "UNIGROK_SERVICE_TOKEN_SHA256": digest,
+        },
+        {"UNIGROK_SERVICE_TOKEN_SCOPES": "unigrok:connect,unigrok:connect"},
+    )
+
+    for environ in configurations:
+        with pytest.raises(remote_auth.ServiceTokenConfigurationError) as raised:
+            remote_auth.validate_service_token_configuration(environ)
+        assert plaintext not in str(raised.value)
+        assert digest not in str(raised.value)
+
+
+def test_service_token_scope_default_applies_only_when_setting_is_absent() -> None:
+    token = "service-scope-token-bbbbbbbbbbbbbbbbbbbbbbbb"  # noqa: S105
+    default_environ = {"UNIGROK_SERVICE_TOKENS": token}
+    restricted_environ = {
+        "UNIGROK_SERVICE_TOKENS": token,
+        "UNIGROK_SERVICE_TOKEN_SCOPES": "unigrok:connect unigrok:review",
+    }
+
+    remote_auth.validate_service_token_configuration(default_environ)
+    remote_auth.validate_service_token_configuration(restricted_environ)
+    assert remote_auth.service_token_scopes(default_environ) == list(
+        remote_auth._DEFAULT_SERVICE_SCOPES
+    )
+    assert remote_auth.service_token_scopes(restricted_environ) == [
+        "unigrok:connect",
+        "unigrok:review",
+    ]
+
+
+def test_transport_security_settings_follow_runtime_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        "UNIGROK_PUBLIC_MCP_URL", "https://mcp.example.test:8443/mcp"
+    )
+    monkeypatch.setenv(
+        "UNIGROK_ALLOWED_ORIGINS",
+        "https://control.example.test/,http://localhost:9000,not-an-origin",
+    )
+    settings = remote_auth.transport_security_settings()
+
+    assert settings.enable_dns_rebinding_protection is True
+    assert {"localhost", "127.0.0.1:*", "grok-mcp:*"}.issubset(settings.allowed_hosts)
+    assert {
+        "mcp.example.test",
+        "mcp.example.test:*",
+        "mcp.example.test:8443",
+    }.issubset(settings.allowed_hosts)
+    assert {
+        "http://localhost:*",
+        "https://mcp.example.test:8443",
+        "https://control.example.test",
+        "http://localhost:9000",
+    }.issubset(settings.allowed_origins)
+    assert "not-an-origin" not in settings.allowed_origins
+
+
+@pytest.mark.asyncio
+async def test_transport_security_enforces_runtime_host_and_origin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("UNIGROK_PUBLIC_MCP_URL", PUBLIC_RESOURCE)
+    monkeypatch.setenv("UNIGROK_ALLOWED_ORIGINS", "https://control.example.test")
+    middleware = TransportSecurityMiddleware(remote_auth.transport_security_settings())
+
+    async def validate(host: str, origin: str) -> int | None:
+        request = Request(
+            {
+                "type": "http",
+                "asgi": {"version": "3.0"},
+                "http_version": "1.1",
+                "scheme": "https",
+                "method": "POST",
+                "path": "/mcp",
+                "raw_path": b"/mcp",
+                "query_string": b"",
+                "headers": [
+                    (b"host", host.encode()),
+                    (b"origin", origin.encode()),
+                    (b"content-type", b"application/json"),
+                ],
+                "client": ("203.0.113.10", 4444),
+                "server": ("mcp.example.test", 443),
+            }
+        )
+        response = await middleware.validate_request(request, is_post=True)
+        return None if response is None else response.status_code
+
+    assert await validate("mcp.example.test", "https://control.example.test") is None
+    assert await validate("attacker.example", "https://control.example.test") == 421
+    assert await validate("mcp.example.test", "https://attacker.example") == 403
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", ("/ui", "/runtimez", "/benchmarkz"))
+async def test_app_wide_transport_security_rejects_attacker_host_on_custom_routes(
+    monkeypatch: pytest.MonkeyPatch,
+    path: str,
+) -> None:
+    monkeypatch.delenv("UNIGROK_PUBLIC_MCP_URL", raising=False)
+    app = server._secured_streamable_http_app()
+
+    status, _headers, body = await _asgi_exchange(
+        app,
+        path=path,
+        headers=((b"host", b"attacker.example:4765"),),
+    )
+
+    assert status == 421
+    assert json.loads(body) == {"error": "host_not_allowed"}
+
+
+@pytest.mark.parametrize(
+    "headers",
+    (
+        ((b"host", b"localhost:4765"), (b"host", b"attacker.example:4765")),
+        ((b"host", b"attacker.example:4765"), (b"host", b"localhost:4765")),
+    ),
+)
+async def test_app_wide_transport_security_rejects_duplicate_host_headers(
+    monkeypatch: pytest.MonkeyPatch,
+    headers: tuple[tuple[bytes, bytes], ...],
+) -> None:
+    monkeypatch.delenv("UNIGROK_PUBLIC_MCP_URL", raising=False)
+    app = server._secured_streamable_http_app()
+
+    status, _response_headers, body = await _asgi_exchange(
+        app,
+        path="/healthz",
+        headers=headers,
+    )
+
+    assert status == 421
+    assert json.loads(body) == {"error": "host_not_allowed"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("path", "host"),
+    (
+        ("/healthz", "127.0.0.1:8080"),
+        ("/ui", "localhost:4765"),
+        ("/healthz", "[::1]:4765"),
+        ("/healthz", "mcp.example.test"),
+        ("/healthz", "mcp.example.test:443"),
+    ),
+)
+async def test_app_wide_transport_security_allows_loopback_and_configured_hosts(
+    monkeypatch: pytest.MonkeyPatch,
+    path: str,
+    host: str,
+) -> None:
+    monkeypatch.setenv("UNIGROK_PUBLIC_MCP_URL", PUBLIC_RESOURCE)
+    app = server._secured_streamable_http_app()
+
+    status, _headers, body = await _asgi_exchange(
+        app,
+        path=path,
+        headers=((b"host", host.encode()),),
+    )
+
+    assert status == 200
+    assert body
+
+
+def test_transport_security_helpers_retain_only_defaults_for_invalid_public_url() -> None:
+    hosts = remote_auth.fastmcp_allowed_hosts(
+        {"UNIGROK_PUBLIC_MCP_URL": "http://private.invalid/mcp"}
+    )
+    origins = remote_auth.fastmcp_allowed_origins(
+        {"UNIGROK_PUBLIC_MCP_URL": "http://private.invalid/mcp"}
+    )
+    assert "localhost:*" in hosts
+    assert "private.invalid" not in hosts
+    assert "http://localhost:*" in origins
+    assert "http://private.invalid" not in origins
+
+
 def test_oauth_metadata_is_current_and_does_not_link_stale_setup(
     remote_oauth_env: None,
 ) -> None:
@@ -186,13 +497,10 @@ def test_cloudrun_discovery_and_onboarding_are_runtime_accurate(
     assert not any(
         item["path"].endswith("before-unigrok-agent.py") for item in plan["files"]
     )
-    cursor_rule = next(
-        item["content"]
-        for item in plan["files"]
-        if item["path"].endswith("using-unigrok.mdc")
-    )
-    assert "instance-local" in cursor_rule
-    assert "durable facts" not in cursor_rule
+    assert plan["files"] == []
+    assert "Cursor Settings > Rules > User Rules" in plan["client_settings_instruction"]
+    assert "instance-local" in plan["client_settings_instruction"]
+    assert "durable facts" not in plan["client_settings_instruction"]
     assert description["team_harness"]["state_persistence"] is False
     assert description["team_harness"]["completion_recovery"] == (
         "one_same_plane_retry; no_cross_plane_available"
@@ -477,13 +785,6 @@ async def test_oauth_introspection_allowlists_claims_from_hostile_payload(
         "provider_metadata": {"private": marker},
     }
 
-    class Response:
-        status_code = 200
-        content = b"{}"
-
-        def json(self) -> dict[str, Any]:
-            return payload
-
     class Client:
         async def __aenter__(self) -> Client:
             return self
@@ -491,8 +792,8 @@ async def test_oauth_introspection_allowlists_claims_from_hostile_payload(
         async def __aexit__(self, *_args: Any) -> None:
             return None
 
-        async def post(self, *_args: Any, **_kwargs: Any) -> Response:
-            return Response()
+        def stream(self, *_args: Any, **_kwargs: Any) -> _JSONResponseStream:
+            return _JSONResponseStream(payload)
 
     monkeypatch.setattr(remote_auth.httpx, "AsyncClient", lambda **_kwargs: Client())
 
@@ -507,6 +808,819 @@ async def test_oauth_introspection_allowlists_claims_from_hostile_payload(
         "unigrok_auth": "oauth",
     }
     assert marker not in json.dumps(claims, sort_keys=True)
+
+
+async def test_oauth_negative_cache_avoids_repeat_control_calls_and_keeps_tokens_secret(
+    remote_oauth_env: None,
+    clean_oauth_introspection_state: None,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    bad_token = "invalid-cache-secret-marker-aaaaaaaaaaaaaaaa"  # noqa: S105
+    valid_token = "valid-cache-secret-marker-bbbbbbbbbbbbbbbbb"  # noqa: S105
+    posted: list[str] = []
+    client_options: list[dict[str, Any]] = []
+
+    class Client:
+        async def __aenter__(self) -> Client:
+            return self
+
+        async def __aexit__(self, *_args: Any) -> None:
+            return None
+
+        def stream(self, *_args: Any, **kwargs: Any) -> _JSONResponseStream:
+            token = str(kwargs["headers"]["Authorization"]).removeprefix("Bearer ")
+            posted.append(token)
+            payload = {"active": False} if token == bad_token else _active_introspection_payload()
+            return _JSONResponseStream(payload)
+
+    def client_factory(**kwargs: Any) -> Client:
+        client_options.append(kwargs)
+        return Client()
+
+    monkeypatch.setattr(remote_auth.httpx, "AsyncClient", client_factory)
+    caplog.set_level(logging.DEBUG, logger=remote_auth.__name__)
+
+    assert await remote_auth.introspect_oauth_token(bad_token, "unigrok:connect") is None
+    assert await remote_auth.introspect_oauth_token(bad_token, "unigrok:connect") is None
+    valid = await remote_auth.introspect_oauth_token(valid_token, "unigrok:connect")
+
+    assert valid is not None
+    assert valid["unigrok_principal"] == _canonical_principal("reviewer")
+    assert posted == [bad_token, valid_token]
+    assert client_options == [
+        {"timeout": 5.0, "follow_redirects": False, "trust_env": False},
+        {"timeout": 5.0, "follow_redirects": False, "trust_env": False},
+    ]
+    retained_state = repr(
+        (remote_auth._oauth_negative_cache, remote_auth._oauth_introspection_inflight)
+    )
+    assert bad_token not in retained_state
+    assert valid_token not in retained_state
+    assert bad_token not in caplog.text
+    assert valid_token not in caplog.text
+
+
+async def test_oauth_negative_cache_is_partitioned_by_required_scope(
+    remote_oauth_env: None,
+    clean_oauth_introspection_state: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    posted_scopes: list[str] = []
+
+    class Client:
+        async def __aenter__(self) -> Client:
+            return self
+
+        async def __aexit__(self, *_args: Any) -> None:
+            return None
+
+        def stream(self, *_args: Any, **kwargs: Any) -> _JSONResponseStream:
+            posted_scopes.append(str(kwargs["data"]["required_scope"]))
+            return _JSONResponseStream({"active": False})
+
+    monkeypatch.setattr(remote_auth.httpx, "AsyncClient", lambda **_kwargs: Client())
+    token = "scope-partitioned-invalid-token"  # noqa: S105
+
+    assert await remote_auth.introspect_oauth_token(token, "unigrok:connect") is None
+    assert await remote_auth.introspect_oauth_token(token, "unigrok:connect") is None
+    assert await remote_auth.introspect_oauth_token(token, "unigrok:status") is None
+
+    assert posted_scopes == ["unigrok:connect", "unigrok:status"]
+    assert len(remote_auth._oauth_negative_cache) == 2
+
+
+async def test_oauth_introspection_concurrency_is_bounded_for_distinct_lookups(
+    remote_oauth_env: None,
+    clean_oauth_introspection_state: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(remote_auth, "_OAUTH_INTROSPECTION_MAX_INFLIGHT", 2)
+    release = asyncio.Event()
+    two_started = asyncio.Event()
+    posted: list[str] = []
+    active = 0
+    maximum_active = 0
+
+    class Response:
+        status_code = 200
+        headers: dict[str, str] = {}
+
+        async def __aenter__(self) -> Response:
+            return self
+
+        async def __aexit__(self, *_args: Any) -> None:
+            return None
+
+        async def aiter_raw(self) -> AsyncIterator[bytes]:
+            nonlocal active
+            try:
+                await release.wait()
+            finally:
+                active -= 1
+            yield b'{"active": false}'
+
+    class Client:
+        async def __aenter__(self) -> Client:
+            return self
+
+        async def __aexit__(self, *_args: Any) -> None:
+            return None
+
+        def stream(self, *_args: Any, **kwargs: Any) -> Response:
+            nonlocal active, maximum_active
+            token = str(kwargs["headers"]["Authorization"]).removeprefix("Bearer ")
+            posted.append(token)
+            active += 1
+            maximum_active = max(maximum_active, active)
+            if len(posted) == 2:
+                two_started.set()
+            return Response()
+
+    monkeypatch.setattr(remote_auth.httpx, "AsyncClient", lambda **_kwargs: Client())
+    first = asyncio.create_task(
+        remote_auth.introspect_oauth_token("bounded-token-a", "unigrok:connect")
+    )
+    second = asyncio.create_task(
+        remote_auth.introspect_oauth_token("bounded-token-b", "unigrok:connect")
+    )
+    await asyncio.wait_for(two_started.wait(), timeout=1.0)
+
+    capacity = await remote_auth.introspect_oauth_token(
+        "bounded-token-c", "unigrok:connect"
+    )
+    assert isinstance(capacity, remote_auth.OAuthIntrospectionCapacity)
+    assert capacity.retry_after_seconds == 1
+    assert posted == ["bounded-token-a", "bounded-token-b"]
+
+    release.set()
+    await asyncio.gather(first, second)
+    assert maximum_active == 2
+    assert remote_auth._oauth_introspection_inflight == {}
+
+
+@pytest.mark.parametrize(
+    ("path", "method", "body_chunks"),
+    (
+        (
+            "/mcp",
+            "POST",
+            (b'{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}',),
+        ),
+        ("/runtimez", "GET", (b"",)),
+    ),
+)
+async def test_oauth_introspection_capacity_is_temporary_unavailability_not_401(
+    remote_oauth_env: None,
+    clean_oauth_introspection_state: None,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    path: str,
+    method: str,
+    body_chunks: tuple[bytes, ...],
+) -> None:
+    monkeypatch.setattr(remote_auth, "_OAUTH_INTROSPECTION_MAX_INFLIGHT", 1)
+    held_token = "held-capacity-secret-marker"  # noqa: S105
+    rejected_token = "rejected-capacity-secret-marker"  # noqa: S105
+    started = asyncio.Event()
+    release = asyncio.Event()
+    posted: list[str] = []
+    downstream_called = False
+
+    class Response(_JSONResponseStream):
+        async def aiter_raw(self) -> AsyncIterator[bytes]:
+            await release.wait()
+            yield b'{"active": false}'
+
+    class Client:
+        async def __aenter__(self) -> Client:
+            return self
+
+        async def __aexit__(self, *_args: Any) -> None:
+            return None
+
+        def stream(self, *_args: Any, **kwargs: Any) -> Response:
+            token = str(kwargs["headers"]["Authorization"]).removeprefix("Bearer ")
+            posted.append(token)
+            started.set()
+            return Response({"active": False})
+
+    async def downstream(scope: Any, receive: Any, send: Any) -> None:
+        nonlocal downstream_called
+        downstream_called = True
+        await JSONResponse({"ok": True})(scope, receive, send)
+
+    monkeypatch.setattr(remote_auth.httpx, "AsyncClient", lambda **_kwargs: Client())
+    caplog.set_level(logging.DEBUG)
+    leader = asyncio.create_task(
+        remote_auth.introspect_oauth_token(held_token, "unigrok:connect")
+    )
+    await asyncio.wait_for(started.wait(), timeout=1.0)
+
+    status, headers, body = await _asgi_exchange(
+        remote_auth.RemoteOAuthMiddleware(downstream),
+        path=path,
+        method=method,
+        body_chunks=body_chunks,
+        headers=((b"authorization", f"Bearer {rejected_token}".encode()),),
+    )
+
+    assert status == 503
+    assert json.loads(body) == {"error": "oauth_introspection_capacity"}
+    assert headers["retry-after"] == "1"
+    assert "www-authenticate" not in headers
+    assert posted == [held_token]
+    assert downstream_called is False
+    assert held_token not in body.decode()
+    assert rejected_token not in body.decode()
+    assert held_token not in caplog.text
+    assert rejected_token not in caplog.text
+
+    release.set()
+    assert await leader is None
+
+
+@pytest.mark.parametrize(
+    ("path", "method", "body_chunks", "expected_scope"),
+    (
+        (
+            "/mcp",
+            "POST",
+            (b'{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}',),
+            "unigrok:connect",
+        ),
+        ("/runtimez", "GET", (b"",), "unigrok:status"),
+    ),
+)
+async def test_oauth_introspection_unavailable_is_503_on_both_middleware_paths(
+    remote_oauth_env: None,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    path: str,
+    method: str,
+    body_chunks: tuple[bytes, ...],
+    expected_scope: str,
+) -> None:
+    token = "middleware-unavailable-secret-marker"  # noqa: S105
+    observed: list[tuple[str, str]] = []
+    downstream_called = False
+
+    async def unavailable(
+        received_token: str, required: str
+    ) -> remote_auth.OAuthIntrospectionUnavailable:
+        observed.append((received_token, required))
+        return remote_auth.OAuthIntrospectionUnavailable(retry_after_seconds=2)
+
+    async def downstream(scope: Any, receive: Any, send: Any) -> None:
+        nonlocal downstream_called
+        downstream_called = True
+        await JSONResponse({"ok": True})(scope, receive, send)
+
+    monkeypatch.setattr(remote_auth, "introspect_oauth_token", unavailable)
+    caplog.set_level(logging.DEBUG)
+
+    status, headers, body = await _asgi_exchange(
+        remote_auth.RemoteOAuthMiddleware(downstream),
+        path=path,
+        method=method,
+        body_chunks=body_chunks,
+        headers=((b"authorization", f"Bearer {token}".encode()),),
+    )
+
+    assert status == 503
+    assert json.loads(body) == {"error": "oauth_introspection_unavailable"}
+    assert headers["retry-after"] == "2"
+    assert "www-authenticate" not in headers
+    assert observed == [(token, expected_scope)]
+    assert downstream_called is False
+    assert token not in body.decode()
+    assert token not in caplog.text
+
+
+async def test_same_valid_token_concurrent_introspection_is_coalesced(
+    remote_oauth_env: None,
+    clean_oauth_introspection_state: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    token = "coalesced-valid-token"  # noqa: S105
+    started = asyncio.Event()
+    release = asyncio.Event()
+    posts = 0
+
+    class Response:
+        status_code = 200
+        headers: dict[str, str] = {}
+
+        async def __aenter__(self) -> Response:
+            return self
+
+        async def __aexit__(self, *_args: Any) -> None:
+            return None
+
+        async def aiter_raw(self) -> AsyncIterator[bytes]:
+            await release.wait()
+            yield json.dumps(
+                _active_introspection_payload("coalesced-reviewer")
+            ).encode()
+
+    class Client:
+        async def __aenter__(self) -> Client:
+            return self
+
+        async def __aexit__(self, *_args: Any) -> None:
+            return None
+
+        def stream(self, *_args: Any, **_kwargs: Any) -> Response:
+            nonlocal posts
+            posts += 1
+            started.set()
+            return Response()
+
+    monkeypatch.setattr(remote_auth.httpx, "AsyncClient", lambda **_kwargs: Client())
+    leader = asyncio.create_task(
+        remote_auth.introspect_oauth_token(token, "unigrok:connect")
+    )
+    await asyncio.wait_for(started.wait(), timeout=1.0)
+    follower = asyncio.create_task(
+        remote_auth.introspect_oauth_token(token, "unigrok:connect")
+    )
+    await asyncio.sleep(0)
+    assert not follower.done()
+    assert posts == 1
+
+    release.set()
+    leader_result, follower_result = await asyncio.gather(leader, follower)
+    assert leader_result == follower_result
+    assert leader_result is not None
+    assert leader_result["unigrok_principal"] == _canonical_principal(
+        "coalesced-reviewer"
+    )
+    assert posts == 1
+
+
+async def test_same_token_transient_failure_is_coalesced_as_unavailable(
+    remote_oauth_env: None,
+    clean_oauth_introspection_state: None,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    token = "coalesced-unavailable-secret-marker"  # noqa: S105
+    started = asyncio.Event()
+    release = asyncio.Event()
+    posts = 0
+
+    class Response:
+        status_code = 503
+        headers: dict[str, str] = {}
+
+        async def __aenter__(self) -> Response:
+            await release.wait()
+            return self
+
+        async def __aexit__(self, *_args: Any) -> None:
+            return None
+
+        async def aiter_raw(self) -> AsyncIterator[bytes]:
+            raise AssertionError("a non-200 introspection body must not be read")
+            yield b""  # pragma: no cover
+
+    class Client:
+        async def __aenter__(self) -> Client:
+            return self
+
+        async def __aexit__(self, *_args: Any) -> None:
+            return None
+
+        def stream(self, *_args: Any, **_kwargs: Any) -> Response:
+            nonlocal posts
+            posts += 1
+            started.set()
+            return Response()
+
+    monkeypatch.setattr(remote_auth.httpx, "AsyncClient", lambda **_kwargs: Client())
+    caplog.set_level(logging.DEBUG)
+    leader = asyncio.create_task(
+        remote_auth.introspect_oauth_token(token, "unigrok:connect")
+    )
+    await asyncio.wait_for(started.wait(), timeout=1.0)
+    follower = asyncio.create_task(
+        remote_auth.introspect_oauth_token(token, "unigrok:connect")
+    )
+    await asyncio.sleep(0)
+    assert not follower.done()
+
+    release.set()
+    leader_result, follower_result = await asyncio.gather(leader, follower)
+
+    assert isinstance(leader_result, remote_auth.OAuthIntrospectionUnavailable)
+    assert follower_result is leader_result
+    assert posts == 1
+    assert remote_auth._oauth_negative_cache == {}
+    assert remote_auth._oauth_introspection_inflight == {}
+    assert token not in caplog.text
+
+
+async def test_cancelled_introspection_leader_releases_follower_as_unavailable(
+    remote_oauth_env: None,
+    clean_oauth_introspection_state: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    token = "cancelled-leader-secret-marker"  # noqa: S105
+    started = asyncio.Event()
+    posts = 0
+
+    class Response:
+        status_code = 200
+        headers: dict[str, str] = {}
+
+        async def __aenter__(self) -> Response:
+            await asyncio.Event().wait()
+            return self
+
+        async def __aexit__(self, *_args: Any) -> None:
+            return None
+
+        async def aiter_raw(self) -> AsyncIterator[bytes]:
+            yield b"{}"
+
+    class Client:
+        async def __aenter__(self) -> Client:
+            return self
+
+        async def __aexit__(self, *_args: Any) -> None:
+            return None
+
+        def stream(self, *_args: Any, **_kwargs: Any) -> Response:
+            nonlocal posts
+            posts += 1
+            started.set()
+            return Response()
+
+    monkeypatch.setattr(remote_auth.httpx, "AsyncClient", lambda **_kwargs: Client())
+    leader = asyncio.create_task(
+        remote_auth.introspect_oauth_token(token, "unigrok:connect")
+    )
+    await asyncio.wait_for(started.wait(), timeout=1.0)
+    follower = asyncio.create_task(
+        remote_auth.introspect_oauth_token(token, "unigrok:connect")
+    )
+    await asyncio.sleep(0)
+    assert not follower.done()
+
+    leader.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await leader
+    follower_result = await asyncio.wait_for(follower, timeout=1.0)
+
+    assert isinstance(follower_result, remote_auth.OAuthIntrospectionUnavailable)
+    assert posts == 1
+    assert remote_auth._oauth_negative_cache == {}
+    assert remote_auth._oauth_introspection_inflight == {}
+
+
+async def test_bad_inflight_token_does_not_block_distinct_valid_token(
+    remote_oauth_env: None,
+    clean_oauth_introspection_state: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(remote_auth, "_OAUTH_INTROSPECTION_MAX_INFLIGHT", 2)
+    bad_token = "held-invalid-token"  # noqa: S105
+    valid_token = "distinct-valid-token"  # noqa: S105
+    bad_started = asyncio.Event()
+    release_bad = asyncio.Event()
+    posted: list[str] = []
+
+    class Response(_JSONResponseStream):
+        def __init__(self, payload: dict[str, Any], *, wait_for_bad: bool) -> None:
+            super().__init__(payload)
+            self.payload = payload
+            self.wait_for_bad = wait_for_bad
+
+        async def aiter_raw(self) -> AsyncIterator[bytes]:
+            if self.wait_for_bad:
+                await release_bad.wait()
+            yield json.dumps(self.payload).encode()
+
+    class Client:
+        async def __aenter__(self) -> Client:
+            return self
+
+        async def __aexit__(self, *_args: Any) -> None:
+            return None
+
+        def stream(self, *_args: Any, **kwargs: Any) -> Response:
+            token = str(kwargs["headers"]["Authorization"]).removeprefix("Bearer ")
+            posted.append(token)
+            if token == bad_token:
+                bad_started.set()
+                return Response({"active": False}, wait_for_bad=True)
+            return Response(
+                _active_introspection_payload("distinct-reviewer"), wait_for_bad=False
+            )
+
+    monkeypatch.setattr(remote_auth.httpx, "AsyncClient", lambda **_kwargs: Client())
+    bad = asyncio.create_task(
+        remote_auth.introspect_oauth_token(bad_token, "unigrok:connect")
+    )
+    await asyncio.wait_for(bad_started.wait(), timeout=1.0)
+
+    duplicate_bad = asyncio.create_task(
+        remote_auth.introspect_oauth_token(bad_token, "unigrok:connect")
+    )
+    await asyncio.sleep(0)
+    assert not duplicate_bad.done()
+    valid = await remote_auth.introspect_oauth_token(valid_token, "unigrok:connect")
+    assert valid is not None
+    assert valid["unigrok_principal"] == _canonical_principal("distinct-reviewer")
+    assert posted == [bad_token, valid_token]
+
+    release_bad.set()
+    assert await bad is None
+    assert await duplicate_bad is None
+
+
+async def test_oauth_negative_cache_ttl_and_size_are_bounded(
+    remote_oauth_env: None,
+    clean_oauth_introspection_state: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock = [100.0]
+    posted: list[str] = []
+    monkeypatch.setattr(remote_auth.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(remote_auth, "_OAUTH_NEGATIVE_CACHE_TTL_SECONDS", 5.0)
+    monkeypatch.setattr(remote_auth, "_OAUTH_NEGATIVE_CACHE_MAX_ENTRIES", 2)
+
+    class Client:
+        async def __aenter__(self) -> Client:
+            return self
+
+        async def __aexit__(self, *_args: Any) -> None:
+            return None
+
+        def stream(self, *_args: Any, **kwargs: Any) -> _JSONResponseStream:
+            posted.append(str(kwargs["headers"]["Authorization"]))
+            return _JSONResponseStream({"active": False})
+
+    monkeypatch.setattr(remote_auth.httpx, "AsyncClient", lambda **_kwargs: Client())
+    for token in ("cache-token-a", "cache-token-b", "cache-token-c"):
+        assert await remote_auth.introspect_oauth_token(token, "unigrok:connect") is None
+    assert len(remote_auth._oauth_negative_cache) == 2
+
+    assert await remote_auth.introspect_oauth_token("cache-token-a", "unigrok:connect") is None
+    assert len(posted) == 4
+    assert len(remote_auth._oauth_negative_cache) == 2
+
+    clock[0] += 6.0
+    assert await remote_auth.introspect_oauth_token("cache-token-c", "unigrok:connect") is None
+    assert len(posted) == 5
+    assert len(remote_auth._oauth_negative_cache) <= 2
+
+
+async def test_transient_introspection_failure_is_never_negative_cached(
+    remote_oauth_env: None,
+    clean_oauth_introspection_state: None,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    attempts = 0
+
+    class Client:
+        async def __aenter__(self) -> Client:
+            return self
+
+        async def __aexit__(self, *_args: Any) -> None:
+            return None
+
+        def stream(self, *_args: Any, **_kwargs: Any) -> None:
+            nonlocal attempts
+            attempts += 1
+            raise httpx.ConnectError("control unavailable")
+
+    monkeypatch.setattr(remote_auth.httpx, "AsyncClient", lambda **_kwargs: Client())
+    token = "transient-failure-secret-marker"  # noqa: S105
+    caplog.set_level(logging.DEBUG)
+
+    first = await remote_auth.introspect_oauth_token(token, "unigrok:connect")
+    second = await remote_auth.introspect_oauth_token(token, "unigrok:connect")
+    assert isinstance(first, remote_auth.OAuthIntrospectionUnavailable)
+    assert isinstance(second, remote_auth.OAuthIntrospectionUnavailable)
+    assert attempts == 2
+    assert remote_auth._oauth_negative_cache == {}
+    retained_state = repr(
+        (remote_auth._oauth_negative_cache, remote_auth._oauth_introspection_inflight)
+    )
+    assert token not in retained_state
+    assert token not in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("case", "status_code", "chunks"),
+    (
+        ("non_200", 502, (b'{"active": false}',)),
+        ("malformed_json", 200, (b'{"active":',)),
+        ("non_object_json", 200, (b"[]",)),
+        ("invalid_active", 200, (b'{"active": "yes"}',)),
+    ),
+)
+async def test_oauth_introspection_protocol_failures_are_unavailable_not_denials(
+    remote_oauth_env: None,
+    clean_oauth_introspection_state: None,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    case: str,
+    status_code: int,
+    chunks: tuple[bytes, ...],
+) -> None:
+    attempts = 0
+    body_reads = 0
+    token = f"{case}-protocol-secret-marker"  # noqa: S105
+
+    class Response:
+        headers: dict[str, str] = {}
+
+        def __init__(self) -> None:
+            self.status_code = status_code
+
+        async def __aenter__(self) -> Response:
+            return self
+
+        async def __aexit__(self, *_args: Any) -> None:
+            return None
+
+        async def aiter_raw(self) -> AsyncIterator[bytes]:
+            nonlocal body_reads
+            body_reads += 1
+            for chunk in chunks:
+                yield chunk
+
+    class Client:
+        async def __aenter__(self) -> Client:
+            return self
+
+        async def __aexit__(self, *_args: Any) -> None:
+            return None
+
+        def stream(self, *_args: Any, **_kwargs: Any) -> Response:
+            nonlocal attempts
+            attempts += 1
+            return Response()
+
+    monkeypatch.setattr(remote_auth.httpx, "AsyncClient", lambda **_kwargs: Client())
+    caplog.set_level(logging.DEBUG)
+
+    first = await remote_auth.introspect_oauth_token(token, "unigrok:connect")
+    second = await remote_auth.introspect_oauth_token(token, "unigrok:connect")
+
+    assert isinstance(first, remote_auth.OAuthIntrospectionUnavailable)
+    assert isinstance(second, remote_auth.OAuthIntrospectionUnavailable)
+    assert attempts == 2
+    assert body_reads == (0 if status_code != 200 else 2)
+    assert remote_auth._oauth_negative_cache == {}
+    assert token not in repr(remote_auth._oauth_introspection_inflight)
+    assert token not in caplog.text
+
+
+async def test_oauth_introspection_absolute_deadline_covers_slow_stream(
+    remote_oauth_env: None,
+    clean_oauth_introspection_state: None,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    monkeypatch.setattr(
+        remote_auth, "_OAUTH_INTROSPECTION_DEADLINE_SECONDS", 0.02
+    )
+    attempts = 0
+    closed = 0
+    token = "slow-stream-secret-marker"  # noqa: S105
+
+    class Response:
+        status_code = 200
+        headers: dict[str, str] = {}
+
+        async def __aenter__(self) -> Response:
+            return self
+
+        async def __aexit__(self, *_args: Any) -> None:
+            nonlocal closed
+            closed += 1
+
+        async def aiter_raw(self) -> AsyncIterator[bytes]:
+            yield b"{"
+            await asyncio.Event().wait()
+
+    class Client:
+        async def __aenter__(self) -> Client:
+            return self
+
+        async def __aexit__(self, *_args: Any) -> None:
+            return None
+
+        def stream(self, *_args: Any, **_kwargs: Any) -> Response:
+            nonlocal attempts
+            attempts += 1
+            return Response()
+
+    monkeypatch.setattr(remote_auth.httpx, "AsyncClient", lambda **_kwargs: Client())
+    caplog.set_level(logging.DEBUG)
+
+    first = await asyncio.wait_for(
+        remote_auth.introspect_oauth_token(token, "unigrok:connect"), timeout=0.5
+    )
+    second = await asyncio.wait_for(
+        remote_auth.introspect_oauth_token(token, "unigrok:connect"), timeout=0.5
+    )
+
+    assert isinstance(first, remote_auth.OAuthIntrospectionUnavailable)
+    assert isinstance(second, remote_auth.OAuthIntrospectionUnavailable)
+    assert attempts == 2
+    assert closed == 2
+    assert remote_auth._oauth_negative_cache == {}
+    assert remote_auth._oauth_introspection_inflight == {}
+    assert token not in caplog.text
+
+
+async def test_oauth_introspection_rejects_compression_and_caps_streamed_bytes(
+    remote_oauth_env: None,
+    clean_oauth_introspection_state: None,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    compressed_token = "compressed-stream-secret-marker"  # noqa: S105
+    oversized_token = "oversized-stream-secret-marker"  # noqa: S105
+    compressed_body_read = False
+    oversized_chunks: list[int] = []
+    accept_encodings: list[str] = []
+
+    class CompressedResponse:
+        status_code = 200
+        headers = {"content-encoding": "gzip"}
+
+        async def __aenter__(self) -> CompressedResponse:
+            return self
+
+        async def __aexit__(self, *_args: Any) -> None:
+            return None
+
+        async def aiter_raw(self) -> AsyncIterator[bytes]:
+            nonlocal compressed_body_read
+            compressed_body_read = True
+            yield b"compressed-body-must-not-be-read"
+
+    class OversizedResponse:
+        status_code = 200
+        headers: dict[str, str] = {}
+
+        async def __aenter__(self) -> OversizedResponse:
+            return self
+
+        async def __aexit__(self, *_args: Any) -> None:
+            return None
+
+        async def aiter_raw(self) -> AsyncIterator[bytes]:
+            for chunk in (b"x" * 8_192, b"y" * 8_192, b"z", b"unreachable"):
+                oversized_chunks.append(len(chunk))
+                yield chunk
+
+    class Client:
+        async def __aenter__(self) -> Client:
+            return self
+
+        async def __aexit__(self, *_args: Any) -> None:
+            return None
+
+        def stream(
+            self, *_args: Any, **kwargs: Any
+        ) -> CompressedResponse | OversizedResponse:
+            accept_encodings.append(str(kwargs["headers"]["Accept-Encoding"]))
+            token = str(kwargs["headers"]["Authorization"]).removeprefix("Bearer ")
+            return CompressedResponse() if token == compressed_token else OversizedResponse()
+
+    monkeypatch.setattr(remote_auth.httpx, "AsyncClient", lambda **_kwargs: Client())
+    caplog.set_level(logging.DEBUG)
+
+    compressed = await remote_auth.introspect_oauth_token(
+        compressed_token, "unigrok:connect"
+    )
+    compressed_again = await remote_auth.introspect_oauth_token(
+        compressed_token, "unigrok:connect"
+    )
+    oversized = await remote_auth.introspect_oauth_token(
+        oversized_token, "unigrok:connect"
+    )
+    oversized_again = await remote_auth.introspect_oauth_token(
+        oversized_token, "unigrok:connect"
+    )
+
+    assert isinstance(compressed, remote_auth.OAuthIntrospectionUnavailable)
+    assert isinstance(compressed_again, remote_auth.OAuthIntrospectionUnavailable)
+    assert isinstance(oversized, remote_auth.OAuthIntrospectionUnavailable)
+    assert isinstance(oversized_again, remote_auth.OAuthIntrospectionUnavailable)
+    assert compressed_body_read is False
+    assert oversized_chunks == [8_192, 8_192, 1] * 2
+    assert accept_encodings == ["identity"] * 4
+    assert remote_auth._oauth_negative_cache == {}
+    assert compressed_token not in caplog.text
+    assert oversized_token not in caplog.text
 
 
 async def test_oauth_middleware_logs_constant_route_provenance(
@@ -881,178 +1995,50 @@ async def test_service_token_works_alongside_oauth(
 
 
 @pytest.mark.asyncio
-async def test_oauth_control_outage_is_retryable_and_coalesced(
-    remote_oauth_env: None, monkeypatch: pytest.MonkeyPatch
+async def test_valid_local_token_bypasses_peer_failure_throttle(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    started = asyncio.Event()
-    release = asyncio.Event()
-    calls = 0
+    token = "local-throttle-token-cccccccccccccccccccccccc"  # noqa: S105
+    monkeypatch.delenv("UNIGROK_RUNTIME", raising=False)
+    monkeypatch.delenv("UNIGROK_OAUTH_INTROSPECTION_URL", raising=False)
+    monkeypatch.delenv("UNIGROK_SERVICE_TOKENS", raising=False)
+    monkeypatch.delenv("UNIGROK_SERVICE_TOKEN_SHA256", raising=False)
+    monkeypatch.delenv("UNIGROK_LOCAL_MCP_TOKEN_SHA256", raising=False)
+    monkeypatch.setenv("UNIGROK_LOCAL_MCP_TOKEN", token)
+    monkeypatch.setattr(remote_auth, "_AUTH_FAILURE_LIMIT", 2)
+    remote_auth._auth_failures.clear()
 
-    class Client:
-        async def __aenter__(self) -> Client:
-            return self
+    async def app(scope: dict[str, Any], receive: Any, send: Any) -> None:
+        response = JSONResponse({"auth": (scope.get("unigrok.oauth") or {}).get("unigrok_auth")})
+        await response(scope, receive, send)
 
-        async def __aexit__(self, *_args: Any) -> None:
-            return None
-
-        async def post(self, *_args: Any, **_kwargs: Any) -> Any:
-            nonlocal calls
-            calls += 1
-            started.set()
-            await release.wait()
-            raise remote_auth.httpx.ConnectError("control unavailable")
-
-    monkeypatch.setattr(remote_auth.httpx, "AsyncClient", lambda **_kwargs: Client())
-    remote_auth._oauth_introspection_tasks.clear()
-
-    async def request() -> tuple[int, dict[str, str], bytes]:
-        return await _asgi_exchange(
-            remote_auth.RemoteOAuthMiddleware(
-                lambda scope, receive, send: JSONResponse({"ok": True})(
-                    scope, receive, send
-                )
-            ),
-            path="/v1/models",
-            headers=((b"authorization", b"Bearer coalesced-outage-token"),),
-        )
-
-    first = asyncio.create_task(request())
-    await started.wait()
-    second = asyncio.create_task(request())
-    await asyncio.sleep(0)
-    release.set()
-    results = await asyncio.gather(first, second)
-
-    assert calls == 1
-    assert [result[0] for result in results] == [503, 503]
-    for status, headers, body in results:
-        assert status == 503
-        assert headers["retry-after"] == "1"
-        assert headers["cache-control"] == "no-store"
-        assert json.loads(body) == {"error": "authorization_service_unavailable"}
-
-
-@pytest.mark.asyncio
-async def test_cancelled_oauth_leader_does_not_cancel_shared_introspection(
-    remote_oauth_env: None, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    started = asyncio.Event()
-    release = asyncio.Event()
-    calls = 0
-
-    class Response:
-        status_code = 200
-        content = b"{}"
-
-        def json(self) -> dict[str, Any]:
-            return {
-                "active": True,
-                "scope": "unigrok:connect",
-                "iss": AUTHORIZATION_SERVER,
-                "sub": "shared-reviewer",
-                "aud": PUBLIC_RESOURCE,
-            }
-
-    class Client:
-        async def __aenter__(self) -> Client:
-            return self
-
-        async def __aexit__(self, *_args: Any) -> None:
-            return None
-
-        async def post(self, *_args: Any, **_kwargs: Any) -> Response:
-            nonlocal calls
-            calls += 1
-            started.set()
-            await release.wait()
-            return Response()
-
-    monkeypatch.setattr(remote_auth.httpx, "AsyncClient", lambda **_kwargs: Client())
-    remote_auth._oauth_introspection_tasks.clear()
-    leader = asyncio.create_task(
-        remote_auth.introspect_oauth_token("shared-token", "unigrok:connect")
+    body = b'{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+    wrong_header = ((b"authorization", b"Bearer wrong-token-xxxxxxxxxxxxxxxxxxxx"),)
+    first_status, _headers, _body = await _asgi_exchange(
+        remote_auth.RemoteOAuthMiddleware(app),
+        path="/mcp",
+        method="POST",
+        body_chunks=(body,),
+        headers=wrong_header,
     )
-    await started.wait()
-    follower = asyncio.create_task(
-        remote_auth.introspect_oauth_token("shared-token", "unigrok:connect")
+    limited_status, _headers, limited_body = await _asgi_exchange(
+        remote_auth.RemoteOAuthMiddleware(app),
+        path="/mcp",
+        method="POST",
+        body_chunks=(body,),
+        headers=wrong_header,
     )
-    await asyncio.sleep(0)
-    leader.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await leader
-    release.set()
-    claims = await follower
+    assert first_status == 401
+    assert limited_status == 429
+    assert json.loads(limited_body) == {"error": "too_many_auth_failures"}
 
-    assert calls == 1
-    assert claims is not None
-    assert claims["unigrok_principal"] == _canonical_principal("shared-reviewer")
-
-
-@pytest.mark.asyncio
-async def test_malformed_unicode_identity_is_consistently_denied_when_coalesced(
-    remote_oauth_env: None, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    started = asyncio.Event()
-    release = asyncio.Event()
-    calls = 0
-
-    class Response:
-        status_code = 200
-        content = b"{}"
-
-        def json(self) -> dict[str, Any]:
-            return {
-                "active": True,
-                "scope": "unigrok:chat",
-                "iss": AUTHORIZATION_SERVER,
-                "sub": "\ud800",
-                "aud": PUBLIC_RESOURCE,
-            }
-
-    class Client:
-        async def __aenter__(self) -> Client:
-            return self
-
-        async def __aexit__(self, *_args: Any) -> None:
-            return None
-
-        async def post(self, *_args: Any, **_kwargs: Any) -> Response:
-            nonlocal calls
-            calls += 1
-            started.set()
-            await release.wait()
-            return Response()
-
-    monkeypatch.setattr(remote_auth.httpx, "AsyncClient", lambda **_kwargs: Client())
-    remote_auth._oauth_introspection_tasks.clear()
-
-    async def request() -> tuple[int, dict[str, str], bytes]:
-        return await _asgi_exchange(
-            remote_auth.RemoteOAuthMiddleware(
-                lambda scope, receive, send: JSONResponse({"ok": True})(
-                    scope, receive, send
-                )
-            ),
-            path="/v1/models",
-            headers=((b"authorization", b"Bearer malformed-unicode-token"),),
-        )
-
-    first = asyncio.create_task(request())
-    await started.wait()
-    second = asyncio.create_task(request())
-    await asyncio.sleep(0)
-    release.set()
-    results = await asyncio.gather(first, second)
-
-    assert calls == 1
-    assert [result[0] for result in results] == [401, 401]
-    assert [json.loads(result[2]) for result in results] == [
-        {"error": "unauthorized"},
-        {"error": "unauthorized"},
-    ]
-
-
-def test_canonical_oauth_principal_rejects_unpaired_surrogates(
-    remote_oauth_env: None,
-) -> None:
-    assert remote_auth.canonical_oauth_principal(AUTHORIZATION_SERVER, "\ud800") is None
+    valid_status, _headers, valid_body = await _asgi_exchange(
+        remote_auth.RemoteOAuthMiddleware(app),
+        path="/mcp",
+        method="POST",
+        body_chunks=(body,),
+        headers=((b"authorization", f"Bearer {token}".encode()),),
+    )
+    assert valid_status == 200
+    assert json.loads(valid_body) == {"auth": "local_mcp_token"}
+    assert remote_auth._auth_failures == {}

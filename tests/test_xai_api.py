@@ -1,4 +1,5 @@
 import asyncio
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -138,6 +139,31 @@ async def test_api_chat_returns_metered_receipt(fake_client: FakeClient) -> None
     assert fake_client.chat.params["reasoning_effort"] == "high"
     assert fake_client.chat.params["max_turns"] == 3
     assert len(fake_client.chat.params["tools"]) == 1
+
+
+def test_missing_or_invalid_provider_cost_is_not_coerced_to_zero() -> None:
+    base = {
+        "content": "ok",
+        "model": "grok-api-live",
+        "finish_reason": "final_answer",
+        "id": "response_test",
+        "usage": None,
+        "citations": [],
+        "tool_outputs": [],
+    }
+    for raw_cost in (None, True, -0.01, float("nan"), "not-a-cost"):
+        response = SimpleNamespace(**base, cost_usd=raw_cost)
+        result = xai_api._chat_result(
+            response,
+            model="grok-api-live",
+            route="chat",
+            started=time.monotonic(),
+        )
+        assert result["cost_usd"] is None
+
+    assert xai_api._media_result(SimpleNamespace(url="https://example.com/a"))[
+        "cost_usd"
+    ] is None
 
 
 @pytest.mark.asyncio

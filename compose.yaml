@@ -9,13 +9,15 @@ services:
     container_name: unigrok
     ports:
       - "127.0.0.1:${UNIGROK_PORT:-4765}:8080"
-    # Inject only documented service settings via compose --env-file.
+    # Pass only these named settings via compose --env-file; never dump the full host
+    # environment into the container. Keep every private env file outside Git.
     environment:
       UNIGROK_HOST: 0.0.0.0
       PORT: 8080
-      UNIGROK_LOCAL_MCP_TOKEN: ${UNIGROK_LOCAL_MCP_TOKEN:-}
+      # Optional local gateway bearer authentication. A SHA-256 digest is preferred;
+      # the plaintext alternative is supported for operators that cannot pre-hash.
       UNIGROK_LOCAL_MCP_TOKEN_SHA256: ${UNIGROK_LOCAL_MCP_TOKEN_SHA256:-}
-      UNIGROK_LOCAL_DAILY_BUDGET_USD: ${UNIGROK_LOCAL_DAILY_BUDGET_USD:-}
+      UNIGROK_LOCAL_MCP_TOKEN: ${UNIGROK_LOCAL_MCP_TOKEN:-}
       # Public defaults: all chat/agent tools available.
       UNIGROK_CHAT_TOOLS: ${UNIGROK_CHAT_TOOLS:-always}
       UNIGROK_SWARM: ${UNIGROK_SWARM:-active}
@@ -39,6 +41,8 @@ services:
       UNIGROK_FILE_LIST_TIMEOUT: ${UNIGROK_FILE_LIST_TIMEOUT:-120}
       UNIGROK_FILE_IO_TIMEOUT: ${UNIGROK_FILE_IO_TIMEOUT:-60}
       UNIGROK_MEDIA_TIMEOUT: ${UNIGROK_MEDIA_TIMEOUT:-300}
+      # Optional comma-separated public-domain allowlist for provider-fetched media.
+      UNIGROK_MEDIA_ALLOWED_DOMAINS: ${UNIGROK_MEDIA_ALLOWED_DOMAINS:-}
       UNIGROK_FILE_CONTENT_MAX_BYTES: ${UNIGROK_FILE_CONTENT_MAX_BYTES:-2000000}
       UNIGROK_CATALOG_TTL: ${UNIGROK_CATALOG_TTL:-60}
       UNIGROK_AGENT_SYNC_WINDOW: ${UNIGROK_AGENT_SYNC_WINDOW:-16}
@@ -50,6 +54,8 @@ services:
       UNIGROK_MAX_PROMPT_CHARS: ${UNIGROK_MAX_PROMPT_CHARS:-100000}
       UNIGROK_MAX_WORKSPACE_CONTEXT_CHARS: ${UNIGROK_MAX_WORKSPACE_CONTEXT_CHARS:-100000}
       UNIGROK_ENABLE_METERED_API: ${UNIGROK_ENABLE_METERED_API:-true}
+      # Optional aggregate UTC-day admission guard for local metered API calls.
+      UNIGROK_LOCAL_DAILY_BUDGET_USD: ${UNIGROK_LOCAL_DAILY_BUDGET_USD:-}
       UNIGROK_API_MODEL: ${UNIGROK_API_MODEL:-}
       # Optional metered xAI developer API plane.
       XAI_API_KEY: ${XAI_API_KEY:-}

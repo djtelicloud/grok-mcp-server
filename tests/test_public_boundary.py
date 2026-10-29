@@ -158,6 +158,7 @@ def test_public_mcp_tool_contract_is_exact_and_self_checked() -> None:
     assert "prompt" in agent_tool.inputSchema["properties"]
     onboarding_tool = next(tool for tool in tools if tool.name == "grok_mcp_onboard_client")
     assert "ctx" not in onboarding_tool.inputSchema["properties"]
+    assert onboarding_tool.inputSchema["properties"]["safe_mode"]["default"] is True
 
 
 def test_heuristic_route_skips_metered_router_for_direct_tasks() -> None:
@@ -465,7 +466,12 @@ def test_client_onboarding_is_namespaced_and_never_writes() -> None:
     assert "gemmagrok-local" in mission["content"] or "Model Runner" in mission["content"]
 
 
-def test_client_onboarding_detection_and_safe_non_filesystem_fallback() -> None:
+def test_client_onboarding_detection_and_safe_non_filesystem_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("UNIGROK_RUNTIME", raising=False)
+    monkeypatch.delenv("UNIGROK_LOCAL_MCP_TOKEN", raising=False)
+    monkeypatch.delenv("UNIGROK_LOCAL_MCP_TOKEN_SHA256", raising=False)
     assert server._client_kind("Google Antigravity") == "antigravity"
     assert server._client_kind("codex-desktop") == "codex"
     assert server._client_kind("Claude Code") == "claude_code"
@@ -473,30 +479,44 @@ def test_client_onboarding_detection_and_safe_non_filesystem_fallback() -> None:
     assert server._client_kind("Visual Studio Code") == "github_copilot"
     assert server._client_kind("unknown") == "generic"
     cursor = server._client_onboarding_plan("cursor", "global")
-    # Cursor now gets the ported client setup: an mcp.json merge entry pointing at the
-    # Grok gateway and a routing rule (no longer an empty client_settings-only plan).
-    assert cursor["client_settings_instruction"] is None
+    # Global scope uses Cursor's global MCP config and User Rules UI without writing
+    # project-scoped .cursor/rules files into the current repository.
+    assert cursor["project_root_files_avoided"] is True
+    assert "Cursor Settings > Rules > User Rules" in cursor["client_settings_instruction"]
     entry = cursor["mcp_server"]
     assert entry["target"] == "~/.cursor/mcp.json"
     assert entry["entry"]["mcpServers"]["grok"]["headers"]["X-Client-ID"] == "cursor"
     assert entry["entry"]["mcpServers"]["grok"]["url"].endswith("/mcp")
     rule_paths = [f["path"] for f in cursor["files"]]
-    assert ".cursor/rules/using-unigrok.mdc" in rule_paths
+    assert rule_paths == []
+    project_cursor = server._client_onboarding_plan("cursor", "project")
+    assert project_cursor["project_root_files_avoided"] is False
+    assert ".cursor/rules/using-unigrok.mdc" in {
+        item["path"] for item in project_cursor["files"]
+    }
     # The emitted MCP config carries NO credential — only the URL and the non-secret
     # X-Client-ID telemetry header (Cursor is a client, never an execution plane).
     grok_server = entry["entry"]["mcpServers"]["grok"]
     assert set(grok_server) == {"url", "headers"}
     assert set(grok_server["headers"]) == {"X-Client-ID"}
     assert "CURSOR_API_KEY" not in json.dumps(cursor)
-    # Cursor's "plugin": the beforeMCPExecution hook that auto-approves ONLY the agent
-    # tool, plus the hook script shipped as an owned file.
-    hooks = cursor["hooks"]
-    assert hooks["target"] == "~/.cursor/hooks.json"
-    before = hooks["entry"]["hooks"]["beforeMCPExecution"][0]
-    assert before["matcher"] == "agent"
-    assert "~/.cursor/hooks/before-unigrok-agent.py" in rule_paths
-    # The hook auto-allows the agent tool and defers (ask) on anything else.
-    assert '"allow"' in server.CURSOR_AGENT_HOOK and '"ask"' in server.CURSOR_AGENT_HOOK
+    # Safe mode is the default and never emits an automatic approval hook.
+    assert cursor["safe_mode"] is True
+    assert cursor["automatic_tool_approval_offered"] is False
+    assert "hooks" not in cursor
+    assert not any(path.endswith("before-unigrok-agent.py") for path in rule_paths)
+    assert "beforeMCPExecution" not in json.dumps(cursor)
+
+    # Even an explicit unsafe-mode request cannot safely bind current Cursor hook
+    # payloads to this server, so the plan stays interactive and emits no hook.
+    opted_in = server._client_onboarding_plan("cursor", "global", safe_mode=False)
+    assert opted_in["automatic_tool_approval_offered"] is False
+    assert opted_in["automatic_tool_approval"]["status"] == "not_offered"
+    assert "hooks" not in opted_in
+    assert not any(
+        item["path"].endswith("before-unigrok-agent.py")
+        for item in opted_in["files"]
+    )
 
 
 @pytest.mark.asyncio
@@ -827,7 +847,7 @@ async def test_circuit_breaker_allows_only_one_half_open_probe(
     release = asyncio.Event()
     calls = 0
 
-    async def allow_budget(state: object) -> None:
+    async def allow_budget() -> None:
         return None
 
     async def operation() -> dict:
@@ -837,7 +857,7 @@ async def test_circuit_breaker_allows_only_one_half_open_probe(
         await release.wait()
         return {"text": "probe ok"}
 
-    monkeypatch.setattr(server, "enforce_caller_budget", allow_budget)
+    monkeypatch.setattr(server, "_begin_api_spend_guard", allow_budget)
     winner = asyncio.create_task(
         server._guarded_provider_call("api", "grok-live", operation)
     )
@@ -881,7 +901,7 @@ async def test_cancelled_guarded_half_open_probe_fences_safe_replacement(
     entered = asyncio.Event()
     replacement_calls = 0
 
-    async def allow_budget(state: object) -> None:
+    async def allow_budget() -> None:
         return None
 
     async def blocked_operation() -> dict:
@@ -889,7 +909,7 @@ async def test_cancelled_guarded_half_open_probe_fences_safe_replacement(
         await asyncio.Event().wait()
         return {"text": "unreachable"}
 
-    monkeypatch.setattr(server, "enforce_caller_budget", allow_budget)
+    monkeypatch.setattr(server, "_begin_api_spend_guard", allow_budget)
     probe = asyncio.create_task(
         server._guarded_provider_call("api", "grok-live", blocked_operation)
     )
@@ -1209,7 +1229,7 @@ async def test_unified_api_call_obeys_owner_policy_before_provider(
 
 
 @pytest.mark.asyncio
-async def test_unified_api_budget_denial_precedes_provider_breaker(
+async def test_unified_api_budget_denial_prevents_provider_without_poisoning_breaker(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     breakers: dict[str, dict] = {}
@@ -1220,7 +1240,7 @@ async def test_unified_api_budget_denial_precedes_provider_breaker(
     async def fake_system(*args: object, **kwargs: object) -> str:
         return "system"
 
-    async def deny_budget(state: object) -> None:
+    async def deny_budget() -> None:
         raise RuntimeError("caller budget exhausted")
 
     async def forbidden_provider(*args: object, **kwargs: object) -> dict:
@@ -1228,7 +1248,7 @@ async def test_unified_api_budget_denial_precedes_provider_breaker(
 
     monkeypatch.setattr(server, "_resolve_plane", fake_resolve)
     monkeypatch.setattr(server, "_system_prompt", fake_system)
-    monkeypatch.setattr(server, "enforce_caller_budget", deny_budget)
+    monkeypatch.setattr(server, "_begin_api_spend_guard", deny_budget)
     monkeypatch.setattr(server.xai_api, "chat", forbidden_provider)
     monkeypatch.setattr(server, "METERED_API_ENABLED", True)
     monkeypatch.setattr(server, "_CIRCUIT_BREAKERS", breakers)
@@ -1246,7 +1266,15 @@ async def test_unified_api_budget_denial_precedes_provider_breaker(
             allow_x_search=False,
             allow_code=False,
         )
-    assert breakers == {}
+    assert len(breakers) == 1
+    breaker = next(iter(breakers.values()))
+    assert breaker == {
+        "failures": 0,
+        "trips": 0,
+        "open_until": 0.0,
+        "half_open": False,
+        "generation": 0,
+    }
 
 
 @pytest.mark.asyncio
@@ -1349,20 +1377,30 @@ def test_media_generation_detector_and_guard() -> None:
 def test_per_client_auto_approve_uses_native_mechanism() -> None:
     from unigrok_public import server
 
-    cc = server._client_onboarding_plan("claude_code", "global")["auto_approve"]
+    # Automatic approvals are absent by default across every supported IDE.
+    for client in ("claude_code", "codex", "antigravity", "github_copilot", "cursor"):
+        assert "auto_approve" not in server._client_onboarding_plan(client, "global")
+
+    cc = server._client_onboarding_plan(
+        "claude_code", "global", safe_mode=False
+    )["auto_approve"]
     assert cc["merge_into"] == "permissions.allow"
     assert cc["entry"]["permissions"]["allow"] == ["mcp__grok__agent", "mcp__grok__agent_result"]
 
-    cx = server._client_onboarding_plan("codex", "global")["auto_approve"]
+    cx = server._client_onboarding_plan("codex", "global", safe_mode=False)[
+        "auto_approve"
+    ]
     assert cx["target"].endswith("config.toml")
     assert 'approval_mode = "auto"' in cx["toml"]
 
-    ag = server._client_onboarding_plan("antigravity", "global")["auto_approve"]
+    ag = server._client_onboarding_plan("antigravity", "global", safe_mode=False)[
+        "auto_approve"
+    ]
     assert ag["entry"]["userSettings"]["globalPermissionGrants"]["allow"] == [
         "mcp(grok/agent)",
         "mcp(grok/agent_result)",
     ]
-    assert ag["gemini_cli_alternative"]["entry"]["mcpServers"]["grok"]["trust"] is True
+    assert ag["gemini_cli_alternative"]["status"] == "not_offered"
     ag_proj = server._auto_approve("antigravity", "project")
     assert ag_proj["target"] == ".gemini/settings.json"
     assert ag_proj["entry"]["globalPermissionGrants"]["allow"] == [
@@ -1370,13 +1408,14 @@ def test_per_client_auto_approve_uses_native_mechanism() -> None:
         "mcp(grok/agent_result)",
     ]
 
-    gh = server._client_onboarding_plan("github_copilot", "global")
+    gh = server._client_onboarding_plan("github_copilot", "global", safe_mode=False)
     assert "--allow-tool 'grok(agent)'" in gh["auto_approve"]["command"]
     assert gh["mcp_server"]["target"] == "~/.copilot/mcp-config.json"
     assert gh["mcp_server"]["entry"]["mcpServers"]["grok"]["url"].endswith("/mcp")
+    assert gh["mcp_server"]["entry"]["mcpServers"]["grok"]["tools"] == ["*"]
     assert gh["mcp_server"]["vscode_alternative"]["target"] == ".vscode/mcp.json"
     gh_proj = server._client_onboarding_plan("github_copilot", "project")
-    assert gh_proj["mcp_server"]["target"] == ".copilot/mcp-config.json"
+    assert gh_proj["mcp_server"]["target"] == ".mcp.json"
     assert any(
         f["path"] == ".github/instructions/unigrok.instructions.md" for f in gh_proj["files"]
     )
@@ -1385,8 +1424,84 @@ def test_per_client_auto_approve_uses_native_mechanism() -> None:
     assert "auto_approve" not in server._client_onboarding_plan("generic", "global")
     # None of the auto-approve configs carry a credential.
     for c in ("claude_code", "codex", "antigravity", "github_copilot"):
-        blob = json.dumps(server._client_onboarding_plan(c, "global"))
+        blob = json.dumps(server._client_onboarding_plan(c, "global", safe_mode=False))
         assert "XAI_API_KEY" not in blob and "CURSOR_API_KEY" not in blob
+
+
+def test_copilot_onboarding_uses_secret_input_for_optional_bearer_tokens(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    token = "local-client-token-aaaaaaaaaaaaaaaaaaaaaaaa"  # noqa: S105
+    monkeypatch.delenv("UNIGROK_RUNTIME", raising=False)
+    monkeypatch.delenv("UNIGROK_SERVICE_TOKENS", raising=False)
+    monkeypatch.delenv("UNIGROK_SERVICE_TOKEN_SHA256", raising=False)
+    monkeypatch.delenv("UNIGROK_LOCAL_MCP_TOKEN_SHA256", raising=False)
+    monkeypatch.setenv("UNIGROK_LOCAL_MCP_TOKEN", token)
+
+    plan = server._client_onboarding_plan("github_copilot", "global")
+    assert plan["connection"]["authentication"] == "bearer_local_mcp_token"
+    assert plan["authentication_setup"]["static_bearer_required"] is True
+    copilot = plan["mcp_server"]["entry"]["mcpServers"]["grok"]
+    assert copilot["headers"]["Authorization"] == (
+        "Bearer ${UNIGROK_LOCAL_MCP_TOKEN}"
+    )
+    assert copilot["tools"] == ["*"]
+    assert plan["mcp_server"]["vscode_alternative"]["merge_into"] == (
+        "servers and inputs"
+    )
+    vscode = plan["mcp_server"]["vscode_alternative"]["entry"]
+    assert vscode["inputs"] == [
+        {
+            "type": "promptString",
+            "id": "unigrok-service-token",
+            "description": "Operator-issued UniGrok access token",
+            "password": True,
+        }
+    ]
+    assert vscode["servers"]["grok"]["headers"]["Authorization"] == (
+        "Bearer ${input:unigrok-service-token}"
+    )
+    serialized = json.dumps(plan)
+    assert token not in serialized
+    assert "XAI_API_KEY" not in serialized
+
+    cursor = server._client_onboarding_plan("cursor", "global")
+    assert cursor["mcp_server"]["entry"]["mcpServers"]["grok"]["headers"] == {
+        "X-Client-ID": "cursor",
+        "Authorization": "Bearer ${env:UNIGROK_LOCAL_MCP_TOKEN}",
+    }
+    assert cursor["files"] == []
+    assert token not in json.dumps(cursor)
+
+
+def test_copilot_hosted_service_token_is_an_explicit_oauth_alternative(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    token = "hosted-client-token-bbbbbbbbbbbbbbbbbbbbbbbb"  # noqa: S105
+    monkeypatch.setenv("UNIGROK_RUNTIME", "cloudrun")
+    monkeypatch.setenv("UNIGROK_PUBLIC_MCP_URL", "https://mcp.example.test/mcp")
+    monkeypatch.setenv("UNIGROK_SERVICE_TOKENS", token)
+    monkeypatch.delenv("UNIGROK_SERVICE_TOKEN_SHA256", raising=False)
+    monkeypatch.delenv("UNIGROK_LOCAL_MCP_TOKEN", raising=False)
+    monkeypatch.delenv("UNIGROK_LOCAL_MCP_TOKEN_SHA256", raising=False)
+
+    plan = server._client_onboarding_plan("github_copilot", "global")
+    assert plan["connection"]["authentication"] == "oauth_discovery"
+    assert plan["authentication_setup"]["preferred_mode"] == "oauth_discovery"
+    alternative = plan["mcp_server"]["vscode_service_token_alternative"]
+    assert alternative["entry"]["inputs"][0]["password"] is True
+    cli_alternative = plan["mcp_server"]["copilot_cli_service_token_alternative"]
+    assert cli_alternative["target"] == "~/.copilot/mcp-config.json"
+    assert cli_alternative["entry"]["mcpServers"]["grok"]["headers"][
+        "Authorization"
+    ] == "Bearer ${UNIGROK_CLIENT_SERVICE_TOKEN}"
+
+    project = server._client_onboarding_plan("github_copilot", "project")
+    assert project["mcp_server"]["target"] == ".mcp.json"
+    assert project["mcp_server"]["copilot_cli_service_token_alternative"][
+        "target"
+    ] == ".mcp.json"
+    assert token not in json.dumps(plan)
 
 
 @pytest.mark.asyncio
