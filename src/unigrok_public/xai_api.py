@@ -342,6 +342,15 @@ async def resolve_model(requested: str | None) -> str:
     return str(default)
 
 
+def _model_supports_reasoning_effort(model: str | None) -> bool:
+    m = (model or "").strip().lower()
+    if not m:
+        return False
+    if m.startswith("grok-build") or "non-reasoning" in m or "code-fast" in m:
+        return False
+    return True
+
+
 async def chat(
     prompt: str,
     *,
@@ -373,7 +382,7 @@ async def chat(
         params: dict[str, Any] = {"model": selected}
         if tools:
             params["tools"] = tools
-        if reasoning_effort:
+        if reasoning_effort and _model_supports_reasoning_effort(selected):
             params["reasoning_effort"] = reasoning_effort
         if max_turns is not None:
             params["max_turns"] = max_turns
@@ -383,10 +392,19 @@ async def chat(
             params["response_format"] = response_format
         client = _client(timeout_seconds=_rpc_timeout(deadline))
         try:
-            conversation = client.chat.create(**params)
-            conversation.append(system(system_prompt))
-            conversation.append(user(prompt))
-            return conversation.sample()
+            try:
+                conversation = client.chat.create(**params)
+                conversation.append(system(system_prompt))
+                conversation.append(user(prompt))
+                return conversation.sample()
+            except Exception as exc:
+                if "reasoning_effort" in params and "reasoningeffort" in str(exc).lower():
+                    params.pop("reasoning_effort", None)
+                    conversation = client.chat.create(**params)
+                    conversation.append(system(system_prompt))
+                    conversation.append(user(prompt))
+                    return conversation.sample()
+                raise
         finally:
             _close_client(client)
 

@@ -224,3 +224,58 @@ async def test_file_saturation_does_not_block_generation(
 
     file_hold.set()
     await asyncio.gather(*holders)
+
+
+@pytest.mark.asyncio
+async def test_api_chat_omits_reasoning_effort_for_grok_build_and_non_reasoning_models(
+    fake_client: FakeClient,
+) -> None:
+    fake_client.models = SimpleNamespace(
+        list_language_models=lambda: [
+            SimpleNamespace(name="grok-4-1-fast-non-reasoning", max_prompt_length=123_000),
+            SimpleNamespace(name="grok-build-0.1", max_prompt_length=123_000),
+            SimpleNamespace(name="grok-4.20", max_prompt_length=123_000),
+        ],
+        list_image_generation_models=lambda: [],
+    )
+    assert xai_api._model_supports_reasoning_effort("grok-build-0.1") is False
+    assert xai_api._model_supports_reasoning_effort("grok-4-1-fast-non-reasoning") is False
+    assert xai_api._model_supports_reasoning_effort("grok-4.20") is True
+
+    await xai_api.chat(
+        "hello",
+        model="grok-build-0.1",
+        reasoning_effort="low",
+        system_prompt="public boundary",
+    )
+    assert "reasoning_effort" not in fake_client.chat.params
+
+    await xai_api.chat(
+        "hello",
+        model="grok-4-1-fast-non-reasoning",
+        reasoning_effort="high",
+        system_prompt="public boundary",
+    )
+    assert "reasoning_effort" not in fake_client.chat.params
+
+
+def test_lead_model_api_skips_grok_build_cli_default() -> None:
+    from unigrok_public import server
+
+    catalogs = {
+        "cli": {
+            "ready": True,
+            "models": ["grok-build-0.1"],
+            "default_model": "grok-build-0.1",
+        },
+        "api": {
+            "ready": True,
+            "models": [{"id": "grok-build-0.1"}, {"id": "grok-4-1-fast-reasoning"}],
+            "default_model": "grok-4-1-fast-reasoning",
+        },
+        "local": {},
+    }
+    assert server._lead_model(catalogs, "cli") == "grok-build-0.1"
+    assert server._lead_model(catalogs, "api") == "grok-4-1-fast-reasoning"
+
+
