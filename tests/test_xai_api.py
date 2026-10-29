@@ -279,3 +279,39 @@ def test_lead_model_api_skips_grok_build_cli_default() -> None:
     assert server._lead_model(catalogs, "api") == "grok-4-1-fast-reasoning"
 
 
+@pytest.mark.asyncio
+async def test_probe_models_selects_newest_flagship_over_lexical_first(
+    fake_client: FakeClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(xai_api, "DEFAULT_API_MODEL", None)
+    live_ids = [
+        "grok-4.20-0309-non-reasoning",
+        "grok-4.20-0309-reasoning",
+        "grok-4.20-multi-agent-0309",
+        "grok-4.3",
+        "grok-4.5",
+        "grok-4.6",
+        "grok-4.7",
+        "grok-build-0.1",
+    ]
+    fake_client.models = SimpleNamespace(
+        list_language_models=lambda: [
+            SimpleNamespace(name=mid, max_prompt_length=500_000) for mid in live_ids
+        ],
+        list_image_generation_models=lambda: [],
+    )
+    status = await xai_api.probe_models()
+    assert status["default_model"] == "grok-4.7"
+    assert await xai_api.resolve_model(None) == "grok-4.7"
+    assert (
+        xai_api._select_default_api_model([*live_ids, "grok-4.8", "grok-5.0"])
+        == "grok-5.0"
+    )
+    assert (
+        xai_api._select_default_api_model(live_ids, preferred="grok-4.6")
+        == "grok-4.6"
+    )
+
+
+

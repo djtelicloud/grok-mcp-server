@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import time
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
@@ -315,7 +316,7 @@ async def probe_models() -> dict[str, Any]:
     models = catalogs["language_models"]
     image_models = catalogs["image_models"]
     ids = [entry["id"] for entry in models]
-    default = DEFAULT_API_MODEL if DEFAULT_API_MODEL in ids else (ids[0] if ids else None)
+    default = _select_default_api_model(ids, DEFAULT_API_MODEL)
     return {
         "ready": bool(ids),
         "configured": True,
@@ -325,6 +326,57 @@ async def probe_models() -> dict[str, Any]:
         "image_models": image_models,
         "default_model": default,
     }
+
+
+def _select_default_api_model(
+    ids: Sequence[str], preferred: str | None = None
+) -> str | None:
+    """Select the newest mainline flagship Grok model instead of lexical ids[0]."""
+    clean_ids = [str(m).strip() for m in ids if str(m).strip()]
+    if not clean_ids:
+        return None
+    pref = (preferred or "").strip()
+    if pref and pref in clean_ids:
+        return pref
+
+    def _rank_key(model_id: str) -> tuple[int, int, float, int, str]:
+        low = model_id.lower()
+        is_build = bool(
+            low.startswith("grok-build")
+            or re.search(r"(?:^|[._/-])build(?:[._/-]|$)", low)
+        )
+        is_non_reasoning = "non-reasoning" in low or "non_reasoning" in low
+        is_multi_agent = "multi-agent" in low or "multi_agent" in low
+        has_date_snapshot = bool(re.search(r"-\d{4}(?:\b|-)", low))
+        m = re.match(r"^grok-(\d+)(?:\.(\d+))?", low)
+        major = int(m.group(1)) if m else 0
+        minor_raw = m.group(2) if (m and m.group(2) is not None) else "0"
+        if len(minor_raw) >= 2 and minor_raw.endswith("0"):
+            minor_val = float(int(minor_raw)) / 10.0
+            is_dated_family = True
+        else:
+            minor_val = float(int(minor_raw))
+            is_dated_family = False
+
+        is_clean_mainline = bool(
+            re.match(r"^grok-\d+(?:\.\d+)?$", low)
+            and not is_dated_family
+            and not has_date_snapshot
+        )
+        if is_clean_mainline and not is_build and not is_non_reasoning and not is_multi_agent:
+            bucket = 4
+        elif not is_build and not is_non_reasoning and not is_multi_agent:
+            bucket = 3
+        elif is_multi_agent and not is_non_reasoning:
+            bucket = 2
+        elif is_non_reasoning and not is_build:
+            bucket = 1
+        else:
+            bucket = 0
+        is_reasoning_bonus = 0 if is_non_reasoning else 1
+        return (bucket, major, minor_val, is_reasoning_bonus, low)
+
+    return max(clean_ids, key=_rank_key)
 
 
 async def resolve_model(requested: str | None) -> str:
