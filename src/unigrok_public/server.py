@@ -2207,9 +2207,16 @@ def _lead_model(
         return router_models[0] if router_models else None
     lead = catalogs["cli"].get("default_model")
     target_ids = catalogs["cli"].get("models", []) if target == "cli" else _api_ids(catalogs)
+    if target == "api" and str(lead or "").strip().lower().startswith("grok-build"):
+        lead = None
     if lead and lead in target_ids:
         return str(lead)
-    return catalogs[target].get("default_model")
+    default_model = catalogs[target].get("default_model")
+    if target == "api" and str(default_model or "").strip().lower().startswith("grok-build"):
+        for candidate in target_ids:
+            if not str(candidate).strip().lower().startswith("grok-build"):
+                return str(candidate)
+    return default_model
 
 
 def _code_specialist_model(catalogs: dict[str, Any]) -> str | None:
