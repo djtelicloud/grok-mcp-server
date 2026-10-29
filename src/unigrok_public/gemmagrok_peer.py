@@ -334,11 +334,12 @@ async def chat(
     sid = _resolve_session_id(session_id, session, memory_scope)
     session_data = _load_session(sid) if sid else None
 
+    session_block = ""
     preamble_parts: list[str] = []
     if session_data is not None:
-        block = _session_preamble(session_data)
-        if block:
-            preamble_parts.append(block)
+        session_block = _session_preamble(session_data)
+        if session_block:
+            preamble_parts.append(session_block)
     exemplar_bodies = _load_icl_exemplars(max(0, min(int(icl_exemplars), 16)))
     base_chars = len(user_prompt) + (len(system) if system else 0) + sum(
         len(part) for part in preamble_parts
@@ -402,7 +403,12 @@ async def chat(
     }
     if sid:
         result["session_id"] = sid
+        result["memory_used"] = bool(session_block)
     return result
+
+
+PEER_ALLOWED_ROLES: frozenset[str] = frozenset({"router", "text_generator", "code"})
+
 
 
 @mcp.tool(annotations=_READ_ONLY)

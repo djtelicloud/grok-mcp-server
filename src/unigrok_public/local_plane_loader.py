@@ -1276,3 +1276,175 @@ async def probe_runtime(
             return result
         errors.extend(result.errors)
     return ProbeResult(runtime_up=False, errors=tuple(errors))
+
+
+M2_PEER_ALLOWED_ROLES: frozenset[str] = frozenset({"router", "text_generator", "code"})
+PEER_ALLOWED_ROLES: frozenset[str] = M2_PEER_ALLOWED_ROLES
+
+
+def resolve_m2_plane_route(
+    requested_plane: str | None,
+    catalogs: Mapping[str, Any],
+    *,
+    fallback_policy: str = "cross_plane",
+    requires_api: bool = False,
+    metered_api_enabled: bool = True,
+    prefer_local: bool = False,
+    cost_tier: str | None = None,
+    budget_exhausted: bool = False,
+    budget_reason: str | None = None,
+    allow_local_fallback: bool = False,
+) -> dict[str, Any]:
+    """Evaluate GemmaGrok Local-Plane M2 cost-aware and budget-gated routing.
+
+    Invariants:
+    - Explicit ``plane="api"`` or ``plane="cli"`` never silently downgrades to
+      ``"local"`` unless ``allow_local_fallback=True``.
+    - ``plane="auto"`` with ``fallback_policy="same_plane"`` fails closed on API
+      budget exhaustion without crossing to ``"local"``.
+    - ``plane="auto"`` with ``fallback_policy="cross_plane"`` (or ``prefer_local`` /
+      ``cost_tier="local"``) shifts to ready ``"local"`` when API budget is
+      exhausted, stamping ``degraded=True``, ``trigger="budget_exhausted"``, and
+      ``fallback_reason="api_budget_exceeded"``.
+    """
+    requested = (requested_plane or "auto").strip().lower() or "auto"
+    policy = (fallback_policy or "cross_plane").strip().lower() or "cross_plane"
+    cli_ready = bool((catalogs.get("cli") or {}).get("ready"))
+    api_ready = bool((catalogs.get("api") or {}).get("ready")) and bool(
+        metered_api_enabled
+    )
+    local_ready = bool((catalogs.get("local") or {}).get("ready"))
+    tier = (cost_tier or "").strip().lower()
+
+    if requested == "cli":
+        if requires_api:
+            raise ValueError("this request requires the xAI API plane")
+        if cli_ready:
+            return {
+                "requested_plane": "cli",
+                "resolved_plane": "cli",
+                "effective_plane": "cli",
+                "fallback_occurred": False,
+                "fallback_from": None,
+                "fallback_reason": None,
+                "degraded": False,
+                "trigger": "none",
+            }
+        if allow_local_fallback and local_ready:
+            return {
+                "requested_plane": "cli",
+                "resolved_plane": "local",
+                "effective_plane": "local",
+                "fallback_occurred": True,
+                "fallback_from": "cli",
+                "fallback_reason": "cli_runtime_unavailable",
+                "degraded": True,
+                "trigger": "error",
+            }
+        raise RuntimeError("The Grok Build subscription plane is not ready")
+
+    if requested == "api":
+        if not api_ready:
+            raise RuntimeError("The xAI API plane is not ready")
+        if budget_exhausted:
+            if allow_local_fallback and local_ready:
+                return {
+                    "requested_plane": "api",
+                    "resolved_plane": "local",
+                    "effective_plane": "local",
+                    "fallback_occurred": True,
+                    "fallback_from": "api",
+                    "fallback_reason": "api_budget_exceeded",
+                    "degraded": True,
+                    "trigger": "budget_exhausted",
+                }
+            raise RuntimeError(budget_reason or "caller budget exhausted")
+        return {
+            "requested_plane": "api",
+            "resolved_plane": "api",
+            "effective_plane": "api",
+            "fallback_occurred": False,
+            "fallback_from": None,
+            "fallback_reason": None,
+            "degraded": False,
+            "trigger": "none",
+        }
+
+    if requested == "local":
+        if not local_ready:
+            raise RuntimeError("The local plane is not ready")
+        return {
+            "requested_plane": "local",
+            "resolved_plane": "local",
+            "effective_plane": "local",
+            "fallback_occurred": False,
+            "fallback_from": None,
+            "fallback_reason": None,
+            "degraded": True,
+            "trigger": "none",
+        }
+
+    # requested == "auto"
+    if local_ready and (prefer_local or tier in {"local", "free", "zero", "offline"}):
+        return {
+            "requested_plane": "auto",
+            "resolved_plane": "local",
+            "effective_plane": "local",
+            "fallback_occurred": False,
+            "fallback_from": None,
+            "fallback_reason": "m2_cost_tier_local",
+            "degraded": True,
+            "trigger": "none",
+        }
+
+    if cli_ready and not requires_api:
+        return {
+            "requested_plane": "auto",
+            "resolved_plane": "cli",
+            "effective_plane": "cli",
+            "fallback_occurred": False,
+            "fallback_from": None,
+            "fallback_reason": None,
+            "degraded": False,
+            "trigger": "none",
+        }
+
+    if api_ready:
+        if budget_exhausted:
+            if (policy == "cross_plane" or allow_local_fallback) and local_ready:
+                return {
+                    "requested_plane": "auto",
+                    "resolved_plane": "local",
+                    "effective_plane": "local",
+                    "fallback_occurred": True,
+                    "fallback_from": "api",
+                    "fallback_reason": "api_budget_exceeded",
+                    "degraded": True,
+                    "trigger": "budget_exhausted",
+                }
+            raise RuntimeError(budget_reason or "caller budget exhausted")
+        return {
+            "requested_plane": "auto",
+            "resolved_plane": "api",
+            "effective_plane": "api",
+            "fallback_occurred": False,
+            "fallback_from": None,
+            "fallback_reason": None,
+            "degraded": False,
+            "trigger": "none",
+        }
+
+    if local_ready:
+        return {
+            "requested_plane": "auto",
+            "resolved_plane": "local",
+            "effective_plane": "local",
+            "fallback_occurred": False,
+            "fallback_from": None,
+            "fallback_reason": None,
+            "degraded": True,
+            "trigger": "none",
+        }
+
+    raise RuntimeError("Neither Grok credential plane is ready")
+

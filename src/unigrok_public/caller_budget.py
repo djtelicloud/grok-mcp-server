@@ -740,3 +740,75 @@ async def finish_local_spend_guard_attempt(
             "Local spend guard reconciliation failed; spend state is unresolved."
         ) from None
 
+
+_BUDGET_DENIAL_MARKERS: tuple[str, ...] = (
+    "caller budget",
+    "daily budget",
+    "monthly budget",
+    "hourly request budget",
+    "spend guard",
+    "spend-guard",
+    "budget exhausted",
+    "budget reached",
+    "declined the requested reservation",
+)
+
+
+def is_caller_budget_error(exc: BaseException | None) -> bool:
+    """Return True when an exception indicates a caller-budget or spend-guard block."""
+    if exc is None:
+        return False
+    if isinstance(exc, CallerBudgetError):
+        return True
+    cause = getattr(exc, "__cause__", None) or getattr(exc, "__context__", None)
+    if isinstance(cause, CallerBudgetError):
+        return True
+    lowered = str(exc).lower()
+    return any(marker in lowered for marker in _BUDGET_DENIAL_MARKERS)
+
+
+async def inspect_caller_budget_pressure(
+    store: PublicStateStore | None,
+) -> dict[str, Any]:
+    """Non-mutating preflight check of caller/local budget exhaustion for M2 routing."""
+    if store is None:
+        return {"exhausted": False, "reason": None, "source": None}
+    if os.environ.get(_BUDGET_ENV, "").strip():
+        try:
+            budgets = load_caller_budgets()
+            principal = get_active_principal()
+            if principal and principal in budgets:
+                limit = budgets[principal]
+                ledger_caller = principal_label(principal) or ""
+                if ledger_caller:
+                    spent = float(await store.get_caller_cost_today(ledger_caller))
+                    if spent >= limit:
+                        return {
+                            "exhausted": True,
+                            "reason": "caller_daily_budget_exhausted",
+                            "source": "hosted_principal_budget",
+                        }
+        except Exception:
+            return {
+                "exhausted": True,
+                "reason": "caller_budget_ledger_unavailable",
+                "source": "hosted_principal_budget",
+            }
+    if not is_cloudrun_runtime():
+        try:
+            local_limit = load_local_daily_budget()
+            if local_limit is not None and local_limit <= 0.0:
+                return {
+                    "exhausted": True,
+                    "reason": "local_daily_budget_exhausted",
+                    "source": "local_spend_guard",
+                }
+        except Exception:
+            return {
+                "exhausted": True,
+                "reason": "local_spend_guard_unavailable",
+                "source": "local_spend_guard",
+            }
+    return {"exhausted": False, "reason": None, "source": None}
+
+

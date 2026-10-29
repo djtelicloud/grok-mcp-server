@@ -47,7 +47,11 @@ from .autonomy import (
 from .cabinet.retrieve import WalkHit, WalkResult, format_cabinet_block
 from .cabinet.uri import CabinetUri, CabinetUriError, fact_uri, parse_uri
 from .caller_budget import (
+    CallerBudgetError,
+    CallerBudgetExceeded,
     enforce_caller_budget,
+    inspect_caller_budget_pressure,
+    is_caller_budget_error,
     release_local_budget,
     reserve_local_budget,
     settle_local_budget,
@@ -2332,8 +2336,39 @@ async def _route_task(prompt: str, catalogs: dict[str, Any]) -> dict[str, Any]:
             "router_model": None,
             "router_cost_usd": 0.0,
         }
+
+    async def _local_floor_route() -> dict[str, Any] | None:
+        if not (catalogs.get("local") or {}).get("ready"):
+            return None
+        try:
+            routed_local = await _local_router_floor(prompt)
+        except Exception:
+            return None
+        route_local = str(routed_local.get("route") or "direct").strip().lower()
+        if route_local not in {"direct", "code", "image", "video"}:
+            route_local = "direct"
+        brief_local = str(routed_local.get("brief") or prompt).strip() or prompt
+        return {
+            "route": route_local,
+            "specialist_prompt": brief_local,
+            "router_model": routed_local.get("router_model"),
+            "router_plane": "local",
+            "router_source": "local_router_floor",
+            "router_cost_usd": 0.0,
+            "heuristic_only": False,
+        }
+
     lead = _lead_model(catalogs, "api")
-    if not (METERED_API_ENABLED and catalogs["api"].get("ready") and lead):
+    budget_state = await inspect_caller_budget_pressure(STATE)
+    if not (
+        METERED_API_ENABLED
+        and catalogs["api"].get("ready")
+        and lead
+        and not budget_state.get("exhausted")
+    ):
+        local_routed = await _local_floor_route()
+        if local_routed is not None:
+            return local_routed
         return {
             "route": "direct",
             "specialist_prompt": prompt,
@@ -2382,6 +2417,9 @@ async def _route_task(prompt: str, catalogs: dict[str, Any]) -> dict[str, Any]:
                 "router_usage": _normalized_usage(result),
                 "router_parse_failed": True,
             }
+        local_routed = await _local_floor_route()
+        if local_routed is not None:
+            return local_routed
         return {
             "route": "direct",
             "specialist_prompt": prompt,
@@ -2906,14 +2944,17 @@ def _receipt(
         {
             "requested_plane": requested_plane,
             "resolved_plane": resolved_plane,
+            "effective_plane": resolved_plane,
             "fallback_policy": fallback_policy,
             "fallback_occurred": fallback_from is not None,
             "fallback_from": fallback_from,
+            "fallback_from_plane": fallback_from,
             "fallback_reason": fallback_reason,
             "degraded": fallback_from is not None,
             "trigger": trigger,
         }
     )
+    result.setdefault("memory_used", False)
     result.setdefault("continue_count", 0)
     result.setdefault("router_source", "heuristic")
     result.setdefault("heuristic_only", False)
@@ -3250,6 +3291,8 @@ def _classify_fallback_reason(
     """Return a stable, non-sensitive benchmark category for a cross-plane recovery."""
     original = _original_exception(exc)
     message = str(exc).lower()
+    if is_caller_budget_error(original) or is_caller_budget_error(exc):
+        return source + "_budget_exceeded"
     if "capability unavailable" in message:
         return source + "_capability_unavailable"
     if isinstance(original, TimeoutError) or re.search(
@@ -3348,6 +3391,9 @@ async def _run_unified(
     max_output_tokens: int | None = None,
     nonanswer_recovery: bool = True,
     prior_continue_count: int = 0,
+    prefer_local: bool = False,
+    cost_tier: str | None = None,
+    allow_local_fallback: bool = False,
 ) -> dict[str, Any]:
     if DIRECT_TALK_ACTIVE:
         return await _serve_local_direct_noncertified(
@@ -3367,6 +3413,16 @@ async def _run_unified(
     # describe tools available to the selected plane; they do not justify bypassing Build.
     requires_api = False
     resolved, catalogs = await _resolve_plane(plane, model, requires_api=requires_api)
+    if (
+        plane == "auto"
+        and not requires_api
+        and (catalogs.get("local") or {}).get("ready")
+        and (
+            prefer_local
+            or str(cost_tier or "").strip().lower() in {"local", "free", "zero", "offline"}
+        )
+    ):
+        resolved = "local"
     system_prompt = await _system_prompt(
         "agent" if agentic else "chat", extra_context=system_context
     )
@@ -3378,6 +3434,8 @@ async def _run_unified(
             prior_continue_count=prior_continue_count,
         )
         result["requested_plane"] = plane
+        result.setdefault("effective_plane", "local")
+        result.setdefault("memory_used", bool(system_context))
         return result
 
     async def _call(target: Literal["cli", "api"], call_prompt: str) -> dict[str, Any]:
@@ -3506,9 +3564,14 @@ async def _run_unified(
             fallback_policy=fallback_policy,
         )
     except Exception as exc:
-        if isinstance(_original_exception(exc), ValueError):
+        original = _original_exception(exc)
+        if isinstance(original, ValueError):
             raise
-        if fallback_policy != "cross_plane":
+        if (is_caller_budget_error(original) or is_caller_budget_error(exc)) and (
+            plane != "auto" and not allow_local_fallback
+        ):
+            raise
+        if fallback_policy != "cross_plane" and not allow_local_fallback:
             raise
         swap_reason = _classify_fallback_reason(resolved, exc)
         alternate = await _alternate_plane(resolved, model, requires_api=requires_api)
@@ -5040,9 +5103,17 @@ async def _execute_team_turn(
                 routing["route"], routing["specialist_prompt"], catalogs
             )
         except Exception as exc:
-            if router_attempts:
-                raise _with_incurred_usage(exc, router_attempts) from exc
-            raise
+            if (
+                plane == "auto"
+                and fallback_policy == "cross_plane"
+                and (catalogs.get("local") or {}).get("ready")
+                and (is_caller_budget_error(_original_exception(exc)) or is_caller_budget_error(exc))
+            ):
+                result = None
+            else:
+                if router_attempts:
+                    raise _with_incurred_usage(exc, router_attempts) from exc
+                raise
     if result is None:
         try:
             result = await _run_unified(
@@ -5218,6 +5289,11 @@ async def _execute_team_turn(
                 "session_history_message_count": len(history),
                 "global_memory_fact_count": len(facts),
             },
+            "memory_used": bool(
+                (session and effective_use_session_history and len(history) > 0)
+                or (effective_use_global_memory and len(facts) > 0)
+                or result.get("memory_used")
+            ),
             "session_turn_persisted": persist_completed_session,
         }
     )
@@ -7912,6 +7988,8 @@ def _canonical_trigger(fallback_reason: str | None) -> str:
         return "429"
     if "incomplete_response" in s or "non_answer" in s or "nonanswer" in s:
         return "non_answer"
+    if "budget" in s or "spend_guard" in s or "spend-guard" in s:
+        return "budget_exhausted"
     if "capacity" in s or "exhausted" in s or "congested" in s or "shed" in s:
         return "shed"
     if "capability_unavailable" in s or "missing" in s:
@@ -8692,6 +8770,8 @@ async def _serve_local_offline(
 
     def _stamp_latency(env: dict[str, Any]) -> dict[str, Any]:
         env["latency_ms"] = int((time.monotonic() - _offline_t0) * 1000)
+        env.setdefault("effective_plane", "local")
+        env.setdefault("memory_used", bool(system_context))
         return env
 
     def _degraded(stop_reason: str, reason: str) -> dict[str, Any]:
